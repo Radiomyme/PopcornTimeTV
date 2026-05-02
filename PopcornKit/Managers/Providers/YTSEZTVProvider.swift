@@ -26,14 +26,40 @@ public final class YTSEZTVProvider: MediaProvider {
         return Session(configuration: configuration)
     }()
 
-    /// Override the YTS host at launch (e.g. `yts.am` if `yts.mx` is DNS-blocked
-    /// in the user's region). Set BEFORE the first MovieManager call.
-    public static var ytsHost: String = "https://yts.mx"
+    /// Hosts the provider tries in order. A French ISP (Orange/SFR/Bouygues)
+    /// will typically DNS-block at least the first one; subsequent entries
+    /// often resolve fine through the same FAI. Sticky-cache the first host
+    /// that successfully serves a JSON response in `lastGoodHost`, then
+    /// only fall back when it later fails.
+    public static var ytsMirrors: [String] = [
+        "https://yts.mx",
+        "https://yts.am",
+        "https://yts.lt",
+        "https://yts.rs",
+        "https://yts.ag",
+    ]
 
-    private struct YTS {
-        static var base:        String { return YTSEZTVProvider.ytsHost + "/api/v2" }
-        static let listMovies = "/list_movies.json"
-        static let movieInfo  = "/movie_details.json"
+    /// Stored as a UserDefault so we don't pay the DNS-failure cost on every
+    /// app launch once a working mirror is identified.
+    private static let stickyHostKey = "popcornkit.yts.lastGoodHost"
+    private var lastGoodHost: String? {
+        get { UserDefaults.standard.string(forKey: YTSEZTVProvider.stickyHostKey) }
+        set { UserDefaults.standard.set(newValue, forKey: YTSEZTVProvider.stickyHostKey) }
+    }
+
+    private var orderedHosts: [String] {
+        guard let sticky = lastGoodHost,
+              let idx    = YTSEZTVProvider.ytsMirrors.firstIndex(of: sticky)
+        else { return YTSEZTVProvider.ytsMirrors }
+        var rotated = YTSEZTVProvider.ytsMirrors
+        rotated.removeAll { $0 == sticky }
+        rotated.insert(sticky, at: 0)
+        return rotated
+    }
+
+    private struct Path {
+        static let listMovies = "/api/v2/list_movies.json"
+        static let movieInfo  = "/api/v2/movie_details.json"
     }
 
     public init() {}
@@ -70,49 +96,94 @@ public final class YTSEZTVProvider: MediaProvider {
             params["query_term"] = term
         }
 
-        let url = YTS.base + YTS.listMovies
-        print("[YTS] GET \(url) params=\(params)")
+        attempt(hosts: orderedHosts, path: Path.listMovies, params: params) { [weak self] data, error in
+            guard let self = self else { return }
+            guard let data = data else {
+                DispatchQueue.main.async { completion(nil, error) }
+                return
+            }
+            guard
+                let json = try? JSONSerialization.jsonObject(with: data, options: .allowFragments),
+                let root = json as? [String: Any]
+            else {
+                print("[YTS] ERROR: JSON not parseable")
+                DispatchQueue.main.async { completion([], nil) }
+                return
+            }
+            if let apiStatus = root["status"] as? String, apiStatus != "ok" {
+                let msg = (root["status_message"] as? String) ?? "YTS error"
+                print("[YTS] ERROR: api status=\(apiStatus) message=\(msg)")
+                DispatchQueue.main.async {
+                    completion([], NSError(domain: "yts", code: -1,
+                                           userInfo: [NSLocalizedDescriptionKey: msg]))
+                }
+                return
+            }
+            guard
+                let payload = root["data"] as? [String: Any],
+                let raw     = payload["movies"] as? [[String: Any]]
+            else {
+                let count = (root["data"] as? [String: Any])?["movie_count"] ?? "nil"
+                print("[YTS] payload missing data.movies (movie_count=\(count))")
+                DispatchQueue.main.async { completion([], nil) }
+                return
+            }
+            let movies = raw.compactMap(Movie.init(yts:))
+            print("[YTS] parsed \(movies.count)/\(raw.count) movies")
+            DispatchQueue.main.async { completion(movies, nil) }
+            _ = self  // silence warning
+        }
+    }
 
-        session.request(url, parameters: params).validate().responseData { response in
-            let status = response.response?.statusCode ?? -1
-            switch response.result {
-            case .success(let data):
-                let preview = String(data: data.prefix(300), encoding: .utf8) ?? "<binary>"
-                print("[YTS] list_movies status=\(status) bytes=\(data.count) preview=\(preview)")
-                guard
-                    let json = try? JSONSerialization.jsonObject(with: data, options: .allowFragments),
-                    let root = json as? [String: Any]
-                else {
-                    print("[YTS] ERROR: JSON not parseable")
-                    DispatchQueue.main.async { completion([], nil) }
-                    return
-                }
-                if let apiStatus = root["status"] as? String, apiStatus != "ok" {
-                    let msg = (root["status_message"] as? String) ?? "YTS error"
-                    print("[YTS] ERROR: api status=\(apiStatus) message=\(msg)")
-                    DispatchQueue.main.async {
-                        completion([], NSError(domain: "yts", code: -1,
-                                               userInfo: [NSLocalizedDescriptionKey: msg]))
+    /// Walk through `hosts`, retrying on DNS-failure (-1003), connection-lost
+    /// (-1004/-1009/-1001), or any non-2xx response. The first host that
+    /// returns parseable bytes wins and is sticky-cached for the next launch.
+    private func attempt(hosts: [String],
+                         path: String,
+                         params: [String: Any],
+                         completion: @escaping (Data?, NSError?) -> Void) {
+        var remaining = hosts
+        var lastError: NSError?
+
+        func tryNext() {
+            guard let host = remaining.first else {
+                print("[YTS] all mirrors exhausted")
+                completion(nil, lastError)
+                return
+            }
+            remaining.removeFirst()
+            let url = host + path
+            print("[YTS] GET \(url) params=\(params)")
+
+            session.request(url, parameters: params).validate().responseData { [weak self] response in
+                let status = response.response?.statusCode ?? -1
+                switch response.result {
+                case .success(let data):
+                    print("[YTS] \(host) status=\(status) bytes=\(data.count)")
+                    self?.lastGoodHost = host
+                    completion(data, nil)
+                case .failure(let err):
+                    let nserr = err.underlyingError as NSError? ?? (err as NSError)
+                    let code  = nserr.code
+                    print("[YTS] \(host) FAILED status=\(status) code=\(code) err=\(nserr.localizedDescription)")
+                    lastError = nserr
+                    // Retry on DNS / connectivity errors and HTTP 4xx/5xx.
+                    let recoverable = code == NSURLErrorCannotFindHost
+                                   || code == NSURLErrorCannotConnectToHost
+                                   || code == NSURLErrorNetworkConnectionLost
+                                   || code == NSURLErrorTimedOut
+                                   || code == NSURLErrorDNSLookupFailed
+                                   || code == NSURLErrorNotConnectedToInternet
+                                   || (status >= 400)
+                    if recoverable {
+                        tryNext()
+                    } else {
+                        completion(nil, nserr)
                     }
-                    return
                 }
-                guard
-                    let payload = root["data"] as? [String: Any],
-                    let raw     = payload["movies"] as? [[String: Any]]
-                else {
-                    let count = (root["data"] as? [String: Any])?["movie_count"] ?? "nil"
-                    print("[YTS] payload missing data.movies (movie_count=\(count))")
-                    DispatchQueue.main.async { completion([], nil) }
-                    return
-                }
-                let movies = raw.compactMap(Movie.init(yts:))
-                print("[YTS] parsed \(movies.count)/\(raw.count) movies")
-                DispatchQueue.main.async { completion(movies, nil) }
-            case .failure(let err):
-                print("[YTS] ERROR request failed: status=\(status) err=\(err)")
-                DispatchQueue.main.async { completion(nil, err as NSError) }
             }
         }
+        tryNext()
     }
 
     public func getMovieInfo(imdbId: String, completion: @escaping (Movie?, NSError?) -> Void) {
@@ -121,28 +192,21 @@ public final class YTSEZTVProvider: MediaProvider {
             "with_images": true,
             "with_cast":   true,
         ]
-        let url = YTS.base + YTS.movieInfo
-        print("[YTS] GET \(url) imdb=\(imdbId)")
-
-        session.request(url, parameters: params).validate().responseData { response in
-            let status = response.response?.statusCode ?? -1
-            switch response.result {
-            case .success(let data):
-                print("[YTS] movie_details status=\(status) bytes=\(data.count)")
-                guard
-                    let json    = try? JSONSerialization.jsonObject(with: data, options: .allowFragments),
-                    let root    = json as? [String: Any],
-                    let payload = root["data"] as? [String: Any],
-                    let movie   = payload["movie"] as? [String: Any]
-                else {
-                    DispatchQueue.main.async { completion(nil, nil) }
-                    return
-                }
-                DispatchQueue.main.async { completion(Movie(yts: movie), nil) }
-            case .failure(let err):
-                print("[YTS] ERROR movie_details failed status=\(status) err=\(err)")
-                DispatchQueue.main.async { completion(nil, err as NSError) }
+        attempt(hosts: orderedHosts, path: Path.movieInfo, params: params) { data, error in
+            guard let data = data else {
+                DispatchQueue.main.async { completion(nil, error) }
+                return
             }
+            guard
+                let json    = try? JSONSerialization.jsonObject(with: data, options: .allowFragments),
+                let root    = json as? [String: Any],
+                let payload = root["data"] as? [String: Any],
+                let movie   = payload["movie"] as? [String: Any]
+            else {
+                DispatchQueue.main.async { completion(nil, nil) }
+                return
+            }
+            DispatchQueue.main.async { completion(Movie(yts: movie), nil) }
         }
     }
 
