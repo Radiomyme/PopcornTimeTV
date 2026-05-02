@@ -24,15 +24,18 @@ public enum Health {
     }
 }
 
-/// Resolution buckets we care about. Raw value sorts naturally low → high; 3D
-/// is a sentinel above 4K so it can be skipped/excluded with a single check.
+/// Resolution buckets we care about. Raw value sorts naturally low → high.
+/// 3D is intentionally placed BELOW SD because Half-Side-By-Side / Top-and-
+/// Bottom variants render as a doubled image on a standard 4K TV — they're
+/// a special-purpose variant, not a higher quality tier. Auto-picking the
+/// "highest quality" should never land on 3D unless that's the only option.
 public enum VideoQuality: Int, Comparable, Codable {
     case unknown = 0
+    case threeD  = 1
     case sd480   = 480
     case hd720   = 720
     case hd1080  = 1080
     case uhd2160 = 2160
-    case threeD  = 9999
 
     public static func < (lhs: VideoQuality, rhs: VideoQuality) -> Bool {
         return lhs.rawValue < rhs.rawValue
