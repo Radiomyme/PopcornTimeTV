@@ -61,24 +61,22 @@ extension SearchViewController {
     /// the current focused element when the user navigates down. With only
     /// 2 results in a left-aligned grid, neither cell sits below the
     /// centered MOVIES/SHOWS/PEOPLE scope buttons, so the engine refuses
-    /// to descend. Plant an invisible UIFocusGuide that spans the entire
-    /// width of the screen just under the keyboard and explicitly redirects
-    /// focus to the first available result cell. The guide doesn't affect
-    /// hit-testing or layout — it only steers the focus engine.
+    /// to descend. Plant a horizontal UIFocusGuide INSIDE the search
+    /// results' collection view (the focus environment that
+    /// UISearchController actually queries on a downward move) and point
+    /// it at the first visible cell. The guide doesn't render, doesn't
+    /// affect hit-testing — it only steers the focus engine.
     private func installResultsFocusGuide() {
-        guard view.layoutGuides.first(where: { $0 is UIFocusGuide }) == nil else { return }
+        guard let cv = collectionViewController?.collectionView else { return }
+        guard cv.layoutGuides.first(where: { $0 is UIFocusGuide }) == nil else { return }
         let guide = UIFocusGuide()
-        view.addLayoutGuide(guide)
+        cv.addLayoutGuide(guide)
         NSLayoutConstraint.activate([
-            guide.leadingAnchor.constraint(equalTo: view.leadingAnchor),
-            guide.trailingAnchor.constraint(equalTo: view.trailingAnchor),
-            guide.heightAnchor.constraint(equalToConstant: 60),
-            guide.bottomAnchor.constraint(equalTo: view.centerYAnchor, constant: 60),
+            guide.leadingAnchor.constraint(equalTo: cv.frameLayoutGuide.leadingAnchor),
+            guide.trailingAnchor.constraint(equalTo: cv.frameLayoutGuide.trailingAnchor),
+            guide.topAnchor.constraint(equalTo: cv.frameLayoutGuide.topAnchor),
+            guide.heightAnchor.constraint(equalToConstant: 80),
         ])
-
-        // Re-point the guide on every layout pass so it always references
-        // the currently visible first cell (cells are recreated when the
-        // user types and results change).
         focusGuide = guide
     }
 
@@ -90,6 +88,7 @@ extension SearchViewController {
 
     override func viewDidLayoutSubviews() {
         super.viewDidLayoutSubviews()
+        if focusGuide == nil { installResultsFocusGuide() }
         guard let guide = focusGuide,
               let first = collectionViewController?.collectionView?.visibleCells.first else { return }
         guide.preferredFocusEnvironments = [first]

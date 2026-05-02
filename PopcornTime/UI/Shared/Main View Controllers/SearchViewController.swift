@@ -31,6 +31,23 @@ class SearchViewController: MainViewController, UISearchBarDelegate {
             return CGSize(width: 108, height: fetchType == .people ? 160 : 185)
         }
     }
+
+    /// Center the cells horizontally when there are few results. tvOS focus
+    /// engine descends from the centered MOVIES/SHOWS/PEOPLE scope buttons
+    /// to whichever focusable view is geometrically closest below — with 1
+    /// or 2 left-aligned cells the engine refused to move down at all
+    /// because the cells are too far off-axis from the buttons. Centering
+    /// guarantees a cell sits directly under the scope tab.
+    override func collectionView(_ collectionView: UICollectionView, insetForSectionAt section: Int) -> UIEdgeInsets? {
+        guard UIDevice.current.userInterfaceIdiom == .tv else { return nil }
+        let count = collectionViewController.dataSources[safe: section]?.count ?? 0
+        guard count > 0 && count <= 3 else { return nil }
+        let cellWidth: CGFloat  = 250
+        let spacing:   CGFloat  = 48
+        let total              = (CGFloat(count) * cellWidth) + (CGFloat(count - 1) * spacing)
+        let side               = max(90, (collectionView.bounds.width - total) / 2)
+        return UIEdgeInsets(top: 60, left: side, bottom: 60, right: side)
+    }
     
     func searchBar(_ searchBar: UISearchBar, selectedScopeButtonIndexDidChange selectedScope: Int) {
         switch selectedScope {
