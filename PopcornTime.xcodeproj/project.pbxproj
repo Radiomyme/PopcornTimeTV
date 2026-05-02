@@ -186,6 +186,7 @@
 		4DFC20951EED7B8200016BA2 /* MPMediaType.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4DFC20931EED7B8200016BA2 /* MPMediaType.swift */; };
 		732635D2FDD9B7B7A07D737B /* MediaProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE96A3C033AAA0359ED427BC /* MediaProvider.swift */; };
 		B916AD968EB3D55671AAA0D7 /* PlaybackEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = F2E2860F5ED0880FDF359835 /* PlaybackEngine.swift */; };
+		BC564456891BE679AABDF451 /* ObjCExceptionCatcher.m in Sources */ = {isa = PBXBuildFile; fileRef = 2274CD17180CD2CE85175EEA /* ObjCExceptionCatcher.m */; };
 		C13AAE5F5C0B7B2A2EADE6D7 /* Pods_PopcornTimetvOS.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = E0F58921BC4D7FCD5EA29325 /* Pods_PopcornTimetvOS.framework */; };
 /* End PBXBuildFile section */
 
@@ -243,6 +244,7 @@
 		1B82EC3E82F13FD7DA6E7340 /* Pods-TopShelf.release.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-TopShelf.release.xcconfig"; path = "Target Support Files/Pods-TopShelf/Pods-TopShelf.release.xcconfig"; sourceTree = "<group>"; };
 		1CBCDAF347D476B2A660252B /* Pods-PopcornKit tvOS.debug.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-PopcornKit tvOS.debug.xcconfig"; path = "Target Support Files/Pods-PopcornKit tvOS/Pods-PopcornKit tvOS.debug.xcconfig"; sourceTree = "<group>"; };
 		1EA105EEC765A7BAF4B04611 /* Pods_PopcornKit_iOS.framework */ = {isa = PBXFileReference; explicitFileType = wrapper.framework; includeInIndex = 0; path = Pods_PopcornKit_iOS.framework; sourceTree = BUILT_PRODUCTS_DIR; };
+		2274CD17180CD2CE85175EEA /* ObjCExceptionCatcher.m */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.c.objc; name = ObjCExceptionCatcher.m; path = PopcornTime/UI/tvOS/Views/ObjCExceptionCatcher.m; sourceTree = SOURCE_ROOT; };
 		287B85341C9873A200EEF5C8 /* PopcornTime.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = PopcornTime.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		339443987BA9913056C788A2 /* Pods-PopcornKit tvOS.release.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-PopcornKit tvOS.release.xcconfig"; path = "Target Support Files/Pods-PopcornKit tvOS/Pods-PopcornKit tvOS.release.xcconfig"; sourceTree = "<group>"; };
 		37DACB023B19FBE420CFFCEA /* YTSEZTVProvider.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = YTSEZTVProvider.swift; path = PopcornKit/Managers/Providers/YTSEZTVProvider.swift; sourceTree = SOURCE_ROOT; };
@@ -454,6 +456,7 @@
 		4DFC20931EED7B8200016BA2 /* MPMediaType.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = MPMediaType.swift; sourceTree = "<group>"; };
 		70D062EA9E7B9A88F5F7BD6F /* Pods-TopShelf.debug.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-TopShelf.debug.xcconfig"; path = "Target Support Files/Pods-TopShelf/Pods-TopShelf.debug.xcconfig"; sourceTree = "<group>"; };
 		8BB94E0D8A266A44948F11E0 /* Pods-PopcornTimetvOS.debug.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-PopcornTimetvOS.debug.xcconfig"; path = "Target Support Files/Pods-PopcornTimetvOS/Pods-PopcornTimetvOS.debug.xcconfig"; sourceTree = "<group>"; };
+		9A4B1F5449CD76A82ABC226A /* ObjCExceptionCatcher.h */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.c.h; name = ObjCExceptionCatcher.h; path = PopcornTime/UI/tvOS/Views/ObjCExceptionCatcher.h; sourceTree = SOURCE_ROOT; };
 		B747D9446AC930A21B6E6E3D /* Pods_TopShelf.framework */ = {isa = PBXFileReference; explicitFileType = wrapper.framework; includeInIndex = 0; path = Pods_TopShelf.framework; sourceTree = BUILT_PRODUCTS_DIR; };
 		B9A5B2894233AEB853E7A1E1 /* JSONValue.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = JSONValue.swift; path = PopcornKit/Resources/JSONValue.swift; sourceTree = SOURCE_ROOT; };
 		C39DBC9A881608E11694A746 /* Pods_PopcornTimeiOS.framework */ = {isa = PBXFileReference; explicitFileType = wrapper.framework; includeInIndex = 0; path = Pods_PopcornTimeiOS.framework; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -940,6 +943,8 @@
 				4D9995521E5C7E68005C432A /* LoadingView.xib */,
 				4D0F9E3F1E705B0800860852 /* ContinueWatchingCollectionReusableView.xib */,
 				4D9995541E5C7F81005C432A /* ErrorBackgroundView.xib */,
+				9A4B1F5449CD76A82ABC226A /* ObjCExceptionCatcher.h */,
+				2274CD17180CD2CE85175EEA /* ObjCExceptionCatcher.m */,
 			);
 			path = Views;
 			sourceTree = "<group>";
@@ -1380,6 +1385,7 @@
 				4DB0477A1E6035860008721A /* ContinueWatchingCollectionViewCell.swift in Sources */,
 				4DC7FE4C1EF71B79002C638A /* DownloadDetailViewController+tvOS.swift in Sources */,
 				B916AD968EB3D55671AAA0D7 /* PlaybackEngine.swift in Sources */,
+				BC564456891BE679AABDF451 /* ObjCExceptionCatcher.m in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
