@@ -157,6 +157,74 @@ public struct Movie: Media, Equatable {
         torrents.sort(by: <)
     }
     
+    /// Convenience init that maps a YTS movie payload (from `yts.mx/api/v2`)
+    /// directly into a Movie without going through ObjectMapper. The schema
+    /// differs from the legacy Popcorn API (torrents is an Array, quality
+    /// strings include "2160p", `imdb_code` instead of `imdb_id`).
+    public init?(yts dict: [String: Any]) {
+        guard
+            let imdb  = dict["imdb_code"] as? String,
+            let title = dict["title"] as? String
+        else { return nil }
+        self.id    = imdb
+        self.title = title.removingHtmlEncoding
+        self.slug  = (dict["slug"] as? String) ?? title.slugged
+        self.year  = String(dict["year"] as? Int ?? 0)
+        // YTS rating is 0–10 float; the rest of the codebase expects 0–100 (Popcorn API style).
+        let ytsRating = (dict["rating"] as? Double) ?? Double(dict["rating"] as? Int ?? 0)
+        self.rating  = Float(ytsRating * 10.0)
+        self.runtime = (dict["runtime"] as? Int) ?? 0
+        let summaryText = (dict["description_full"] as? String) ?? (dict["synopsis"] as? String) ?? (dict["summary"] as? String) ?? "No summary available.".localized
+        self.summary = summaryText.removingHtmlEncoding
+        self.trailer = (dict["yt_trailer_code"] as? String).flatMap { code in
+            code.isEmpty ? nil : "https://www.youtube.com/watch?v=\(code)"
+        }
+        self.certification = (dict["mpa_rating"] as? String) ?? "Unrated"
+        self.genres = (dict["genres"] as? [String]) ?? []
+        self.tmdbId = nil
+        self.largeCoverImage      = (dict["large_cover_image"] as? String) ?? (dict["medium_cover_image"] as? String)
+        self.largeBackgroundImage = (dict["background_image_original"] as? String) ?? (dict["background_image"] as? String)
+        if let ytsTorrents = dict["torrents"] as? [[String: Any]] {
+            for entry in ytsTorrents {
+                guard let hash = entry["hash"] as? String else { continue }
+                let qualityString = (entry["quality"] as? String) ?? "unknown"
+                let codec         = entry["video_codec"] as? String ?? ""
+                let audio         = entry["audio_channels"] as? String ?? ""
+                let composedTags  = qualityString + " " + codec + " " + audio
+                var torrent = Torrent(
+                    health: .unknown,
+                    url:    Movie.ytsMagnet(hash: hash, title: title),
+                    quality: qualityString,
+                    seeds:   entry["seeds"] as? Int ?? 0,
+                    peers:   entry["peers"] as? Int ?? 0,
+                    size:    entry["size"]  as? String,
+                    tags:    VideoTags.parse(composedTags))
+                // Re-apply quality string to enrich tags from the composed string.
+                torrent.quality = qualityString + (torrent.tags.displaySuffix)
+                self.torrents.append(torrent)
+            }
+            self.torrents.sort(by: <)
+        }
+    }
+
+    /// YTS only exposes torrent hashes; build a standard magnet link with the
+    /// public trackers YTS recommends.
+    private static func ytsMagnet(hash: String, title: String) -> String {
+        let trackers = [
+            "udp://open.demonii.com:1337/announce",
+            "udp://tracker.openbittorrent.com:80",
+            "udp://tracker.coppersurfer.tk:6969",
+            "udp://glotorrents.pw:6969/announce",
+            "udp://tracker.opentrackr.org:1337/announce",
+            "udp://torrent.gresille.org:80/announce",
+            "udp://p4p.arenabg.com:1337",
+            "udp://tracker.leechers-paradise.org:6969",
+        ]
+        let encodedTitle = title.addingPercentEncoding(withAllowedCharacters: .urlHostAllowed) ?? title
+        let trackersQS = trackers.map { "tr=" + ($0.addingPercentEncoding(withAllowedCharacters: .urlHostAllowed) ?? $0) }.joined(separator: "&")
+        return "magnet:?xt=urn:btih:\(hash)&dn=\(encodedTitle)&\(trackersQS)"
+    }
+
     public init(title: String = "Unknown".localized, id: String = "tt0000000", tmdbId: Int? = nil, slug: String = "unknown", summary: String = "No summary available.".localized, torrents: [Torrent] = [], subtitles: [Subtitle] = [], largeBackgroundImage: String? = nil, largeCoverImage: String? = nil) {
         self.title = title
         self.id = id

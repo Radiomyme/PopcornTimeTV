@@ -51,31 +51,16 @@ open class MovieManager: NetworkManager {
         searchTerm: String?,
         orderBy order: Orders,
         completion: @escaping ([Movie]?, NSError?) -> Void) {
-        var params: [String: Any] = ["sort": filter.rawValue, "order": order.rawValue, "genre": genre.rawValue.replacingOccurrences(of: " ", with: "-").lowercased()]
-        if let searchTerm = searchTerm , !searchTerm.isEmpty {
-            params["keywords"] = searchTerm
-        }
-        self.manager.request(Popcorn.base + Popcorn.movies + "/\(page)", parameters: params).validate().responseData { response in
-            guard case .success(let __data) = response.result, let value = try? JSONSerialization.jsonObject(with: __data, options: .allowFragments) else {
-                completion(nil, response.error as NSError?)
-                return
-            }
-            completion(Mapper<Movie>().mapArray(JSONObject: value), nil)
-        }
+        MediaProviders.shared.loadMovies(
+            page: page,
+            filter: filter,
+            genre: genre,
+            searchTerm: searchTerm,
+            order: order,
+            completion: completion)
     }
-    
-    /**
-     Get more movie information.
-     
-     - Parameter imdbId:        The imdb identification code of the movie.
-     
-     - Parameter completion:    Completion handler for the request. Returns movie upon success, error upon failure.
-     */
+
     open func getInfo(_ imdbId: String, completion: @escaping (Movie?, NSError?) -> Void) {
-        self.manager.request(Popcorn.base + Popcorn.movie + "/\(imdbId)").validate().responseData { response in
-            guard case .success(let __data) = response.result, let value = try? JSONSerialization.jsonObject(with: __data, options: .allowFragments) else {completion(nil, response.error as NSError?); return}
-            completion(Mapper<Movie>().map(JSONObject: value), nil)
-        }
+        MediaProviders.shared.getMovieInfo(imdbId: imdbId, completion: completion)
     }
-    
 }
