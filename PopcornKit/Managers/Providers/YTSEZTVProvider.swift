@@ -26,13 +26,16 @@ public final class YTSEZTVProvider: MediaProvider {
         return Session(configuration: configuration)
     }()
 
-    /// Hosts the provider tries in order. A French ISP (Orange/SFR/Bouygues)
-    /// will typically DNS-block at least the first one; subsequent entries
-    /// often resolve fine through the same FAI. Sticky-cache the first host
-    /// that successfully serves a JSON response in `lastGoodHost`, then
-    /// only fall back when it later fails.
+    /// Hosts the provider tries in order. The current official YTS endpoint
+    /// (May 2026) is `movies-api.accel.li` — the legacy `yts.mx` domain has
+    /// been retired (NXDOMAIN globally) and `yts.bz` is the front-end mirror
+    /// that announces the API migration. The remaining entries are kept as
+    /// last-resort fallbacks but they're either redirected to the new host
+    /// or known broken. The first host that returns 2xx JSON is sticky-
+    /// cached in UserDefaults so subsequent launches skip the failed lookups.
     public static var ytsMirrors: [String] = [
-        "https://yts.mx",
+        "https://movies-api.accel.li",
+        "https://yts.bz",
         "https://yts.am",
         "https://yts.lt",
         "https://yts.rs",
