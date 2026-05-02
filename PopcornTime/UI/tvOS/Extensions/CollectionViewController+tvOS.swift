@@ -43,12 +43,17 @@ extension CollectionViewController {
     }
     
     override func collectionView(_ collectionView: UICollectionView, didUpdateFocusIn context: UICollectionViewFocusUpdateContext, with coordinator: UIFocusAnimationCoordinator) {
-        
+
         if let next = context.nextFocusedIndexPath {
             focusIndexPath = next
         }
-        
-        if paginated && !isLoading && focusIndexPath.item >= (collectionView.numberOfItems(inSection: focusIndexPath.section) - 10) {
+
+        // Infinite scroll: when the focus reaches within 10 cells of the end
+        // of the current section, kick off the next page. Guard with
+        // `hasNextPage` so we don't keep firing once the catalog is exhausted.
+        let itemsInSection = collectionView.numberOfItems(inSection: focusIndexPath.section)
+        if paginated && hasNextPage && !isLoading
+            && focusIndexPath.item >= (itemsInSection - 10) {
             currentPage += 1
             delegate?.load(page: currentPage)
         }

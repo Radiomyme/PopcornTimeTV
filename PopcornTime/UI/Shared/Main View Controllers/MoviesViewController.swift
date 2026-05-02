@@ -10,7 +10,11 @@ class MoviesViewController: MediaViewController {
         return UINib(nibName: String(describing: ContinueWatchingCollectionReusableView.self), bundle: nil)
     }
     
-    var currentFilter: MovieManager.Filters = .trending {
+    /// Default sort surfaces the newest YTS uploads (`date_added DESC`) so
+    /// the user lands on fresh content rather than the all-time blockbusters
+    /// that `download_count` returns. The picker still lets them switch back
+    /// to trending / rating / year.
+    var currentFilter: MovieManager.Filters = .date {
         didSet {
             collectionViewController.currentPage = 1
             didRefresh(collectionView: collectionView!)

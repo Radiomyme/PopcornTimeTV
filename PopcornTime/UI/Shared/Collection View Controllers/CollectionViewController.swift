@@ -324,7 +324,7 @@ class CollectionViewController: ResponsiveCollectionViewController, UICollection
         if let cell = sender as? UICollectionViewCell,
             let indexPath = collectionView?.indexPath(for: cell) {
             let sender = dataSources[indexPath.section][indexPath.row]
-            
+
             activeRootViewController?.prepare(for: segue, sender: sender)
         }
     }

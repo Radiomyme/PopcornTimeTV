@@ -54,29 +54,29 @@ public struct Movie: Media, Equatable {
         let amazonUrl = largeBackgroundImage?.isAmazonUrl ?? false
         return largeBackgroundImage?.replacingOccurrences(of: amazonUrl ? "SX1920" : "w1920", with: amazonUrl ? "SX650" : "w650")
     }
-    
+
     /// If fanart image is available, it is returned with size 1280*720.
     public var mediumBackgroundImage: String? {
         let amazonUrl = largeBackgroundImage?.isAmazonUrl ?? false
         return largeBackgroundImage?.replacingOccurrences(of: amazonUrl ? "SX1920" : "w1920", with: amazonUrl ? "SX1280" : "w1280")
     }
-    
+
     /// If fanart image is available, it is returned with size 1920*1080.
     public var largeBackgroundImage: String?
-    
+
     /// If poster image is available, it is returned with size 450*300.
     public var smallCoverImage: String? {
         let amazonUrl = largeCoverImage?.isAmazonUrl ?? false
         return largeCoverImage?.replacingOccurrences(of: amazonUrl ? "SX1000" : "w1000", with: amazonUrl ? "SX300" : "w300")
     }
-    
+
     /// If poster image is available, it is returned with size 975*650.
     public var mediumCoverImage: String? {
         let amazonUrl = largeCoverImage?.isAmazonUrl ?? false
         return largeCoverImage?.replacingOccurrences(of: amazonUrl ? "SX1000" : "w1000", with: amazonUrl ? "SX650" : "w650")
     }
-    
-    /// If poster image is available, it is returned with size 1500*1000
+
+    /// If poster image is available, it is returned with size 1500*1000.
     public var largeCoverImage: String?
     
     /// Convenience variable. Boolean value indicating the watched status of the movie.
@@ -133,8 +133,8 @@ public struct Movie: Media, Equatable {
             self.year = try map.value("year")
             self.rating = try map.value("rating.percentage")
             self.summary = ((try? map.value("synopsis")) ?? "No summary available.".localized).removingHtmlEncoding
-            self.largeCoverImage = try? map.value("images.poster"); largeCoverImage = largeCoverImage?.replacingOccurrences(of: "w500", with: "w1000").replacingOccurrences(of: "SX300", with: "SX1000")
-            self.largeBackgroundImage = try? map.value("images.fanart"); largeBackgroundImage = largeBackgroundImage?.replacingOccurrences(of: "w500", with: "w1920").replacingOccurrences(of: "SX300", with: "SX1920")
+            self.largeCoverImage = try? map.value("images.poster"); largeCoverImage = ImageProxy.proxied(largeCoverImage?.replacingOccurrences(of: "w500", with: "w1000").replacingOccurrences(of: "SX300", with: "SX1000"))
+            self.largeBackgroundImage = try? map.value("images.fanart"); largeBackgroundImage = ImageProxy.proxied(largeBackgroundImage?.replacingOccurrences(of: "w500", with: "w1920").replacingOccurrences(of: "SX300", with: "SX1920"))
             self.runtime = try map.value("runtime", using: IntTransform())
 
         }
@@ -182,8 +182,8 @@ public struct Movie: Media, Equatable {
         self.certification = (dict["mpa_rating"] as? String) ?? "Unrated"
         self.genres = (dict["genres"] as? [String]) ?? []
         self.tmdbId = nil
-        self.largeCoverImage      = (dict["large_cover_image"] as? String) ?? (dict["medium_cover_image"] as? String)
-        self.largeBackgroundImage = (dict["background_image_original"] as? String) ?? (dict["background_image"] as? String)
+        self.largeCoverImage      = ImageProxy.proxied((dict["large_cover_image"] as? String) ?? (dict["medium_cover_image"] as? String))
+        self.largeBackgroundImage = ImageProxy.proxied((dict["background_image_original"] as? String) ?? (dict["background_image"] as? String))
         if let ytsTorrents = dict["torrents"] as? [[String: Any]] {
             for entry in ytsTorrents {
                 guard let hash = entry["hash"] as? String else { continue }
