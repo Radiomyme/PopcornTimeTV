@@ -127,13 +127,54 @@ extension AppDelegate: PCTPlayerViewControllerDelegate, UIViewControllerTransiti
         
         media.getSubtitles { [unowned self] subtitles in
             guard self.window?.rootViewController?.presentedViewController === loadingViewController else { return } // Make sure the user is still loading.
-            
+
             media.subtitles = subtitles
+
+            // Codec sniff: AVPlayer renders HDR10 / Dolby Vision / Atmos
+            // natively on tvOS 17+ but only handles .mp4/.m4v/.mov.
+            // Almost all YTS torrents are .mkv → fall back to PCTPlayer/VLC.
+            if AppDelegate.shouldUseAVPlayer(forMagnet: torrent.url) {
+                let avVc = NativeAVPlayerViewController()
+                avVc.modalPresentationStyle = .fullScreen
+                let captured = media
+                let mediaCopy = media
+                let playBlock: (URL, URL, Media, Episode?, Float, UIViewController, PTTorrentStreamer) -> Void = { videoFileURL, _, _, _, progress, viewController, streamer in
+                    guard let avVc = viewController as? NativeAVPlayerViewController else { return }
+                    avVc.configure(url: videoFileURL,
+                                   startPositionPercent: progress,
+                                   media: captured,
+                                   streamer: streamer)
+                }
+                _ = mediaCopy
+                mediaCopy.play(fromFileOrMagnetLink: torrent.url,
+                               nextEpisodeInSeries: nextEpisode,
+                               loadingViewController: loadingViewController,
+                               playViewController: avVc,
+                               progress: currentProgress,
+                               playBlock: playBlock,
+                               errorBlock: error,
+                               finishedLoadingBlock: finishedLoading)
+                return
+            }
 
             let playViewController = storyboard.instantiateViewController(withIdentifier: "PCTPlayerViewController") as! PCTPlayerViewController
             playViewController.delegate = self
             media.play(fromFileOrMagnetLink: torrent.url, nextEpisodeInSeries: nextEpisode, loadingViewController: loadingViewController, playViewController: playViewController, progress: currentProgress, errorBlock: error, finishedLoadingBlock: finishedLoading)
         }
+    }
+
+    /// Inspect the magnet's `dn=` (display name, set by the torrent creator
+    /// to the file name) for an extension AVPlayer can decode. Without this
+    /// the user lands on a black PCTPlayerViewController for unsupported
+    /// containers (mkv with proprietary subtitle tracks, etc.). YTS encodes
+    /// most 4K HEVC inside `.mkv` containers — those keep going to VLC.
+    fileprivate static func shouldUseAVPlayer(forMagnet magnet: String) -> Bool {
+        guard let dn = magnet.components(separatedBy: "&dn=").last?
+                .components(separatedBy: "&").first?
+                .removingPercentEncoding?.lowercased()
+        else { return false }
+        let avFriendly = [".mp4", ".m4v", ".mov"]
+        return avFriendly.contains(where: { dn.hasSuffix($0) })
     }
     
     func downloadButton(_ button: DownloadButton, wasPressedWith download: PTTorrentDownload, didDeleteHandler: (() -> Void)? = nil) {
