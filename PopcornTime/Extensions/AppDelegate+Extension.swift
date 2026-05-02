@@ -15,10 +15,14 @@ extension AppDelegate: PCTPlayerViewControllerDelegate, UIViewControllerTransiti
         let preference = UserDefaults.standard.string(forKey: "autoSelectQuality") ?? "Highest".localized
         let sorted     = media.torrents.sorted(by: <)
 
+        print("[chooseQuality] media=\(media.title) preference=\(preference) candidates=\(sorted.map { "\($0.quality ?? "?")(\($0.qualityValue))" })")
+
         if preference == "Highest".localized, let best = sorted.last {
+            print("[chooseQuality] picked HIGHEST: quality=\(best.quality ?? "?") url=\(best.url.prefix(120))")
             return completion(best)
         }
         if preference == "Lowest".localized, let worst = sorted.first {
+            print("[chooseQuality] picked LOWEST: quality=\(worst.quality ?? "?")")
             return completion(worst)
         }
 
