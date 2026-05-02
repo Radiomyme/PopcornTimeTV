@@ -8,13 +8,20 @@ import MediaPlayer.MPMediaItem
 extension AppDelegate: PCTPlayerViewControllerDelegate, UIViewControllerTransitioningDelegate {
     
     func chooseQuality(_ sender: UIView?, media: Media, completion: @escaping (Torrent) -> Void) {
-        if let quality = UserDefaults.standard.string(forKey: "autoSelectQuality") {
-            let sorted  = media.torrents.sorted(by: <)
-            let torrent = quality == "Highest".localized ? sorted.last! : sorted.first!
-            
-            return completion(torrent)
+        // Default behaviour for the modernized tvOS app: always pick the highest
+        // quality torrent available (2160p > 1080p > 720p > 480p > 3D, with
+        // HDR/DV/Atmos preferred at equal resolution). The user can override the
+        // preference in Settings ("autoSelectQuality" UserDefault).
+        let preference = UserDefaults.standard.string(forKey: "autoSelectQuality") ?? "Highest".localized
+        let sorted     = media.torrents.sorted(by: <)
+
+        if preference == "Highest".localized, let best = sorted.last {
+            return completion(best)
         }
-        
+        if preference == "Lowest".localized, let worst = sorted.first {
+            return completion(worst)
+        }
+
         guard media.torrents.count > 1 else {
             if let torrent = media.torrents.first {
                 completion(torrent)
@@ -25,21 +32,19 @@ extension AppDelegate: PCTPlayerViewControllerDelegate, UIViewControllerTransiti
             }
             return
         }
-        
+
         let style: UIAlertController.Style = sender == nil ? .alert : .actionSheet
         let blurStyle: UIBlurEffect.Style  = style == .alert ? .extraLight : .dark
         let alertController = UIAlertController(title: "Choose Quality".localized, message: nil, preferredStyle: style, blurStyle: blurStyle)
-        
-        for torrent in media.torrents {
+
+        for torrent in sorted.reversed() {
             alertController.addAction(UIAlertAction(title: torrent.quality, style: .default) { _ in
                 completion(torrent)
             })
         }
-        
+
         alertController.addAction(UIAlertAction(title: "Cancel".localized, style: .cancel, handler: nil))
-        
         alertController.popoverPresentationController?.sourceView = sender
-        
         alertController.show(animated: true)
     }
     

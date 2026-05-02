@@ -7,161 +7,234 @@ import ObjectMapper
  Health of a torrent.
  */
 public enum Health {
-    /// Low number of seeds and peers.
     case bad
-    /// Moderate number of seeds and peers.
     case medium
-    /// Lots of seeds and peers.
     case good
-    /// Fucking lots of seeds and peers.
     case excellent
-    /// Health of the torrent cannot be calcualted.
     case unknown
-    
-    /**
-     - Bad:         Red.
-     - Medium:      Orange.
-     - Good:        Yellow-green.
-     - Excellent:   Bright green.
-     - Unknown:     Grey.
-     */
+
     public var color: UIColor {
         switch self {
-        case .bad:
-            return UIColor(red: 212.0/255.0, green: 14.0/255.0, blue: 0.0, alpha: 1.0)
-        case .medium:
-            return UIColor(red: 212.0/255.0, green: 120.0/255.0, blue: 0.0, alpha: 1.0)
-        case .good:
-            return UIColor(red: 201.0/255.0, green: 212.0/255.0, blue: 0.0, alpha: 1.0)
-        case .excellent:
-            return UIColor(red: 90.0/255.0, green: 186.0/255.0, blue: 0.0, alpha: 1.0)
-        case .unknown:
-            return UIColor(red: 105.0/255.0, green: 105.0/255.0, blue: 105.0, alpha: 1.0)
+        case .bad:       return UIColor(red: 212.0/255.0, green:  14.0/255.0, blue:   0.0/255.0, alpha: 1.0)
+        case .medium:    return UIColor(red: 212.0/255.0, green: 120.0/255.0, blue:   0.0/255.0, alpha: 1.0)
+        case .good:      return UIColor(red: 201.0/255.0, green: 212.0/255.0, blue:   0.0/255.0, alpha: 1.0)
+        case .excellent: return UIColor(red:  90.0/255.0, green: 186.0/255.0, blue:   0.0/255.0, alpha: 1.0)
+        case .unknown:   return UIColor(red: 105.0/255.0, green: 105.0/255.0, blue: 105.0/255.0, alpha: 1.0)
         }
     }
 }
 
+/// Resolution buckets we care about. Raw value sorts naturally low → high; 3D
+/// is a sentinel above 4K so it can be skipped/excluded with a single check.
+public enum VideoQuality: Int, Comparable, Codable {
+    case unknown = 0
+    case sd480   = 480
+    case hd720   = 720
+    case hd1080  = 1080
+    case uhd2160 = 2160
+    case threeD  = 9999
+
+    public static func < (lhs: VideoQuality, rhs: VideoQuality) -> Bool {
+        return lhs.rawValue < rhs.rawValue
+    }
+
+    /// Parse a raw quality token from API or a torrent name.
+    /// Examples: "2160p", "4K", "UHD", "1080p", "1080p.bluray", "720", "480p", "3D"
+    public static func parse(_ raw: String) -> VideoQuality {
+        let s = raw.lowercased()
+        if s.contains("2160") || s.contains("4k") || s.contains("uhd") { return .uhd2160 }
+        if s.contains("1080") { return .hd1080 }
+        if s.contains("720")  { return .hd720 }
+        if s.contains("480")  { return .sd480 }
+        if s == "3d" || s.contains(" 3d") || s.contains(".3d") || s.contains("-3d") { return .threeD }
+        return .unknown
+    }
+
+    /// Human-readable label preserved in `Torrent.quality` for the UI alerts
+    /// that previously displayed the raw API string.
+    public var displayLabel: String {
+        switch self {
+        case .uhd2160: return "2160p"
+        case .hd1080:  return "1080p"
+        case .hd720:   return "720p"
+        case .sd480:   return "480p"
+        case .threeD:  return "3D"
+        case .unknown: return ""
+        }
+    }
+}
+
+/// Codec / dynamic-range / audio modifiers parsed from the torrent name.
+/// Used as a tiebreaker in sorting (HDR/HEVC/Atmos preferred at equal resolution)
+/// and to inform the player engine of HDR/Dolby Vision content.
+public struct VideoTags: OptionSet, Codable {
+    public let rawValue: Int
+    public init(rawValue: Int) { self.rawValue = rawValue }
+
+    public static let hdr10        = VideoTags(rawValue: 1 << 0)
+    public static let hdr10Plus    = VideoTags(rawValue: 1 << 1)
+    public static let dolbyVision  = VideoTags(rawValue: 1 << 2)
+    public static let hevc         = VideoTags(rawValue: 1 << 3)
+    public static let av1          = VideoTags(rawValue: 1 << 4)
+    public static let atmos        = VideoTags(rawValue: 1 << 5)
+    public static let trueHD       = VideoTags(rawValue: 1 << 6)
+    public static let dts          = VideoTags(rawValue: 1 << 7)
+
+    /// Parse a torrent name string for codec/HDR/audio markers.
+    public static func parse(_ raw: String) -> VideoTags {
+        let s = raw.lowercased().replacingOccurrences(of: "-", with: " ")
+        var tags: VideoTags = []
+        if s.contains("dv ") || s.contains("dovi") || s.contains("dolby.vision") || s.contains("dolby vision") { tags.insert(.dolbyVision) }
+        if s.contains("hdr10+") || s.contains("hdr10plus") { tags.insert(.hdr10Plus) }
+        if s.contains("hdr") { tags.insert(.hdr10) }
+        if s.contains("hevc") || s.contains("x265") || s.contains("h.265") || s.contains("h265") { tags.insert(.hevc) }
+        if s.contains("av1") || s.contains("aom") { tags.insert(.av1) }
+        if s.contains("atmos") { tags.insert(.atmos) }
+        if s.contains("truehd") || s.contains("true hd") { tags.insert(.trueHD) }
+        if s.contains("dts") { tags.insert(.dts) }
+        return tags
+    }
+
+    /// Human-readable suffix (e.g. " HDR DV HEVC Atmos") for the UI picker.
+    public var displaySuffix: String {
+        var parts: [String] = []
+        if contains(.dolbyVision) { parts.append("DV") }
+        if contains(.hdr10Plus)   { parts.append("HDR10+") }
+        else if contains(.hdr10)  { parts.append("HDR") }
+        if contains(.atmos)       { parts.append("Atmos") }
+        if contains(.av1)         { parts.append("AV1") }
+        else if contains(.hevc)   { parts.append("HEVC") }
+        return parts.isEmpty ? "" : " " + parts.joined(separator: " ")
+    }
+}
+
 public struct Torrent: Mappable, Equatable, Comparable {
-    
-    /// Health of the torrent.
+
     public let health: Health
-    
-    /// Url of the torrent. May be http url or may be a magnet link.
     public let url: String
-    
-    /// Quality of the media - 1080p, 720p, 480p etc.
-    public var quality: String!
-    
-    /// Number of seeds the torrent has.
+
+    /// Resolution bucket of this torrent (480 / 720 / 1080 / 2160 / 3D / unknown).
+    public var qualityValue: VideoQuality
+
+    /// Codec / HDR / audio tags parsed from the torrent name.
+    public var tags: VideoTags
+
+    /// Backing storage so callers can still set `.quality` to a custom string
+    /// (some Movie/Episode JSON paths assign it after construction).
+    private var _qualityOverride: String?
+
+    /// Human-readable quality label, e.g. "2160p HDR DV HEVC". Preserved as a
+    /// settable property so the existing call sites that do
+    /// `torrent.quality = key` after mapping continue to work.
+    public var quality: String! {
+        get {
+            if let override = _qualityOverride { return override }
+            return qualityValue.displayLabel + tags.displaySuffix
+        }
+        set {
+            _qualityOverride = newValue
+            if let value = newValue {
+                qualityValue = VideoQuality.parse(value)
+                tags = VideoTags.parse(value)
+            }
+        }
+    }
+
     public let seeds: Int
-    
-    /// Number of peers the torrent has.
     public let peers: Int
-    
-    /// Size of the torrent. Will be `nil` if object is episode.
     public let size: String?
-    
+
     public init?(map: Map) {
         do { self = try Torrent(map) }
         catch { return nil }
     }
-    
+
     private init(_ map: Map) throws {
-        self.url = try map.value("url")
+        self.url   = try map.value("url")
         self.seeds = (try? (try? map.value("seeds")) ?? map.value(("seed"))) ?? 0
         self.peers = (try? (try? map.value("peers")) ?? map.value(("peer"))) ?? 0
-        self.size = try? map.value("filesize")
-        self.quality = try? map.value("quality") // Will only not be `nil` if object is mapped from JSON array, otherwise this is set in `Show or Movie` struct.
-        
-        // First calculate the seed/peer ratio
-        let ratio = peers > 0 ? (seeds / peers) : seeds
-        
-        // Normalize the data. Convert each to a percentage
-        // Ratio: Anything above a ratio of 5 is good
-        let normalizedRatio = min(ratio / 5 * 100, 100)
-        // Seeds: Anything above 30 seeds is good
-        let normalizedSeeds = min(seeds / 30 * 100, 100)
-        
-        // Weight the above metrics differently
-        // Ratio is weighted 60% whilst seeders is 40%
-        let weightedRatio = Double(normalizedRatio) * 0.6
-        let weightedSeeds = Double(normalizedSeeds) * 0.4
-        let weightedTotal = weightedRatio + weightedSeeds
-        
-        // Scale from [0, 100] to [0, 3]. Drops the decimal places
-        var scaledTotal = ((weightedTotal * 3.0) / 100.0)// | 0.0
+        self.size  = try? map.value("filesize")
+
+        // Quality may be supplied as a JSON field, or set later by Movie/Episode mapping.
+        let qualityString: String? = try? map.value("quality")
+        if let q = qualityString {
+            self._qualityOverride = q
+            self.qualityValue     = VideoQuality.parse(q)
+            self.tags             = VideoTags.parse(q)
+        } else {
+            self._qualityOverride = nil
+            self.qualityValue     = .unknown
+            self.tags             = []
+        }
+
+        let ratio            = peers > 0 ? (seeds / peers) : seeds
+        let normalizedRatio  = min(ratio / 5 * 100, 100)
+        let normalizedSeeds  = min(seeds / 30 * 100, 100)
+        let weightedRatio    = Double(normalizedRatio) * 0.6
+        let weightedSeeds    = Double(normalizedSeeds) * 0.4
+        let weightedTotal    = weightedRatio + weightedSeeds
+        var scaledTotal      = (weightedTotal * 3.0) / 100.0
         if scaledTotal < 0 { scaledTotal = 0 }
-        
+
         switch floor(scaledTotal) {
-        case 0:
-            health = .bad
-        case 1:
-            health = .medium
-        case 2:
-            health = .good
-        case 3:
-            health = .excellent
-        default:
-            health = .unknown
+        case 0:  health = .bad
+        case 1:  health = .medium
+        case 2:  health = .good
+        case 3:  health = .excellent
+        default: health = .unknown
         }
     }
-    
-    public init(health: Health = .unknown, url: String = "", quality: String = "0p", seeds: Int = 0, peers: Int = 0, size: String? = nil) {
+
+    public init(health: Health = .unknown,
+                url: String = "",
+                quality: String = "",
+                seeds: Int = 0,
+                peers: Int = 0,
+                size: String? = nil,
+                tags: VideoTags = []) {
         self.health = health
-        self.url = url
-        self.quality = quality
-        self.seeds = seeds
-        self.peers = peers
-        self.size = size
+        self.url    = url
+        self.seeds  = seeds
+        self.peers  = peers
+        self.size   = size
+        self._qualityOverride = quality.isEmpty ? nil : quality
+        self.qualityValue     = VideoQuality.parse(quality)
+        self.tags             = tags.isEmpty ? VideoTags.parse(quality) : tags
     }
-    
+
     public mutating func mapping(map: Map) {
         switch map.mappingType {
         case .fromJSON:
             if let torrent = Torrent(map: map) {
                 self = torrent
             }
-            
+
         case .toJSON:
-            url >>> map["url"]
-            seeds >>> map["seeds"]
-            peers >>> map["peers"]
-            quality >>> map["quality"]
-            size >>> map["filesize"]
+            url               >>> map["url"]
+            seeds             >>> map["seeds"]
+            peers             >>> map["peers"]
+            quality           >>> map["quality"]
+            size              >>> map["filesize"]
         }
     }
 }
 
-public func >(lhs: Torrent, rhs: Torrent) -> Bool {
-    if let lhsSize = lhs.quality, let rhsSize = rhs.quality {
-        if lhsSize.count == 2  && rhsSize.count > 2 // 3D
-        {
-            return true
-        } else if lhsSize.count == 5 && rhsSize.count < 5 && rhsSize.count > 2 // 1080p
-        {
-            return true
-        } else if lhsSize.count == 4 && rhsSize.count == 4 // 720p and 480p
-        {
-            return lhsSize > rhsSize
-        }
+/// Total ordering: 3D sentinel sits above 2160p, then resolution descending
+/// gets handled by VideoQuality's natural Int-ordered Comparable. At equal
+/// resolution, prefer the torrent with HDR/DV/HEVC/Atmos tags, then prefer
+/// more seeders.
+public func < (lhs: Torrent, rhs: Torrent) -> Bool {
+    if lhs.qualityValue != rhs.qualityValue {
+        return lhs.qualityValue < rhs.qualityValue
     }
-    return false
+    let lhsScore = lhs.tags.rawValue.nonzeroBitCount
+    let rhsScore = rhs.tags.rawValue.nonzeroBitCount
+    if lhsScore != rhsScore { return lhsScore < rhsScore }
+    return lhs.seeds < rhs.seeds
 }
 
-public func <(lhs: Torrent, rhs: Torrent) -> Bool {
-    if let lhsSize = lhs.quality, let rhsSize = rhs.quality {
-        if rhsSize.count == 2  && lhsSize.count > 2 // 3D
-        {
-            return true
-        } else if rhsSize.count == 5 && lhsSize.count < 5 && lhsSize.count > 2 // 1080p
-        {
-            return true
-        } else if rhsSize.count == 4 && lhsSize.count == 4 // 720p and 480p
-        {
-            return lhsSize < rhsSize
-        }
-    }
-    return false
+public func > (lhs: Torrent, rhs: Torrent) -> Bool {
+    return rhs < lhs
 }
 
 public func == (lhs: Torrent, rhs: Torrent) -> Bool {
