@@ -292,7 +292,20 @@ class PCTPlayerViewController: UIViewController, VLCMediaPlayerDelegate, UIGestu
         mediaplayer.delegate = self
         mediaplayer.drawable = movieView
         mediaplayer.media = VLCMedia(url: url)
-        
+
+        // Tune VLC for max-quality playback on Apple TV 4K. Larger cache windows
+        // hide network jitter on 1080p/2160p streams that PopcornTorrent serves
+        // over HTTP localhost while still downloading. Disable VLC's framedrop
+        // on slow seeks so high-bitrate sources keep their picture quality.
+        let mediaOptions: [String: Any] = [
+            "network-caching": NSNumber(value: 5000),
+            "file-caching":    NSNumber(value: 5000),
+            "live-caching":    NSNumber(value: 5000),
+            "drop-late-frames": NSNumber(value: 0),
+            "skip-frames":      NSNumber(value: 0),
+        ]
+        mediaplayer.media?.addOptions(mediaOptions)
+
         NotificationCenter.default.addObserver(self, selector: #selector(torrentStatusDidChange(_:)), name: .PTTorrentStatusDidChange, object: streamer)
         
         let settings = SubtitleSettings.shared
