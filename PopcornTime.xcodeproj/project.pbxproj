@@ -557,7 +557,7 @@
 				4D990E281DC4F00F005CDE34 /* PopcornTimetvOS-Bridging-Header.h */,
 			);
 			name = "Supporting Files";
-			path = "Supporting FIles";
+			path = "Supporting Files";
 			sourceTree = "<group>";
 		};
 		28EB626A1CA3362B00985F78 /* Extensions */ = {
