@@ -72,6 +72,31 @@ public final class YTSEZTVProvider: MediaProvider {
     private var showCache: [String: Show] = [:]
     private let cacheQueue = DispatchQueue(label: "com.popcorntimetv.popcornkit.eztv.cache")
 
+    /// EZTV mirror chain. Like YTS, FAIs blacklist `eztvx.to` directly so we
+    /// walk through alternates that resolve through Cloudflare-fronted IPs.
+    public static var eztvMirrors: [String] = [
+        "https://eztvx.to",
+        "https://eztv.wf",
+        "https://eztv.tf",
+        "https://eztv.yt",
+        "https://eztv1.xyz",
+        "https://eztv.re",
+    ]
+    private static let stickyEztvKey = "popcornkit.eztv.lastGoodHost"
+    private var lastGoodEztv: String? {
+        get { UserDefaults.standard.string(forKey: YTSEZTVProvider.stickyEztvKey) }
+        set { UserDefaults.standard.set(newValue, forKey: YTSEZTVProvider.stickyEztvKey) }
+    }
+    private var orderedEztvHosts: [String] {
+        guard let sticky = lastGoodEztv,
+              YTSEZTVProvider.eztvMirrors.contains(sticky)
+        else { return YTSEZTVProvider.eztvMirrors }
+        var rotated = YTSEZTVProvider.eztvMirrors
+        rotated.removeAll { $0 == sticky }
+        rotated.insert(sticky, at: 0)
+        return rotated
+    }
+
     // MARK: - Movies
 
     public func loadMovies(page: Int,
@@ -231,31 +256,69 @@ public final class YTSEZTVProvider: MediaProvider {
                           order: NetworkManager.Orders,
                           completion: @escaping ([Show]?, NSError?) -> Void) {
 
-        let url = "https://eztvx.to/api/get-torrents"
         let params: [String: Any] = ["limit": 100, "page": max(page, 1)]
-        print("[EZTV] GET \(url) params=\(params)")
-
-        session.request(url, parameters: params).validate().responseData { [weak self] response in
+        attemptEztv(hosts: orderedEztvHosts, params: params) { [weak self] data, error in
             guard let self = self else { return }
-            let status = response.response?.statusCode ?? -1
-            switch response.result {
-            case .success(let data):
-                guard
-                    let json = try? JSONSerialization.jsonObject(with: data, options: .allowFragments),
-                    let root = json as? [String: Any],
-                    let raw  = root["torrents"] as? [[String: Any]]
-                else {
-                    print("[EZTV] JSON parse failed status=\(status)")
-                    DispatchQueue.main.async { completion([], nil) }
-                    return
+            guard let data = data else {
+                DispatchQueue.main.async { completion(nil, error) }
+                return
+            }
+            guard
+                let json = try? JSONSerialization.jsonObject(with: data, options: .allowFragments),
+                let root = json as? [String: Any],
+                let raw  = root["torrents"] as? [[String: Any]]
+            else {
+                print("[EZTV] JSON parse failed")
+                DispatchQueue.main.async { completion([], nil) }
+                return
+            }
+            print("[EZTV] got \(raw.count) torrents")
+            self.buildShows(from: raw, completion: completion)
+        }
+    }
+
+    private func attemptEztv(hosts: [String],
+                             params: [String: Any],
+                             completion: @escaping (Data?, NSError?) -> Void) {
+        var remaining = hosts
+        var lastError: NSError?
+        func tryNext() {
+            guard let host = remaining.first else {
+                print("[EZTV] all mirrors exhausted")
+                completion(nil, lastError)
+                return
+            }
+            remaining.removeFirst()
+            let url = host + "/api/get-torrents"
+            print("[EZTV] GET \(url) params=\(params)")
+            session.request(url, parameters: params).validate().responseData { [weak self] response in
+                let status = response.response?.statusCode ?? -1
+                switch response.result {
+                case .success(let data):
+                    print("[EZTV] \(host) status=\(status) bytes=\(data.count)")
+                    self?.lastGoodEztv = host
+                    completion(data, nil)
+                case .failure(let err):
+                    let nserr = err.underlyingError as NSError? ?? (err as NSError)
+                    let code  = nserr.code
+                    print("[EZTV] \(host) FAILED status=\(status) code=\(code) err=\(nserr.localizedDescription)")
+                    lastError = nserr
+                    let recoverable = code == NSURLErrorCannotFindHost
+                                   || code == NSURLErrorCannotConnectToHost
+                                   || code == NSURLErrorNetworkConnectionLost
+                                   || code == NSURLErrorTimedOut
+                                   || code == NSURLErrorDNSLookupFailed
+                                   || code == NSURLErrorNotConnectedToInternet
+                                   || (status >= 400)
+                    if recoverable {
+                        tryNext()
+                    } else {
+                        completion(nil, nserr)
+                    }
                 }
-                print("[EZTV] got \(raw.count) torrents (status=\(status))")
-                self.buildShows(from: raw, completion: completion)
-            case .failure(let err):
-                print("[EZTV] FAILED status=\(status) err=\(err)")
-                DispatchQueue.main.async { completion(nil, err as NSError) }
             }
         }
+        tryNext()
     }
 
     public func getShowInfo(imdbId: String, completion: @escaping (Show?, NSError?) -> Void) {

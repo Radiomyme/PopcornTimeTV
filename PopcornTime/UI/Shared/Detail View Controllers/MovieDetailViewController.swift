@@ -4,13 +4,33 @@ import Foundation
 import PopcornKit
 
 class MovieDetailViewController: DetailViewController {
-    
+
     var movie: Movie {
         get {
            return currentItem as! Movie
         } set(new) {
             currentItem = new
         }
+    }
+
+    /// The detail storyboard is shared with shows: it embeds an Episodes
+    /// container that shows "0 EPISODES" + a "LABEL / Lorem ipsum / Download"
+    /// placeholder when no episodes are present (movie case). Collapse the
+    /// container's height to 0 on load so a movie page shows only Cast, Info,
+    /// Related — same behaviour as the legacy Popcorn UI.
+    override func viewDidLoad() {
+        super.viewDidLoad()
+        episodesContainerViewHeightConstraint.constant = 0
+        episodesContainerViewHeightConstraint.priority = .required
+    }
+
+    override func preferredContentSizeDidChange(forChildContentContainer container: UIContentContainer) {
+        // Ignore the embedded EpisodesCollectionViewController so it can
+        // never reopen the container we just collapsed.
+        if let vc = container as? UIViewController, vc === episodesCollectionViewController {
+            return
+        }
+        super.preferredContentSizeDidChange(forChildContentContainer: container)
     }
     
     override func loadMedia(id: String, completion: @escaping (Media?, NSError?) -> Void) {
