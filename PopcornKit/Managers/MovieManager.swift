@@ -51,6 +51,7 @@ open class MovieManager: NetworkManager {
         searchTerm: String?,
         orderBy order: Orders,
         completion: @escaping ([Movie]?, NSError?) -> Void) {
+        print("[MovieManager] load page=\(page) filter=\(filter) genre=\(genre) -> provider=\(type(of: MediaProviders.shared))")
         MediaProviders.shared.loadMovies(
             page: page,
             filter: filter,

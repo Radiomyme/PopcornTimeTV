@@ -39,19 +39,23 @@ class MoviesViewController: MediaViewController {
     }
     
     override func load(page: Int) {
-        guard !collectionViewController.isLoading else { return }
+        print("[Movies] load(page: \(page)) filter=\(currentFilter) genre=\(currentGenre)")
+        guard !collectionViewController.isLoading else {
+            print("[Movies] skip: already loading")
+            return
+        }
         collectionViewController.isLoading = true
         collectionViewController.hasNextPage = false
         PopcornKit.loadMovies(page, filterBy: currentFilter, genre: currentGenre) { [unowned self] (movies, error) in
+            print("[Movies] callback movies=\(movies?.count ?? -1) error=\(error?.localizedDescription ?? "nil")")
             self.collectionViewController.isLoading = false
-            
+
             guard let movies = movies else { self.collectionViewController.error = error; self.collectionView?.reloadData(); return }
-            
+
             self.collectionViewController.dataSources[0] += movies as [AnyHashable]
             self.collectionViewController.dataSources[0].unique()
-            
-            if movies.isEmpty // If the array passed in is empty, there are no more results so the content inset of the collection view is reset.
-            {
+
+            if movies.isEmpty {
                 self.collectionView?.contentInset.bottom = self.tabBarController?.tabBar.frame.height ?? 0
             } else {
                 self.collectionViewController.hasNextPage = true

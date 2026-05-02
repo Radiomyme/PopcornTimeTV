@@ -2,7 +2,6 @@
 
 import Foundation
 import Alamofire
-import os
 
 /// Default `MediaProvider` impl that talks directly to:
 ///   - YTS  (yts.mx)         — movies + torrent listings
@@ -13,8 +12,6 @@ import os
 /// returns empty arrays; reintroduce by composing EZTV + TMDB queries
 /// in `loadShows` and `getShowInfo`. Tracking item: plan Phase 7.
 public final class YTSEZTVProvider: MediaProvider {
-
-    private let log = OSLog(subsystem: "com.popcorntimetv.popcornkit", category: "YTS")
 
     private let session: Session = {
         let configuration = URLSessionConfiguration.default
@@ -74,27 +71,25 @@ public final class YTSEZTVProvider: MediaProvider {
         }
 
         let url = YTS.base + YTS.listMovies
-        os_log("YTS GET %{public}s params=%{public}@", log: log, type: .info, url, "\(params)")
+        print("[YTS] GET \(url) params=\(params)")
 
-        session.request(url, parameters: params).validate().responseData { [log] response in
+        session.request(url, parameters: params).validate().responseData { response in
             let status = response.response?.statusCode ?? -1
             switch response.result {
             case .success(let data):
-                let preview = String(data: data.prefix(200), encoding: .utf8) ?? "<binary>"
-                os_log("YTS list_movies status=%d bytes=%d preview=%{public}s",
-                       log: log, type: .info, status, data.count, preview)
+                let preview = String(data: data.prefix(300), encoding: .utf8) ?? "<binary>"
+                print("[YTS] list_movies status=\(status) bytes=\(data.count) preview=\(preview)")
                 guard
-                    let json    = try? JSONSerialization.jsonObject(with: data, options: .allowFragments),
-                    let root    = json as? [String: Any]
+                    let json = try? JSONSerialization.jsonObject(with: data, options: .allowFragments),
+                    let root = json as? [String: Any]
                 else {
-                    os_log("YTS JSON not parseable", log: log, type: .error)
+                    print("[YTS] ERROR: JSON not parseable")
                     DispatchQueue.main.async { completion([], nil) }
                     return
                 }
                 if let apiStatus = root["status"] as? String, apiStatus != "ok" {
                     let msg = (root["status_message"] as? String) ?? "YTS error"
-                    os_log("YTS api status=%{public}s message=%{public}s",
-                           log: log, type: .error, apiStatus, msg)
+                    print("[YTS] ERROR: api status=\(apiStatus) message=\(msg)")
                     DispatchQueue.main.async {
                         completion([], NSError(domain: "yts", code: -1,
                                                userInfo: [NSLocalizedDescriptionKey: msg]))
@@ -105,18 +100,16 @@ public final class YTSEZTVProvider: MediaProvider {
                     let payload = root["data"] as? [String: Any],
                     let raw     = payload["movies"] as? [[String: Any]]
                 else {
-                    os_log("YTS payload missing data.movies (movie_count=%@)",
-                           log: log, type: .info,
-                           "\((root["data"] as? [String: Any])?["movie_count"] ?? "nil")")
+                    let count = (root["data"] as? [String: Any])?["movie_count"] ?? "nil"
+                    print("[YTS] payload missing data.movies (movie_count=\(count))")
                     DispatchQueue.main.async { completion([], nil) }
                     return
                 }
                 let movies = raw.compactMap(Movie.init(yts:))
-                os_log("YTS parsed %d/%d movies", log: log, type: .info, movies.count, raw.count)
+                print("[YTS] parsed \(movies.count)/\(raw.count) movies")
                 DispatchQueue.main.async { completion(movies, nil) }
             case .failure(let err):
-                os_log("YTS request failed: status=%d err=%{public}s",
-                       log: log, type: .error, status, "\(err)")
+                print("[YTS] ERROR request failed: status=\(status) err=\(err)")
                 DispatchQueue.main.async { completion(nil, err as NSError) }
             }
         }
@@ -129,14 +122,13 @@ public final class YTSEZTVProvider: MediaProvider {
             "with_cast":   true,
         ]
         let url = YTS.base + YTS.movieInfo
-        os_log("YTS GET %{public}s imdb=%{public}s", log: log, type: .info, url, imdbId)
+        print("[YTS] GET \(url) imdb=\(imdbId)")
 
-        session.request(url, parameters: params).validate().responseData { [log] response in
+        session.request(url, parameters: params).validate().responseData { response in
             let status = response.response?.statusCode ?? -1
             switch response.result {
             case .success(let data):
-                os_log("YTS movie_details status=%d bytes=%d",
-                       log: log, type: .info, status, data.count)
+                print("[YTS] movie_details status=\(status) bytes=\(data.count)")
                 guard
                     let json    = try? JSONSerialization.jsonObject(with: data, options: .allowFragments),
                     let root    = json as? [String: Any],
@@ -148,8 +140,7 @@ public final class YTSEZTVProvider: MediaProvider {
                 }
                 DispatchQueue.main.async { completion(Movie(yts: movie), nil) }
             case .failure(let err):
-                os_log("YTS movie_details failed status=%d err=%{public}s",
-                       log: log, type: .error, status, "\(err)")
+                print("[YTS] ERROR movie_details failed status=\(status) err=\(err)")
                 DispatchQueue.main.async { completion(nil, err as NSError) }
             }
         }
