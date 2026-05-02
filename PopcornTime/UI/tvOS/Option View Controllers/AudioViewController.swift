@@ -2,7 +2,7 @@
 
 import Foundation
 import PopcornKit
-import AVFoundation.AVFAudio.AVAudioSession
+import AVFoundation
 
 enum EqualizerProfiles: UInt32 {
     case fullDynamicRange = 0
@@ -34,10 +34,10 @@ class AudioViewController: OptionsStackViewController, UITableViewDataSource {
         super.viewDidLoad()
         
         NotificationCenter.default.addObserver(self, selector: #selector(pickableRoutesDidChange), name: .AVSpeakerManagerPickableRoutesDidChange, object: nil)
-        NotificationCenter.default.addObserver(self, selector: #selector(pickableRoutesDidChange), name: .AVAudioSessionRouteChange, object: nil)
+        NotificationCenter.default.addObserver(self, selector: #selector(pickableRoutesDidChange), name: AVAudioSession.routeChangeNotification, object: nil)
     }
-    
-    func pickableRoutesDidChange() {
+
+    @objc func pickableRoutesDidChange() {
         thirdTableView?.reloadData()
     }
     

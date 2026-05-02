@@ -4,20 +4,21 @@ import Foundation
 import MarqueeLabel
 
 extension MarqueeLabel: Object {
-    
-    static func awake() {
+
+    public static func awake() {
         DispatchQueue.once {
-            let originalMethod = class_getInstanceMethod(self, #selector(awakeFromNib))
-            let swizzledMethod = class_getInstanceMethod(self, #selector(pctAwakeFromNib))
+            guard let originalMethod = class_getInstanceMethod(self, #selector(awakeFromNib)),
+                  let swizzledMethod = class_getInstanceMethod(self, #selector(pctAwakeFromNib)) else { return }
             method_exchangeImplementations(originalMethod, swizzledMethod)
         }
     }
-    
-    func pctAwakeFromNib() {
+
+    @objc func pctAwakeFromNib() {
         self.pctAwakeFromNib()
-        
-        if let iVar = class_getInstanceVariable(type(of: self), NSString(string: "sublabel").utf8String),
-            let label = object_getIvar(self, iVar) as? UILabel {
+
+        if let cString = NSString(string: "sublabel").utf8String,
+           let iVar = class_getInstanceVariable(Swift.type(of: self), cString),
+           let label = object_getIvar(self, iVar) as? UILabel {
             label.contentMode = contentMode
         }
     }

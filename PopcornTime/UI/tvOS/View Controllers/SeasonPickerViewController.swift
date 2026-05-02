@@ -4,7 +4,7 @@ import Foundation
 import struct PopcornKit.Show
 import class PopcornKit.TMDBManager
 
-protocol SeasonPickerViewControllerDelegate: class {
+protocol SeasonPickerViewControllerDelegate: AnyObject {
     func change(to season: Int)
 }
 
@@ -27,7 +27,7 @@ class SeasonPickerViewController: UIViewController, UICollectionViewDelegate, UI
         
         showLabel.text = show.title
         
-        seasons = show.seasonNumbers.flatMap({($0, nil)})
+        seasons = show.seasonNumbers.compactMap({($0, nil)})
         
         let group = DispatchGroup()
         
@@ -63,7 +63,7 @@ class SeasonPickerViewController: UIViewController, UICollectionViewDelegate, UI
     }
     
     func indexPathForPreferredFocusedView(in collectionView: UICollectionView) -> IndexPath? {
-        if let item = seasons.index(where: {$0.number == currentSeason}) {
+        if let item = seasons.firstIndex(where: {$0.number == currentSeason}) {
             return IndexPath(item: item, section: 0)
         }
         return nil
@@ -85,7 +85,7 @@ class SeasonPickerViewController: UIViewController, UICollectionViewDelegate, UI
         cell.titleLabel.text = "Season".localized + " \(season.number)"
         
         if let image = season.image, let url = URL(string: image) {
-            cell.imageView.af_setImage(withURL: url)
+            cell.imageView.af.setImage(withURL: url)
         } else {
             cell.imageView.image = UIImage(named: "Episode Placeholder")
         }

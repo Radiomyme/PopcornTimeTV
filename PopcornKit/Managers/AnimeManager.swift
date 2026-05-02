@@ -7,7 +7,7 @@ open class AnimeManager: NetworkManager {
     /*
     
     /// Creates new instance of AnimeManager class
-    open static let shared = AnimeManager()
+    public static let shared = AnimeManager()
     
     /// Possible genres used in API call.
     public enum Genres: String {

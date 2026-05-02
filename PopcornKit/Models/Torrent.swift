@@ -134,13 +134,13 @@ public struct Torrent: Mappable, Equatable, Comparable {
 
 public func >(lhs: Torrent, rhs: Torrent) -> Bool {
     if let lhsSize = lhs.quality, let rhsSize = rhs.quality {
-        if lhsSize.characters.count == 2  && rhsSize.characters.count > 2 // 3D
+        if lhsSize.count == 2  && rhsSize.count > 2 // 3D
         {
             return true
-        } else if lhsSize.characters.count == 5 && rhsSize.characters.count < 5 && rhsSize.characters.count > 2 // 1080p
+        } else if lhsSize.count == 5 && rhsSize.count < 5 && rhsSize.count > 2 // 1080p
         {
             return true
-        } else if lhsSize.characters.count == 4 && rhsSize.characters.count == 4 // 720p and 480p
+        } else if lhsSize.count == 4 && rhsSize.count == 4 // 720p and 480p
         {
             return lhsSize > rhsSize
         }
@@ -150,13 +150,13 @@ public func >(lhs: Torrent, rhs: Torrent) -> Bool {
 
 public func <(lhs: Torrent, rhs: Torrent) -> Bool {
     if let lhsSize = lhs.quality, let rhsSize = rhs.quality {
-        if rhsSize.characters.count == 2  && lhsSize.characters.count > 2 // 3D
+        if rhsSize.count == 2  && lhsSize.count > 2 // 3D
         {
             return true
-        } else if rhsSize.characters.count == 5 && lhsSize.characters.count < 5 && lhsSize.characters.count > 2 // 1080p
+        } else if rhsSize.count == 5 && lhsSize.count < 5 && lhsSize.count > 2 // 1080p
         {
             return true
-        } else if rhsSize.characters.count == 4 && lhsSize.characters.count == 4 // 720p and 480p
+        } else if rhsSize.count == 4 && lhsSize.count == 4 // 720p and 480p
         {
             return lhsSize < rhsSize
         }

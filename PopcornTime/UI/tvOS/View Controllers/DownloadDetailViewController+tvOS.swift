@@ -36,7 +36,7 @@ extension DownloadDetailViewController: UITableViewDataSource, UITableViewDelega
         super.viewDidLoad()
         
         if let image = show.largeBackgroundImage, let url = URL(string: image) {
-           backgroundImageView.af_setImage(withURL: url, placeholderImage: UIImage(named: "Episode Placeholder"))
+           backgroundImageView.af.setImage(withURL: url, placeholderImage: UIImage(named: "Episode Placeholder"))
         }
         
         titleLabel.text = show.title
@@ -129,7 +129,7 @@ extension DownloadDetailViewController: UITableViewDataSource, UITableViewDelega
     
     func tableView(_ tableView: UITableView, didUpdateFocusIn context: UITableViewFocusUpdateContext, with coordinator: UIFocusAnimationCoordinator) {
         
-        tableView.visibleCells.flatMap({$0 as? DownloadDetailTableViewCell}).forEach {
+        tableView.visibleCells.compactMap({$0 as? DownloadDetailTableViewCell}).forEach {
             $0.invalidateAppearance()
         }
         
@@ -148,7 +148,7 @@ extension DownloadDetailViewController: UITableViewDataSource, UITableViewDelega
                 return
             }
             
-            self.episodeImageView.af_setImage(withURL: url, placeholderImage: UIImage(named: "Episode Placeholder"))
+            self.episodeImageView.af.setImage(withURL: url, placeholderImage: UIImage(named: "Episode Placeholder"))
         }
         
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.5, execute: workItem)

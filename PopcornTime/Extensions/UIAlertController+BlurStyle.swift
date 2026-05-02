@@ -9,9 +9,9 @@ extension UIAlertController {
     }
     
     
-    public var blurStyle: UIBlurEffectStyle {
+    public var blurStyle: UIBlurEffect.Style {
         get {
-            return objc_getAssociatedObject(self, &AssociatedKeys.blurStyleKey) as? UIBlurEffectStyle ?? .extraLight
+            return objc_getAssociatedObject(self, &AssociatedKeys.blurStyleKey) as? UIBlurEffect.Style ?? .extraLight
         } set (style) {
             objc_setAssociatedObject(self, &AssociatedKeys.blurStyleKey, style, .OBJC_ASSOCIATION_RETAIN_NONATOMIC)
             
@@ -27,10 +27,10 @@ extension UIAlertController {
     private var visualEffectView: UIVisualEffectView? {
         if let presentationController = presentationController, presentationController.responds(to: Selector(("popoverView"))), let view = presentationController.value(forKey: "popoverView") as? UIView // We're on an iPad and visual effect view is in a different place.
         {
-            return view.recursiveSubviews.flatMap({$0 as? UIVisualEffectView}).first
+            return view.recursiveSubviews.compactMap({$0 as? UIVisualEffectView}).first
         }
         
-        return view.recursiveSubviews.flatMap({$0 as? UIVisualEffectView}).first
+        return view.recursiveSubviews.compactMap({$0 as? UIVisualEffectView}).first
     }
     
     private var cancelBackgroundView: UIView? {
@@ -45,7 +45,7 @@ extension UIAlertController {
         return cancelBackgroundView?.value(forKey: "highlightView") as? UIView
     }
     
-    public convenience init(title: String?, message: String?, preferredStyle: UIAlertControllerStyle, blurStyle: UIBlurEffectStyle) {
+    public convenience init(title: String?, message: String?, preferredStyle: UIAlertController.Style, blurStyle: UIBlurEffect.Style) {
         self.init(title: title, message: message, preferredStyle: preferredStyle)
         self.blurStyle = blurStyle
     }

@@ -79,11 +79,11 @@ class DetailViewController: UIViewController, CollectionViewControllerDelegate, 
     var currentItem: Media!
     var currentSeason = -1
     
-    var isDark = true {
+    @objc var isDark = true {
         didSet {
             guard isDark != oldValue && UIDevice.current.userInterfaceIdiom == .tv else { return }
             
-            childViewControllers.forEach {
+            children.forEach {
                 guard $0.responds(to: #selector(getter: DetailViewController.isDark)) else { return }                
                 $0.setValue(isDark, forKey: "isDark")
             }
@@ -127,33 +127,25 @@ class DetailViewController: UIViewController, CollectionViewControllerDelegate, 
         titleLabel?.text = currentItem.title
         
         if let image = currentItem.largeBackgroundImage, let url = URL(string: image) {
-            backgroundImageView.af_setImage(withURL: url) { [weak self] response in
-                guard
-                    let image = response.result.value,
-                    let `self` = self,
-                    response.result.isSuccess
-                    else {
-                        return
-                }
+            backgroundImageView.af.setImage(withURL: url, completion: { [weak self] response in
+                guard case .success(let image) = response.result, let self = self else { return }
                 self.isDark = image.isDark
-            }
+            })
         }
-        
+
         let completion: (String?, NSError?) -> Void = { [weak self] (image, error) in
-            guard let image = image, let url = URL(string: image), let `self` = self else { return }
+            guard let image = image, let url = URL(string: image), let self = self else { return }
             let imageView = UIImageView(frame: CGRect(origin: .zero, size: CGSize(width: .max, height: 40)))
             imageView.clipsToBounds = true
             imageView.contentMode = .scaleAspectFit
-            imageView.af_setImage(withURL: url) { response in
-                guard response.result.isSuccess else { return }
-#if os(tvOS)
-                    self.titleImageView?.image = response.result.value
-                    self.titleLabel?.isHidden = true
-                    
-                    self.episodesCollectionViewController.titleImageView.image = response.result.value
-                    self.episodesCollectionViewController.titleLabel.isHidden = true
-#endif
-            }
+            imageView.af.setImage(withURL: url, completion: { response in
+                guard case .success(let img) = response.result else { return }
+                self.titleImageView?.image = img
+                self.titleLabel?.isHidden = true
+
+                self.episodesCollectionViewController.titleImageView.image = img
+                self.episodesCollectionViewController.titleLabel.isHidden = true
+            })
         }
         
         if let movie = currentItem as? Movie {

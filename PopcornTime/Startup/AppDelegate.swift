@@ -29,7 +29,7 @@ class AppDelegate: UIResponder, UIApplicationDelegate, UITabBarControllerDelegat
 
     var window: UIWindow?
 
-    var reachability: Reachability = .forInternetConnection()
+    var reachability: Reachability = (try? Reachability()) ?? (try! Reachability(hostname: "www.apple.com"))
 
     var tabBarController: UITabBarController {
         return window?.rootViewController as! UITabBarController
@@ -38,20 +38,20 @@ class AppDelegate: UIResponder, UIApplicationDelegate, UITabBarControllerDelegat
     var activeRootViewController: MainViewController? {
         guard
             let navigationController = tabBarController.selectedViewController as? UINavigationController,
-            let main = navigationController.viewControllers.flatMap({$0 as? MainViewController}).first
+            let main = navigationController.viewControllers.compactMap({$0 as? MainViewController}).first
             else {
                 return nil
         }
         return main
     }
 
-    func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [UIApplicationLaunchOptionsKey: Any]?) -> Bool {
+    func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?) -> Bool {
         if let url = launchOptions?[.url] as? URL {
             return self.application(.shared, open: url)
         }
 
-        let font = UIFont.systemFont(ofSize: 38, weight: UIFontWeightHeavy)
-        UITabBarItem.appearance().setTitleTextAttributes([NSFontAttributeName: font], for: .normal)
+        let font = UIFont.systemFont(ofSize: 38, weight: UIFont.Weight.heavy)
+        UITabBarItem.appearance().setTitleTextAttributes([NSAttributedString.Key.font: font], for: .normal)
 
         if !UserDefaults.standard.bool(forKey: "tosAccepted") {
             let vc = UIStoryboard.main.instantiateViewController(withIdentifier: "TermsOfServiceNavigationController")
@@ -65,7 +65,7 @@ class AppDelegate: UIResponder, UIApplicationDelegate, UITabBarControllerDelegat
             }
         }
 
-        reachability.startNotifier()
+        try? reachability.startNotifier()
         window?.tintColor = .app
 
         TraktManager.shared.syncUserData()
@@ -75,7 +75,7 @@ class AppDelegate: UIResponder, UIApplicationDelegate, UITabBarControllerDelegat
     }
 
     func tabBarController(_ tabBarController: UITabBarController, shouldSelect viewController: UIViewController) -> Bool {
-        if tabBarController.selectedViewController == viewController, let scrollView = viewController.view.recursiveSubviews.flatMap({$0 as? UIScrollView}).first {
+        if tabBarController.selectedViewController == viewController, let scrollView = viewController.view.recursiveSubviews.compactMap({$0 as? UIScrollView}).first {
             let offset = CGPoint(x: 0, y: -scrollView.contentInset.top)
             scrollView.setContentOffset(offset, animated: true)
         }
@@ -83,7 +83,7 @@ class AppDelegate: UIResponder, UIApplicationDelegate, UITabBarControllerDelegat
     }
 
 
-    func application(_ app: UIApplication, open url: URL, options: [UIApplicationOpenURLOptionsKey : Any] = [:]) -> Bool {
+    func application(_ app: UIApplication, open url: URL, options: [UIApplication.OpenURLOptionsKey : Any] = [:]) -> Bool {
         if url.scheme == "PopcornTime" {
             guard
                 let actions = url.absoluteString.removingPercentEncoding?.components(separatedBy: "PopcornTime:?action=").last?.components(separatedBy: "»"),
@@ -128,10 +128,10 @@ class AppDelegate: UIResponder, UIApplicationDelegate, UITabBarControllerDelegat
 
     func awakeObjects() {
         let typeCount = Int(objc_getClassList(nil, 0))
-        let types = UnsafeMutablePointer<AnyClass?>.allocate(capacity: typeCount)
-        let autoreleasingTypes = AutoreleasingUnsafeMutablePointer<AnyClass?>(types)
+        let types = UnsafeMutablePointer<AnyClass>.allocate(capacity: typeCount)
+        let autoreleasingTypes = AutoreleasingUnsafeMutablePointer<AnyClass>(types)
         objc_getClassList(autoreleasingTypes, Int32(typeCount))
         for index in 0 ..< typeCount { (types[index] as? Object.Type)?.awake() }
-        types.deallocate(capacity: typeCount)
+        types.deallocate()
     }
 }

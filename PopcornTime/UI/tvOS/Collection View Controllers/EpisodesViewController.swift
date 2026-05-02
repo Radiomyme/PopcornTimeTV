@@ -104,7 +104,7 @@ class EpisodesViewController: UIViewController, UICollectionViewDataSource, UICo
         present(viewController, animated: true)
     }
     
-    func stopDownload(_ sender: DownloadButton) {
+    @objc func stopDownload(_ sender: DownloadButton) {
         guard let media = dataSource[safe: focusIndexPath.row],
             let download = media.associatedDownload else { return }
         AppDelegate.shared.downloadButton(sender, wantsToStop: download)
@@ -125,7 +125,7 @@ class EpisodesViewController: UIViewController, UICollectionViewDataSource, UICo
     
     // MARK: - PTTorrentDownloadManagerListener
     
-    func torrentStatusDidChange(_ torrentStatus: PTTorrentStatus, for download: PTTorrentDownload) {
+    @objc func torrentStatusDidChange(_ torrentStatus: PTTorrentStatus, for download: PTTorrentDownload) {
         guard let media = dataSource[safe: focusIndexPath.row],
             download == media.associatedDownload else { return }
         downloadButton.progress = torrentStatus.totalProgress
@@ -190,7 +190,7 @@ class EpisodesViewController: UIViewController, UICollectionViewDataSource, UICo
         cell.isDark = isDark
         
         if let image = episode.smallBackgroundImage, let url = URL(string: image) {
-            cell.imageView.af_setImage(withURL: url, placeholderImage: UIImage(named: "Episode Placeholder"), imageTransition: .crossDissolve(.default))
+            cell.imageView.af.setImage(withURL: url, placeholderImage: UIImage(named: "Episode Placeholder"), imageTransition: .crossDissolve(.default))
         } else {
             cell.imageView.image = UIImage(named: "Episode Placeholder")
         }
@@ -218,8 +218,8 @@ class EpisodesViewController: UIViewController, UICollectionViewDataSource, UICo
         
         var shouldUpdateView = false
         summaryFocusGuide.preferredFocusEnvironments = [downloadButton, episodeSummaryTextView]
-        topFocusGuide.preferredFocusEnvironments = itemViewController?.visibleButtons.flatMap({$0})
-        environmentsToFocus = [context.nextFocusedView].flatMap({$0})
+        topFocusGuide.preferredFocusEnvironments = itemViewController?.visibleButtons.compactMap({$0})
+        environmentsToFocus = [context.nextFocusedView].compactMap({$0})
         
         
         if let next = context.nextFocusedIndexPath {

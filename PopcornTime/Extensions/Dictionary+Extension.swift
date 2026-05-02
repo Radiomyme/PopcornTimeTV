@@ -4,7 +4,7 @@ import Foundation
 
 extension Dictionary where Value : Equatable {
     func allKeysForValue(_ val : Value) -> [Key] {
-        return self.filter { $1 == val }.map { $0.0 }
+        return self.filter { $0.value == val }.map { $0.key }
     }
 
     public init(_ seq: Zip2Sequence<[Key], [Value]>) {

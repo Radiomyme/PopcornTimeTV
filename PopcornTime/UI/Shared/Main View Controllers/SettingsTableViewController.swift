@@ -209,7 +209,7 @@ class SettingsTableViewController: UITableViewController, TraktManagerDelegate {
                 
                 alertController.addAction(UIAlertAction(title: "Cancel".localized, style: .cancel, handler: nil))
                 
-                for title in UIColor.systemColors.flatMap({$0.localizedString}) {
+                for title in UIColor.systemColors.compactMap({$0.localizedString}) {
                     alertController.addAction(UIAlertAction(title: title, style: .default, handler: handler))
                 }
                 
@@ -272,14 +272,14 @@ class SettingsTableViewController: UITableViewController, TraktManagerDelegate {
                 
                 for title in keys {
                     let action = UIAlertAction(title: title, style: .default) { _ in
-                        subtitleSettings.encoding = values[keys.index(of: title)!]
+                        subtitleSettings.encoding = values[keys.firstIndex(of: title)!]
                         subtitleSettings.save()
                         tableView.reloadData()
                     }
                     alertController.addAction(action)
                 }
                 
-                alertController.preferredAction = alertController.actions.first(where: { $0.title == keys[values.index(of: subtitleSettings.encoding)!] })
+                alertController.preferredAction = alertController.actions.first(where: { $0.title == keys[values.firstIndex(of: subtitleSettings.encoding)!] })
                 
                 alertController.popoverPresentationController?.sourceView = tableView.cellForRow(at: indexPath)
                 

@@ -110,13 +110,13 @@ public struct OpenSubtitles {
 }
 
 open class NetworkManager: NSObject {
-    internal let manager: SessionManager = {
-        var configuration = URLSessionConfiguration.default
+    internal let manager: Session = {
+        let configuration = URLSessionConfiguration.default
         configuration.httpCookieAcceptPolicy = .always
         configuration.httpShouldSetCookies = true
         configuration.urlCache = nil
         configuration.requestCachePolicy = .useProtocolCachePolicy
-        return Alamofire.SessionManager(configuration: configuration)
+        return Session(configuration: configuration)
     }()
     
     /// Possible orders used in API call.

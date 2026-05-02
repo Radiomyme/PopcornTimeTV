@@ -78,7 +78,7 @@ class DescriptionCollectionViewController: ResponsiveCollectionViewController, U
         let maxWidth   = collectionView.bounds.width
         let targetSize = CGSize(width: maxWidth, height: 0)
         
-        return sizingCell?.contentView.systemLayoutSizeFitting(targetSize, withHorizontalFittingPriority: UILayoutPriorityRequired, verticalFittingPriority: UILayoutPriorityFittingSizeLevel) ?? .zero
+        return sizingCell?.contentView.systemLayoutSizeFitting(targetSize, withHorizontalFittingPriority: UILayoutPriority.required, verticalFittingPriority: UILayoutPriority.fittingSizeLevel) ?? .zero
     }
     
     override func collectionView(_ collectionView: UICollectionView, numberOfItemsInSection section: Int) -> Int {
@@ -94,7 +94,7 @@ class DescriptionCollectionViewController: ResponsiveCollectionViewController, U
     }
     
     override func collectionView(_ collectionView: UICollectionView, viewForSupplementaryElementOfKind kind: String, at indexPath: IndexPath) -> UICollectionReusableView {
-        if kind == UICollectionElementKindSectionHeader, let title = headerTitle {
+        if kind == UICollectionView.elementKindSectionHeader, let title = headerTitle {
             let view = collectionView.dequeueReusableSupplementaryView(ofKind: kind, withReuseIdentifier: "header", for: indexPath)
             
             let titleLabel = view.viewWithTag(1) as? UILabel

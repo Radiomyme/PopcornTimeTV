@@ -4,24 +4,20 @@ import Foundation
 import UIKit.NSAttributedString
 
 extension String {
-    
-    var localized: String {
-        return Bundle.main.localizedString(forKey: self, value: self, table: nil)
-    }
-    
+
     mutating func localize() {
         self = localized
     }
-    
+
     func slice(from start: String, to: String) -> String? {
         return (range(of: start)?.upperBound).flatMap { sInd in
             let eInd = range(of: to, range: sInd..<endIndex)
             if eInd != nil {
                 return (eInd?.lowerBound).map { eInd in
-                    return substring(with: sInd..<eInd)
+                    return String(self[sInd..<eInd])
                 }
             }
-            return substring(with: sInd..<endIndex)
+            return String(self[sInd..<endIndex])
         }
     }
     
@@ -42,7 +38,7 @@ extension String {
     static func random(of length: Int) -> String {
         let alphabet = "-_1234567890abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
         return String((0..<length).map { _ -> Character in
-            return alphabet[alphabet.characters.index(alphabet.startIndex, offsetBy: Int(arc4random_uniform(UInt32(alphabet.characters.count))))]
+            return alphabet[alphabet.index(alphabet.startIndex, offsetBy: Int(arc4random_uniform(UInt32(alphabet.count))))]
         })
     }
     

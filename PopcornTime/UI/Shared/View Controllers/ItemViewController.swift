@@ -60,7 +60,7 @@ class ItemViewController: UIViewController, PTTorrentDownloadManagerListener {
                 guard oldValue != isDark else { return }
     
                 summaryTextView.isDark = isDark
-                view.recursiveSubviews.flatMap({$0 as? TVButton}).forEach {
+                view.recursiveSubviews.compactMap({$0 as? TVButton}).forEach {
                     $0.isDark = self.isDark
                 }
                 let colorPallete: ColorPallete = isDark ? .light : .dark
@@ -95,7 +95,7 @@ class ItemViewController: UIViewController, PTTorrentDownloadManagerListener {
             media = movie
         } else {
             let show = self.media as! Show
-            let episode = show.latestUnwatchedEpisode() ?? show.episodes.filter({$0.season == show.seasonNumbers.first}).sorted(by: {$0.0.episode < $0.1.episode}).first
+            let episode = show.latestUnwatchedEpisode() ?? show.episodes.filter({$0.season == show.seasonNumbers.first}).sorted(by: { $0.episode < $1.episode }).first
             media = episode ?? show
             
         }
@@ -123,7 +123,7 @@ class ItemViewController: UIViewController, PTTorrentDownloadManagerListener {
             var videoUrl: URL?
             
             for quality in preferredVideoQualities {
-                if let index = qualities.index(of: quality) {
+                if let index = qualities.firstIndex(of: quality) {
                     videoUrl = Array(streamUrls.values)[index]
                     break
                 }
@@ -145,15 +145,15 @@ class ItemViewController: UIViewController, PTTorrentDownloadManagerListener {
             
 #if os(tvOS)
             
-                let title = AVMetadataItem(key: AVMetadataCommonKeyTitle as NSString, value: self.media.title as NSString)
-                let summary = AVMetadataItem(key: AVMetadataCommonKeyDescription as NSString, value: self.media.summary as NSString)
+                let title = AVMetadataItem.make(key:AVMetadataKey.commonKeyTitle.rawValue as NSString, value: self.media.title as NSString)
+                let summary = AVMetadataItem.make(key:AVMetadataKey.commonKeyDescription.rawValue as NSString, value: self.media.summary as NSString)
                 
                 player.currentItem?.externalMetadata = [title, summary]
                 
                 if let string = self.media.mediumCoverImage,
                     let url = URL(string: string),
                     let data = try? Data(contentsOf: url) {
-                    let image = AVMetadataItem(key: AVMetadataCommonKeyArtwork as NSString, value: data as NSData)
+                    let image = AVMetadataItem.make(key:AVMetadataKey.commonKeyArtwork.rawValue as NSString, value: data as NSData)
                     player.currentItem?.externalMetadata.append(image)
                 }
                 
@@ -167,12 +167,12 @@ class ItemViewController: UIViewController, PTTorrentDownloadManagerListener {
         }
     }
     
-    func playerDidFinishPlaying() {
+    @objc func playerDidFinishPlaying() {
         NotificationCenter.default.removeObserver(self, name: .AVPlayerItemDidPlayToEndTime, object: nil)
         dismiss(animated: true)
     }
     
-    func stopDownload(_ sender: DownloadButton) {
+    @objc func stopDownload(_ sender: DownloadButton) {
         guard let download = media.associatedDownload else { return }
         AppDelegate.shared.downloadButton(sender, wantsToStop: download)
     }
@@ -191,7 +191,7 @@ class ItemViewController: UIViewController, PTTorrentDownloadManagerListener {
     
     // MARK: - PTTorrentDownloadManagerListener
     
-    func torrentStatusDidChange(_ torrentStatus: PTTorrentStatus, for download: PTTorrentDownload) {
+    @objc func torrentStatusDidChange(_ torrentStatus: PTTorrentStatus, for download: PTTorrentDownload) {
         guard download == media.associatedDownload else { return }
         downloadButton.progress = torrentStatus.totalProgress
     }

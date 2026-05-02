@@ -5,7 +5,7 @@ import ObjectMapper
 open class MovieManager: NetworkManager {
     
     /// Creates new instance of MovieManager class
-    open static let shared = MovieManager()
+    public static let shared = MovieManager()
     
     /// Possible filters used in API call.
     public enum Filters: String {
@@ -55,9 +55,9 @@ open class MovieManager: NetworkManager {
         if let searchTerm = searchTerm , !searchTerm.isEmpty {
             params["keywords"] = searchTerm
         }
-        self.manager.request(Popcorn.base + Popcorn.movies + "/\(page)", parameters: params).validate().responseJSON { response in
-            guard let value = response.result.value else {
-                completion(nil, response.result.error as NSError?)
+        self.manager.request(Popcorn.base + Popcorn.movies + "/\(page)", parameters: params).validate().responseData { response in
+            guard case .success(let __data) = response.result, let value = try? JSONSerialization.jsonObject(with: __data, options: .allowFragments) else {
+                completion(nil, response.error as NSError?)
                 return
             }
             completion(Mapper<Movie>().mapArray(JSONObject: value), nil)
@@ -72,8 +72,8 @@ open class MovieManager: NetworkManager {
      - Parameter completion:    Completion handler for the request. Returns movie upon success, error upon failure.
      */
     open func getInfo(_ imdbId: String, completion: @escaping (Movie?, NSError?) -> Void) {
-        self.manager.request(Popcorn.base + Popcorn.movie + "/\(imdbId)").validate().responseJSON { response in
-            guard let value = response.result.value else {completion(nil, response.result.error as NSError?); return}
+        self.manager.request(Popcorn.base + Popcorn.movie + "/\(imdbId)").validate().responseData { response in
+            guard case .success(let __data) = response.result, let value = try? JSONSerialization.jsonObject(with: __data, options: .allowFragments) else {completion(nil, response.error as NSError?); return}
             completion(Mapper<Movie>().map(JSONObject: value), nil)
         }
     }

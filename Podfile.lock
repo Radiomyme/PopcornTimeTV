@@ -1,0 +1,64 @@
+PODS:
+  - Alamofire (5.11.2)
+  - AlamofireImage (4.4.0):
+    - Alamofire (~> 5.11)
+  - FloatRatingView (3.0.1)
+  - GCDWebServer (3.5.4):
+    - GCDWebServer/Core (= 3.5.4)
+  - GCDWebServer/Core (3.5.4)
+  - MarqueeLabel (4.5.3)
+  - MBCircularProgressBar (0.3.5)
+  - ObjectMapper (4.4.2)
+  - PopcornTorrent (1.3.15):
+    - GCDWebServer (~> 3.5.0)
+  - ReachabilitySwift (5.2.4)
+  - TvOSMoreButton (1.4.1)
+  - TVVLCKit (3.7.3)
+  - XCDYouTubeKit (2.15.2)
+
+DEPENDENCIES:
+  - Alamofire (~> 5.9)
+  - AlamofireImage (~> 4.3)
+  - FloatRatingView (= 3.0.1)
+  - MarqueeLabel (~> 4.5)
+  - MBCircularProgressBar (= 0.3.5-1)
+  - ObjectMapper (~> 4.4)
+  - PopcornTorrent (~> 1.3.15)
+  - ReachabilitySwift (~> 5.2)
+  - TvOSMoreButton (~> 1.4)
+  - TVVLCKit (~> 3.7)
+  - XCDYouTubeKit (~> 2.9)
+
+SPEC REPOS:
+  https://github.com/CocoaPods/Specs.git:
+    - Alamofire
+    - AlamofireImage
+    - GCDWebServer
+    - MarqueeLabel
+    - ObjectMapper
+    - ReachabilitySwift
+    - TvOSMoreButton
+    - TVVLCKit
+    - XCDYouTubeKit
+  https://github.com/PopcornTimeTV/Specs:
+    - FloatRatingView
+    - MBCircularProgressBar
+    - PopcornTorrent
+
+SPEC CHECKSUMS:
+  Alamofire: 400275dd1c6d87d95a041861d2a59da4b520a203
+  AlamofireImage: 19ec9c0991f52cc7f9ba6a9d4ec782e29bdf6210
+  FloatRatingView: 5b31eb72798ca3531df5243959f7cfe03d0b7ac9
+  GCDWebServer: 2c156a56c8226e2d5c0c3f208a3621ccffbe3ce4
+  MarqueeLabel: 0c57d4c6634e04a6d015af79f7c9a175b2309525
+  MBCircularProgressBar: 29e6df5e8683ff2375a291792a5988a16dd78c8e
+  ObjectMapper: e6e4d91ff7f2861df7aecc536c92d8363f4c9677
+  PopcornTorrent: 343ff0e04ba370764a9cf27c35685463f7428b90
+  ReachabilitySwift: 32793e867593cfc1177f5d16491e3a197d2fccda
+  TvOSMoreButton: 7aae43a537176f722a9656b9079568c927cf60d3
+  TVVLCKit: 57ab7bbd31178881ae5200ae5d93f8c7cd1385b9
+  XCDYouTubeKit: b120aced3d8638ffb570c5450cddb5a1dac448c7
+
+PODFILE CHECKSUM: 06aa19ac7a5cb23b149750d8653e3f187bd8b95c
+
+COCOAPODS: 1.16.2

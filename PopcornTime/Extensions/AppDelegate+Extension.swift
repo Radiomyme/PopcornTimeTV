@@ -26,8 +26,8 @@ extension AppDelegate: PCTPlayerViewControllerDelegate, UIViewControllerTransiti
             return
         }
         
-        let style: UIAlertControllerStyle = sender == nil ? .alert : .actionSheet
-        let blurStyle: UIBlurEffectStyle  = style == .alert ? .extraLight : .dark
+        let style: UIAlertController.Style = sender == nil ? .alert : .actionSheet
+        let blurStyle: UIBlurEffect.Style  = style == .alert ? .extraLight : .dark
         let alertController = UIAlertController(title: "Choose Quality".localized, message: nil, preferredStyle: style, blurStyle: blurStyle)
         
         for torrent in media.torrents {
@@ -44,7 +44,7 @@ extension AppDelegate: PCTPlayerViewControllerDelegate, UIViewControllerTransiti
     }
     
     func play(_ media: Media, torrent: Torrent) {
-        if UIDevice.current.hasCellularCapabilites && !reachability.isReachableViaWiFi() && !UserDefaults.standard.bool(forKey: "streamOnCellular")  {
+        if UIDevice.current.hasCellularCapabilites && reachability.connection != .wifi && !UserDefaults.standard.bool(forKey: "streamOnCellular")  {
             
             let alertController = UIAlertController(title: "Cellular Data is turned off for streaming".localized, message: nil, preferredStyle: .alert)
             alertController.addAction(UIAlertAction(title: "Turn On".localized, style: .default) { [unowned self] _ in
@@ -72,10 +72,10 @@ extension AppDelegate: PCTPlayerViewControllerDelegate, UIViewControllerTransiti
             var episodesLeftInShow = [Episode]()
             
             for season in show.seasonNumbers where season >= episode.season {
-                episodesLeftInShow += show.episodes.filter({$0.season == season}).sorted(by: {$0.0.episode < $0.1.episode})
+                episodesLeftInShow += show.episodes.filter({$0.season == season}).sorted(by: { $0.episode < $1.episode })
             }
             
-            if let index = episodesLeftInShow.index(of: episode) {
+            if let index = episodesLeftInShow.firstIndex(of: episode) {
                 episodesLeftInShow.removeFirst(index + 1)
             }
             
@@ -86,7 +86,7 @@ extension AppDelegate: PCTPlayerViewControllerDelegate, UIViewControllerTransiti
         }
         
         if let image = backgroundImage, let url = URL(string: image) {
-            loadingViewController.backgroundImageView?.af_setImage(withURL: url)
+            loadingViewController.backgroundImageView?.af.setImage(withURL: url)
         }
         loadingViewController.titleLabel.text = media.title
         

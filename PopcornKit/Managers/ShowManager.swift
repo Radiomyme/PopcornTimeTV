@@ -5,7 +5,7 @@ import ObjectMapper
 open class ShowManager: NetworkManager {
     
     /// Creates new instance of ShowManager class
-    open static let shared = ShowManager()
+    public static let shared = ShowManager()
     
     /// Possible filters used in API call.
     public enum Filters: String {
@@ -55,8 +55,8 @@ open class ShowManager: NetworkManager {
         if let searchTerm = searchTerm , !searchTerm.isEmpty {
             params["keywords"] = searchTerm
         }
-        self.manager.request(Popcorn.base + Popcorn.shows + "/\(page)", method: .get, parameters: params).validate().responseJSON { response in
-            guard let value = response.result.value else {completion(nil, response.result.error as NSError?); return}
+        self.manager.request(Popcorn.base + Popcorn.shows + "/\(page)", method: .get, parameters: params).validate().responseData { response in
+            guard case .success(let __data) = response.result, let value = try? JSONSerialization.jsonObject(with: __data, options: .allowFragments) else {completion(nil, response.error as NSError?); return}
             completion(Mapper<Show>().mapArray(JSONObject: value), nil)
         }
     }
@@ -69,8 +69,8 @@ open class ShowManager: NetworkManager {
      - Parameter completion:    Completion handler for the request. Returns show upon success, error upon failure.
      */
     open func getInfo(_ imdbId: String, completion: @escaping (Show?, NSError?) -> Void) {
-        self.manager.request(Popcorn.base + Popcorn.show + "/\(imdbId)", method: .get).validate().responseJSON { response in
-            guard let value = response.result.value else {completion(nil, response.result.error as NSError?); return}
+        self.manager.request(Popcorn.base + Popcorn.show + "/\(imdbId)", method: .get).validate().responseData { response in
+            guard case .success(let __data) = response.result, let value = try? JSONSerialization.jsonObject(with: __data, options: .allowFragments) else {completion(nil, response.error as NSError?); return}
             completion(Mapper<Show>().map(JSONObject: value), nil)
         }
     }

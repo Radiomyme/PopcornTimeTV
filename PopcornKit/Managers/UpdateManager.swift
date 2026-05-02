@@ -1,8 +1,8 @@
 
 
 import Foundation
+import UIKit
 import Alamofire
-import SwiftyJSON
 
 /**
  A manager class that automatically looks for new releases from github and presents them to the user.
@@ -77,38 +77,37 @@ public final class UpdateManager: NSObject {
     
     private func checkForUpdates(_ completion: ((_ success: Bool) -> Void)? = nil) {
         lastVersionCheckPerformedOnDate = Date()
-        Alamofire.request("https://api.github.com/repos/PopcornTimeTV/PopcornTimeTV/releases").validate().responseJSON { (response) in
-            guard let value = response.result.value else { completion?(false); return }
-            let responseObject = JSON(value)
-            let sortedReleases = responseObject.flatMap({VersionString($1["tag_name"].string!, $1["published_at"].string!)}).sorted(by: {$0.0 > $0.1})
+        AF.request("https://api.github.com/repos/PopcornTimeTV/PopcornTimeTV/releases").validate().responseData { response in
+            guard
+                case .success(let data) = response.result,
+                let json = try? JSONSerialization.jsonObject(with: data, options: .allowFragments),
+                let releases = json as? [[String: Any]]
+            else { completion?(false); return }
+
+            let sortedReleases = releases.compactMap { entry -> VersionString? in
+                guard
+                    let tag       = entry["tag_name"] as? String,
+                    let published = entry["published_at"] as? String
+                else { return nil }
+                return VersionString(tag, published)
+            }.sorted(by: { $0 > $1 })
 
             if let latestRelease = sortedReleases.first,
-                let currentRelease = sortedReleases.filter({$0.buildNumber == self.currentApplicationVersion}).first,
+                let currentRelease = sortedReleases.filter({ $0.buildNumber == self.currentApplicationVersion }).first,
                 latestRelease > currentRelease && self.skipReleaseVersion?.buildNumber != latestRelease.buildNumber {
 
                 let alert = UIAlertController(title: "Update Available".localized, message: .localizedStringWithFormat("%@ version %@ of Popcorn Time is now available.".localized, latestRelease.releaseType.rawValue.localized, latestRelease.buildNumber), preferredStyle: .alert)
 
                 alert.addAction(UIAlertAction(title: "Maybe Later".localized, style: .default, handler: nil))
-                
+
                 alert.addAction(UIAlertAction(title: "Skip This Version".localized, style: .default) { _ in
                     self.skipReleaseVersion = latestRelease
                 })
-                
-                let isCydiaInstalled = UIApplication.shared.canOpenURL(URL(string: "cydia://")!)
-                
-                alert.addAction(UIAlertAction(title: isCydiaInstalled ? "Update".localized : "OK".localized, style: .default) { _ in
-                    if isCydiaInstalled {
-                        let url = URL(string: "cydia://package/\(Bundle.main.bundleIdentifier!)")!
-                        if #available(iOS 10.0, tvOS 10.0, *) {
-                            UIApplication.shared.open(url)
-                        } else {
-                            UIApplication.shared.openURL(url)
-                        }
-                    } else {
-                        let instructionsAlert = UIAlertController(title: "Sideloading Instructions".localized, message: "Unfortunately, in-app updates are not available for un-jailbroken devices. Please follow the sideloading instructions available in the PopcornTimeTV repo's wiki.".localized, preferredStyle: .alert)
-                        instructionsAlert.addAction(UIAlertAction(title: "OK".localized, style: .default, handler: nil))
-                        instructionsAlert.show(animated: true)
-                    }
+
+                alert.addAction(UIAlertAction(title: "OK".localized, style: .default) { _ in
+                    let instructionsAlert = UIAlertController(title: "Sideloading Instructions".localized, message: "Unfortunately, in-app updates are not available for un-jailbroken devices. Please follow the sideloading instructions available in the PopcornTimeTV repo's wiki.".localized, preferredStyle: .alert)
+                    instructionsAlert.addAction(UIAlertAction(title: "OK".localized, style: .default, handler: nil))
+                    instructionsAlert.show(animated: true)
                 })
                 completion?(true)
                 alert.show(animated: true)
@@ -169,9 +168,9 @@ internal class VersionString: NSObject, NSCoding {
     }
     
     func archived() -> Data {
-        return NSKeyedArchiver.archivedData(withRootObject: self)
+        return (try? NSKeyedArchiver.archivedData(withRootObject: self, requiringSecureCoding: false)) ?? Data()
     }
-    
+
     class func unarchive(_ data: Data) -> VersionString? {
         return NSKeyedUnarchiver.unarchiveObject(with: data) as? VersionString
     }

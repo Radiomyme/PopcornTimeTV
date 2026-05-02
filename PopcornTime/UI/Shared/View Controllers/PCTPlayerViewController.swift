@@ -6,7 +6,7 @@ import PopcornTorrent
 import PopcornKit
 
 
-protocol PCTPlayerViewControllerDelegate: class {
+protocol PCTPlayerViewControllerDelegate: AnyObject {
     func playNext(_ episode: Episode)
     
 }
@@ -203,7 +203,7 @@ class PCTPlayerViewController: UIViewController, VLCMediaPlayerDelegate, UIGestu
     internal var workItem: DispatchWorkItem?
     private var resumePlayback = false
     internal var streamDuration: Float {
-        guard let remaining = mediaplayer.remainingTime?.value?.floatValue, let elapsed = mediaplayer.time?.value?.floatValue else { return Float(CMTimeGetSeconds(imageGenerator.asset.duration) * 1000) }
+        guard let remaining = (mediaplayer.remainingTime ?? VLCTime(int: 0)).value?.floatValue, let elapsed = mediaplayer.time.value?.floatValue else { return Float(CMTimeGetSeconds(imageGenerator.asset.duration) * 1000) }
         return fabsf(remaining) + elapsed
     }
     internal var nowPlayingInfo: [String: Any]? {
@@ -243,11 +243,11 @@ class PCTPlayerViewController: UIViewController, VLCMediaPlayerDelegate, UIGestu
     }
     
     func didSelectEncoding(_ encoding: String) {
-        mediaplayer.media.addOptions([vlcSettingTextEncoding: encoding])
+        mediaplayer.media?.addOptions([vlcSettingTextEncoding: encoding])
     }
     
     func screenshotAtTime(_ time: NSNumber) -> UIImage? {
-        guard let image = try? imageGenerator.copyCGImage(at: CMTimeMakeWithSeconds(time.doubleValue/1000.0, 1000), actualTime: nil) else { return nil }
+        guard let image = try? imageGenerator.copyCGImage(at: CMTimeMakeWithSeconds(time.doubleValue/1000.0, preferredTimescale: 1000), actualTime: nil) else { return nil }
         return UIImage(cgImage: image)
     }
     
@@ -258,7 +258,7 @@ class PCTPlayerViewController: UIViewController, VLCMediaPlayerDelegate, UIGestu
         guard mediaplayer.state == .stopped || mediaplayer.state == .opening else { return }
         if startPosition > 0.0 {
             let isRegular = traitCollection.horizontalSizeClass == .regular && traitCollection.verticalSizeClass == .regular
-            let style: UIAlertControllerStyle = isRegular ? .alert : .actionSheet
+            let style: UIAlertController.Style = isRegular ? .alert : .actionSheet
             let continueWatchingAlert = UIAlertController(title: nil, message: nil, preferredStyle: style)
             
 #if os(tvOS)
@@ -303,7 +303,7 @@ class PCTPlayerViewController: UIViewController, VLCMediaPlayerDelegate, UIGestu
         if let preferredLanguage = settings.language {
             currentSubtitle = subtitles.first(where: {$0.language == preferredLanguage})
         }
-        mediaplayer.media.addOptions([vlcSettingTextEncoding: settings.encoding])
+        mediaplayer.media?.addOptions([vlcSettingTextEncoding: settings.encoding])
         
         if let first = tapOnVideoRecognizer, let second = doubleTapToZoomOnVideoRecognizer {
             first.require(toFail: second)
@@ -327,7 +327,7 @@ class PCTPlayerViewController: UIViewController, VLCMediaPlayerDelegate, UIGestu
     
     // MARK: - Player changes notifications
     
-    func torrentStatusDidChange(_ aNotification: Notification) {
+    @objc func torrentStatusDidChange(_ aNotification: Notification) {
         if let streamer = aNotification.object as? PTTorrentStreamer {
             progressBar?.bufferProgress = streamer.torrentStatus.totalProgress
         }
@@ -354,13 +354,13 @@ class PCTPlayerViewController: UIViewController, VLCMediaPlayerDelegate, UIGestu
         
         progressBar.isBuffering = false
         
-        progressBar.remainingTimeLabel.text = mediaplayer.remainingTime.stringValue
+        progressBar.remainingTimeLabel.text = (mediaplayer.remainingTime ?? VLCTime(int: 0)).stringValue
         progressBar.elapsedTimeLabel.text = mediaplayer.time.stringValue
         progressBar.progress = mediaplayer.position
         
-        if nextEpisode != nil && (mediaplayer.remainingTime.intValue/1000) == -31 && presentedViewController == nil {
+        if nextEpisode != nil && ((mediaplayer.remainingTime ?? VLCTime(int: 0)).intValue/1000) == -31 && presentedViewController == nil {
             performSegue(withIdentifier: "showUpNext", sender: nil)
-        } else if (mediaplayer.remainingTime.intValue/1000) < -31, let vc = presentedViewController as? UpNextViewController {
+        } else if ((mediaplayer.remainingTime ?? VLCTime(int: 0)).intValue/1000) < -31, let vc = presentedViewController as? UpNextViewController {
             vc.dismiss(animated: true)
         }
     }
@@ -482,7 +482,7 @@ class PCTPlayerViewController: UIViewController, VLCMediaPlayerDelegate, UIGestu
                 self?.nextEpisode?.largeBackgroundImage = image
                     
                 if let image = image, let url = URL(string: image) {
-                    vc?.imageView.af_setImage(withURL: url)
+                    vc?.imageView.af.setImage(withURL: url)
                 }
                 
                 self?.nextEpisode?.getSubtitles { (subtitles) in

@@ -80,7 +80,7 @@ class MainViewController: UIViewController, CollectionViewControllerDelegate {
                     destination.loadView() // Initialize the @IBOutlets
                     
                     if let image = media.smallCoverImage, let url = URL(string: image) {
-                        destination.backgroundImageView.af_setImage(withURL: url)
+                        destination.backgroundImageView.af.setImage(withURL: url)
                     }
                     
                     destination.titleLabel.text = media.title
@@ -100,14 +100,14 @@ class MainViewController: UIViewController, CollectionViewControllerDelegate {
                 
                 let transition = CATransition()
                 transition.duration = 0.5
-                transition.timingFunction = CAMediaTimingFunction(name: kCAMediaTimingFunctionEaseInEaseOut)
-                transition.type = kCATransitionFade
+                transition.timingFunction = CAMediaTimingFunction(name: CAMediaTimingFunctionName.easeInEaseOut)
+                transition.type = CATransitionType.fade
                 navigationController.view.layer.add(transition, forKey: nil)
                 
                 defer {
                     DispatchQueue.main.asyncAfter(deadline: .now() + transition.duration) {
                         var viewControllers = navigationController.viewControllers
-                        if let index = viewControllers.index(where: {$0 === segue.destination}) {
+                        if let index = viewControllers.firstIndex(where: {$0 === segue.destination}) {
                             viewControllers.remove(at: index)
                             navigationController.setViewControllers(viewControllers, animated: false)
                         }

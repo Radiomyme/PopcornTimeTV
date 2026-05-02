@@ -73,7 +73,7 @@ class DownloadButton: UIDownloadButton, UIGestureRecognizerDelegate {
 #endif
         
         let image  = UIImageView(image: UIImage(named: "Download Progress Indeterminate"))
-        let size   = image.systemLayoutSizeFitting(UILayoutFittingCompressedSize)
+        let size   = image.systemLayoutSizeFitting(UIView.layoutFittingCompressedSize)
         let center = CGPoint(x: bounds.width/2, y: bounds.height/2)
         let origin = CGPoint(x: center.x - size.width/2, y: center.y - size.height/2)
         let frame  = CGRect(origin: origin, size: size)
@@ -111,7 +111,7 @@ class DownloadButton: UIDownloadButton, UIGestureRecognizerDelegate {
         guard downloadState != .normal, let imageView = imageView, UIDevice.current.userInterfaceIdiom != .tv else {
             return super.intrinsicContentSize
         }
-        let size = imageView.systemLayoutSizeFitting(UILayoutFittingCompressedSize)
+        let size = imageView.systemLayoutSizeFitting(UIView.layoutFittingCompressedSize)
         let common = Swift.max(size.width, size.height)
         
         return CGSize(width: common, height: common)
@@ -161,7 +161,7 @@ class DownloadButton: UIDownloadButton, UIGestureRecognizerDelegate {
             layers.append(focusedView?.layer)
 #endif
         
-        layers.flatMap({$0}).forEach {
+        layers.compactMap({$0}).forEach {
             if downloadState != .pending && $0.animation(forKey: "Spin") != nil {
                 $0.removeAnimation(forKey: "Spin")
             }
@@ -206,7 +206,7 @@ class DownloadButton: UIDownloadButton, UIGestureRecognizerDelegate {
             let image = UIImage(named: "Download Progress Indeterminate")
             imageView?.image != image ? setImage(image, for: .normal) : ()
             
-            layers.flatMap({$0}).forEach {
+            layers.compactMap({$0}).forEach {
                 if $0.animation(forKey: "Spin") == nil {
                     $0.add(self.rotationAnimation, forKey: "Spin")
                 }

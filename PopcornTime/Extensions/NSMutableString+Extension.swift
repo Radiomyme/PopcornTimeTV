@@ -9,14 +9,14 @@ extension NSMutableAttributedString {
         
         guard range.location != NSNotFound else { return false }
         
-        addAttribute(NSForegroundColorAttributeName, value: color, range: range)
+        addAttribute(NSAttributedString.Key.foregroundColor, value: color, range: range)
         
         return true
     }
 }
 
 func attributedString(colored color: UIColor = .white, with spacing: Int = 25, between images: String...) -> [NSAttributedString] {
-    return images.flatMap {
+    return images.compactMap {
         guard let attributedString = UIImage(named: $0)?.colored(color)?.attributed else { return nil }
         
         let string = NSMutableAttributedString(attributedString: UIImage.from(color: .clear, size: CGSize(width: spacing, height: 1)).attributed)

@@ -19,8 +19,8 @@ extension UIViewController: Object {
     }
     
     class func exchangeImplementations(originalSelector: Selector, swizzledSelector: Selector) {
-        let originalMethod = class_getInstanceMethod(self, originalSelector)
-        let swizzledMethod = class_getInstanceMethod(self, swizzledSelector)
+        guard let originalMethod = class_getInstanceMethod(self, originalSelector),
+              let swizzledMethod = class_getInstanceMethod(self, swizzledSelector) else { return }
         method_exchangeImplementations(originalMethod, swizzledMethod)
     }
 }

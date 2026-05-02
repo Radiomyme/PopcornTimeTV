@@ -34,7 +34,7 @@ class ContinueWatchingCollectionReusableView: UICollectionReusableView, UICollec
     override func awakeFromNib() {
         super.awakeFromNib()
 
-        collectionView.decelerationRate = UIScrollViewDecelerationRateFast
+        collectionView.decelerationRate = UIScrollView.DecelerationRate.fast
         collectionView.contentInset.left = 15
         collectionView.register(UINib(nibName: String(describing: ContinueWatchingCollectionViewCell.self), bundle: nil), forCellWithReuseIdentifier: "cell")
     }
@@ -46,7 +46,7 @@ class ContinueWatchingCollectionReusableView: UICollectionReusableView, UICollec
             var media = [Media]()
             
             let completion: ([Media]) -> Void = { media in
-                self.onDeck = media.sorted(by: {$0.0.title < $0.1.title})
+                self.onDeck = media.sorted(by: { $0.title < $1.title })
                 self.collectionView.reloadData()
                 self.layoutSubviews()
             }
@@ -96,7 +96,7 @@ class ContinueWatchingCollectionReusableView: UICollectionReusableView, UICollec
         
         if let image = media.mediumBackgroundImage,
             let url = URL(string: image) {
-            cell.imageView.af_setImage(withURL: url, placeholderImage: UIImage(named: placeholder), imageTransition: .crossDissolve(.default))
+            cell.imageView.af.setImage(withURL: url, placeholderImage: UIImage(named: placeholder), imageTransition: .crossDissolve(.default))
         } else {
             cell.imageView.image = UIImage(named: placeholder)
         }

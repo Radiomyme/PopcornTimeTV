@@ -2,14 +2,13 @@
 
 import ObjectMapper
 import Alamofire
-import SwiftyJSON
 
 
 open class TraktManager: NetworkManager {
     
     
     /// Creates new instance of TraktManager class
-    open static let shared = TraktManager()
+    public static let shared = TraktManager()
     
     /// OAuth state parameter added for extra security against cross site forgery.
     fileprivate var state: String!
@@ -44,8 +43,8 @@ open class TraktManager: NetworkManager {
             } else {
                 parameters = ["episode": ["ids": ["tvdb": Int(id)!]], "progress": progress * 100.0]
             }
-            self.manager.request(Trakt.base + Trakt.scrobble + "/\(status.rawValue)", method: .post, parameters: parameters, encoding: JSONEncoding.default, headers: Trakt.Headers.Authorization(credential.accessToken)).validate().responseJSON { response in
-                if let error = response.result.error { completion?(error as NSError) }
+            self.manager.request(Trakt.base + Trakt.scrobble + "/\(status.rawValue)", method: .post, parameters: parameters, encoding: JSONEncoding.default, headers: HTTPHeaders(Trakt.Headers.Authorization(credential.accessToken))).validate().responseData { response in
+                if let error = response.error { completion?(error as NSError) }
             }
         }
     }
@@ -60,8 +59,8 @@ open class TraktManager: NetworkManager {
      - Parameter completion:    The completion handler for the request containing an optional episode and an optional error.
      */
     open func getEpisodeMetadata(_ showId: String, episodeNumber: Int, seasonNumber: Int, completion: @escaping (Episode?, NSError?) -> Void) {
-        self.manager.request(Trakt.base + Trakt.shows + "/\(showId)" + Trakt.seasons + "/\(seasonNumber)" + Trakt.episodes + "/\(episodeNumber)", parameters: Trakt.extended, headers: Trakt.Headers.Default).validate().responseJSON { response in
-            guard let value = response.result.value else { completion(nil, response.result.error as NSError?); return }
+        self.manager.request(Trakt.base + Trakt.shows + "/\(showId)" + Trakt.seasons + "/\(seasonNumber)" + Trakt.episodes + "/\(episodeNumber)", parameters: Trakt.extended, headers: HTTPHeaders(Trakt.Headers.Default)).validate().responseData { response in
+            guard case .success(let __data) = response.result, let value = try? JSONSerialization.jsonObject(with: __data, options: .allowFragments) else { completion(nil, response.error as NSError?); return }
             completion(Mapper<Episode>(context: TraktContext()).map(JSONObject: value), nil)
         }
     }
@@ -85,8 +84,8 @@ open class TraktManager: NetworkManager {
             }
             let type = type is Movie.Type ? Trakt.movies : Trakt.episodes
             let queue = DispatchQueue(label: "com.popcorntimetv.popcornkit.response.queue", attributes: .concurrent)
-            self.manager.request(Trakt.base + Trakt.sync + Trakt.history + type, parameters: ["extended": "full", "limit": Int.max], headers: Trakt.Headers.Authorization(credential.accessToken)).validate().responseJSON(queue: queue, options: .allowFragments) { response in
-                guard let value = response.result.value else { completion([T](), response.result.error as NSError?); return }
+            self.manager.request(Trakt.base + Trakt.sync + Trakt.history + type, parameters: ["extended": "full", "limit": Int.max], headers: HTTPHeaders(Trakt.Headers.Authorization(credential.accessToken))).validate().responseData(queue: queue) { response in
+                guard case .success(let __data) = response.result, let value = try? JSONSerialization.jsonObject(with: __data, options: .allowFragments) else { completion([T](), response.error as NSError?); return }
                 let responseObject = JSON(value)
                 var watchedlist = [T]()
                 let group = DispatchGroup()
@@ -136,8 +135,8 @@ open class TraktManager: NetworkManager {
                 fatalError("Only retrieving progress for movies and episode is supported.")
             }
             let queue = DispatchQueue(label: "com.popcorntimetv.popcornkit.response.queue", attributes: .concurrent)
-            self.manager.request(Trakt.base + Trakt.sync + Trakt.playback + mediaType, parameters: Trakt.extended, headers: Trakt.Headers.Authorization(credential.accessToken)).validate().responseJSON(queue: queue, options: .allowFragments) { response in
-                guard let value = response.result.value else { completion([:], response.result.error as NSError?); return }
+            self.manager.request(Trakt.base + Trakt.sync + Trakt.playback + mediaType, parameters: Trakt.extended, headers: HTTPHeaders(Trakt.Headers.Authorization(credential.accessToken))).validate().responseData(queue: queue) { response in
+                guard case .success(let __data) = response.result, let value = try? JSONSerialization.jsonObject(with: __data, options: .allowFragments) else { completion([:], response.error as NSError?); return }
                 let responseObject = JSON(value)
                 let group = DispatchGroup()
                 var progressDict = [T: Float]()
@@ -183,9 +182,9 @@ open class TraktManager: NetworkManager {
                 }
             }
             
-            self.manager.request(Trakt.base + Trakt.sync + Trakt.playback + "/\(type.rawValue)", headers: Trakt.Headers.Authorization(credential.accessToken)).validate().responseJSON { (response) in
-                guard let value = response.result.value else {
-                    if let error = response.result.error as NSError? {
+            self.manager.request(Trakt.base + Trakt.sync + Trakt.playback + "/\(type.rawValue)", headers: HTTPHeaders(Trakt.Headers.Authorization(credential.accessToken))).validate().responseData { (response) in
+                guard case .success(let __data) = response.result, let value = try? JSONSerialization.jsonObject(with: __data, options: .allowFragments) else {
+                    if let error = response.error as NSError? {
                         completion?(error)
                     }
                     return
@@ -208,8 +207,8 @@ open class TraktManager: NetworkManager {
                 
                 guard let id = playbackId else { return }
                 
-                self.manager.request(Trakt.base + Trakt.sync + Trakt.playback + "/\(id)", method: .delete, headers: Trakt.Headers.Authorization(credential.accessToken)).validate().responseJSON { response in
-                    if let error = response.result.error { completion?(error as NSError) }
+                self.manager.request(Trakt.base + Trakt.sync + Trakt.playback + "/\(id)", method: .delete, headers: HTTPHeaders(Trakt.Headers.Authorization(credential.accessToken))).validate().responseData { response in
+                    if let error = response.error { completion?(error as NSError) }
                 }
             }
         }
@@ -241,8 +240,8 @@ open class TraktManager: NetworkManager {
             } else {
                 parameters = [:]
             }
-            self.manager.request(Trakt.base + Trakt.sync + Trakt.history + Trakt.remove, method: .post, parameters: parameters, encoding: JSONEncoding.default, headers: Trakt.Headers.Authorization(credential.accessToken)).validate().responseJSON { response in
-                if let error = response.result.error { completion?(error as NSError) }
+            self.manager.request(Trakt.base + Trakt.sync + Trakt.history + Trakt.remove, method: .post, parameters: parameters, encoding: JSONEncoding.default, headers: HTTPHeaders(Trakt.Headers.Authorization(credential.accessToken))).validate().responseData { response in
+                if let error = response.error { completion?(error as NSError) }
             }
         }
     }
@@ -273,8 +272,8 @@ open class TraktManager: NetworkManager {
             } else {
                 parameters = [:]
             }
-            self.manager.request(Trakt.base + Trakt.sync + Trakt.history, method: .post, parameters: parameters, encoding: JSONEncoding.default, headers: Trakt.Headers.Authorization(credential.accessToken)).validate().responseJSON { response in
-                if let error = response.result.error { completion?(error as NSError) }
+            self.manager.request(Trakt.base + Trakt.sync + Trakt.history, method: .post, parameters: parameters, encoding: JSONEncoding.default, headers: HTTPHeaders(Trakt.Headers.Authorization(credential.accessToken))).validate().responseData { response in
+                if let error = response.error { completion?(error as NSError) }
             }
         }
     }
@@ -288,8 +287,8 @@ open class TraktManager: NetworkManager {
      - Parameter completion: The completion handler for the request containing an array of actors, array of crews and an optional error.
      */
     open func getPeople(forMediaOfType type: Trakt.MediaType, id: String, completion: @escaping ([Actor], [Crew], NSError?) -> Void) {
-        self.manager.request(Trakt.base + "/\(type.rawValue)/\(id)" + Trakt.people, headers: Trakt.Headers.Default).validate().responseJSON { response in
-            guard let value = response.result.value else { completion([Actor](), [Crew](), response.result.error as NSError?); return }
+        self.manager.request(Trakt.base + "/\(type.rawValue)/\(id)" + Trakt.people, headers: HTTPHeaders(Trakt.Headers.Default)).validate().responseData { response in
+            guard case .success(let __data) = response.result, let value = try? JSONSerialization.jsonObject(with: __data, options: .allowFragments) else { completion([Actor](), [Crew](), response.error as NSError?); return }
             let responseObject = JSON(value)
             var actors = [Actor]()
             var crew = [Crew]()
@@ -347,8 +346,8 @@ open class TraktManager: NetworkManager {
                 mediaType = ""
             }
             let queue = DispatchQueue(label: "com.popcorntimetv.popcornkit.response.queue", attributes: .concurrent)
-            self.manager.request(Trakt.base + Trakt.sync + Trakt.watchlist + mediaType, parameters: Trakt.extended, headers: Trakt.Headers.Authorization(credential.accessToken)).validate().responseJSON(queue: queue, options: .allowFragments) { response in
-                guard let value = response.result.value else { completion([T](), response.result.error as NSError?); return }
+            self.manager.request(Trakt.base + Trakt.sync + Trakt.watchlist + mediaType, parameters: Trakt.extended, headers: HTTPHeaders(Trakt.Headers.Authorization(credential.accessToken))).validate().responseData(queue: queue) { response in
+                guard case .success(let __data) = response.result, let value = try? JSONSerialization.jsonObject(with: __data, options: .allowFragments) else { completion([T](), response.error as NSError?); return }
                 let responseObject = JSON(value)
                 var watchlist = [T]()
                 let group = DispatchGroup()
@@ -392,8 +391,8 @@ open class TraktManager: NetworkManager {
             } else {
                 parameters = [type.rawValue: [["ids": ["imdb": id]]]]
             }
-            self.manager.request(Trakt.base + Trakt.sync + Trakt.watchlist, method: .post, parameters: parameters, encoding: JSONEncoding.default, headers: Trakt.Headers.Authorization(credential.accessToken)).validate().responseJSON { response in
-                if let error = response.result.error { completion?(error as NSError) }
+            self.manager.request(Trakt.base + Trakt.sync + Trakt.watchlist, method: .post, parameters: parameters, encoding: JSONEncoding.default, headers: HTTPHeaders(Trakt.Headers.Authorization(credential.accessToken))).validate().responseData { response in
+                if let error = response.error { completion?(error as NSError) }
             }
         }
     }
@@ -422,8 +421,8 @@ open class TraktManager: NetworkManager {
             } else {
                 parameters = [type.rawValue: [["ids": ["imdb": id]]]]
             }
-            self.manager.request(Trakt.base + Trakt.sync + Trakt.watchlist + Trakt.remove, method: .post, parameters: parameters, encoding: JSONEncoding.default, headers: Trakt.Headers.Authorization(credential.accessToken)).validate().responseJSON { response in
-                if let error = response.result.error { completion?(error as NSError) }
+            self.manager.request(Trakt.base + Trakt.sync + Trakt.watchlist + Trakt.remove, method: .post, parameters: parameters, encoding: JSONEncoding.default, headers: HTTPHeaders(Trakt.Headers.Authorization(credential.accessToken))).validate().responseData { response in
+                if let error = response.error { completion?(error as NSError) }
             }
         }
     }
@@ -436,8 +435,8 @@ open class TraktManager: NetworkManager {
      - Parameter completion: The requests completion handler containing array of related movies and an optional error.
      */
     open func getRelated<T: Media>(_ media: T, completion: @escaping ([T], NSError?) -> Void) {
-        self.manager.request(Trakt.base + (media is Movie ? Trakt.movies : Trakt.shows) + "/\(media.id)" + Trakt.related, parameters: Trakt.extended, headers: Trakt.Headers.Default).validate().responseJSON { response in
-            guard let value = response.result.value else { completion([T](), response.result.error as NSError?); return }
+        self.manager.request(Trakt.base + (media is Movie ? Trakt.movies : Trakt.shows) + "/\(media.id)" + Trakt.related, parameters: Trakt.extended, headers: HTTPHeaders(Trakt.Headers.Default)).validate().responseData { response in
+            guard case .success(let __data) = response.result, let value = try? JSONSerialization.jsonObject(with: __data, options: .allowFragments) else { completion([T](), response.error as NSError?); return }
             let responseObject = JSON(value)
             let group = DispatchGroup()
             var array = [T]()
@@ -464,11 +463,11 @@ open class TraktManager: NetworkManager {
      */
     open func getMediaCredits<T: Media>(forPersonWithId id: String, mediaType type: T.Type, completion: @escaping ([T], NSError?) -> Void) {
         var typeString = (type is Movie.Type ? Trakt.movies : Trakt.shows)
-        self.manager.request(Trakt.base + Trakt.people + "/\(id)" + typeString, parameters: Trakt.extended, headers: Trakt.Headers.Default).validate().responseJSON { response in
-            guard let value = response.result.value else { completion([T](), response.result.error as NSError?); return }
+        self.manager.request(Trakt.base + Trakt.people + "/\(id)" + typeString, parameters: Trakt.extended, headers: HTTPHeaders(Trakt.Headers.Default)).validate().responseData { response in
+            guard case .success(let __data) = response.result, let value = try? JSONSerialization.jsonObject(with: __data, options: .allowFragments) else { completion([T](), response.error as NSError?); return }
             let responseObject = JSON(value)
-            typeString.characters.removeLast() // Removes 's' from the type string
-            typeString.characters.removeFirst() // Removes '/' from the type string
+            typeString.removeLast() // Removes 's' from the type string
+            typeString.removeFirst() // Removes '/' from the type string
             var medias = [T]()
             let group = DispatchGroup()
             for (_, item) in responseObject["crew"] {
@@ -512,8 +511,8 @@ open class TraktManager: NetworkManager {
      - Parameter completion:    Completion handler containing optional tmdb id and an optional error.
      */
     open func getTMDBId(forImdbId id: String, completion: @escaping (Int?, NSError?) -> Void) {
-        self.manager.request(Trakt.base + Trakt.search + Trakt.imdb + "/\(id)", headers: Trakt.Headers.Default).validate().responseJSON { (response) in
-            guard let value = response.result.value else { completion(nil, response.result.error as NSError?); return }
+        self.manager.request(Trakt.base + Trakt.search + Trakt.imdb + "/\(id)", headers: HTTPHeaders(Trakt.Headers.Default)).validate().responseData { (response) in
+            guard case .success(let __data) = response.result, let value = try? JSONSerialization.jsonObject(with: __data, options: .allowFragments) else { completion(nil, response.error as NSError?); return }
             let responseObject = JSON(value).arrayValue.first
             
             if let type = responseObject?["type"].string  {
@@ -531,8 +530,8 @@ open class TraktManager: NetworkManager {
      - Parameter completion:    Completion handler for the request. Returns episode upon success, error upon failure.
      */
     open func getEpisodeInfo(forTvdb id: Int, completion: @escaping (Episode?, NSError?) -> Void) {
-        self.manager.request(Trakt.base + Trakt.search + Trakt.tvdb + "/\(id)", parameters:Trakt.extended, headers: Trakt.Headers.Default).validate().responseJSON { (response) in
-            guard let value = response.result.value else { completion(nil, response.result.error as NSError?); return }
+        self.manager.request(Trakt.base + Trakt.search + Trakt.tvdb + "/\(id)", parameters:Trakt.extended, headers: HTTPHeaders(Trakt.Headers.Default)).validate().responseData { (response) in
+            guard case .success(let __data) = response.result, let value = try? JSONSerialization.jsonObject(with: __data, options: .allowFragments) else { completion(nil, response.error as NSError?); return }
             let responseObject = JSON(value)[0]
             
             var episode = Mapper<Episode>(context: TraktContext()).map(JSONObject: responseObject["episode"].dictionaryObject)
@@ -555,10 +554,10 @@ open class TraktManager: NetworkManager {
      - Parameter completion:    Completion handler for the request. Returns an array of people matching the passed in title, error upon failure.
      */
     open func search(forPerson person: String, completion: @escaping ([Person]?, NSError?) -> Void) {
-        self.manager.request(Trakt.base + Trakt.search + Trakt.person, parameters: ["query": person], headers: Trakt.Headers.Default).validate().responseJSON { (response) in
-            guard let value = response.result.value,
+        self.manager.request(Trakt.base + Trakt.search + Trakt.person, parameters: ["query": person], headers: HTTPHeaders(Trakt.Headers.Default)).validate().responseData { (response) in
+            guard case .success(let __data) = response.result, let value = try? JSONSerialization.jsonObject(with: __data, options: .allowFragments),
                 let persons: [Person] = Mapper<Crew>().mapArray(JSONObject: value) // Type of person doesn't matter as it will succeed either way.
-                else { completion(nil, response.result.error as NSError?); return }
+                else { completion(nil, response.error as NSError?); return }
             
             let group = DispatchGroup()
             var people = [Person]()
@@ -583,7 +582,7 @@ struct TraktContext: MapContext {}
 
 // MARK: Trakt OAuth
 
-@objc public protocol TraktManagerDelegate: class {
+@objc public protocol TraktManagerDelegate: AnyObject {
     /// Called when a user has successfully logged in.
     @objc optional func authenticationDidSucceed()
     
@@ -603,9 +602,7 @@ extension TraktManager {
      - Returns: A login view controller to be presented.
      */
     public func loginViewController() -> UIViewController {
-#else
-            return TraktAuthenticationViewController(nibName: "TraktAuthenticationViewController", bundle: TraktAuthenticationViewController.bundle)
-#endif
+        return TraktAuthenticationViewController(nibName: "TraktAuthenticationViewController", bundle: TraktAuthenticationViewController.bundle)
     }
     
     /**
@@ -632,8 +629,8 @@ extension TraktManager {
      - Parameter completion: The completion handler for the request containing the code for the user to enter to the validation url (`https://trakt.tv/activate/authorize`), the code for the device to get the access token, the expiery date of the displat code and the time interval that the program is to check whether the user has authenticated and an optional error if request fails.
      */
     internal func generateCode(completion: @escaping (String?, String?, Date?, TimeInterval?, NSError?) -> Void) {
-        self.manager.request(Trakt.base + Trakt.auth + Trakt.device + Trakt.code, method: .post, parameters: ["client_id": Trakt.apiKey]).validate().responseJSON { (response) in
-            guard let value = response.result.value as? [String: AnyObject], let displayCode = value["user_code"] as? String, let deviceCode = value["device_code"] as? String, let expire = value["expires_in"] as? Int, let interval = value["interval"]  as? Int else { completion(nil, nil, nil, nil, response.result.error as NSError?); return }
+        self.manager.request(Trakt.base + Trakt.auth + Trakt.device + Trakt.code, method: .post, parameters: ["client_id": Trakt.apiKey]).validate().responseData { (response) in
+            guard case .success(let __data) = response.result, let json = try? JSONSerialization.jsonObject(with: __data, options: .allowFragments), let value = json as? [String: AnyObject], let displayCode = value["user_code"] as? String, let deviceCode = value["device_code"] as? String, let expire = value["expires_in"] as? Int, let interval = value["interval"]  as? Int else { completion(nil, nil, nil, nil, response.error as NSError?); return }
             completion(displayCode, deviceCode, Date().addingTimeInterval(Double(expire)), Double(interval), nil)
         }
     }

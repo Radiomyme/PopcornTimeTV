@@ -3,7 +3,6 @@
 import Foundation
 import AVFoundation
 import Alamofire
-import SwiftyJSON
 
 /// Class for managing TV Show and Movie Theme songs.
 public class ThemeSongManager: NSObject, AVAudioPlayerDelegate {
@@ -32,10 +31,15 @@ public class ThemeSongManager: NSObject, AVAudioPlayerDelegate {
      - Parameter name: The name of the movie.
      */
     public func playMovieTheme(_ name: String) {
-        Alamofire.request("https://itunes.apple.com/search", parameters: ["term": "\(name) soundtrack", "media": "music", "attribute": "albumTerm", "limit": 1]).validate().responseJSON { (response) in
-            guard let response = response.result.value else { return }
-            let responseDict = JSON(response)
-            if let url = responseDict["results"].arrayValue.first?["previewUrl"].string { self.playTheme(url) }
+        AF.request("https://itunes.apple.com/search", parameters: ["term": "\(name) soundtrack", "media": "music", "attribute": "albumTerm", "limit": 1]).validate().responseData { response in
+            guard
+                case .success(let data) = response.result,
+                let json    = try? JSONSerialization.jsonObject(with: data, options: .allowFragments),
+                let dict    = json as? [String: Any],
+                let results = dict["results"] as? [[String: Any]],
+                let url     = results.first?["previewUrl"] as? String
+            else { return }
+            self.playTheme(url)
         }
     }
     
@@ -50,7 +54,7 @@ public class ThemeSongManager: NSObject, AVAudioPlayerDelegate {
         self.task = URLSession.shared.dataTask(with: URL(string: url)!, completionHandler: { (data, response, error) in
             do {
                 if let data = data {
-                    try AVAudioSession.sharedInstance().setCategory(AVAudioSessionCategoryPlayback)
+                    try AVAudioSession.sharedInstance().setCategory(.playback)
                     
                     let player = try AVAudioPlayer(data: data)
                     player.volume = 0

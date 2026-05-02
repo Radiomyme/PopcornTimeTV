@@ -99,7 +99,7 @@ public func getMovieInfo(_ imdbId: String, completion: @escaping (Movie?, NSErro
  */
 public func downloadTorrentFile(_ path: String, completion: @escaping (String?, NSError?) -> Void) {
     var finalPath: URL!
-    Alamofire.download(path) { (temporaryURL, response) -> (destinationURL: URL, options: DownloadRequest.DownloadOptions) in
+    AF.download(path) { (temporaryURL, response) -> (destinationURL: URL, options: DownloadRequest.Options) in
         finalPath = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent(response.suggestedFilename!)
         return (finalPath, .removePreviousFile)
     }.validate().response { response in
@@ -123,7 +123,7 @@ public func downloadSubtitleFile(
     downloadDirectory directory: URL = URL(fileURLWithPath: NSTemporaryDirectory()),
     completion: @escaping (URL?, NSError?) -> Void) {
     var fileUrl: URL!
-    Alamofire.download(path) { (temporaryURL, response) -> (destinationURL: URL, options: DownloadRequest.DownloadOptions) in
+    AF.download(path) { (temporaryURL, response) -> (destinationURL: URL, options: DownloadRequest.Options) in
         let fileName = suggestedName ?? response.suggestedFilename!
         let downloadDirectory = directory.appendingPathComponent("Subtitles")
         if !FileManager.default.fileExists(atPath: downloadDirectory.path) {

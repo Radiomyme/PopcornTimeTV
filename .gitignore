@@ -1,0 +1,17 @@
+# Xcode
+build/
+DerivedData/
+*.xcworkspace/xcuserdata/
+*.xcodeproj/xcuserdata/
+*.xcuserstate
+
+# CocoaPods
+Pods/
+
+# Build artifacts
+*.dSYM.zip
+*.dSYM
+
+# Secrets
+Secrets.xcconfig
+.env

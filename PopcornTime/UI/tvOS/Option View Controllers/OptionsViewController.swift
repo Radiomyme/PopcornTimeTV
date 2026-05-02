@@ -3,7 +3,7 @@
 import UIKit
 import struct PopcornKit.Subtitle
 
-protocol OptionsViewControllerDelegate: class {
+protocol OptionsViewControllerDelegate: AnyObject {
     func didSelectSubtitle(_ subtitle: Subtitle?)
     func didSelectSubtitleDelay(_ delay: Int)
     func didSelectEncoding(_ encoding: String)
@@ -40,8 +40,8 @@ class OptionsViewController: UIViewController, UIGestureRecognizerDelegate, UITa
         super.viewDidLoad()
         
         let menuGesture = UITapGestureRecognizer(target: self, action: #selector(menuPressed))
-        menuGesture.allowedTouchTypes = [NSNumber(value: UITouchType.indirect.rawValue)]
-        menuGesture.allowedPressTypes = [NSNumber(value: UIPressType.menu.rawValue)]
+        menuGesture.allowedTouchTypes = [NSNumber(value: UITouch.TouchType.indirect.rawValue)]
+        menuGesture.allowedPressTypes = [NSNumber(value: UIPress.PressType.menu.rawValue)]
         
         view.addGestureRecognizer(menuGesture)
     }
@@ -51,7 +51,7 @@ class OptionsViewController: UIViewController, UIGestureRecognizerDelegate, UITa
     }
 
     func tabBar(_ tabBar: UITabBar, didSelect item: UITabBarItem) {
-        let index = tabBar.items!.index(of: item)!
+        let index = tabBar.items!.firstIndex(of: item)!
         
         updateContainerView(infoContainerView, viewController: infoViewController, hidden: index != 0)
         updateContainerView(subtitlesContainerView, viewController: subtitlesViewController, hidden: index != 1)
@@ -101,7 +101,7 @@ class OptionsViewController: UIViewController, UIGestureRecognizerDelegate, UITa
         return environmentsToFocus.isEmpty ? super.preferredFocusEnvironments : environmentsToFocus
     }
     
-    func menuPressed() {
+    @objc func menuPressed() {
         if tabBar.recursiveSubviews.filter({$0.isFocused}).isEmpty {
             environmentsToFocus = [tabBar]
             setNeedsFocusUpdate()

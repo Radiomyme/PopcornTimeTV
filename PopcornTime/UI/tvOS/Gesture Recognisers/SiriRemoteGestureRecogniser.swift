@@ -24,8 +24,8 @@ class SiriRemoteGestureRecognizer: UIGestureRecognizer {
     
     override init(target: Any?, action: Selector?) {
         super.init(target: target, action: action)
-        allowedTouchTypes = [NSNumber(value: UITouchType.indirect.rawValue)]
-        allowedPressTypes = [NSNumber(value: UIPressType.select.rawValue)]
+        allowedTouchTypes = [NSNumber(value: UITouch.TouchType.indirect.rawValue)]
+        allowedPressTypes = [NSNumber(value: UIPress.PressType.select.rawValue)]
         cancelsTouchesInView = false
     }
     
@@ -93,14 +93,14 @@ class SiriRemoteGestureRecognizer: UIGestureRecognizer {
     
     // MARK: Timers
     
-    func longPressTimerFired() {
+    @objc func longPressTimerFired() {
         guard isClick && state == .began || state == .changed else { return }
         isLongPress = true
         isClick = false
         state = .changed
     }
     
-    func longTapTimerFired() {
+    @objc func longTapTimerFired() {
         guard state == .began || state == .changed else { return }
         isLongTap = true
         state = .changed

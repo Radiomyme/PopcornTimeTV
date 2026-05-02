@@ -106,7 +106,7 @@ extension DownloadViewController: CollectionViewControllerDelegate, DownloadColl
     
     // MARK: - PTTorrentDownloadManagerListener
     
-    func torrentStatusDidChange(_ torrentStatus: PTTorrentStatus, for download: PTTorrentDownload) {
+    @objc func torrentStatusDidChange(_ torrentStatus: PTTorrentStatus, for download: PTTorrentDownload) {
         let visibleCells = collectionView?.visibleCells ?? []
         
         for cell in visibleCells {

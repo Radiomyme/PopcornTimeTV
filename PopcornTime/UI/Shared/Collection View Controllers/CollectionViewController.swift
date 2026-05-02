@@ -6,7 +6,7 @@ import AlamofireImage
 import class PopcornTorrent.PTTorrentDownload
 import MediaPlayer.MPMediaItem
 
-protocol CollectionViewControllerDelegate: class {
+protocol CollectionViewControllerDelegate: AnyObject {
     func load(page: Int)
     func didRefresh(collectionView: UICollectionView)
     func collectionView(isEmptyForUnknownReason collectionView: UICollectionView)
@@ -74,7 +74,7 @@ class CollectionViewController: ResponsiveCollectionViewController, UICollection
         
         if let collectionView = collectionView,
             let nib = delegate?.collectionView(nibForHeaderInCollectionView: collectionView) {
-            collectionView.register(nib, forSupplementaryViewOfKind: UICollectionElementKindSectionHeader, withReuseIdentifier: "stickyHeader")
+            collectionView.register(nib, forSupplementaryViewOfKind: UICollectionView.elementKindSectionHeader, withReuseIdentifier: "stickyHeader")
         }
     }
     
@@ -118,7 +118,7 @@ class CollectionViewController: ResponsiveCollectionViewController, UICollection
     
     override func numberOfSections(in collectionView: UICollectionView) -> Int {
         collectionView.backgroundView = nil
-        guard dataSources.flatMap({$0}).isEmpty else {
+        guard dataSources.compactMap({$0}).isEmpty else {
             error = nil
             return dataSources.count
         }
@@ -152,7 +152,7 @@ class CollectionViewController: ResponsiveCollectionViewController, UICollection
     }
     
     override func collectionView(_ collectionView: UICollectionView, viewForSupplementaryElementOfKind kind: String, at indexPath: IndexPath) -> UICollectionReusableView {
-        if kind == UICollectionElementKindSectionHeader {
+        if kind == UICollectionView.elementKindSectionHeader {
             if let title = delegate?.collectionView(collectionView, titleForHeaderInSection: indexPath.section) {
                 let header = collectionView.dequeueReusableSupplementaryView(ofKind: kind, withReuseIdentifier: "sectionHeader", for: indexPath)
                 
@@ -228,7 +228,7 @@ class CollectionViewController: ResponsiveCollectionViewController, UICollection
                 
                 if let image = media.smallCoverImage,
                     let url = URL(string: image) {
-                    cell.imageView.af_setImage(withURL: url, placeholderImage: UIImage(named: placeholder), imageTransition: .crossDissolve(.default))
+                    cell.imageView.af.setImage(withURL: url, placeholderImage: UIImage(named: placeholder), imageTransition: .crossDissolve(.default))
                 } else {
                     cell.imageView.image = UIImage(named: placeholder)
                 }
@@ -246,8 +246,10 @@ class CollectionViewController: ResponsiveCollectionViewController, UICollection
                     let url = URL(string: image),
                     let request = try? URLRequest(url: url, method: .get) {
                     cell.originalImage = UIImage(named: "Other Placeholder")
-                    ImageDownloader.default.download(request) { (response) in
-                        cell.originalImage = response.result.value
+                    ImageDownloader.default.download(request) { response in
+                        if case .success(let image) = response.result {
+                            cell.originalImage = image
+                        }
                     }
                 } else {
                     cell.originalImage = nil
@@ -276,7 +278,7 @@ class CollectionViewController: ResponsiveCollectionViewController, UICollection
                     cell.downloadState = DownloadButton.State(download.downloadStatus)
                     
                     if let image = download.mediaMetadata[MPMediaItemPropertyArtwork] as? String, let url = URL(string: image) {
-                        cell.imageView?.af_setImage(withURL: url)
+                        cell.imageView?.af.setImage(withURL: url)
                     } else {
                         cell.imageView?.image = UIImage(named: "Episode Placeholder")
                     }

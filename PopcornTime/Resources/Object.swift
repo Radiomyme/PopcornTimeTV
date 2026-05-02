@@ -2,7 +2,7 @@
 
 import Foundation
 
-protocol Object: class {
+protocol Object: AnyObject {
     
     static func awake()
 }

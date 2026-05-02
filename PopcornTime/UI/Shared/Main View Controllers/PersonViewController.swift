@@ -32,13 +32,13 @@ class PersonViewController: MainViewController {
         }
         
         group.enter()
-        TraktManager.shared.getMediaCredits(forPersonWithId: currentItem.imdbId, mediaType: Show.self) {
-            completion($0.0, $0.1)
+        TraktManager.shared.getMediaCredits(forPersonWithId: currentItem.imdbId, mediaType: Show.self) { results, error in
+            completion(results, error)
         }
-        
+
         group.enter()
-        TraktManager.shared.getMediaCredits(forPersonWithId: currentItem.imdbId, mediaType: Movie.self) {
-            completion($0.0, $0.1)
+        TraktManager.shared.getMediaCredits(forPersonWithId: currentItem.imdbId, mediaType: Movie.self) { results, error in
+            completion(results, error)
         }
         
         group.notify(queue: .main) { [unowned self] in

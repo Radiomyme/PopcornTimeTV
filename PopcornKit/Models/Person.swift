@@ -19,7 +19,7 @@ public protocol Person: Mappable {
 extension Person {
     /// The initials of the person.
     public var initials: String {
-        let parts = name.characters.split(separator: " ")
+        let parts = name.split(separator: " ")
         
         guard let firstName = parts.first,
             let lastName  = parts.last,

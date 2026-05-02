@@ -9,7 +9,7 @@ import class PopcornTorrent.PTTorrentDownloadManager
 extension ItemViewController: UIViewControllerTransitioningDelegate {
     
     var visibleButtons: [TVButton] {
-        return [trailerButton, playButton, seasonsButton, watchlistButton, watchedButton].flatMap({$0}).filter({$0.superview != nil})
+        return [trailerButton, playButton, seasonsButton, watchlistButton, watchedButton].compactMap({$0}).filter({$0.superview != nil})
     }
     
     var watchlistButtonImage: UIImage? {
@@ -51,11 +51,11 @@ extension ItemViewController: UIViewControllerTransitioningDelegate {
             let runtime = formatter.string(from: TimeInterval(movie.runtime) * 60)
             let year = movie.year
             
-            let subtitle = NSMutableAttributedString(string: [runtime, year].flatMap({$0}).joined(separator: "\t"))
+            let subtitle = NSMutableAttributedString(string: [runtime, year].compactMap({$0}).joined(separator: "\t"))
             attributedString(colored: isDark ? .white : .black, between: movie.certification, "HD", "CC").forEach({subtitle.append($0)})
             
             subtitleLabel.attributedText = subtitle
-            ratingView.rating = movie.rating/20.0
+            ratingView.rating = Double(movie.rating)/20.0
             
             let peopleText = NSMutableAttributedString()
             
@@ -63,16 +63,16 @@ extension ItemViewController: UIViewControllerTransitioningDelegate {
             paragraphStyle.alignment = .right
             
             let appendSection: (String, [String]) -> Void = { (title, items) in
-                let titleAttributes = [NSParagraphStyleAttributeName: paragraphStyle,
-                                       NSFontAttributeName: UIFont.systemFont(ofSize: 24, weight: UIFontWeightBold),
-                                       NSForegroundColorAttributeName: self.isDark ? UIColor(white: 1, alpha: 0.8) : UIColor(white: 0, alpha: 0.8)]
+                let titleAttributes = [NSAttributedString.Key.paragraphStyle: paragraphStyle,
+                                       NSAttributedString.Key.font: UIFont.systemFont(ofSize: 24, weight: UIFont.Weight.bold),
+                                       NSAttributedString.Key.foregroundColor: self.isDark ? UIColor(white: 1, alpha: 0.8) : UIColor(white: 0, alpha: 0.8)]
                 
                 let isFirstSection = peopleText.length == 0
                 peopleText.append(NSAttributedString(string: (!isFirstSection ? "\n" : "") + title + "\n", attributes: titleAttributes))
                 
-                let itemAttribtues = [NSParagraphStyleAttributeName: paragraphStyle,
-                                      NSFontAttributeName: UIFont.systemFont(ofSize: 31, weight: UIFontWeightMedium),
-                                      NSForegroundColorAttributeName: self.isDark ? UIColor(white: 1, alpha: 0.5) : UIColor(white: 0, alpha: 0.5)]
+                let itemAttribtues = [NSAttributedString.Key.paragraphStyle: paragraphStyle,
+                                      NSAttributedString.Key.font: UIFont.systemFont(ofSize: 31, weight: UIFont.Weight.medium),
+                                      NSAttributedString.Key.foregroundColor: self.isDark ? UIColor(white: 1, alpha: 0.5) : UIColor(white: 0, alpha: 0.5)]
                 
                 items.forEach({peopleText.append(NSAttributedString(string: $0 + "\n", attributes: itemAttribtues))})
             }
@@ -81,14 +81,14 @@ extension ItemViewController: UIViewControllerTransitioningDelegate {
                 appendSection("Genre".localized.localizedUppercase, [genre])
             }
             
-            let directors = movie.crew.filter({$0.roleType == .director}).flatMap({$0.name})
+            let directors = movie.crew.filter({$0.roleType == .director}).compactMap({$0.name})
             
             if !directors.isEmpty {
                 let isSingular = directors.count == 1
                 appendSection(isSingular ? "Director".localized.localizedUppercase : "Directors".localized.localizedUppercase, directors)
             }
             
-            let actors = movie.actors.flatMap({$0.name})
+            let actors = movie.actors.compactMap({$0.name})
             
             if !actors.isEmpty {
                 appendSection("Starring".localized.localizedUppercase, actors)
@@ -110,10 +110,10 @@ extension ItemViewController: UIViewControllerTransitioningDelegate {
             let genre = show.genres.first?.localizedCapitalized
             let year = show.year
             
-            let subtitle = NSMutableAttributedString(string: [genre, year].flatMap({$0}).joined(separator: "\t"))
+            let subtitle = NSMutableAttributedString(string: [genre, year].compactMap({$0}).joined(separator: "\t"))
             attributedString(colored: isDark ? .white : .black, between: "HD", "CC").forEach({subtitle.append($0)})
             
-            subtitleLabel.font = UIFont.systemFont(ofSize: 31, weight: UIFontWeightMedium)
+            subtitleLabel.font = UIFont.systemFont(ofSize: 31, weight: UIFont.Weight.medium)
             subtitleLabel.attributedText = subtitle
             
             ratingView.isHidden = true

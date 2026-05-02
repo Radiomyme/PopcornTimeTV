@@ -1,13 +1,12 @@
 
 
 import UIKit
-import SwiftyTimer
 
 #if os(tvOS)
     import MBCircularProgressBar
 #endif
 
-protocol UpNextViewControllerDelegate: class {
+protocol UpNextViewControllerDelegate: AnyObject {
     func viewController(_ viewController: UpNextViewController, proceedToNextVideo proceed: Bool)
 }
 
@@ -86,21 +85,18 @@ class UpNextViewController: UIViewController {
     func startTimers() {
         let initial = 30
         var delay = initial
-        
-        updateTimer = Timer.every(1.0) { [weak self] in
-            guard let `self` = self, (delay - 1) >= 0 else { return }
+
+        updateTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
+            guard let self = self, (delay - 1) >= 0 else { return }
             delay -= 1
-            
-#if os(tvOS)
-                self.countdownView.value = CGFloat(delay)
-#endif
+            self.countdownView.value = CGFloat(delay)
         }
-        
-        timer = Timer.after(TimeInterval(initial), { [weak self] in
-            guard let `self` = `self` else { return }
+
+        timer = Timer.scheduledTimer(withTimeInterval: TimeInterval(initial), repeats: false) { [weak self] _ in
+            guard let self = self else { return }
             self.stopTimers()
             self.delegate?.viewController(self, proceedToNextVideo: true)
-        })
+        }
     }
     
     func stopTimers() {
