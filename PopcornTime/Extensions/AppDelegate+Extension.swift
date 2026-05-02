@@ -13,7 +13,18 @@ extension AppDelegate: PCTPlayerViewControllerDelegate, UIViewControllerTransiti
         // HDR/DV/Atmos preferred at equal resolution). The user can override the
         // preference in Settings ("autoSelectQuality" UserDefault).
         let preference = UserDefaults.standard.string(forKey: "autoSelectQuality") ?? "Highest".localized
-        let sorted     = media.torrents.sorted(by: <)
+        var sorted     = media.torrents.sorted(by: <)
+
+        #if targetEnvironment(simulator)
+        // The tvOS Simulator runs on the Mac with no HEVC HW decoder, so 4K
+        // HEVC takes minutes to start and stutters. Cap auto-pick at 1080p
+        // for simulator runs only — the real Apple TV 4K still gets the
+        // 2160p stream.
+        let simulatorCap: VideoQuality = .hd1080
+        sorted = sorted.filter { $0.qualityValue <= simulatorCap }
+        if sorted.isEmpty { sorted = media.torrents.sorted(by: <) }
+        print("[chooseQuality] simulator cap applied: max=\(simulatorCap)")
+        #endif
 
         print("[chooseQuality] media=\(media.title) preference=\(preference) candidates=\(sorted.map { "\($0.quality ?? "?")(\($0.qualityValue))" })")
 
