@@ -63,7 +63,18 @@ class CollectionViewController: ResponsiveCollectionViewController, UICollection
         }
     }
     
+    /// Walk the responder chain to find the owning `MainViewController`.
+    /// `AppDelegate.shared.activeRootViewController` only locates the host
+    /// VC when the selected tab is a UINavigationController; the Search tab
+    /// uses UISearchContainerViewController, which broke cell-tap → segue
+    /// forwarding (and silently dropped the user's selection on the floor).
+    /// Falling back to the global lookup keeps existing flows working.
     var activeRootViewController: MainViewController? {
+        var responder: UIResponder? = self
+        while let r = responder {
+            if let main = r as? MainViewController { return main }
+            responder = r.next
+        }
         return AppDelegate.shared.activeRootViewController
     }
     

@@ -16,9 +16,9 @@ class SearchViewController: MainViewController, UISearchBarDelegate {
 
     let searchDelay: TimeInterval = 0.25
     var workItem: DispatchWorkItem!
-    
-    var fetchType: Trakt.MediaType = .shows /// Default to searching for shows (temp)
-    
+
+    var fetchType: Trakt.MediaType = .movies
+
     override func load(page: Int) {
         filterSearchText(searchBar?.text ?? "")
     }
