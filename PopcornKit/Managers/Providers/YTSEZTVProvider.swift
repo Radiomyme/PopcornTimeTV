@@ -67,6 +67,11 @@ public final class YTSEZTVProvider: MediaProvider {
 
     public init() {}
 
+    /// Last batch of shows assembled by `loadShows`, keyed by imdb id, so
+    /// `getShowInfo` can return the same instance with its episode list.
+    private var showCache: [String: Show] = [:]
+    private let cacheQueue = DispatchQueue(label: "com.popcorntimetv.popcornkit.eztv.cache")
+
     // MARK: - Movies
 
     public func loadMovies(page: Int,
@@ -213,18 +218,139 @@ public final class YTSEZTVProvider: MediaProvider {
         }
     }
 
-    // MARK: - Shows (stub — see Phase 7 for full EZTV+TMDB integration)
+    // MARK: - Shows (EZTV + TVMaze)
 
+    /// Fetch a page of episode torrents from EZTV, group by imdb_id, then
+    /// resolve show metadata in parallel via TVMaze (free, unauthenticated).
+    /// EZTV doesn't expose sort/genre filtering; we ignore those args and
+    /// always return the most recently released episodes' shows.
     public func loadShows(page: Int,
                           filter: ShowManager.Filters,
                           genre: NetworkManager.Genres,
                           searchTerm: String?,
                           order: NetworkManager.Orders,
                           completion: @escaping ([Show]?, NSError?) -> Void) {
-        DispatchQueue.main.async { completion([], nil) }
+
+        let url = "https://eztvx.to/api/get-torrents"
+        let params: [String: Any] = ["limit": 100, "page": max(page, 1)]
+        print("[EZTV] GET \(url) params=\(params)")
+
+        session.request(url, parameters: params).validate().responseData { [weak self] response in
+            guard let self = self else { return }
+            let status = response.response?.statusCode ?? -1
+            switch response.result {
+            case .success(let data):
+                guard
+                    let json = try? JSONSerialization.jsonObject(with: data, options: .allowFragments),
+                    let root = json as? [String: Any],
+                    let raw  = root["torrents"] as? [[String: Any]]
+                else {
+                    print("[EZTV] JSON parse failed status=\(status)")
+                    DispatchQueue.main.async { completion([], nil) }
+                    return
+                }
+                print("[EZTV] got \(raw.count) torrents (status=\(status))")
+                self.buildShows(from: raw, completion: completion)
+            case .failure(let err):
+                print("[EZTV] FAILED status=\(status) err=\(err)")
+                DispatchQueue.main.async { completion(nil, err as NSError) }
+            }
+        }
     }
 
     public func getShowInfo(imdbId: String, completion: @escaping (Show?, NSError?) -> Void) {
-        DispatchQueue.main.async { completion(nil, nil) }
+        // First-class source: the show that loadShows already assembled with
+        // its episode list (cached when the catalog rendered). If absent
+        // (deep-linked from a watchlist with no fresh catalog fetch), fall
+        // back to a TVMaze-only metadata refresh — episodes will be empty
+        // but the detail screen renders a "no episodes" path correctly.
+        let cached = cacheQueue.sync { showCache[imdbId] }
+        if let cached = cached {
+            DispatchQueue.main.async { completion(cached, nil) }
+            return
+        }
+        fetchTVMaze(imdbId: imdbId) { tvmaze in
+            guard let tvmaze = tvmaze, let show = Show(tvmaze: tvmaze, imdbId: imdbId, episodes: []) else {
+                DispatchQueue.main.async { completion(nil, nil) }
+                return
+            }
+            DispatchQueue.main.async { completion(show, nil) }
+        }
+    }
+
+    private func buildShows(from raw: [[String: Any]],
+                            completion: @escaping ([Show]?, NSError?) -> Void) {
+        // Group EZTV torrents by imdb_id (string form, since EZTV stores it
+        // as a 7- or 8-digit number without "tt" prefix).
+        var grouped: [String: [[String: Any]]] = [:]
+        for entry in raw {
+            guard let imdb = entry["imdb_id"] as? String, !imdb.isEmpty else { continue }
+            grouped[imdb, default: []].append(entry)
+        }
+        guard !grouped.isEmpty else {
+            DispatchQueue.main.async { completion([], nil) }
+            return
+        }
+
+        let group = DispatchGroup()
+        var shows: [Show] = []
+        let lock = NSLock()
+
+        for (imdbNumeric, entries) in grouped {
+            group.enter()
+            // Construct an `imdb_id` parameter for TVMaze — pad the numeric
+            // form back to "tt"+digits, with at least 7 digits as is the
+            // canonical IMDB ID width.
+            let padded = String(imdbNumeric).leftPadded(to: 7, with: "0")
+            let imdbId = "tt\(padded)"
+            self.fetchTVMaze(imdbId: imdbId) { tvmaze in
+                let episodes = entries.compactMap { Episode(eztv: $0) }
+                if let tvmaze = tvmaze, var show = Show(tvmaze: tvmaze, imdbId: imdbId, episodes: episodes) {
+                    // Wire each episode back to its show so the player flow
+                    // (which reads episode.show) has the metadata.
+                    show.episodes = episodes.map { var e = $0; e.show = show; return e }
+                    lock.lock(); shows.append(show); lock.unlock()
+                }
+                group.leave()
+            }
+        }
+
+        group.notify(queue: .main) {
+            // Sort by most recent episode air date (descending) so newer
+            // shows surface first — matches the "Latest" feel of the films
+            // tab.
+            shows.sort { lhs, rhs in
+                let l = lhs.episodes.map(\.firstAirDate).max() ?? .distantPast
+                let r = rhs.episodes.map(\.firstAirDate).max() ?? .distantPast
+                return l > r
+            }
+            // Cache for later getShowInfo lookups by detail screens.
+            self.cacheQueue.sync {
+                for s in shows { self.showCache[s.id] = s }
+            }
+            print("[EZTV] built \(shows.count) shows from \(grouped.count) imdb groups")
+            completion(shows, nil)
+        }
+    }
+
+    private func fetchTVMaze(imdbId: String, completion: @escaping ([String: Any]?) -> Void) {
+        let url = "https://api.tvmaze.com/lookup/shows"
+        let params: [String: Any] = ["imdb": imdbId]
+        session.request(url, parameters: params).validate().responseData { response in
+            switch response.result {
+            case .success(let data):
+                let json = try? JSONSerialization.jsonObject(with: data, options: .allowFragments)
+                completion(json as? [String: Any])
+            case .failure:
+                completion(nil)
+            }
+        }
+    }
+}
+
+private extension String {
+    func leftPadded(to width: Int, with pad: Character) -> String {
+        if count >= width { return self }
+        return String(repeating: pad, count: width - count) + self
     }
 }

@@ -105,6 +105,59 @@ public struct Episode: Media, Equatable {
         self.largeBackgroundImage = try? map.value("images.fanart")
     }
     
+    /// Build an Episode from an EZTV `get-torrents` JSON object. EZTV is a
+    /// flat list of torrents per show — we group by imdb_id upstream and
+    /// pass the show context in so each Episode knows which series it
+    /// belongs to. The `quality` of the torrent is parsed from the filename
+    /// since EZTV doesn't tag it explicitly.
+    public init?(eztv dict: [String: Any], show: Show? = nil) {
+        guard
+            let hash    = dict["hash"]     as? String,
+            let magnet  = dict["magnet_url"] as? String
+        else { return nil }
+        let title    = (dict["title"]    as? String) ?? "Episode"
+        let filename = (dict["filename"] as? String) ?? title
+        let season   = Int((dict["season"]  as? String) ?? "0") ?? 0
+        let number   = Int((dict["episode"] as? String) ?? "0") ?? 0
+        self.id       = hash
+        self.episode  = number
+        self.season   = season
+        self.title    = title.removingHtmlEncoding
+        self.slug     = title.slugged
+        self.summary  = "No summary available.".localized
+        self.tmdbId   = nil
+        self.imdbId   = nil
+        self.show     = show
+        let unix = (dict["date_released_unix"] as? Int) ?? 0
+        self.firstAirDate = unix > 0 ? Date(timeIntervalSince1970: TimeInterval(unix)) : .distantPast
+        self.largeBackgroundImage = nil
+        // Parse quality + tags from the filename (EZTV doesn't expose codec/
+        // resolution as structured fields). VideoQuality.parse handles the
+        // common 480p/720p/1080p/2160p/x265/HEVC tokens.
+        let qStr = filename
+        let seedsRaw = dict["seeds"] as? Int ?? 0
+        let peersRaw = dict["peers"] as? Int ?? 0
+        let sizeStr = (dict["size_bytes"] as? String).flatMap { Episode.formatBytes($0) }
+        var torrent = Torrent(
+            health:  .unknown,
+            url:     magnet,
+            quality: qStr,
+            seeds:   seedsRaw,
+            peers:   peersRaw,
+            size:    sizeStr,
+            tags:    VideoTags.parse(qStr))
+        torrent.quality = qStr
+        self.torrents = [torrent]
+    }
+
+    private static func formatBytes(_ raw: String) -> String? {
+        guard let bytes = Double(raw) else { return nil }
+        let formatter = ByteCountFormatter()
+        formatter.allowedUnits = [.useGB, .useMB]
+        formatter.countStyle = .binary
+        return formatter.string(fromByteCount: Int64(bytes))
+    }
+
     public init(title: String = "Unknown".localized, id: String = "0000000", tmdbId: Int? = nil, slug: String = "unknown", summary: String = "No summary available.".localized, torrents: [Torrent] = [], subtitles: [Subtitle] = [], largeBackgroundImage: String? = nil, largeCoverImage: String? = nil, show: Show? = nil, episode: Int = -1, season: Int = -1) {
         self.title = title
         self.id = id

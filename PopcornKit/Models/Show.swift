@@ -158,6 +158,36 @@ public struct Show: Media, Equatable {
         self.episodes.sort(by: { $0.episode < $1.episode })
     }
     
+    /// Build a Show from a TVMaze `lookup/shows?imdb=tt…` payload plus the
+    /// imdb id (TVMaze doesn't echo it back) and the list of episodes
+    /// gathered from EZTV. Used by YTSEZTVProvider when no Trakt session is
+    /// active — TVMaze is unauthenticated, free, and not DNS-blocked, so it's
+    /// the best public source of show metadata + cover art.
+    public init?(tvmaze dict: [String: Any], imdbId: String, episodes: [Episode] = []) {
+        guard let name = dict["name"] as? String else { return nil }
+        self.id      = imdbId
+        self.tmdbId  = nil
+        self.tvdbId  = String((dict["externals"] as? [String: Any])?["thetvdb"] as? Int ?? 0)
+        self.slug    = name.slugged
+        self.title   = name.removingHtmlEncoding
+        let premiered = (dict["premiered"] as? String) ?? ""
+        self.year    = String(premiered.prefix(4))
+        self.rating  = Float((dict["rating"] as? [String: Any])?["average"] as? Double ?? 0) * 10.0
+        let summary  = (dict["summary"] as? String) ?? "No summary available.".localized
+        self.summary = summary.removingHtmlEncoding
+        self.runtime = (dict["runtime"] as? Int) ?? (dict["averageRuntime"] as? Int)
+        self.status  = dict["status"] as? String
+        self.genres  = (dict["genres"] as? [String]) ?? []
+        self.network = (dict["network"] as? [String: Any])?["name"] as? String
+        let imageDict = dict["image"] as? [String: Any]
+        self.largeCoverImage      = ImageProxy.proxied(imageDict?["original"] as? String ?? imageDict?["medium"] as? String)
+        self.largeBackgroundImage = self.largeCoverImage
+        self.airDay  = ((dict["schedule"] as? [String: Any])?["days"] as? [String])?.first
+        self.airTime = (dict["schedule"] as? [String: Any])?["time"] as? String
+        self.episodes = episodes
+        self.episodes.sort { $0.season == $1.season ? $0.episode < $1.episode : $0.season < $1.season }
+    }
+
     public init(title: String = "Unknown".localized, id: String = "tt0000000", tmdbId: Int? = nil, slug: String = "unknown", summary: String = "No summary available.".localized, torrents: [Torrent] = [], subtitles: [Subtitle] = [], largeBackgroundImage: String? = nil, largeCoverImage: String? = nil) {
         self.title = title
         self.id = id
