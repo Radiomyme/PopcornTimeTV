@@ -506,7 +506,6 @@
 				70D062EA9E7B9A88F5F7BD6F /* Pods-TopShelf.debug.xcconfig */,
 				1B82EC3E82F13FD7DA6E7340 /* Pods-TopShelf.release.xcconfig */,
 			);
-			name = Pods;
 			path = Pods;
 			sourceTree = "<group>";
 		};
@@ -556,7 +555,6 @@
 				4DC870B51D9EDE58005455B0 /* PopcornTime.entitlements */,
 				4D990E281DC4F00F005CDE34 /* PopcornTimetvOS-Bridging-Header.h */,
 			);
-			name = "Supporting Files";
 			path = "Supporting Files";
 			sourceTree = "<group>";
 		};
@@ -686,7 +684,6 @@
 				B9A5B2894233AEB853E7A1E1 /* JSONValue.swift */,
 				3EC80D936120986C06A00498 /* String+Localized.swift */,
 			);
-			name = Resources;
 			path = Resources;
 			sourceTree = "<group>";
 		};
@@ -962,7 +959,6 @@
 				DE96A3C033AAA0359ED427BC /* MediaProvider.swift */,
 				37DACB023B19FBE420CFFCEA /* YTSEZTVProvider.swift */,
 			);
-			name = Providers;
 			path = Providers;
 			sourceTree = "<group>";
 		};
@@ -1092,29 +1088,11 @@
 						LastSwiftMigration = 0820;
 						ProvisioningStyle = Automatic;
 					};
-					4D0F9D901E6F2F4D00860852 = {
-						CreatedOnToolsVersion = 8.2.1;
-						DevelopmentTeam = 6RYPZDP4Q2;
-						ProvisioningStyle = Automatic;
-					};
 					4D2543AC1DACFBFE00149533 = {
 						CreatedOnToolsVersion = 8.0;
 						DevelopmentTeam = 6RYPZDP4Q2;
 						ProvisioningStyle = Automatic;
 						SystemCapabilities = {
-							com.apple.Keychain = {
-								enabled = 1;
-							};
-						};
-					};
-					4D689A161DD88E17001D1318 = {
-						CreatedOnToolsVersion = 8.1;
-						DevelopmentTeam = 6RYPZDP4Q2;
-						ProvisioningStyle = Automatic;
-						SystemCapabilities = {
-							com.apple.BackgroundModes = {
-								enabled = 1;
-							};
 							com.apple.Keychain = {
 								enabled = 1;
 							};
@@ -1127,8 +1105,13 @@
 			developmentRegion = English;
 			hasScannedForEncodings = 0;
 			knownRegions = (
+				English,
 				Base,
 				en,
+				it,
+				ar,
+				"pt-BR",
+				es,
 			);
 			mainGroup = 287B852B1C9873A200EEF5C8;
 			productRefGroup = 287B85351C9873A200EEF5C8 /* Products */;

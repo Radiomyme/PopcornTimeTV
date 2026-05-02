@@ -67,7 +67,25 @@ class CollectionViewController: ResponsiveCollectionViewController, UICollection
         return AppDelegate.shared.activeRootViewController
     }
     
-    private var continueWatchingCollectionReusableView: ContinueWatchingCollectionReusableView?
+    /// The currently visible "Continue watching" supplementary view, set on
+    /// every dequeue so `collectionViewDidReloadData` can ask it to refresh.
+    /// Never returned from `viewForSupplementaryElementOfKind` directly:
+    /// tvOS 18+ requires a fresh dequeue for every index path.
+    private weak var continueWatchingCollectionReusableView: ContinueWatchingCollectionReusableView?
+
+    /// Off-screen instance used solely for `intrinsicContentSize` lookups in
+    /// `referenceSizeForHeaderInSection`. Built once from the same nib the
+    /// collection view registers; never added to the view hierarchy.
+    private lazy var sizingContinueWatchingView: ContinueWatchingCollectionReusableView? = {
+        guard
+            let nib = delegate?.collectionView(nibForHeaderInCollectionView: self.collectionView ?? UICollectionView(frame: .zero, collectionViewLayout: UICollectionViewFlowLayout())),
+            let view = nib.instantiate(withOwner: nil, options: nil).first as? ContinueWatchingCollectionReusableView
+        else { return nil }
+        if let parent = self.parent {
+            view.type = type(of: parent) == MoviesViewController.self ? .movies : .episodes
+        }
+        return view
+    }()
     
     override func viewDidLoad() {
         super.viewDidLoad()
@@ -146,35 +164,35 @@ class CollectionViewController: ResponsiveCollectionViewController, UICollection
         if delegate?.collectionView(collectionView, titleForHeaderInSection: section) != nil {
             return collectionView.numberOfItems(inSection: section) != 0 ? CGSize(width: collectionView.bounds.width, height: 40) : .zero
         } else if delegate?.collectionView(nibForHeaderInCollectionView: collectionView) != nil {
-            return continueWatchingCollectionReusableView?.intrinsicContentSize ?? .min
+            return sizingContinueWatchingView?.intrinsicContentSize ?? .min
         }
         return .zero
     }
-    
+
     override func collectionView(_ collectionView: UICollectionView, viewForSupplementaryElementOfKind kind: String, at indexPath: IndexPath) -> UICollectionReusableView {
         if kind == UICollectionView.elementKindSectionHeader {
             if let title = delegate?.collectionView(collectionView, titleForHeaderInSection: indexPath.section) {
                 let header = collectionView.dequeueReusableSupplementaryView(ofKind: kind, withReuseIdentifier: "sectionHeader", for: indexPath)
-                
+
                 let label = header.viewWithTag(1) as? UILabel
                 label?.text = title
-                
+
                 return header
             } else {
-                continueWatchingCollectionReusableView = continueWatchingCollectionReusableView ?? {
-                    let header = collectionView.dequeueReusableSupplementaryView(ofKind: kind, withReuseIdentifier: "stickyHeader", for: indexPath) as! ContinueWatchingCollectionReusableView
-                    if let parent = parent {
-                        header.type = type(of: parent) == MoviesViewController.self ? .movies : .episodes
-                    }
-                    return header
-                }()
-                
-                continueWatchingCollectionReusableView!.refreshOnDeck()
-                
-                return continueWatchingCollectionReusableView!
+                // tvOS 18+ requires a fresh dequeue for each index path. Caching
+                // and re-returning the same supplementary view raises
+                // NSInternalInconsistencyException ("supplementary view that is
+                // in the reuse queue").
+                let header = collectionView.dequeueReusableSupplementaryView(ofKind: kind, withReuseIdentifier: "stickyHeader", for: indexPath) as! ContinueWatchingCollectionReusableView
+                if let parent = parent {
+                    header.type = type(of: parent) == MoviesViewController.self ? .movies : .episodes
+                }
+                continueWatchingCollectionReusableView = header
+                header.refreshOnDeck()
+                return header
             }
         }
-        return super.collectionView(collectionView, viewForSupplementaryElementOfKind: kind, at: indexPath)
+        return UICollectionReusableView()
     }
     
     func collectionView(_ collectionView: UICollectionView, layout collectionViewLayout: UICollectionViewLayout, referenceSizeForFooterInSection section: Int) -> CGSize {
