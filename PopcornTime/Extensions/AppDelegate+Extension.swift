@@ -109,17 +109,7 @@ extension AppDelegate: PCTPlayerViewControllerDelegate, UIViewControllerTransiti
             guard self.window?.rootViewController?.presentedViewController === loadingViewController else { return } // Make sure the user is still loading.
             
             media.subtitles = subtitles
-            
-            #if os(iOS)
-                
-                if GCKCastContext.sharedInstance().castState == .connected {
-                    let playViewController = storyboard.instantiateViewController(withIdentifier: "CastPlayerViewController") as! CastPlayerViewController
-                    media.playOnChromecast(fromFileOrMagnetLink: torrent.url, loadingViewController: loadingViewController, playViewController: playViewController, progress: currentProgress, errorBlock: error, finishedLoadingBlock: finishedLoading)
-                    return
-                }
-                
-            #endif
-            
+
             let playViewController = storyboard.instantiateViewController(withIdentifier: "PCTPlayerViewController") as! PCTPlayerViewController
             playViewController.delegate = self
             media.play(fromFileOrMagnetLink: torrent.url, nextEpisodeInSeries: nextEpisode, loadingViewController: loadingViewController, playViewController: playViewController, progress: currentProgress, errorBlock: error, finishedLoadingBlock: finishedLoading)
@@ -175,24 +165,7 @@ extension AppDelegate: PCTPlayerViewControllerDelegate, UIViewControllerTransiti
     }
     
     // MARK: - PCTPlayerViewControllerDelegate
-    
-    #if os(iOS)
-    
-    func playerViewControllerPresentCastPlayer(_ playerViewController: PCTPlayerViewController) {
-        dismiss(animated: true) { [unowned self] in
-            let castPlayerViewController = UIStoryboard.main.instantiateViewController(withIdentifier: "CastPlayerViewController") as! CastPlayerViewController
-            castPlayerViewController.media = playerViewController.media
-            castPlayerViewController.streamer = playerViewController.streamer
-            castPlayerViewController.localPathToMedia = playerViewController.localPathToMedia
-            castPlayerViewController.directory = playerViewController.directory
-            castPlayerViewController.url = playerViewController.url
-            castPlayerViewController.startPosition = TimeInterval(playerViewController.progressBar.progress)
-            self.present(castPlayerViewController, animated: true)
-        }
-    }
-    
-    #endif
-    
+
     func playNext(_ episode: Episode) {
         chooseQuality(nil, media: episode) { [unowned self] torrent in
             self.play(episode, torrent: torrent)

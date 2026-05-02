@@ -7,13 +7,11 @@ import MediaPlayer.MPMediaItem
 
 #if os(tvOS)
     typealias UIDownloadDetailViewController = UIViewController
-#elseif os(iOS)
-    typealias UIDownloadDetailViewController = UITableViewController
 #endif
 
 class DownloadDetailViewController: UIDownloadDetailViewController {
     
-    #if os(tvOS)
+#if os(tvOS)
     
         @IBOutlet var titleLabel: UILabel!
         @IBOutlet var tableView: UITableView!
@@ -25,7 +23,7 @@ class DownloadDetailViewController: UIDownloadDetailViewController {
         @IBOutlet var playButton: TVButton!
         @IBOutlet var deleteButton: TVButton!
     
-    #endif
+#endif
     
     var show: Show!
     var workItem: DispatchWorkItem!

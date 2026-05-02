@@ -3,9 +3,7 @@
 import UIKit
 import enum PopcornTorrent.PTTorrentDownloadStatus
 
-#if os(iOS)
-    typealias UIDownloadButton = BorderButton
-#elseif os(tvOS)
+#if os(tvOS)
     typealias UIDownloadButton = TVButton
 #endif
     
@@ -51,9 +49,9 @@ class DownloadButton: UIDownloadButton, UIGestureRecognizerDelegate {
             
             progressView.endAngle = ((2 * CGFloat.pi) * CGFloat(progress)) + progressView.startAngle
             
-            #if os(tvOS)
+#if os(tvOS)
                 isFocused ? updateFocusedViewMask() : () // Because this call is very expensive and the mask is automatically updated upon focus, the only time we need to actively update the mask for the user to see the progress is when the button is focused.
-            #endif
+#endif
         }
     }
     
@@ -70,9 +68,9 @@ class DownloadButton: UIDownloadButton, UIGestureRecognizerDelegate {
     override func layoutSubviews() {
         super.layoutSubviews()
         
-        #if os(tvOS)
+#if os(tvOS)
             let bounds = backgroundView?.contentView.bounds ?? self.bounds
-        #endif
+#endif
         
         let image  = UIImageView(image: UIImage(named: "Download Progress Indeterminate"))
         let size   = image.systemLayoutSizeFitting(UILayoutFittingCompressedSize)
@@ -89,11 +87,9 @@ class DownloadButton: UIDownloadButton, UIGestureRecognizerDelegate {
         
         [progressView, outlineView].forEach { [unowned self] in
             $0.isHidden = true
-            #if os(tvOS)
+#if os(tvOS)
                 let view = self.backgroundView!.contentView
-            #elseif os(iOS)
-                let view = self
-            #endif
+#endif
             view.addSubview($0)
         }
         
@@ -121,7 +117,7 @@ class DownloadButton: UIDownloadButton, UIGestureRecognizerDelegate {
         return CGSize(width: common, height: common)
     }
     
-    #if os(tvOS)
+#if os(tvOS)
     
     override func applyFocusedAppearance() {
         [progressView, outlineView].forEach { $0.isHidden = true }
@@ -146,13 +142,13 @@ class DownloadButton: UIDownloadButton, UIGestureRecognizerDelegate {
         [progressView, outlineView].forEach { $0.isHidden = downloadProgressViewsHidden }
     }
     
-    #endif
+#endif
     
     override func invalidateAppearance() {
         defer {
-            #if os(tvOS)
+#if os(tvOS)
                 updateFocusedViewMask()
-            #endif
+#endif
             setNeedsLayout()
             UIView.animate(withDuration: .default) { [unowned self] in
                 self.layoutIfNeeded()
@@ -161,9 +157,9 @@ class DownloadButton: UIDownloadButton, UIGestureRecognizerDelegate {
         }
         
         var layers = [imageView?.layer]
-        #if os(tvOS)
+#if os(tvOS)
             layers.append(focusedView?.layer)
-        #endif
+#endif
         
         layers.flatMap({$0}).forEach {
             if downloadState != .pending && $0.animation(forKey: "Spin") != nil {
@@ -183,15 +179,10 @@ class DownloadButton: UIDownloadButton, UIGestureRecognizerDelegate {
             UIDevice.current.userInterfaceIdiom == .tv ? setTitle("Options".localized, for: .normal) : ()
             [progressView, outlineView].forEach { $0.isHidden = true }
         case .normal:
-            #if os(iOS)
-                super.invalidateAppearance()
-                setImage(nil, for: .normal)
-                layer.borderWidth = borderWidth
-                setTitle(titleLabel?.text, for: .normal)
-            #elseif os(tvOS)
+#if os(tvOS)
                 setImage(UIImage(named: "Download Progress Start"), for: .normal)
                 setTitle(title, for: .normal)
-            #endif
+#endif
             [progressView, outlineView].forEach { $0.isHidden = true }
         case .downloading:
             if UIDevice.current.userInterfaceIdiom == .tv {

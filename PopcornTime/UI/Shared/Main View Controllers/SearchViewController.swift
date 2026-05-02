@@ -6,19 +6,13 @@ import PopcornKit
 
 class SearchViewController: MainViewController, UISearchBarDelegate {
     
-    #if os(iOS)
-    
-    @IBOutlet var searchBar: UISearchBar!
-    @IBOutlet var toolbar: UIToolbar!
-    @IBOutlet var segmentedControl: UISegmentedControl!
-    
-    #elseif os(tvOS)
+#if os(tvOS)
     
     var searchBar: UISearchBar!
     var searchController: UISearchController!
     var searchContainerViewController: UISearchContainerViewController?
     
-    #endif
+#endif
 
     let searchDelay: TimeInterval = 0.25
     var workItem: DispatchWorkItem!

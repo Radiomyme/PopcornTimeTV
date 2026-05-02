@@ -4,9 +4,6 @@ import ObjectMapper
 import Alamofire
 import SwiftyJSON
 
-#if os(iOS)
-    import SafariServices
-#endif
 
 open class TraktManager: NetworkManager {
     
@@ -606,16 +603,9 @@ extension TraktManager {
      - Returns: A login view controller to be presented.
      */
     public func loginViewController() -> UIViewController {
-        #if os(iOS)
-            state = .random(of: 15)
-            
-            let vc = SFSafariViewController(url: URL(string: Trakt.base + Trakt.auth + "/authorize?client_id=" + Trakt.apiKey + "&redirect_uri=PopcornTime%3A%2F%2Ftrakt&response_type=code&state=\(state!)")!)
-            vc.modalPresentationStyle = .fullScreen
-            
-            return vc
-        #else
+#else
             return TraktAuthenticationViewController(nibName: "TraktAuthenticationViewController", bundle: TraktAuthenticationViewController.bundle)
-        #endif
+#endif
     }
     
     /**

@@ -35,9 +35,6 @@ class MainViewController: UIViewController, CollectionViewControllerDelegate {
     override dynamic func viewWillAppear(_ animated: Bool) {
         super.viewWillAppear(animated)
         
-        #if os(iOS)
-            navigationController?.navigationBar.isBackgroundHidden = false
-        #endif
         navigationController?.navigationBar.tintColor = .app
     }
     
@@ -72,15 +69,12 @@ class MainViewController: UIViewController, CollectionViewControllerDelegate {
         if segue.identifier == "embed", let vc = segue.destination as? CollectionViewController {
             collectionViewController = vc
             collectionViewController.delegate = self
-            #if os(iOS)
-                collectionViewController.isRefreshable = true
-            #endif
         } else if let segue = segue as? AutoPlayStoryboardSegue,
             segue.identifier == "showMovie" || segue.identifier == "showShow",
             let media: Media = sender as? Movie ?? sender as? Show,
             let vc = storyboard?.instantiateViewController(withIdentifier: String(describing: DetailViewController.self)) as? DetailViewController {
             
-            #if os(tvOS)
+#if os(tvOS)
 
                 if let destination = segue.destination as? TVLoadingViewController {
                     destination.loadView() // Initialize the @IBOutlets
@@ -92,14 +86,11 @@ class MainViewController: UIViewController, CollectionViewControllerDelegate {
                     destination.titleLabel.text = media.title
                 }
             
-            #endif
+#endif
             
             // Exact same storyboard UI is being used for both classes. This will enable subclass-specific functions however, stored instance variables have to be set using `object_setIvar` otherwise there will be weird malloc crashes.
             object_setClass(vc, media is Movie ? MovieDetailViewController.self : ShowDetailViewController.self)
             
-            #if os(iOS)
-                navigationController?.navigationBar.isBackgroundHidden = true
-            #endif
             
             vc.loadMedia(id: media.id) { (media, error) in
                 guard let navigationController = segue.destination.navigationController,

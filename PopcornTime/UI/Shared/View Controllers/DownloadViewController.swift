@@ -5,9 +5,7 @@ import PopcornTorrent
 import PopcornKit
 import MediaPlayer.MPMediaItem
 
-#if os(iOS)
-    typealias UIDownloadViewController = UITableViewController
-#elseif os(tvOS)
+#if os(tvOS)
     typealias UIDownloadViewController = UIViewController
 #endif
 
@@ -15,9 +13,9 @@ class DownloadViewController: UIDownloadViewController, PTTorrentDownloadManager
     
     @IBOutlet var segmentedControl: UISegmentedControl!
     
-    #if os(tvOS)
+#if os(tvOS)
         @IBOutlet var tableView: UITableView?
-    #endif
+#endif
     
     var completedEpisodes: [PTTorrentDownload] {
         return filter(downloads: PTTorrentDownloadManager.shared().completedDownloads, through: .episode)
@@ -86,14 +84,6 @@ class DownloadViewController: UIDownloadViewController, PTTorrentDownloadManager
         sharedSetup()
     }
     
-    #if os(iOS)
-    
-    override init(style: UITableViewStyle) {
-        super.init(style: style)
-        sharedSetup()
-    }
-    
-    #endif
     
     func sharedSetup() {
         PTTorrentDownloadManager.shared().add(self)

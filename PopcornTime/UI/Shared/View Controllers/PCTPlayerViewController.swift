@@ -9,9 +9,6 @@ import PopcornKit
 protocol PCTPlayerViewControllerDelegate: class {
     func playNext(_ episode: Episode)
     
-    #if os(iOS)
-        func playerViewControllerPresentCastPlayer(_ playerViewController: PCTPlayerViewController)
-    #endif
 }
 
 /// Optional functions
@@ -55,19 +52,6 @@ class PCTPlayerViewController: UIViewController, VLCMediaPlayerDelegate, UIGestu
     
     @IBOutlet var scrubbingSpeedLabel: UILabel?
     
-    #if os(iOS)
-        @IBOutlet var volumeSlider: BarSlider! {
-            didSet {
-                volumeSlider.setValue(AVAudioSession.sharedInstance().outputVolume, animated: false)
-            }
-        }
-    
-        internal var volumeView: MPVolumeView = {
-            let view = MPVolumeView(frame: CGRect(x: -1000, y: -1000, width: 100, height: 100))
-            view.sizeToFit()
-            return view
-        }()
-    #endif
     
     
     
@@ -81,11 +65,9 @@ class PCTPlayerViewController: UIViewController, VLCMediaPlayerDelegate, UIGestu
         workItem?.cancel()
         workItem = DispatchWorkItem { [weak self] in
             if let image = self?.screenshotAtTime(time) {
-                #if os(tvOS)
+#if os(tvOS)
                     self?.progressBar.screenshot = image
-                #elseif os(iOS)
-                    self?.screenshotImageView?.image = image
-                #endif
+#endif
             }
         }
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.25, execute: workItem!)
@@ -103,19 +85,13 @@ class PCTPlayerViewController: UIViewController, VLCMediaPlayerDelegate, UIGestu
     // MARK: - Button actions
     
     @IBAction func playandPause() {
-        #if os(tvOS)
+#if os(tvOS)
             // Make fake gesture to trick clickGesture: into recognising the touch.
             let gesture = SiriRemoteGestureRecognizer(target: nil, action: nil)
             gesture.isClick = true
             gesture.state = .ended
             clickGesture(gesture)
-        #elseif os(iOS)
-            if mediaplayer.isPlaying {
-                mediaplayer.canPause ? mediaplayer.pause() : ()
-            } else {
-                mediaplayer.willPlay ? mediaplayer.play() : ()
-            }
-        #endif
+#endif
     }
     
     @IBAction func fastForward() {
@@ -131,9 +107,9 @@ class PCTPlayerViewController: UIViewController, VLCMediaPlayerDelegate, UIGestu
         case .began:
             fallthrough
         case .changed:
-            #if os(tvOS)
+#if os(tvOS)
             progressBar.hint = .fastForward
-            #endif
+#endif
             guard mediaplayer.rate == 1.0 else { break }
             mediaplayer.fastForward(atRate: 20.0)
         case .cancelled:
@@ -141,9 +117,9 @@ class PCTPlayerViewController: UIViewController, VLCMediaPlayerDelegate, UIGestu
         case .failed:
             fallthrough
         case .ended:
-            #if os(tvOS)
+#if os(tvOS)
             progressBar.hint = .none
-            #endif
+#endif
             mediaplayer.rate = 1.0
             resetIdleTimer()
         default:
@@ -156,9 +132,9 @@ class PCTPlayerViewController: UIViewController, VLCMediaPlayerDelegate, UIGestu
         case .began:
             fallthrough
         case .changed:
-            #if os(tvOS)
+#if os(tvOS)
             progressBar.hint = .rewind
-            #endif
+#endif
             guard mediaplayer.rate == 1.0 else { break }
             mediaplayer.rewind(atRate: 20.0)
         case .cancelled:
@@ -166,9 +142,9 @@ class PCTPlayerViewController: UIViewController, VLCMediaPlayerDelegate, UIGestu
         case .failed:
             fallthrough
         case .ended:
-            #if os(tvOS)
+#if os(tvOS)
             progressBar.hint = .none
-            #endif
+#endif
             mediaplayer.rate = 1.0
             resetIdleTimer()
         default:
@@ -285,9 +261,9 @@ class PCTPlayerViewController: UIViewController, VLCMediaPlayerDelegate, UIGestu
             let style: UIAlertControllerStyle = isRegular ? .alert : .actionSheet
             let continueWatchingAlert = UIAlertController(title: nil, message: nil, preferredStyle: style)
             
-            #if os(tvOS)
+#if os(tvOS)
                 NotificationCenter.default.addObserver(self, selector: #selector(alertFocusDidChange(_:)), name: .UIViewControllerFocusedViewDidChange, object: continueWatchingAlert)
-            #endif
+#endif
             
             self.loadingActivityIndicatorView.isHidden = true
             
@@ -336,12 +312,7 @@ class PCTPlayerViewController: UIViewController, VLCMediaPlayerDelegate, UIGestu
         subtitleSwitcherButton?.isHidden = subtitles.count == 0
         subtitleSwitcherButtonWidthConstraint?.constant = subtitleSwitcherButton?.isHidden == true ? 0 : 24
         
-        #if os(iOS)
-            view.addSubview(volumeView)
-            if let slider = volumeView.subviews.flatMap({$0 as? UISlider}).first {
-                slider.addTarget(self, action: #selector(volumeChanged), for: .valueChanged)
-            }
-        #elseif os(tvOS)
+#if os(tvOS)
             let gesture = SiriRemoteGestureRecognizer(target: self, action: #selector(touchLocationDidChange(_:)))
             gesture.delegate = self
             view.addGestureRecognizer(gesture)
@@ -351,7 +322,7 @@ class PCTPlayerViewController: UIViewController, VLCMediaPlayerDelegate, UIGestu
             view.addGestureRecognizer(clickGesture)
             
             didSelectEqualizerProfile(.fullDynamicRange)
-        #endif
+#endif
     }
     
     // MARK: - Player changes notifications
@@ -364,9 +335,6 @@ class PCTPlayerViewController: UIViewController, VLCMediaPlayerDelegate, UIGestu
     
     func mediaPlayerTimeChanged(_ aNotification: Notification!) {
         if loadingActivityIndicatorView.isHidden == false {
-            #if os(iOS)
-                progressBar.subviews.first(where: {!$0.subviews.isEmpty})?.subviews.forEach({ $0.isHidden = false })
-            #endif
             loadingActivityIndicatorView.isHidden = true
             
             addRemoteCommandCenterHandlers()
@@ -436,9 +404,6 @@ class PCTPlayerViewController: UIViewController, VLCMediaPlayerDelegate, UIGestu
             } else {
                 self.overlayViews.forEach({ $0.alpha = 0.0 })
             }
-            #if os(iOS)
-            self.setNeedsStatusBarAppearanceUpdate()
-            #endif
          }, completion: { finished in
             if self.overlayViews.first!.alpha == 0.0 {
                 self.overlayViews.forEach({ $0.isHidden = true })
@@ -526,23 +491,5 @@ class PCTPlayerViewController: UIViewController, VLCMediaPlayerDelegate, UIGestu
             }
         }
         
-        #if os(iOS)
-            
-            if segue.identifier == "showSubtitles",
-                let navigationController = segue.destination as? UINavigationController,
-                let vc = navigationController.viewControllers.first as? OptionsTableViewController {
-                vc.subtitles = subtitles
-                vc.currentSubtitle = currentSubtitle
-                vc.currentSubtitleDelay = mediaplayer.currentVideoSubTitleDelay/Int(1e6)
-                vc.currentAudioDelay = mediaplayer.currentAudioPlaybackDelay/Int(1e6)
-                vc.delegate = self
-                segue.destination.popoverPresentationController?.delegate = self
-            } else if segue.identifier == "showDevices", let vc = (segue.destination as? UINavigationController)?.viewControllers.first as? GoogleCastTableViewController {
-                object_setClass(vc, StreamToDevicesTableViewController.self)
-                vc.delegate = self
-                segue.destination.popoverPresentationController?.delegate = self
-            }
-            
-        #endif
     }
 }

@@ -7,10 +7,7 @@ import PopcornTorrent
 import AVKit
 import XCDYouTubeKit
 
-#if os(iOS)
-    typealias ExpandableTextView = UIExpandableTextView
-    typealias Button = UIButton
-#elseif os(tvOS)
+#if os(tvOS)
     typealias ExpandableTextView = TVExpandableTextView
     typealias Button = TVButton
 #endif
@@ -56,7 +53,7 @@ class ItemViewController: UIViewController, PTTorrentDownloadManagerListener {
         return media.isWatched ? UIImage(named: "Watched On") : UIImage(named: "Watched Off")
     }
     
-    #if os(tvOS)
+#if os(tvOS)
     
         var isDark = true {
             didSet {
@@ -76,7 +73,7 @@ class ItemViewController: UIViewController, PTTorrentDownloadManagerListener {
             }
         }
     
-    #endif
+#endif
     
     override func viewWillAppear(_ animated: Bool) {
         super.viewWillAppear(animated)
@@ -146,7 +143,7 @@ class ItemViewController: UIViewController, PTTorrentDownloadManagerListener {
             
             let player = AVPlayer(url: url)
             
-            #if os(tvOS)
+#if os(tvOS)
             
                 let title = AVMetadataItem(key: AVMetadataCommonKeyTitle as NSString, value: self.media.title as NSString)
                 let summary = AVMetadataItem(key: AVMetadataCommonKeyDescription as NSString, value: self.media.summary as NSString)
@@ -160,7 +157,7 @@ class ItemViewController: UIViewController, PTTorrentDownloadManagerListener {
                     player.currentItem?.externalMetadata.append(image)
                 }
                 
-            #endif
+#endif
             
             playerController.player = player
             player.play()

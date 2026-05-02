@@ -20,7 +20,7 @@ class EpisodeCollectionViewCell: BaseCollectionViewCell {
         }
     }
     
-    #if os(tvOS)
+#if os(tvOS)
     
     override func awakeFromNib() {
         super.awakeFromNib()
@@ -33,14 +33,7 @@ class EpisodeCollectionViewCell: BaseCollectionViewCell {
         addGestureRecognizer(gestureRecognizer)
     }
     
-    #elseif os(iOS)
-    
-    override func hitTest(_ point: CGPoint, with event: UIEvent?) -> UIView? {
-        let view = super.hitTest(point, with: event)
-        return view == accessoryView ? watchedButton : view
-    }
-    
-    #endif
+#endif
     
     func didDetectLongPress(_ gesture: UILongPressGestureRecognizer) {
         guard gesture.state == .began else { return }

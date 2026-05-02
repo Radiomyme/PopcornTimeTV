@@ -67,54 +67,6 @@ extension Media {
         }
     }
     
-    #if os(iOS)
-    
-    /**
-     Start playing movie or episode on chromecast.
-     
-     - Parameter fromFileOrMagnetLink:  The url pointing to a .torrent file, a web adress pointing to a .torrent file to be downloaded or a magnet link.
-     - Parameter loadingViewController: The view controller that will be presented while the torrent is processing to display updates to the user.
-     - Parameter playViewController:    View controller to be presented to handle controlling cast UI.
-     - Parameter progress:              The users playback progress for the current media.
-     - Parameter loadingBlock:          Block that handels updating loadingViewController UI. Defaults to updaing the progress of buffering, download speed and number of seeds.
-     - Parameter playBlock:             Block that handels setting up playViewController. If playViewController is a subclass of CastPlayerViewController, default behaviour is to setup UI.
-     - Parameter errorBlock:            Block thats called when the request fails or torrent fails processing/downloading with error message parameter.
-     - Parameter finishedLoadingBlock:  Block thats called when torrent is finished loading.
-     */
-    func playOnChromecast(
-        fromFileOrMagnetLink url: String,
-        loadingViewController: PreloadTorrentViewController,
-        playViewController: UIViewController,
-        progress: Float,
-        loadingBlock: @escaping ((PTTorrentStatus, PreloadTorrentViewController) -> Void) = { (status, viewController) in
-        viewController.progress = status.bufferingProgress
-        viewController.speed = Int(status.downloadSpeed)
-        viewController.seeds = Int(status.seeds)
-        },
-        playBlock: @escaping (URL, URL, Media, Episode?, Float, UIViewController, PTTorrentStreamer) -> Void = { (videoFileURL, videoFilePath, media, _, progress, viewController, streamer) in
-        guard let viewController = viewController as? CastPlayerViewController else { return }
-        viewController.media = media
-        viewController.url = videoFileURL
-        viewController.streamer = streamer
-        viewController.localPathToMedia = videoFilePath
-        viewController.directory = videoFilePath.deletingLastPathComponent()
-        viewController.startPosition = TimeInterval(progress)
-        },
-        errorBlock: @escaping (String) -> Void,
-        finishedLoadingBlock: @escaping (PreloadTorrentViewController, UIViewController) -> Void)
-    {
-        self.play(
-            fromFileOrMagnetLink: url,
-            loadingViewController: loadingViewController,
-            playViewController: playViewController,
-            progress: progress,
-            loadingBlock: loadingBlock,
-            playBlock: playBlock,
-            errorBlock: errorBlock,
-            finishedLoadingBlock: finishedLoadingBlock)
-    }
-    #endif
-    
     /**
      Retrieves subtitles from OpenSubtitles
      

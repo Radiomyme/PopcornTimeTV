@@ -34,9 +34,9 @@ class UpNextViewController: UIViewController {
     @IBOutlet var summaryView: UITextView?
     @IBOutlet var containerView: UIView?
     
-    #if os(tvOS)
+#if os(tvOS)
         @IBOutlet var countdownView: MBCircularProgressBarView!
-    #endif
+#endif
     
     
     override func viewWillAppear(_ animated: Bool) {
@@ -91,11 +91,9 @@ class UpNextViewController: UIViewController {
             guard let `self` = self, (delay - 1) >= 0 else { return }
             delay -= 1
             
-            #if os(iOS)
-                self.countdownLabel?.text = String(delay)
-            #elseif os(tvOS)
+#if os(tvOS)
                 self.countdownView.value = CGFloat(delay)
-            #endif
+#endif
         }
         
         timer = Timer.after(TimeInterval(initial), { [weak self] in

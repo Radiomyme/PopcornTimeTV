@@ -222,9 +222,9 @@ class CollectionViewController: ResponsiveCollectionViewController, UICollection
                 cell.watched = media.isWatched
                 
                 
-                #if os(tvOS)
+#if os(tvOS)
                     cell.hidesTitleLabelWhenUnfocused = true
-                #endif
+#endif
                 
                 if let image = media.smallCoverImage,
                     let url = URL(string: image) {
@@ -267,7 +267,7 @@ class CollectionViewController: ResponsiveCollectionViewController, UICollection
             }()
         } else if let download = item as? PTTorrentDownload {
             cell = {
-                #if os(tvOS)
+#if os(tvOS)
                     let cell = collectionView.dequeueReusableCell(withReuseIdentifier: "downloadCell", for: indexPath) as! DownloadCollectionViewCell
                     
                     cell.delegate = parent as? DownloadCollectionViewCellDelegate
@@ -285,9 +285,7 @@ class CollectionViewController: ResponsiveCollectionViewController, UICollection
                     cell.blurView.isHidden = download.downloadStatus == .finished
                     
                     return cell
-                #elseif os(iOS)
-                    fatalError("Unknown type in dataSource.")
-                #endif
+#endif
             }()
         } else {
             fatalError("Unknown type in dataSource.")

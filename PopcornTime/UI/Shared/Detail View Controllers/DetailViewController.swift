@@ -9,22 +9,7 @@ import PopcornKit
 class DetailViewController: UIViewController, CollectionViewControllerDelegate, UIScrollViewDelegate {
     
     
-    #if os(iOS)
-
-    @IBOutlet var castButton: CastIconButton?
-    @IBOutlet var watchlistButton: UIButton!
-    @IBOutlet var watchedButton: UIButton!
-    
-    @IBOutlet var moreSeasonsButton: UIButton?
-    @IBOutlet var seasonsLabel: UILabel!
-    
-    var headerHeight: CGFloat = 0 {
-        didSet {
-            scrollView.contentInset.top = headerHeight
-        }
-    }
-    
-    #elseif os(tvOS)
+#if os(tvOS)
     
     var seasonsLabel: UILabel {
         get {
@@ -49,7 +34,7 @@ class DetailViewController: UIViewController, CollectionViewControllerDelegate, 
         }
     }
     
-    #endif
+#endif
     
     // tvOS Exclusive
     @IBOutlet var titleImageView: UIImageView?
@@ -124,7 +109,7 @@ class DetailViewController: UIViewController, CollectionViewControllerDelegate, 
     override dynamic func viewDidLoad() {
         super.viewDidLoad()
         
-        #if os(tvOS)
+#if os(tvOS)
             
             let focusButtonsGuide = UIFocusGuide()
             view.addLayoutGuide(focusButtonsGuide)
@@ -136,7 +121,7 @@ class DetailViewController: UIViewController, CollectionViewControllerDelegate, 
             
             focusButtonsGuide.preferredFocusEnvironments = itemViewController.visibleButtons
             
-        #endif
+#endif
         
         navigationItem.title = currentItem.title
         titleLabel?.text = currentItem.title
@@ -161,15 +146,13 @@ class DetailViewController: UIViewController, CollectionViewControllerDelegate, 
             imageView.contentMode = .scaleAspectFit
             imageView.af_setImage(withURL: url) { response in
                 guard response.result.isSuccess else { return }
-                #if os(tvOS)
+#if os(tvOS)
                     self.titleImageView?.image = response.result.value
                     self.titleLabel?.isHidden = true
                     
                     self.episodesCollectionViewController.titleImageView.image = response.result.value
                     self.episodesCollectionViewController.titleLabel.isHidden = true
-                #elseif os(iOS)
-                    self.navigationItem.titleView = imageView
-                #endif
+#endif
             }
         }
         
@@ -196,11 +179,6 @@ class DetailViewController: UIViewController, CollectionViewControllerDelegate, 
     // MARK: Navigation
     
     override func prepare(for segue: UIStoryboardSegue, sender: Any?) {
-        #if os(iOS)
-            if segue.identifier == "showCastDevices", let vc = segue.destination as? UINavigationController, vc.viewControllers.first is GoogleCastTableViewController, let sender = sender as? CastIconButton {
-                vc.popoverPresentationController?.sourceRect = sender.bounds
-            }
-        #endif
         if segue.identifier == "embedItem", let vc = segue.destination as? ItemViewController {
             itemViewController = vc
             itemViewController.media = currentItem
