@@ -188,12 +188,12 @@ class PCTPlayerViewController: UIViewController, VLCMediaPlayerDelegate, UIGestu
     
     // MARK: - Private vars
     
-    private (set) var mediaplayer = VLCMediaPlayer()
-    private (set) var url: URL!
-    private (set) var directory: URL!
-    private (set) var localPathToMedia: URL!
-    private (set) var media: Media!
-    private (set) var streamer: PTTorrentStreamer!
+    private(set) var mediaplayer = VLCMediaPlayer()
+    private(set) var url: URL!
+    private(set) var directory: URL!
+    private(set) var localPathToMedia: URL!
+    private(set) var media: Media!
+    private(set) var streamer: PTTorrentStreamer!
     internal var nextEpisode: Episode?
     internal var startPosition: Float = 0.0
     private var idleWorkItem: DispatchWorkItem?

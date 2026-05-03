@@ -14,7 +14,7 @@ class SiriRemoteGestureRecognizer: UIGestureRecognizer {
     var minimumLongTapDuration: TimeInterval = 1.0
     
     private(set) var isLongPress = false
-    private (set) var isLongTap = false
+    private(set) var isLongTap = false
     var isClick = false
     
     var touchLocation: SiriRemoteTouchLocation = .unknown

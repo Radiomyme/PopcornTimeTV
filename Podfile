@@ -64,30 +64,100 @@ end
 # ships an x86_64 simulator slice).
 post_install do |installer|
     installer.pods_project.targets.each do |target|
+        name = target.name
         target.build_configurations.each do |config|
-            ios = config.build_settings['IPHONEOS_DEPLOYMENT_TARGET']
-            if ios && Gem::Version.new(ios.to_s) < Gem::Version.new('12.0')
-                config.build_settings['IPHONEOS_DEPLOYMENT_TARGET'] = '12.0'
-            end
-            tv = config.build_settings['TVOS_DEPLOYMENT_TARGET']
-            if tv && Gem::Version.new(tv.to_s) < Gem::Version.new('14.0')
-                config.build_settings['TVOS_DEPLOYMENT_TARGET'] = '14.0'
-            end
-            config.build_settings['EXCLUDED_ARCHS[sdk=iphonesimulator*]'] = 'arm64'
+            # Force-bump deployment targets unconditionally so pods with old
+            # xcconfig defaults (TVVLCKit's 10.2, GCDWebServer's 9.0, etc.)
+            # don't trip Xcode 26's "below the minimum supported" warnings.
+            # Platform-specific so an iOS-only pod doesn't accidentally get
+            # a TVOS_DEPLOYMENT_TARGET key.
+            # Bump every deployment-target field that's set, regardless of
+            # which platform the pod targets. Xcode 26 demands ≥12 (iOS) /
+            # ≥14 (tvOS) and warns otherwise. Setting both keys is harmless
+            # — the linker uses whichever applies to the active SDK.
+            config.build_settings['IPHONEOS_DEPLOYMENT_TARGET'] = '17.0'
+            config.build_settings['TVOS_DEPLOYMENT_TARGET']     = '17.0'
+
+            config.build_settings['EXCLUDED_ARCHS[sdk=iphonesimulator*]']  = 'arm64'
             config.build_settings['EXCLUDED_ARCHS[sdk=appletvsimulator*]'] = 'arm64'
-            config.build_settings['ENABLE_USER_SCRIPT_SANDBOXING'] = 'NO'
+            config.build_settings['ENABLE_USER_SCRIPT_SANDBOXING']         = 'NO'
 
             # Restrict each pod target to its actual platform. CocoaPods names
             # them with `-iOS` / `-tvOS` suffixes; Xcode 26 otherwise tries to
             # compile both flavors for whatever scheme is active and fails on
             # platform-only frameworks (e.g. ReachabilitySwift-iOS needs
             # CoreTelephony which doesn't exist on tvOS).
-            name = target.name
             if name.end_with?('-iOS')
                 config.build_settings['SUPPORTED_PLATFORMS'] = 'iphoneos iphonesimulator'
             elsif name.end_with?('-tvOS')
                 config.build_settings['SUPPORTED_PLATFORMS'] = 'appletvos appletvsimulator'
             end
+
+            # GCDWebServer ships a few decade-old Objective-C warnings (no
+            # prototype, enum-mismatch ternary). They're in 3rd-party code
+            # we can't patch upstream — silence them so they stop polluting
+            # the issue navigator.
+            if name == 'GCDWebServer'
+                config.build_settings['GCC_WARN_ABOUT_MISSING_PROTOTYPES']        = 'NO'
+                config.build_settings['CLANG_WARN_STRICT_PROTOTYPES']             = 'NO'
+                config.build_settings['CLANG_WARN_ENUM_CONVERSION']               = 'NO'
+                config.build_settings['CLANG_WARN_IMPLICIT_FUNCTION_DECLARATION'] = 'NO'
+                config.build_settings['CLANG_WARN_DOCUMENTATION_COMMENTS']        = 'NO'
+            end
+        end
+    end
+
+    # The aggregate Pods-PopcornTimetvOS / Pods-PopcornTimeiOS xcconfigs
+    # inherit `-lc++ -liconv -lbz2 -lxml2 -lz` from VLCKit, AND VLCKit's own
+    # xcconfig already lists those flags — Xcode 26 warns "Ignoring
+    # duplicate libraries" on every build. De-duplicate the OTHER_LDFLAGS
+    # in the aggregate xcconfigs (regenerated on every `pod install`).
+    aggregate_dirs = Dir.glob('Pods/Target Support Files/Pods-*/')
+    aggregate_dirs.each do |dir|
+        Dir.glob(File.join(dir, '*.xcconfig')).each do |xc|
+            content = File.read(xc)
+            updated = content.lines.map do |line|
+                next line unless line.start_with?('OTHER_LDFLAGS')
+                key, _, rhs = line.partition('=')
+                seen = []
+                tokens = rhs.strip.split(/\s+/)
+                deduped = tokens.reject do |t|
+                    if t.start_with?('-l"') || t == '-framework'
+                        if seen.include?(t)
+                            true
+                        else
+                            seen << t; false
+                        end
+                    elsif tokens[tokens.index(t)&.- 1] == '-framework'
+                        # framework name token following -framework — pair it
+                        false
+                    else
+                        false
+                    end
+                end
+                # Pair-aware framework dedup (because '-framework' and the
+                # name token must both be present together to count as a flag).
+                pairs = []
+                out   = []
+                i = 0
+                while i < tokens.length
+                    if tokens[i] == '-framework' && i + 1 < tokens.length
+                        pair = "#{tokens[i]} #{tokens[i+1]}"
+                        unless pairs.include?(pair)
+                            pairs << pair
+                            out << tokens[i] << tokens[i+1]
+                        end
+                        i += 2
+                    else
+                        unless out.include?(tokens[i])
+                            out << tokens[i]
+                        end
+                        i += 1
+                    end
+                end
+                "#{key.strip} = #{out.join(' ')}\n"
+            end
+            File.write(xc, updated.join)
         end
     end
 end
