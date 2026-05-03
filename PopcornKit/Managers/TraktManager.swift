@@ -602,7 +602,15 @@ extension TraktManager {
      - Returns: A login view controller to be presented.
      */
     public func loginViewController() -> UIViewController {
+        #if os(tvOS)
         return TraktAuthenticationViewController(nibName: "TraktAuthenticationViewController", bundle: TraktAuthenticationViewController.bundle)
+        #else
+        // The iOS app uses SFSafariViewController for the Trakt OAuth web
+        // flow — wired in by the host app, not by PopcornKit. Returning an
+        // empty placeholder here keeps the framework cross-platform; the
+        // SwiftUI iOS surface doesn't currently expose Trakt sign-in.
+        return UIViewController()
+        #endif
     }
     
     /**
