@@ -6,6 +6,8 @@ import PopcornKit
 struct SettingsView: View {
     @AppStorage("autoSelectQuality") private var autoSelectQuality = "Highest"
     @AppStorage("streamOnCellular")  private var streamOnCellular  = false
+    @State private var traktAuthURL: URL?
+    @State private var isTraktSignedIn = TraktManager.shared.isSignedIn()
 
     var body: some View {
         Form {
@@ -18,6 +20,25 @@ struct SettingsView: View {
                 .pickerStyle(.menu)
 
                 Toggle("Streamer en données mobiles", isOn: $streamOnCellular)
+            }
+
+            Section("Compte Trakt") {
+                if isTraktSignedIn {
+                    Label("Connecté à Trakt", systemImage: "checkmark.seal.fill")
+                        .foregroundStyle(.green)
+                    Button(role: .destructive) {
+                        try? TraktManager.shared.logout()
+                        isTraktSignedIn = TraktManager.shared.isSignedIn()
+                    } label: {
+                        Label("Se déconnecter", systemImage: "rectangle.portrait.and.arrow.right")
+                    }
+                } else {
+                    Button {
+                        traktAuthURL = TraktManager.shared.iOSAuthorizationURL()
+                    } label: {
+                        Label("Se connecter à Trakt", systemImage: "person.crop.circle.badge.plus")
+                    }
+                }
             }
 
             Section("Sources") {
@@ -33,7 +54,18 @@ struct SettingsView: View {
                 }
             }
         }
+        .sheet(item: $traktAuthURL) { url in
+            SafariSheet(url: url)
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .traktDidAuthenticate)) { _ in
+            isTraktSignedIn = TraktManager.shared.isSignedIn()
+            traktAuthURL = nil
+        }
     }
+}
+
+extension Notification.Name {
+    static let traktDidAuthenticate = Notification.Name("popcornkit.trakt.didAuthenticate")
 }
 
 private extension Bundle {

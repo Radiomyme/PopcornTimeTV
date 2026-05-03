@@ -233,6 +233,8 @@
 		D574BEFA4C2613A65FC6FD50 /* TraktManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4D0F9CFF1E6F296400860852 /* TraktManager.swift */; };
 		E349EC8EFFE8CCA44ED758D1 /* String+Extension.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4D0F9D4A1E6F2B1300860852 /* String+Extension.swift */; };
 		E4D3A089FC6BC5790C707375 /* PosterCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = BE23C29C7331612CD4A38E6B /* PosterCard.swift */; };
+		E7A5B6C01687D7BACE9A7124 /* VLCPlayerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = BAA2707D98245AD65397F0CA /* VLCPlayerView.swift */; };
+		E9E5141F1B95C1F603C78CC9 /* SafariSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7346E256E49510AF03B05E38 /* SafariSheet.swift */; };
 		EA335D2315869F466A5843F5 /* NetworkManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4D0F9CFC1E6F296400860852 /* NetworkManager.swift */; };
 		F08409000BBED2C737F68198 /* PopcornKit iOS.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 383706534E1BC6C3E1A47C8A /* PopcornKit iOS.framework */; };
 		F15FA38AE58B85B64C1B89D4 /* UIAlertController+Show.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4DCB39391E844D4500388374 /* UIAlertController+Show.swift */; };
@@ -522,6 +524,7 @@
 		63EA10BA5CEAAC75379E9758 /* MediaDetailView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = MediaDetailView.swift; path = PopcornTime/UI/iOS/MediaDetailView.swift; sourceTree = SOURCE_ROOT; };
 		6CAD29660BDA0BD45463DF6A /* iOS.plist */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.plist.xml; name = iOS.plist; path = "PopcornTime/Supporting Files/iOS.plist"; sourceTree = SOURCE_ROOT; };
 		70D062EA9E7B9A88F5F7BD6F /* Pods-TopShelf.debug.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-TopShelf.debug.xcconfig"; path = "Target Support Files/Pods-TopShelf/Pods-TopShelf.debug.xcconfig"; sourceTree = "<group>"; };
+		7346E256E49510AF03B05E38 /* SafariSheet.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = SafariSheet.swift; path = PopcornTime/UI/iOS/SafariSheet.swift; sourceTree = SOURCE_ROOT; };
 		7AF0067D5CB4117BCD285131 /* PopcornTimeiOS.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = PopcornTimeiOS.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		8BB94E0D8A266A44948F11E0 /* Pods-PopcornTimetvOS.debug.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-PopcornTimetvOS.debug.xcconfig"; path = "Target Support Files/Pods-PopcornTimetvOS/Pods-PopcornTimetvOS.debug.xcconfig"; sourceTree = "<group>"; };
 		9A4B1F5449CD76A82ABC226A /* ObjCExceptionCatcher.h */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.c.h; name = ObjCExceptionCatcher.h; path = PopcornTime/UI/tvOS/Views/ObjCExceptionCatcher.h; sourceTree = SOURCE_ROOT; };
@@ -531,6 +534,7 @@
 		B747D9446AC930A21B6E6E3D /* Pods_TopShelf.framework */ = {isa = PBXFileReference; explicitFileType = wrapper.framework; includeInIndex = 0; path = Pods_TopShelf.framework; sourceTree = BUILT_PRODUCTS_DIR; };
 		B9A5B2894233AEB853E7A1E1 /* JSONValue.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = JSONValue.swift; path = PopcornKit/Resources/JSONValue.swift; sourceTree = SOURCE_ROOT; };
 		BA6570766F9655DB0334097A /* NativeAVPlayerViewController.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = NativeAVPlayerViewController.swift; path = "PopcornTime/UI/Shared/View Controllers/NativeAVPlayerViewController.swift"; sourceTree = SOURCE_ROOT; };
+		BAA2707D98245AD65397F0CA /* VLCPlayerView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = VLCPlayerView.swift; path = PopcornTime/UI/iOS/VLCPlayerView.swift; sourceTree = SOURCE_ROOT; };
 		BE23C29C7331612CD4A38E6B /* PosterCard.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = PosterCard.swift; path = PopcornTime/UI/iOS/PosterCard.swift; sourceTree = SOURCE_ROOT; };
 		BFB220FFCCA0BD315227CAF6 /* MoviesGridView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = MoviesGridView.swift; path = PopcornTime/UI/iOS/MoviesGridView.swift; sourceTree = SOURCE_ROOT; };
 		C39DBC9A881608E11694A746 /* Pods_PopcornTimeiOS.framework */ = {isa = PBXFileReference; explicitFileType = wrapper.framework; includeInIndex = 0; path = Pods_PopcornTimeiOS.framework; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -626,6 +630,8 @@
 				E6E07EC72763156450DAFE1A /* SettingsView.swift */,
 				D569C7F4DE25DED1535F57A2 /* ShowsGridView.swift */,
 				F1C95085203B329E42C0D97B /* VideoPlayerWrapper.swift */,
+				BAA2707D98245AD65397F0CA /* VLCPlayerView.swift */,
+				7346E256E49510AF03B05E38 /* SafariSheet.swift */,
 			);
 			name = iOS;
 			path = UI/iOS;
@@ -1414,6 +1420,7 @@
 				"${BUILT_PRODUCTS_DIR}/ObjectMapper-iOS/ObjectMapper.framework",
 				"${PODS_ROOT}/PopcornTorrent/Build/iOS/PopcornTorrent.framework",
 				"${BUILT_PRODUCTS_DIR}/ReachabilitySwift-iOS/Reachability.framework",
+				"${PODS_XCFRAMEWORKS_BUILD_DIR}/MobileVLCKit/MobileVLCKit.framework/MobileVLCKit",
 			);
 			name = "[CP] Embed Pods Frameworks";
 			outputPaths = (
@@ -1423,6 +1430,7 @@
 				"${TARGET_BUILD_DIR}/${FRAMEWORKS_FOLDER_PATH}/ObjectMapper.framework",
 				"${TARGET_BUILD_DIR}/${FRAMEWORKS_FOLDER_PATH}/PopcornTorrent.framework",
 				"${TARGET_BUILD_DIR}/${FRAMEWORKS_FOLDER_PATH}/Reachability.framework",
+				"${TARGET_BUILD_DIR}/${FRAMEWORKS_FOLDER_PATH}/MobileVLCKit.framework",
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/sh;
@@ -1766,6 +1774,8 @@
 				A3178BF473B59420C3782D26 /* SettingsView.swift in Sources */,
 				9B8F5E0DB6600D14870A8B1F /* ShowsGridView.swift in Sources */,
 				F549E10D989231FC020F0D6E /* VideoPlayerWrapper.swift in Sources */,
+				E7A5B6C01687D7BACE9A7124 /* VLCPlayerView.swift in Sources */,
+				E9E5141F1B95C1F603C78CC9 /* SafariSheet.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

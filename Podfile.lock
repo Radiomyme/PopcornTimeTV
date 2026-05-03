@@ -8,6 +8,7 @@ PODS:
   - GCDWebServer/Core (3.5.4)
   - MarqueeLabel (4.5.3)
   - MBCircularProgressBar (0.3.5)
+  - MobileVLCKit (3.7.3)
   - ObjectMapper (4.4.2)
   - PopcornTorrent (1.3.15):
     - GCDWebServer (~> 3.5.0)
@@ -22,6 +23,7 @@ DEPENDENCIES:
   - FloatRatingView (= 3.0.1)
   - MarqueeLabel (~> 4.5)
   - MBCircularProgressBar (= 0.3.5-1)
+  - MobileVLCKit (~> 3.7)
   - ObjectMapper (~> 4.4)
   - PopcornTorrent (~> 1.3.15)
   - ReachabilitySwift (~> 5.2)
@@ -35,6 +37,7 @@ SPEC REPOS:
     - AlamofireImage
     - GCDWebServer
     - MarqueeLabel
+    - MobileVLCKit
     - ObjectMapper
     - ReachabilitySwift
     - TvOSMoreButton
@@ -52,6 +55,7 @@ SPEC CHECKSUMS:
   GCDWebServer: 2c156a56c8226e2d5c0c3f208a3621ccffbe3ce4
   MarqueeLabel: 0c57d4c6634e04a6d015af79f7c9a175b2309525
   MBCircularProgressBar: 29e6df5e8683ff2375a291792a5988a16dd78c8e
+  MobileVLCKit: 73d7ddb52238b6885b70b0f281cae75a0a6e3ac0
   ObjectMapper: e6e4d91ff7f2861df7aecc536c92d8363f4c9677
   PopcornTorrent: 343ff0e04ba370764a9cf27c35685463f7428b90
   ReachabilitySwift: 32793e867593cfc1177f5d16491e3a197d2fccda
@@ -59,6 +63,6 @@ SPEC CHECKSUMS:
   TVVLCKit: 57ab7bbd31178881ae5200ae5d93f8c7cd1385b9
   XCDYouTubeKit: b120aced3d8638ffb570c5450cddb5a1dac448c7
 
-PODFILE CHECKSUM: fb1125a541b15bc543b48af948dac42952fcb74a
+PODFILE CHECKSUM: 02ceacd71bca94fab5ab661beaa1c088ff338a91
 
 COCOAPODS: 1.16.2

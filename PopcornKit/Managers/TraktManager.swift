@@ -605,12 +605,27 @@ extension TraktManager {
         #if os(tvOS)
         return TraktAuthenticationViewController(nibName: "TraktAuthenticationViewController", bundle: TraktAuthenticationViewController.bundle)
         #else
-        // The iOS app uses SFSafariViewController for the Trakt OAuth web
-        // flow — wired in by the host app, not by PopcornKit. Returning an
-        // empty placeholder here keeps the framework cross-platform; the
-        // SwiftUI iOS surface doesn't currently expose Trakt sign-in.
         return UIViewController()
         #endif
+    }
+
+    /// Build the Trakt authorize URL for the iOS OAuth flow. The host app
+    /// presents this in `SFSafariViewController`; once the user grants access
+    /// Trakt redirects to `popcorntime://trakt?code=…&state=…` which the
+    /// AppDelegate forwards to `authenticate(_:)`. The `state` parameter is
+    /// stored on the manager so `authenticate(_:)` can reject mismatched
+    /// callbacks (CSRF guard).
+    public func iOSAuthorizationURL() -> URL {
+        let randomState = String.random(of: 16)
+        self.state = randomState
+        var components = URLComponents(string: Trakt.base + Trakt.auth + "/authorize")!
+        components.queryItems = [
+            URLQueryItem(name: "client_id",     value: Trakt.apiKey),
+            URLQueryItem(name: "redirect_uri",  value: "popcorntime://trakt"),
+            URLQueryItem(name: "response_type", value: "code"),
+            URLQueryItem(name: "state",         value: randomState),
+        ]
+        return components.url!
     }
     
     /**

@@ -62,5 +62,21 @@
 	<string>Popcorn Time streams torrent video over your local network to AirPlay-compatible devices.</string>
 	<key>ITSAppUsesNonExemptEncryption</key>
 	<false/>
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleURLName</key>
+			<string>com.popcorntime.ios.trakt</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>popcorntime</string>
+			</array>
+		</dict>
+	</array>
+	<key>LSApplicationQueriesSchemes</key>
+	<array>
+		<string>https</string>
+		<string>http</string>
+	</array>
 </dict>
 </plist>

@@ -21,6 +21,17 @@ struct PopcornTimeApp: App {
             RootTabView()
                 .preferredColorScheme(.dark)
                 .tint(.accentColor)
+                .onOpenURL { url in
+                    // Trakt's web auth flow finishes by redirecting to
+                    // popcorntime://trakt?code=…&state=… — hand it off to
+                    // PopcornKit and tell SettingsView to refresh its UI.
+                    if url.scheme == "popcorntime", url.host == "trakt" {
+                        TraktManager.shared.authenticate(url)
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+                            NotificationCenter.default.post(name: .traktDidAuthenticate, object: nil)
+                        }
+                    }
+                }
         }
     }
 }

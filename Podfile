@@ -29,6 +29,12 @@ target 'PopcornTimeiOS' do
     pod 'AlamofireImage', '~> 4.3'
     pod 'ReachabilitySwift', '~> 5.2'
     pod 'ObjectMapper', '~> 4.4'
+    # MobileVLCKit 3.7.3 is the latest available stable build (4.x alphas
+    # are no longer hosted on download.videolan.org). Its xcframework
+    # ships ios-arm64_i386_x86_64-simulator — the post_install hook
+    # already excludes arm64 for iphonesimulator so we hit the x86_64
+    # slice via Rosetta.
+    pod 'MobileVLCKit', '~> 3.7'
 end
 
 target 'TopShelf' do

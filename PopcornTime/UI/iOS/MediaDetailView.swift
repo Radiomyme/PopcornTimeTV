@@ -51,11 +51,48 @@ final class MediaDetailViewModel: ObservableObject {
     }
 }
 
+/// Picks AVPlayer for AV-friendly containers (.mp4 / .m4v / .mov — HDR10,
+/// Dolby Vision, Atmos all native on tvOS/iOS) and VLC for everything else
+/// (.mkv / .avi / unknown — most YTS 4K HEVC ships in MKV containers that
+/// AVFoundation can't open at all).
+private enum PreferredEngine {
+    case avPlayer
+    case vlc
+}
+
+private func sniffEngine(for url: URL, magnetFallback: String?) -> PreferredEngine {
+    let candidates: [String] = {
+        var out: [String] = []
+        out.append(url.path.lowercased())
+        if let magnet = magnetFallback,
+           let dn = magnet.components(separatedBy: "&dn=").last?
+                          .components(separatedBy: "&").first?
+                          .removingPercentEncoding?.lowercased() {
+            out.append(dn)
+        }
+        return out
+    }()
+    let avFriendly = [".mp4", ".m4v", ".mov"]
+    if candidates.contains(where: { c in avFriendly.contains { c.hasSuffix($0) } }) {
+        return .avPlayer
+    }
+    return .vlc
+}
+
+private struct PendingPlayback: Identifiable {
+    let id = UUID()
+    let url: URL
+    let engine: PreferredEngine
+    let title: String
+    let streamer: PTTorrentStreamer?
+}
+
 struct MediaDetailView: View {
     let media: Media
     @StateObject private var viewModel = MediaDetailViewModel()
-    @State private var presentedURL: URL?
+    @State private var pendingPlayback: PendingPlayback?
     @State private var startingStream = false
+    @State private var safariURL: URL?
 
     var body: some View {
         ScrollView {
@@ -71,8 +108,19 @@ struct MediaDetailView: View {
         .navigationTitle(media.title)
         .navigationBarTitleDisplayMode(.inline)
         .task { viewModel.load(media) }
-        .fullScreenCover(item: $presentedURL) { url in
-            VideoPlayerWrapper(url: url)
+        .fullScreenCover(item: $pendingPlayback) { item in
+            Group {
+                switch item.engine {
+                case .avPlayer:
+                    VideoPlayerWrapper(url: item.url)
+                case .vlc:
+                    VLCPlayerView(url: item.url, title: item.title, streamer: item.streamer)
+                }
+            }
+            .ignoresSafeArea()
+        }
+        .sheet(item: $safariURL) { url in
+            SafariSheet(url: url)
                 .ignoresSafeArea()
         }
         .overlay {
@@ -110,8 +158,20 @@ struct MediaDetailView: View {
             .buttonStyle(.borderedProminent)
             .disabled(viewModel.torrents.isEmpty)
 
+            if let trailerURL = trailerURL {
+                Button {
+                    safariURL = trailerURL
+                } label: {
+                    Image(systemName: "play.rectangle")
+                        .font(.title3)
+                        .padding(.vertical, 12)
+                        .padding(.horizontal, 18)
+                }
+                .buttonStyle(.bordered)
+            }
+
             Button {
-                // Watchlist — stub for now.
+                // Watchlist - stub for now.
             } label: {
                 Image(systemName: "plus")
                     .font(.title3)
@@ -120,6 +180,20 @@ struct MediaDetailView: View {
             }
             .buttonStyle(.bordered)
         }
+    }
+
+    /// Build a YouTube watch URL from the YTS `yt_trailer_code` if available
+    /// on the enriched movie. We send the user to Safari (or
+    /// SFSafariViewController) rather than embedding XCDYouTubeKit — that
+    /// pod's iOS-8 deployment target broke under Xcode 26's libarclite
+    /// removal, and Safari handles AirPlay / picture-in-picture for free.
+    private var trailerURL: URL? {
+        if let movie = viewModel.enrichedMovie ?? (media as? Movie),
+           let raw = movie.trailer, !raw.isEmpty,
+           let url = URL(string: raw) {
+            return url
+        }
+        return nil
     }
 
     @ViewBuilder
@@ -198,13 +272,19 @@ struct MediaDetailView: View {
     private func play(_ torrent: Torrent) {
         startingStream = true
         let streamer = PTTorrentStreamer.shared()
+        let mediaTitle = media.title
+        let magnet = torrent.url
         streamer.cancelStreamingAndDeleteData(false)
         streamer.startStreaming(fromFileOrMagnetLink: torrent.url, progress: { _ in
             // Hook a progress UI here later.
         }, readyToPlay: { fileURL, _ in
             DispatchQueue.main.async {
                 startingStream = false
-                presentedURL = fileURL
+                let engine = sniffEngine(for: fileURL, magnetFallback: magnet)
+                pendingPlayback = PendingPlayback(url: fileURL,
+                                                  engine: engine,
+                                                  title: mediaTitle,
+                                                  streamer: streamer)
             }
         }, failure: { error in
             DispatchQueue.main.async {
@@ -214,5 +294,3 @@ struct MediaDetailView: View {
         })
     }
 }
-
-extension URL: Identifiable { public var id: String { absoluteString } }
