@@ -17,12 +17,17 @@ class MediaViewController: MainViewController {
         
         let handler: ((UIAlertAction) -> Void) = { (handler) in
             self.currentGenre = NetworkManager.Genres.array.first(where: {$0.string == handler.title!})!
-            if self.currentGenre == .all {
-                self.navigationItem.title = (self is MoviesViewController ? "Movies" : "Shows").localized
-            } else {
-               self.navigationItem.title = self.currentGenre.string
-            }
-            
+            let title = self.currentGenre == .all
+                ? (self is MoviesViewController ? "Movies" : "Shows").localized
+                : self.currentGenre.string
+            // Update both the legacy navigationItem.title (used by iOS large
+            // titles + accessibility) and the in-body header label that the
+            // tvOS layout actually displays. On iOS the second call is a
+            // no-op since `bodyTitleLabel` is nil.
+            self.navigationItem.title = title
+            #if os(tvOS)
+            self.setBodyTitle(title)
+            #endif
         }
         
         NetworkManager.Genres.array.forEach {

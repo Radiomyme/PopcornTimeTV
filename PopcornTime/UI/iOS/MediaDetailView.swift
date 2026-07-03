@@ -92,6 +92,11 @@ struct MediaDetailView: View {
     @StateObject private var viewModel = MediaDetailViewModel()
     @State private var pendingPlayback: PendingPlayback?
     @State private var startingStream = false
+    @State private var bufferProgress: Float = 0
+    @State private var seedsCount: Int = 0
+    @State private var peersCount: Int = 0
+    @State private var downloadKbps: Double = 0
+    @State private var streamErrorMessage: String?
     @State private var safariURL: URL?
 
     var body: some View {
@@ -102,6 +107,7 @@ struct MediaDetailView: View {
                 summary
                 torrentList
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.horizontal, 16)
             .padding(.bottom, 32)
         }
@@ -123,25 +129,80 @@ struct MediaDetailView: View {
             SafariSheet(url: url)
                 .ignoresSafeArea()
         }
-        .overlay {
-            if startingStream { ProgressView("Démarrage du stream…").padding(24).background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 16)) }
+        .overlay { streamingOverlay }
+    }
+
+    @ViewBuilder
+    private var streamingOverlay: some View {
+        if startingStream {
+            VStack(spacing: 14) {
+                ProgressView(value: Double(bufferProgress))
+                    .progressViewStyle(.linear)
+                    .tint(.accentColor)
+                    .frame(width: 240)
+                Text(bufferProgress > 0
+                     ? String(format: "Buffering · %.0f %%", bufferProgress * 100)
+                     : "Recherche de peers…")
+                    .font(.headline)
+                if seedsCount > 0 || peersCount > 0 {
+                    Text("\(seedsCount) seeds · \(peersCount) peers · \(formatKbps(downloadKbps))")
+                        .font(.caption.monospacedDigit())
+                        .foregroundStyle(.secondary)
+                }
+                if let err = streamErrorMessage {
+                    Text(err).font(.caption).foregroundStyle(.red).multilineTextAlignment(.center).padding(.horizontal, 8)
+                }
+                Button("Annuler", role: .cancel) { cancelStream() }
+                    .buttonStyle(.bordered)
+                    .padding(.top, 4)
+            }
+            .padding(20)
+            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 16))
+            .padding(.horizontal, 24)
         }
+    }
+
+    private func formatKbps(_ kbps: Double) -> String {
+        if kbps >= 1024 { return String(format: "%.1f MB/s", kbps / 1024) }
+        return String(format: "%.0f KB/s", kbps)
+    }
+
+    private func cancelStream() {
+        PTTorrentStreamer.shared().cancelStreamingAndDeleteData(true)
+        startingStream = false
+        bufferProgress = 0
+        seedsCount = 0
+        peersCount = 0
+        downloadKbps = 0
+        streamErrorMessage = nil
     }
 
     @ViewBuilder
     private var hero: some View {
         if let urlStr = media.largeBackgroundImage, let url = URL(string: urlStr) {
-            AsyncImage(url: url) { phase in
-                switch phase {
-                case .success(let image):
-                    image.resizable().scaledToFill()
-                default:
-                    Color(.systemGray6)
+            // `Color.clear` carries the 16:9 aspect ratio; the AsyncImage is
+            // overlaid on top and clipped. We cap the height at 320 so on a
+            // wide / tall Mac window the hero doesn't push the rest of the
+            // detail off the fold. `aspectRatio(.fit)` (vs `.fill`) is
+            // critical: with `.fill` SwiftUI grows the view past the parent
+            // width on tall narrow viewports, dragging the surrounding VStack
+            // wider than the window and clipping summary/torrent text on
+            // both sides.
+            Color.clear
+                .aspectRatio(16.0 / 9.0, contentMode: .fit)
+                .frame(maxWidth: .infinity, maxHeight: 320)
+                .overlay {
+                    AsyncImage(url: url) { phase in
+                        switch phase {
+                        case .success(let image):
+                            image.resizable().scaledToFill()
+                        default:
+                            Color(.systemGray6)
+                        }
+                    }
                 }
-            }
-            .aspectRatio(16/9, contentMode: .fill)
-            .frame(maxWidth: .infinity)
-            .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                .clipped()
+                .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
         }
     }
 
@@ -201,23 +262,31 @@ struct MediaDetailView: View {
         if let movie = viewModel.enrichedMovie {
             VStack(alignment: .leading, spacing: 8) {
                 Text(movie.title).font(.title2.bold())
+                    .fixedSize(horizontal: false, vertical: true)
                 Text(metadataLine(year: movie.year, runtime: movie.runtime, certification: movie.certification, rating: movie.rating))
                     .font(.subheadline).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
                 Text(movie.summary)
                     .font(.body)
                     .foregroundStyle(.primary)
+                    .fixedSize(horizontal: false, vertical: true)
                     .padding(.top, 4)
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
         } else if let show = viewModel.enrichedShow {
             VStack(alignment: .leading, spacing: 8) {
                 Text(show.title).font(.title2.bold())
+                    .fixedSize(horizontal: false, vertical: true)
                 Text("\(show.year)\(show.network.map { " · \($0)" } ?? "")")
                     .font(.subheadline).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
                 Text(show.summary)
                     .font(.body)
                     .foregroundStyle(.primary)
+                    .fixedSize(horizontal: false, vertical: true)
                     .padding(.top, 4)
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
         } else if viewModel.loading {
             ProgressView().frame(maxWidth: .infinity)
         }
@@ -240,17 +309,19 @@ struct MediaDetailView: View {
                                 Text("\(torrent.seeds) seeds · \(torrent.size ?? "—")")
                                     .font(.caption).foregroundStyle(.secondary)
                             }
-                            Spacer()
+                            Spacer(minLength: 8)
                             Image(systemName: "play.circle.fill")
                                 .foregroundStyle(.tint)
                                 .font(.title2)
                         }
                         .padding(12)
+                        .frame(maxWidth: .infinity, alignment: .leading)
                         .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
                     }
                     .buttonStyle(.plain)
                 }
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
     }
 
@@ -271,12 +342,24 @@ struct MediaDetailView: View {
 
     private func play(_ torrent: Torrent) {
         startingStream = true
+        bufferProgress = 0
+        seedsCount = 0
+        peersCount = 0
+        downloadKbps = 0
+        streamErrorMessage = nil
         let streamer = PTTorrentStreamer.shared()
         let mediaTitle = media.title
         let magnet = torrent.url
         streamer.cancelStreamingAndDeleteData(false)
-        streamer.startStreaming(fromFileOrMagnetLink: torrent.url, progress: { _ in
-            // Hook a progress UI here later.
+        print("[iOS Detail] starting torrent: \(magnet.prefix(80))…")
+        streamer.startStreaming(fromFileOrMagnetLink: torrent.url, progress: { status in
+            DispatchQueue.main.async {
+                bufferProgress = status.bufferingProgress
+                seedsCount = Int(status.seeds)
+                peersCount = Int(status.peers)
+                // libtorrent reports bytes/s; surface as KB/s.
+                downloadKbps = Double(status.downloadSpeed) / 1024.0
+            }
         }, readyToPlay: { fileURL, _ in
             DispatchQueue.main.async {
                 startingStream = false
@@ -288,7 +371,10 @@ struct MediaDetailView: View {
             }
         }, failure: { error in
             DispatchQueue.main.async {
-                startingStream = false
+                streamErrorMessage = error.localizedDescription
+                // Keep the overlay open so the user sees the error and can dismiss
+                // explicitly via the "Annuler" button.
+                bufferProgress = 0
             }
             print("[iOS Detail] streaming failure: \(error.localizedDescription)")
         })

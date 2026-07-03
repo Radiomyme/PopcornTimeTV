@@ -3,16 +3,20 @@
 import Foundation
 
 extension CollectionViewController {
-    
-    private struct AssociatedKeys {
-        static var focusIndexPathKey = "CollectionViewController.focusIndexPathKey"
-    }
-    
+
+    /// Stable raw pointer key for `objc_setAssociatedObject`. We can't pass
+    /// `&someStringVar` (Swift 6 warns: "Forming 'UnsafeRawPointer' to an
+    /// inout variable of type String exposes the internal representation
+    /// rather than the string contents") so we allocate a single byte and
+    /// use its (forever-stable) address as the key.
+    private static let focusIndexPathKey: UnsafeRawPointer =
+        UnsafeRawPointer(UnsafeMutablePointer<UInt8>.allocate(capacity: 1))
+
     var focusIndexPath: IndexPath {
         get {
-            return objc_getAssociatedObject(self, &AssociatedKeys.focusIndexPathKey) as? IndexPath ?? IndexPath(item: 0, section: 0)
+            return objc_getAssociatedObject(self, Self.focusIndexPathKey) as? IndexPath ?? IndexPath(item: 0, section: 0)
         } set (indexPath) {
-            objc_setAssociatedObject(self, &AssociatedKeys.focusIndexPathKey, indexPath, .OBJC_ASSOCIATION_RETAIN_NONATOMIC)
+            objc_setAssociatedObject(self, Self.focusIndexPathKey, indexPath, .OBJC_ASSOCIATION_RETAIN_NONATOMIC)
         }
     }
 

@@ -24,12 +24,15 @@ extension UIColor {
     }
     
     func hexInt() -> UInt32 {
-        let hex = hexString()
-        var rgb: UInt32 = 0
+        // hexString() returns "#RRGGBB". Drop the leading # and parse the
+        // remaining 6 chars with Scanner.scanHexInt64 (the int32 variant
+        // was deprecated in tvOS 13). Truncating to UInt32 is safe — RGB
+        // hex never exceeds 0xFFFFFF.
+        let hex = String(hexString().dropFirst())
         let s = Scanner(string: hex)
-        s.scanLocation = 1
-        s.scanHexInt32(&rgb)
-        return rgb
+        var rgb: UInt64 = 0
+        s.scanHexInt64(&rgb)
+        return UInt32(truncatingIfNeeded: rgb)
     }
     
     @nonobjc var localizedString: String? {

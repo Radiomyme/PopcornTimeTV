@@ -52,7 +52,7 @@ public final class YTSEZTVProvider: MediaProvider {
 
     private var orderedHosts: [String] {
         guard let sticky = lastGoodHost,
-              let idx    = YTSEZTVProvider.ytsMirrors.firstIndex(of: sticky)
+              YTSEZTVProvider.ytsMirrors.contains(sticky)
         else { return YTSEZTVProvider.ytsMirrors }
         var rotated = YTSEZTVProvider.ytsMirrors
         rotated.removeAll { $0 == sticky }
@@ -72,15 +72,17 @@ public final class YTSEZTVProvider: MediaProvider {
     private var showCache: [String: Show] = [:]
     private let cacheQueue = DispatchQueue(label: "com.popcorntimetv.popcornkit.eztv.cache")
 
-    /// EZTV mirror chain. Like YTS, FAIs blacklist `eztvx.to` directly so we
-    /// walk through alternates that resolve through Cloudflare-fronted IPs.
+    /// EZTV mirror chain. `eztvx.to` is the canonical host but most FAIs (and
+    /// Apple's `Designed for iPad` Mac sandbox) DNS-block it, so we put a
+    /// Cloudflare-fronted alternate first. The sticky-cache below promotes
+    /// whichever mirror last worked, so subsequent runs skip the failure.
     public static var eztvMirrors: [String] = [
-        "https://eztvx.to",
         "https://eztv.wf",
         "https://eztv.tf",
         "https://eztv.yt",
         "https://eztv1.xyz",
         "https://eztv.re",
+        "https://eztvx.to",
     ]
     private static let stickyEztvKey = "popcornkit.eztv.lastGoodHost"
     private var lastGoodEztv: String? {

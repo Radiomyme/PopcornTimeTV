@@ -192,7 +192,7 @@ class OAuthCredential: NSObject, NSCoding {
         super.init()
         guard
             let data = KeychainStore.load(account: identifier),
-            let credential = (try? NSKeyedUnarchiver.unarchivedObject(ofClass: OAuthCredential.self, from: data)) ?? (NSKeyedUnarchiver.unarchiveObject(with: data) as? OAuthCredential)
+            let credential = try? NSKeyedUnarchiver.unarchivedObject(ofClass: OAuthCredential.self, from: data)
         else { return nil }
         self.accessToken  = credential.accessToken
         self.tokenType    = credential.tokenType

@@ -6,8 +6,12 @@ extension SearchViewController {
     
     override func viewDidLoad() {
         // Make sure we set this before calling super as it is not being loaded from storyboard.
-        collectionViewController = storyboard?.instantiateViewController(withIdentifier: "CollectionViewController") as! CollectionViewController
-        
+        // Force-cast → if-let-cast since `instantiateViewController` is non-Optional in modern SDKs
+        // and the forced cast triggers a "downcast will never produce nil" warning.
+        if let cvc = storyboard?.instantiateViewController(withIdentifier: "CollectionViewController") as? CollectionViewController {
+            collectionViewController = cvc
+        }
+
         super.viewDidLoad()
         
         collectionViewController.delegate = self
@@ -80,10 +84,11 @@ extension SearchViewController {
         focusGuide = guide
     }
 
-    private static var focusGuideKey = "SearchViewController.focusGuideKey"
+    private static let focusGuideKey: UnsafeRawPointer =
+        UnsafeRawPointer(UnsafeMutablePointer<UInt8>.allocate(capacity: 1))
     private var focusGuide: UIFocusGuide? {
-        get { objc_getAssociatedObject(self, &SearchViewController.focusGuideKey) as? UIFocusGuide }
-        set { objc_setAssociatedObject(self, &SearchViewController.focusGuideKey, newValue, .OBJC_ASSOCIATION_RETAIN_NONATOMIC) }
+        get { objc_getAssociatedObject(self, SearchViewController.focusGuideKey) as? UIFocusGuide }
+        set { objc_setAssociatedObject(self, SearchViewController.focusGuideKey, newValue, .OBJC_ASSOCIATION_RETAIN_NONATOMIC) }
     }
 
     override func viewDidLayoutSubviews() {

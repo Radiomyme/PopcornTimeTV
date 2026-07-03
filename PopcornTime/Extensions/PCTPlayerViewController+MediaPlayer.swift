@@ -61,10 +61,10 @@ extension PCTPlayerViewController {
                           MPMediaItemPropertyMediaType: MPMediaType.movie.rawValue]
         
         if let image = media.mediumCoverImage ?? media.mediumBackgroundImage, let request = try? URLRequest(url: image, method: .get) {
-            ImageDownloader.default.download(request) { response in
+            ImageDownloader.default.download(request, completion: { response in
                 guard case .success(let image) = response.result else { return }
                 self.nowPlayingInfo?[MPMediaItemPropertyArtwork] = MPMediaItemArtwork(boundsSize: image.size) { _ in image }
-            }
+            })
         }
     }
     

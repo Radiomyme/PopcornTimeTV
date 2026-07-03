@@ -4,8 +4,58 @@ import Foundation
 import PopcornKit
 import PopcornTorrent.PTTorrentStreamer
 import MediaPlayer.MPMediaItem
+import AlamofireImage
 
 extension AppDelegate: PCTPlayerViewControllerDelegate, UIViewControllerTransitioningDelegate {
+
+    /// Free every cache we control to reclaim sandbox space when libtorrent
+    /// reports "not enough space". On Apple TV the per-app sandbox is
+    /// fairly small (~7-12 GB) and a 4K HEVC torrent at 6-10 GB sits right
+    /// on the edge — wiping image caches / HTTP caches typically
+    /// recovers a few hundred MB to several GB, enough to push the same
+    /// torrent through.
+    static func aggressivelyFreeDiskSpace() {
+        let fm = FileManager.default
+
+        // 1) Stale torrent partials under tmp/Downloads/ (already a no-op
+        //    in the common case since we purge before each stream, but
+        //    guards against partial leftovers from the failed start).
+        purgeOrphanTorrentDownloads()
+
+        // 2) Foundation URLCache (HTTP responses cached by Alamofire).
+        URLCache.shared.removeAllCachedResponses()
+
+        // 3) AlamofireImage's URLCache (covers both Alamofire HTTP and
+        //    AlamofireImage's poster downloads). We don't try to reach the
+        //    in-memory `ImageCache` because each `UIImageView.af` extension
+        //    can attach its own and there's no global accessor.
+        ImageDownloader.defaultURLCache().removeAllCachedResponses()
+
+        // 4) Anything left in NSTemporaryDirectory() that isn't claimed
+        //    by an active streamer (after step 1).
+        let tmp = NSTemporaryDirectory()
+        if let entries = try? fm.contentsOfDirectory(atPath: tmp) {
+            for entry in entries where entry != "Downloads" {
+                let p = (tmp as NSString).appendingPathComponent(entry)
+                try? fm.removeItem(atPath: p)
+            }
+        }
+
+        // 5) NSCachesDirectory for the app — system reclaims this on
+        //    pressure but doing it ourselves makes the freed bytes visible
+        //    to libtorrent immediately.
+        if let caches = fm.urls(for: .cachesDirectory, in: .userDomainMask).first {
+            if let entries = try? fm.contentsOfDirectory(at: caches, includingPropertiesForKeys: nil) {
+                for entry in entries {
+                    try? fm.removeItem(at: entry)
+                }
+            }
+        }
+        print("[Cache] aggressivelyFreeDiskSpace done")
+    }
+}
+
+extension AppDelegate {
     
     func chooseQuality(_ sender: UIView?, media: Media, completion: @escaping (Torrent) -> Void) {
         // Default behaviour for the modernized tvOS app: always pick the highest
@@ -64,8 +114,17 @@ extension AppDelegate: PCTPlayerViewControllerDelegate, UIViewControllerTransiti
     }
     
     func play(_ media: Media, torrent: Torrent) {
+        play(media, torrent: torrent, hasAutoCleanedForDiskFull: false)
+    }
+
+    /// Internal entry point so the disk-full handler can call back with a
+    /// flag noting we already burnt through every cache and should stop
+    /// looping if the same torrent fails again.
+    private func play(_ media: Media,
+                      torrent: Torrent,
+                      hasAutoCleanedForDiskFull: Bool) {
         if UIDevice.current.hasCellularCapabilites && reachability.connection != .wifi && !UserDefaults.standard.bool(forKey: "streamOnCellular")  {
-            
+
             let alertController = UIAlertController(title: "Cellular Data is turned off for streaming".localized, message: nil, preferredStyle: .alert)
             alertController.addAction(UIAlertAction(title: "Turn On".localized, style: .default) { [unowned self] _ in
                 UserDefaults.standard.set(true, forKey: "streamOnCellular")
@@ -112,22 +171,102 @@ extension AppDelegate: PCTPlayerViewControllerDelegate, UIViewControllerTransiti
         
         present(loadingViewController, animated: true)
         
-        let error: (String) -> Void = { (errorMessage) in
-            let alertController = UIAlertController(title: "Error".localized, message: errorMessage, preferredStyle: .alert)
-            alertController.addAction(UIAlertAction(title: "OK".localized, style: .cancel, handler: nil))
-            alertController.show(animated: true)
+        let error: (String) -> Void = { [weak self] (errorMessage) in
+            guard let self = self else { return }
+
+            // libtorrent's "not enough space" message is reported in
+            // localized form (`There is not enough space to download the
+            // torrent. Please clear at least 7.86 GB…`). Apple TV's app
+            // sandbox is way smaller than the disk space shown in Réglages
+            // — typically 7-10 GB usable — so picking a 4K HEVC release on
+            // a fresh launch reliably trips this. Detect the substring (in
+            // both English and French to cover the localized libtorrent
+            // build) and offer a one-tap downgrade to the next-lower
+            // quality torrent rather than an unhelpful OK alert.
+            let isDiskFullError = errorMessage.localizedCaseInsensitiveContains("not enough space")
+                               || errorMessage.localizedCaseInsensitiveContains("pas assez d'espace")
+                               || errorMessage.localizedCaseInsensitiveContains("not enough disk")
+
+            // Find a smaller candidate from the same media — strictly
+            // smaller `qualityValue` than what we just tried.
+            let smaller: Torrent? = {
+                let candidates = media.torrents.sorted(by: <)
+                guard let currentIdx = candidates.firstIndex(where: { $0.url == torrent.url }) else {
+                    return candidates.dropLast().last
+                }
+                return currentIdx == 0 ? nil : candidates[currentIdx - 1]
+            }()
+
+            // Always tear down the half-started loading VC so we can
+            // present the alert cleanly.
+            let dismissThen: (@escaping () -> Void) -> Void = { next in
+                if self.window?.rootViewController?.presentedViewController != nil {
+                    self.dismiss(animated: false, completion: next)
+                } else {
+                    next()
+                }
+            }
+
+            dismissThen {
+                if isDiskFullError && !hasAutoCleanedForDiskFull {
+                    // First disk-full hit: silently nuke every cache we
+                    // can reach (URLCache, Alamofire/AlamofireImage caches,
+                    // tmp/Caches dirs, leftover torrent partials), then
+                    // retry the *same* torrent. The user never sees a
+                    // popup unless it fails again.
+                    print("[Play] disk-full → wiping all caches and retrying \(torrent.quality ?? "?")")
+                    AppDelegate.aggressivelyFreeDiskSpace()
+                    self.play(media, torrent: torrent, hasAutoCleanedForDiskFull: true)
+                    return
+                }
+
+                if isDiskFullError, let fallback = smaller {
+                    // Second hit (or no auto-clean possible) — offer the
+                    // user the next-lower quality.
+                    let title = "Espace insuffisant pour ce film en \(torrent.quality ?? "?")"
+                    let body  = "L'Apple TV n'a pas assez de place dans le cache de l'app pour télécharger ce torrent. Essayer une qualité inférieure ?"
+                    let alert = UIAlertController(title: title, message: body, preferredStyle: .alert)
+                    alert.addAction(UIAlertAction(title: "Réessayer en \(fallback.quality ?? "qualité inférieure")", style: .default) { _ in
+                        self.play(media, torrent: fallback)
+                    })
+                    alert.addAction(UIAlertAction(title: "Annuler", style: .cancel, handler: nil))
+                    alert.show(animated: true)
+                } else {
+                    let alert = UIAlertController(title: "Error".localized, message: errorMessage, preferredStyle: .alert)
+                    alert.addAction(UIAlertAction(title: "OK".localized, style: .cancel, handler: nil))
+                    alert.show(animated: true)
+                }
+            }
         }
         
-        let finishedLoading: (PreloadTorrentViewController, UIViewController) -> Void = { (loadingVc, playerVc) in
+        let finishedLoading: (PreloadTorrentViewController, UIViewController) -> Void = { [weak self] (loadingVc, playerVc) in
+            guard let self = self else { return }
             let flag = UIDevice.current.userInterfaceIdiom != .tv
-            self.dismiss(animated: flag) {
+            print("[Play] finishedLoading — presenting player VC")
+            // If something is presented (loading VC), dismiss it then push
+            // the player. If nothing is presented (loading was raced /
+            // already gone), present the player directly on the root.
+            if self.window?.rootViewController?.presentedViewController != nil {
+                self.dismiss(animated: flag) {
+                    self.present(playerVc, animated: flag)
+                }
+            } else {
                 self.present(playerVc, animated: flag)
             }
         }
         
         media.getSubtitles { [unowned self] subtitles in
-            guard self.window?.rootViewController?.presentedViewController === loadingViewController else { return } // Make sure the user is still loading.
-
+            // The legacy guard was
+            //   `presentedViewController === loadingViewController`
+            // but with the modernized SubtitlesManager (stub returning
+            // an empty array via `DispatchQueue.main.async`), this closure
+            // fires before `present(loadingViewController, animated: true)`
+            // finishes its animation, so the guard always failed and the
+            // streamer never started — the spinner sat there forever. We
+            // accept that the loading VC may not yet be on screen; once
+            // PTTorrentStreamer's `readyToPlay` fires we dismiss whatever
+            // is presented and push the player anyway.
+            print("[Play] subtitles=\(subtitles.count) starting streamer for \(media.title)")
             media.subtitles = subtitles
 
             // Codec sniff: AVPlayer renders HDR10 / Dolby Vision / Atmos

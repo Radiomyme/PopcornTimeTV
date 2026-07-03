@@ -39,6 +39,8 @@ final class VLCPlayerViewController: UIViewController, VLCMediaPlayerDelegate {
     private let controlsView = UIView()
     private let playPauseButton = UIButton(type: .system)
     private let closeButton = UIButton(type: .system)
+    private let subtitleButton = UIButton(type: .system)
+    private let audioButton = UIButton(type: .system)
     private let progressSlider = UISlider()
     private let timeLabel = UILabel()
     private let durationLabel = UILabel()
@@ -106,6 +108,22 @@ final class VLCPlayerViewController: UIViewController, VLCMediaPlayerDelegate {
         closeButton.addTarget(self, action: #selector(close), for: .touchUpInside)
         controlsView.addSubview(closeButton)
 
+        // Subtitle picker (CC icon) — shown only if the media reports tracks.
+        subtitleButton.translatesAutoresizingMaskIntoConstraints = false
+        subtitleButton.setImage(UIImage(systemName: "captions.bubble"), for: .normal)
+        subtitleButton.tintColor = .white
+        subtitleButton.setPreferredSymbolConfiguration(UIImage.SymbolConfiguration(pointSize: 22, weight: .regular), forImageIn: .normal)
+        subtitleButton.addTarget(self, action: #selector(showSubtitlePicker), for: .touchUpInside)
+        controlsView.addSubview(subtitleButton)
+
+        // Audio track picker (speaker icon) — for multi-language releases.
+        audioButton.translatesAutoresizingMaskIntoConstraints = false
+        audioButton.setImage(UIImage(systemName: "speaker.wave.2"), for: .normal)
+        audioButton.tintColor = .white
+        audioButton.setPreferredSymbolConfiguration(UIImage.SymbolConfiguration(pointSize: 22, weight: .regular), forImageIn: .normal)
+        audioButton.addTarget(self, action: #selector(showAudioPicker), for: .touchUpInside)
+        controlsView.addSubview(audioButton)
+
         playPauseButton.translatesAutoresizingMaskIntoConstraints = false
         playPauseButton.setImage(UIImage(systemName: "pause.fill"), for: .normal)
         playPauseButton.tintColor = .white
@@ -147,12 +165,22 @@ final class VLCPlayerViewController: UIViewController, VLCMediaPlayerDelegate {
 
             titleLabel.topAnchor.constraint(equalTo: controlsView.topAnchor, constant: 12),
             titleLabel.leadingAnchor.constraint(equalTo: controlsView.leadingAnchor, constant: 16),
-            titleLabel.trailingAnchor.constraint(lessThanOrEqualTo: closeButton.leadingAnchor, constant: -16),
+            titleLabel.trailingAnchor.constraint(lessThanOrEqualTo: audioButton.leadingAnchor, constant: -8),
 
             closeButton.topAnchor.constraint(equalTo: controlsView.topAnchor, constant: 8),
             closeButton.trailingAnchor.constraint(equalTo: controlsView.trailingAnchor, constant: -16),
             closeButton.widthAnchor.constraint(equalToConstant: 36),
             closeButton.heightAnchor.constraint(equalToConstant: 36),
+
+            subtitleButton.centerYAnchor.constraint(equalTo: closeButton.centerYAnchor),
+            subtitleButton.trailingAnchor.constraint(equalTo: closeButton.leadingAnchor, constant: -8),
+            subtitleButton.widthAnchor.constraint(equalToConstant: 36),
+            subtitleButton.heightAnchor.constraint(equalToConstant: 36),
+
+            audioButton.centerYAnchor.constraint(equalTo: closeButton.centerYAnchor),
+            audioButton.trailingAnchor.constraint(equalTo: subtitleButton.leadingAnchor, constant: -8),
+            audioButton.widthAnchor.constraint(equalToConstant: 36),
+            audioButton.heightAnchor.constraint(equalToConstant: 36),
 
             playPauseButton.bottomAnchor.constraint(equalTo: controlsView.bottomAnchor, constant: -20),
             playPauseButton.leadingAnchor.constraint(equalTo: controlsView.leadingAnchor, constant: 16),
@@ -195,6 +223,99 @@ final class VLCPlayerViewController: UIViewController, VLCMediaPlayerDelegate {
         dismiss(animated: true)
     }
 
+    // MARK: - Track pickers
+
+    /// Pull (index, name) pairs out of `VLCMediaPlayer.videoSubTitlesIndexes/Names`
+    /// (paired NSArrays). Filters out the magic "-1 / Disable" sentinel that VLC
+    /// always reports — we add our own "Aucun" entry instead.
+    private func subtitleTracks() -> [(index: Int32, name: String)] {
+        guard let idx = player.videoSubTitlesIndexes as? [NSNumber],
+              let names = player.videoSubTitlesNames as? [String],
+              idx.count == names.count else { return [] }
+        return zip(idx, names).compactMap { (n, name) -> (Int32, String)? in
+            let value = n.int32Value
+            // VLC uses -1 to mean "subtitles disabled". We expose that via a
+            // separate cancel-style action so the list only contains real tracks.
+            return value < 0 ? nil : (value, name)
+        }
+    }
+
+    private func audioTracks() -> [(index: Int32, name: String)] {
+        guard let idx = player.audioTrackIndexes as? [NSNumber],
+              let names = player.audioTrackNames as? [String],
+              idx.count == names.count else { return [] }
+        return zip(idx, names).compactMap { (n, name) -> (Int32, String)? in
+            let value = n.int32Value
+            return value < 0 ? nil : (value, name)
+        }
+    }
+
+    @objc private func showSubtitlePicker() {
+        presentTrackSheet(
+            title: "Sous-titres",
+            tracks: subtitleTracks(),
+            selectedIndex: player.currentVideoSubTitleIndex,
+            allowDisable: true,
+            sourceView: subtitleButton
+        ) { [weak self] index in
+            self?.player.currentVideoSubTitleIndex = index
+            self?.scheduleHideControls()
+        }
+    }
+
+    @objc private func showAudioPicker() {
+        presentTrackSheet(
+            title: "Audio",
+            tracks: audioTracks(),
+            selectedIndex: player.currentAudioTrackIndex,
+            allowDisable: false,
+            sourceView: audioButton
+        ) { [weak self] index in
+            self?.player.currentAudioTrackIndex = index
+            self?.scheduleHideControls()
+        }
+    }
+
+    /// Wrap `TrackPickerSheet` in a `UIHostingController` and present as a
+    /// form sheet. We pin the popover anchor for iPad regular-size class /
+    /// Mac so the OS doesn't fall back to a modal that might miss the target.
+    private func presentTrackSheet(title: String,
+                                   tracks: [(index: Int32, name: String)],
+                                   selectedIndex: Int32,
+                                   allowDisable: Bool,
+                                   sourceView: UIView,
+                                   onSelect: @escaping (Int32) -> Void) {
+        let view = TrackPickerSheet(title: title,
+                                    tracks: tracks,
+                                    selectedIndex: selectedIndex,
+                                    allowDisable: allowDisable,
+                                    onSelect: onSelect)
+        let host = UIHostingController(rootView: view)
+        host.modalPresentationStyle = .formSheet
+        if let sheet = host.sheetPresentationController {
+            sheet.detents = [.medium(), .large()]
+            sheet.prefersGrabberVisible = true
+        }
+        host.popoverPresentationController?.sourceView = sourceView
+        host.popoverPresentationController?.sourceRect = sourceView.bounds
+        present(host, animated: true)
+        hideControlsTask?.cancel()
+    }
+
+    /// Hide the subtitle/audio buttons when VLC reports no tracks at all
+    /// (raw audio file, or before media probing finishes). Called from
+    /// `mediaPlayerStateChanged` whenever the state transitions to `.playing`.
+    private func refreshTrackButtonsVisibility() {
+        let hasSub   = !subtitleTracks().isEmpty
+        let hasAudio = audioTracks().count > 1
+        // Subtitle button stays visible even with 0 tracks — user might want
+        // to confirm "no subtitles" via the sheet. Audio button only when
+        // there's actually a choice to make (>1 track).
+        subtitleButton.isHidden = false
+        audioButton.isHidden    = !hasAudio
+        _ = hasSub
+    }
+
     @objc private func toggleControls() {
         let target: CGFloat = controlsView.alpha > 0 ? 0 : 1
         UIView.animate(withDuration: 0.2) { self.controlsView.alpha = target }
@@ -231,6 +352,12 @@ final class VLCPlayerViewController: UIViewController, VLCMediaPlayerDelegate {
 
     func mediaPlayerStateChanged(_ aNotification: Notification) {
         switch player.state {
+        case .playing:
+            // libvlc fills in the track list right after the file starts
+            // playing. We refresh now (and on each subsequent transition)
+            // so multi-language MKVs surface their tracks as soon as they
+            // become available.
+            refreshTrackButtonsVisibility()
         case .error, .stopped, .ended:
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
                 self?.dismiss(animated: true)

@@ -28,6 +28,11 @@ class DownloadButton: UIDownloadButton, UIGestureRecognizerDelegate {
                 self = .downloaded
             case .failed:
                 self = .normal
+            // PTTorrentDownloadStatus is an Objective-C enum imported as
+            // open — Swift 6 requires `@unknown default` to handle a value
+            // we don't recognise (e.g. a future libtorrent state).
+            @unknown default:
+                self = .normal
             }
         }
     }

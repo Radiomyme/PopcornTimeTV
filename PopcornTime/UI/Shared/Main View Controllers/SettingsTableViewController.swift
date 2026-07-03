@@ -30,12 +30,154 @@ class SettingsTableViewController: UITableViewController, TraktManagerDelegate {
     
     override func viewDidLoad() {
         super.viewDidLoad()
-        
+
         if UIDevice.current.userInterfaceIdiom == .tv {
             tableView.contentInset.bottom = 27
+            applyTvOSCinemaTheme()
+            relocateParentTitleIntoBody()
         }
-        
+
         tableView.remembersLastFocusedIndexPath = true
+    }
+
+    /// Inject a cinema-warm gradient (matching the new app icon palette)
+    /// into the Settings VC's parent view, and make the grouped table view
+    /// transparent so the gradient shows through. The kawaii illustration
+    /// in the storyboard's left half (which is owned by the parent VC, not
+    /// us) sits naturally on top of this gradient since its PNG already has
+    /// a transparent background.
+    private func applyTvOSCinemaTheme() {
+        // 1) Backdrop on the parent VC's root view (only if we haven't done
+        //    it before — viewDidLoad can fire on container re-presentations).
+        if let parentView = parent?.view ?? view.superview,
+           parentView.viewWithTag(SettingsTableViewController.gradientBgTag) == nil {
+            let gradient = CAGradientLayer()
+            gradient.colors = [
+                UIColor(red: 0.30, green: 0.08, blue: 0.34, alpha: 1.0).cgColor, // plum
+                UIColor(red: 0.10, green: 0.04, blue: 0.22, alpha: 1.0).cgColor, // deep
+                UIColor(red: 0.08, green: 0.03, blue: 0.18, alpha: 1.0).cgColor, // black-plum
+            ]
+            gradient.locations = [0.0, 0.55, 1.0]
+            gradient.startPoint = CGPoint(x: 0.5, y: 0.0)
+            gradient.endPoint   = CGPoint(x: 0.5, y: 1.0)
+            // Soft warm glow from the top-right corner — matches the icon.
+            let glow = CAGradientLayer()
+            glow.type = .radial
+            glow.colors = [
+                UIColor(red: 1.00, green: 0.55, blue: 0.20, alpha: 0.45).cgColor,
+                UIColor(red: 1.00, green: 0.55, blue: 0.20, alpha: 0.0).cgColor,
+            ]
+            glow.locations = [0.0, 1.0]
+            glow.startPoint = CGPoint(x: 0.78, y: 0.18)
+            glow.endPoint   = CGPoint(x: 1.6, y: 1.10)
+
+            let container = LayerBackedBackdropView()
+            container.translatesAutoresizingMaskIntoConstraints = false
+            container.tag = SettingsTableViewController.gradientBgTag
+            container.tracked = [gradient, glow]
+            container.layer.addSublayer(gradient)
+            container.layer.addSublayer(glow)
+            parentView.insertSubview(container, at: 0)
+            NSLayoutConstraint.activate([
+                container.topAnchor.constraint(equalTo: parentView.topAnchor),
+                container.bottomAnchor.constraint(equalTo: parentView.bottomAnchor),
+                container.leadingAnchor.constraint(equalTo: parentView.leadingAnchor),
+                container.trailingAnchor.constraint(equalTo: parentView.trailingAnchor),
+            ])
+        }
+
+        // 2) Make the table itself transparent and tone down the system grouped
+        //    chrome (the gradient does the heavy lifting now). `separatorColor`
+        //    is unavailable on tvOS — separators between cells are drawn by
+        //    the focus engine instead, so we just clear the bg.
+        tableView.backgroundColor       = .clear
+        tableView.backgroundView        = nil
+        tableView.separatorInset        = UIEdgeInsets(top: 0, left: 20, bottom: 0, right: 20)
+
+        // 3) Style the section headers (more readable on the gradient).
+        // Done lazily in tableView(_:viewForHeaderInSection:); just trigger
+        // a layout pass so the appearance hooks below take effect.
+        tableView.reloadData()
+    }
+
+    private static let gradientBgTag = 0xC1A1
+    private static let bodyTitleTag  = 0xC1A2
+
+    /// The Settings page's "Settings" title lives in the parent container
+    /// VC's `navigationItem.leftBarButtonItem.customView`. On tvOS 26 that
+    /// position overlaps the centered tab pill bar — the title is hidden.
+    /// Mirror what `MainViewController.installInBodyHeader` does for
+    /// Movies/Shows/Watchlist: pull the title text out of the bar item,
+    /// detach the item, and inject a fresh 75pt heavy `UILabel` in the
+    /// parent VC's body view at the same Y as Downloads' title (≈190pt
+    /// from the top safe area). The illustration + table layout in the
+    /// storyboard stay where they are — they're already below this row.
+    private func relocateParentTitleIntoBody() {
+        guard let parent = parent,
+              parent.view.viewWithTag(SettingsTableViewController.bodyTitleTag) == nil else { return }
+
+        var titleText: String? = parent.navigationItem.title
+        if titleText == nil,
+           let custom = parent.navigationItem.leftBarButtonItem?.customView,
+           let label = (custom as? UILabel) ?? custom.subviews.compactMap({ $0 as? UILabel }).first {
+            titleText = label.text
+        }
+        // Default fallback so the page never goes title-less.
+        let text = titleText ?? "Settings".localized
+
+        // Detach from the nav bar so tvOS doesn't render a system title
+        // alongside our body header (browser-style nav bar would mirror
+        // `navigationItem.title` next to the tab pills).
+        parent.navigationItem.title = ""
+        parent.navigationItem.leftBarButtonItem = nil
+
+        let titleLabel = UILabel()
+        titleLabel.translatesAutoresizingMaskIntoConstraints = false
+        titleLabel.tag = SettingsTableViewController.bodyTitleTag
+        titleLabel.text = text
+        titleLabel.font = .systemFont(ofSize: 75, weight: .heavy)
+        titleLabel.textColor = .white
+        parent.view.addSubview(titleLabel)
+        NSLayoutConstraint.activate([
+            titleLabel.leadingAnchor.constraint(equalTo: parent.view.safeAreaLayoutGuide.leadingAnchor, constant: 90),
+            titleLabel.topAnchor.constraint(equalTo: parent.view.safeAreaLayoutGuide.topAnchor, constant: 16),
+        ])
+    }
+
+    /// Tiny UIView subclass that keeps the frames of its `tracked` CALayers
+    /// in sync with its own bounds. CAGradientLayer doesn't autoresize when
+    /// added as a sublayer (only when used via `view.layer = CAGradientLayer`).
+    private final class LayerBackedBackdropView: UIView {
+        var tracked: [CALayer] = []
+        override func layoutSubviews() {
+            super.layoutSubviews()
+            CATransaction.begin()
+            CATransaction.setDisableActions(true)
+            for layer in tracked { layer.frame = bounds }
+            CATransaction.commit()
+        }
+    }
+
+    override func tableView(_ tableView: UITableView, willDisplay cell: UITableViewCell, forRowAt indexPath: IndexPath) {
+        guard UIDevice.current.userInterfaceIdiom == .tv else { return }
+        // Subtle frosted-card appearance on the cells themselves.
+        cell.backgroundColor = UIColor.white.withAlphaComponent(0.06)
+        cell.contentView.backgroundColor = .clear
+        cell.textLabel?.textColor       = .white
+        cell.detailTextLabel?.textColor = UIColor.white.withAlphaComponent(0.65)
+        // Focused state already inverts colours by default — leave it.
+    }
+
+    override func tableView(_ tableView: UITableView, willDisplayHeaderView view: UIView, forSection section: Int) {
+        guard UIDevice.current.userInterfaceIdiom == .tv,
+              let header = view as? UITableViewHeaderFooterView else { return }
+        header.textLabel?.textColor = UIColor.white.withAlphaComponent(0.55)
+        header.textLabel?.font      = .systemFont(ofSize: 28, weight: .semibold)
+        header.contentView.backgroundColor = .clear
+        // UITableViewHeaderFooterView.backgroundView is the right knob; the
+        // generic `view` coming in is the same instance.
+        header.backgroundView = UIView()
+        header.backgroundView?.backgroundColor = .clear
     }
     
     override func indexPathForPreferredFocusedView(in tableView: UITableView) -> IndexPath? {

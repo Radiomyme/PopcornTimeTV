@@ -27,10 +27,140 @@ class MainViewController: UIViewController, CollectionViewControllerDelegate {
     }
     
     var environmentsToFocus: [UIFocusEnvironment] = []
-    
+
     override var preferredFocusEnvironments: [UIFocusEnvironment] {
         return environmentsToFocus.isEmpty ? super.preferredFocusEnvironments : environmentsToFocus
     }
+
+    #if os(tvOS)
+    /// Tracks whether we've already injected the in-body header. viewDidLoad
+    /// can fire repeatedly when the VC is removed/re-added (e.g. tab switch
+    /// + memory pressure), so we de-dup.
+    private var didInstallInBodyHeader: Bool = false
+
+    /// Reference to the in-body title label so subclasses can update it
+    /// (e.g. `MediaViewController.showGenres` rewrites the title to the
+    /// current genre when the user filters).
+    var bodyTitleLabel: UILabel?
+
+    /// On tvOS 26 the centered tab-bar pills live in the same vertical strip
+    /// as `navigationItem.leftBarButtonItem` and `rightBarButtonItems`,
+    /// hiding the giant page title + Sort/Genre under them. The Downloads
+    /// page never had this problem — its "Downloads" label is laid out as a
+    /// regular subview at body y≈190, well below the pills. We mirror that
+    /// approach for every `MainViewController` subclass: read the page
+    /// title from `navigationItem.title` (set via storyboard or by the
+    /// subclass), clear it so the system doesn't render its own copy
+    /// alongside the pills, and inject a fresh body header at the top of
+    /// the view with the title + Sort/Genre buttons.
+    ///
+    /// `responds(to:)` filters: Movies & Shows expose `showFilters:` and
+    /// `showGenres:`; Watchlist / Settings have neither so they get the
+    /// title only, no buttons.
+    func installInBodyHeader() {
+        guard !didInstallInBodyHeader else { return }
+        didInstallInBodyHeader = true
+
+        // 1) Extract title text. Storyboard sets `navigationItem.title`
+        //    statically for Movies/Shows/Watchlist/Settings; subclasses
+        //    (PersonViewController) set it before calling super. As a
+        //    legacy fallback, read the customView label still in the bar
+        //    item (Person hasn't been migrated).
+        var titleText: String? = navigationItem.title
+        if titleText == nil,
+           let custom = navigationItem.leftBarButtonItem?.customView,
+           let label = (custom as? UILabel) ?? custom.subviews.compactMap({ $0 as? UILabel }).first {
+            titleText = label.text
+        }
+
+        // 2) Detach the legacy chrome so tvOS doesn't render its own copy
+        //    of the title (browser-style nav bar would mirror
+        //    `navigationItem.title` next to the tab pills).
+        navigationItem.title = ""
+        navigationItem.leftBarButtonItem = nil
+        navigationItem.rightBarButtonItems = nil
+
+        // 3) Build the in-body header.
+        let header = UIView()
+        header.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(header)
+
+        if let text = titleText {
+            let titleLabel = UILabel()
+            titleLabel.translatesAutoresizingMaskIntoConstraints = false
+            titleLabel.text = text
+            titleLabel.font = .systemFont(ofSize: 75, weight: .heavy)
+            titleLabel.textColor = .white
+            titleLabel.adjustsFontSizeToFitWidth = false
+            header.addSubview(titleLabel)
+            NSLayoutConstraint.activate([
+                titleLabel.leadingAnchor.constraint(equalTo: header.leadingAnchor),
+                titleLabel.centerYAnchor.constraint(equalTo: header.centerYAnchor),
+            ])
+            self.bodyTitleLabel = titleLabel
+        }
+
+        var rightButtons: [UIButton] = []
+        let sortSel = NSSelectorFromString("showFilters:")
+        if responds(to: sortSel) { rightButtons.append(makeCapsuleButton(title: "Sort".localized, action: sortSel)) }
+        let genreSel = NSSelectorFromString("showGenres:")
+        if responds(to: genreSel) { rightButtons.append(makeCapsuleButton(title: "Genre".localized, action: genreSel)) }
+
+        if !rightButtons.isEmpty {
+            let stack = UIStackView(arrangedSubviews: rightButtons)
+            stack.axis = .horizontal
+            stack.spacing = 28
+            stack.alignment = .center
+            stack.translatesAutoresizingMaskIntoConstraints = false
+            header.addSubview(stack)
+            NSLayoutConstraint.activate([
+                stack.trailingAnchor.constraint(equalTo: header.trailingAnchor),
+                stack.centerYAnchor.constraint(equalTo: header.centerYAnchor),
+            ])
+        }
+
+        // 4) Pin the header just below the tab pill bar (safe area top
+        //    already accounts for the pills on tvOS 26). 16pt is enough
+        //    breathing room for the descenders without leaving a void.
+        NSLayoutConstraint.activate([
+            header.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 16),
+            header.leadingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.leadingAnchor, constant: 90),
+            header.trailingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.trailingAnchor, constant: -90),
+            header.heightAnchor.constraint(equalToConstant: 100),
+        ])
+
+        // 5) Push the collection view's content below the header.
+        //    Header (100) + breathing room above (16) and below (~30) +
+        //    extra padding so the focus zoom on the first row clears
+        //    the header → 150pt.
+        let topInset: CGFloat = 150
+        collectionView?.contentInset.top = topInset
+        collectionView?.verticalScrollIndicatorInsets.top = topInset
+    }
+
+    /// Update the in-body title label. Used by `MediaViewController`
+    /// when the user picks a genre filter.
+    func setBodyTitle(_ text: String) {
+        bodyTitleLabel?.text = text
+    }
+
+    private func makeCapsuleButton(title: String, action: Selector) -> UIButton {
+        var config = UIButton.Configuration.gray()
+        config.title = title
+        config.cornerStyle = .capsule
+        config.contentInsets = NSDirectionalEdgeInsets(top: 14, leading: 32, bottom: 14, trailing: 32)
+        config.baseForegroundColor = .white
+        config.titleTextAttributesTransformer = UIConfigurationTextAttributesTransformer { incoming in
+            var out = incoming
+            out.font = .systemFont(ofSize: 26, weight: .semibold)
+            return out
+        }
+        let btn = UIButton(configuration: config)
+        btn.translatesAutoresizingMaskIntoConstraints = false
+        btn.addTarget(self, action: action, for: .primaryActionTriggered)
+        return btn
+    }
+    #endif
     
     override dynamic func viewWillAppear(_ animated: Bool) {
         super.viewWillAppear(animated)
@@ -54,9 +184,13 @@ class MainViewController: UIViewController, CollectionViewControllerDelegate {
 
     override dynamic func viewDidLoad() {
         super.viewDidLoad()
-        
+
         collectionViewController.paginated = true
         load(page: 1)
+
+        #if os(tvOS)
+        installInBodyHeader()
+        #endif
     }
     
     func didRefresh(collectionView: UICollectionView) {

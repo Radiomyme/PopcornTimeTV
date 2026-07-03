@@ -175,53 +175,7 @@
                             <constraint firstAttribute="bottomMargin" secondItem="0tu-gJ-79A" secondAttribute="bottom" id="x8n-JO-c81"/>
                         </constraints>
                     </view>
-                    <navigationItem key="navigationItem" id="DvR-v2-5Xm">
-                        <barButtonItem key="leftBarButtonItem" id="FMQ-eT-ecE">
-                            <view key="customView" contentMode="scaleToFill" id="QG2-Bm-das">
-                                <rect key="frame" x="90" y="44" width="426" height="108"/>
-                                <autoresizingMask key="autoresizingMask" flexibleMaxX="YES" flexibleMaxY="YES"/>
-                                <subviews>
-                                    <label opaque="NO" userInteractionEnabled="NO" contentMode="left" horizontalHuggingPriority="251" verticalHuggingPriority="251" text="Shows" textAlignment="natural" lineBreakMode="tailTruncation" baselineAdjustment="alignBaselines" adjustsFontSizeToFit="NO" translatesAutoresizingMaskIntoConstraints="NO" id="S8B-Ge-Ngl">
-                                        <rect key="frame" x="0.0" y="0.0" width="242" height="90"/>
-                                        <fontDescription key="fontDescription" type="system" weight="heavy" pointSize="75"/>
-                                        <nil key="textColor"/>
-                                        <nil key="highlightedColor"/>
-                                    </label>
-                                </subviews>
-                                <color key="backgroundColor" white="0.0" alpha="0.0" colorSpace="calibratedWhite"/>
-                                <constraints>
-                                    <constraint firstItem="S8B-Ge-Ngl" firstAttribute="top" secondItem="QG2-Bm-das" secondAttribute="top" id="NzZ-9Q-64D"/>
-                                    <constraint firstItem="S8B-Ge-Ngl" firstAttribute="leading" secondItem="QG2-Bm-das" secondAttribute="leading" id="POG-u0-xFl"/>
-                                </constraints>
-                            </view>
-                        </barButtonItem>
-                        <rightBarButtonItems>
-                            <barButtonItem id="UIR-se-NPW">
-                                <button key="customView" opaque="NO" contentMode="scaleToFill" contentHorizontalAlignment="center" contentVerticalAlignment="center" buttonType="roundedRect" lineBreakMode="middleTruncation" id="lOV-1D-qH8">
-                                    <rect key="frame" x="1688" y="58" width="142" height="80"/>
-                                    <autoresizingMask key="autoresizingMask" flexibleMaxX="YES" flexibleMaxY="YES"/>
-                                    <fontDescription key="fontDescription" type="system" weight="medium" pointSize="29"/>
-                                    <inset key="contentEdgeInsets" minX="0.0" minY="20" maxX="0.0" maxY="20"/>
-                                    <state key="normal" title="Genre"/>
-                                    <connections>
-                                        <action selector="showGenres:" destination="JhE-2g-2Pe" eventType="primaryActionTriggered" id="74g-US-slR"/>
-                                    </connections>
-                                </button>
-                            </barButtonItem>
-                            <barButtonItem width="145" id="bJ2-1K-7p0">
-                                <button key="customView" opaque="NO" contentMode="scaleToFill" contentHorizontalAlignment="center" contentVerticalAlignment="center" buttonType="roundedRect" lineBreakMode="middleTruncation" id="L77-QY-cXM">
-                                    <rect key="frame" x="1522" y="58" width="142" height="80"/>
-                                    <autoresizingMask key="autoresizingMask" flexibleMaxX="YES" flexibleMaxY="YES"/>
-                                    <fontDescription key="fontDescription" type="system" weight="medium" pointSize="29"/>
-                                    <inset key="contentEdgeInsets" minX="0.0" minY="20" maxX="0.0" maxY="20"/>
-                                    <state key="normal" title="Sort"/>
-                                    <connections>
-                                        <action selector="showFilters:" destination="JhE-2g-2Pe" eventType="primaryActionTriggered" id="oY0-qu-Vsf"/>
-                                    </connections>
-                                </button>
-                            </barButtonItem>
-                        </rightBarButtonItems>
-                    </navigationItem>
+                    <navigationItem key="navigationItem" id="DvR-v2-5Xm" title="Shows"/>
                 </viewController>
             </objects>
             <point key="canvasLocation" x="1547" y="-1187"/>
@@ -253,53 +207,7 @@
                             <constraint firstItem="GU1-zd-ytb" firstAttribute="top" secondItem="mFM-m6-PqW" secondAttribute="topMargin" id="dCL-uA-P9w"/>
                         </constraints>
                     </view>
-                    <navigationItem key="navigationItem" id="jvN-d2-mze">
-                        <barButtonItem key="leftBarButtonItem" id="Lhs-X5-TYu">
-                            <view key="customView" contentMode="scaleToFill" id="Wd1-EY-HEW">
-                                <rect key="frame" x="90" y="44" width="426" height="108"/>
-                                <autoresizingMask key="autoresizingMask" flexibleMaxX="YES" flexibleMaxY="YES"/>
-                                <subviews>
-                                    <label opaque="NO" userInteractionEnabled="NO" contentMode="left" horizontalHuggingPriority="251" verticalHuggingPriority="251" text="Movies" textAlignment="natural" lineBreakMode="tailTruncation" baselineAdjustment="alignBaselines" adjustsFontSizeToFit="NO" translatesAutoresizingMaskIntoConstraints="NO" id="UzE-4G-slw">
-                                        <rect key="frame" x="0.0" y="0.0" width="255" height="90"/>
-                                        <fontDescription key="fontDescription" type="system" weight="heavy" pointSize="75"/>
-                                        <nil key="textColor"/>
-                                        <nil key="highlightedColor"/>
-                                    </label>
-                                </subviews>
-                                <color key="backgroundColor" white="0.0" alpha="0.0" colorSpace="calibratedWhite"/>
-                                <constraints>
-                                    <constraint firstItem="UzE-4G-slw" firstAttribute="top" secondItem="Wd1-EY-HEW" secondAttribute="top" id="SZI-hI-LNM"/>
-                                    <constraint firstItem="UzE-4G-slw" firstAttribute="leading" secondItem="Wd1-EY-HEW" secondAttribute="leading" id="gCs-pN-jgE"/>
-                                </constraints>
-                            </view>
-                        </barButtonItem>
-                        <rightBarButtonItems>
-                            <barButtonItem id="GfM-Em-z9g">
-                                <button key="customView" opaque="NO" contentMode="scaleToFill" contentHorizontalAlignment="center" contentVerticalAlignment="center" buttonType="roundedRect" lineBreakMode="middleTruncation" id="ggv-4q-HNn">
-                                    <rect key="frame" x="1688" y="58" width="142" height="80"/>
-                                    <autoresizingMask key="autoresizingMask" flexibleMaxX="YES" flexibleMaxY="YES"/>
-                                    <fontDescription key="fontDescription" type="system" weight="medium" pointSize="29"/>
-                                    <inset key="contentEdgeInsets" minX="0.0" minY="20" maxX="0.0" maxY="20"/>
-                                    <state key="normal" title="Genre"/>
-                                    <connections>
-                                        <action selector="showGenres:" destination="ZFj-vu-dW8" eventType="primaryActionTriggered" id="NzM-kO-Whb"/>
-                                    </connections>
-                                </button>
-                            </barButtonItem>
-                            <barButtonItem id="9kS-8U-WGE">
-                                <button key="customView" opaque="NO" contentMode="scaleToFill" contentHorizontalAlignment="center" contentVerticalAlignment="center" buttonType="roundedRect" lineBreakMode="middleTruncation" id="rTI-it-IkT">
-                                    <rect key="frame" x="1522" y="58" width="142" height="80"/>
-                                    <autoresizingMask key="autoresizingMask" flexibleMaxX="YES" flexibleMaxY="YES"/>
-                                    <fontDescription key="fontDescription" type="system" weight="medium" pointSize="29"/>
-                                    <inset key="contentEdgeInsets" minX="0.0" minY="20" maxX="0.0" maxY="20"/>
-                                    <state key="normal" title="Sort"/>
-                                    <connections>
-                                        <action selector="showFilters:" destination="ZFj-vu-dW8" eventType="primaryActionTriggered" id="Wmm-6c-2bt"/>
-                                    </connections>
-                                </button>
-                            </barButtonItem>
-                        </rightBarButtonItems>
-                    </navigationItem>
+                    <navigationItem key="navigationItem" id="jvN-d2-mze" title="Movies"/>
                 </viewController>
             </objects>
             <point key="canvasLocation" x="1547" y="-2571"/>
@@ -1518,27 +1426,7 @@
                             <constraint firstItem="dKI-kC-Efj" firstAttribute="top" secondItem="Lh1-a1-xxZ" secondAttribute="topMargin" id="p94-xh-n9T"/>
                         </constraints>
                     </view>
-                    <navigationItem key="navigationItem" id="5WB-pT-Oa2">
-                        <barButtonItem key="leftBarButtonItem" id="rrz-8T-DaG">
-                            <view key="customView" contentMode="scaleToFill" id="52R-Vi-e7E">
-                                <rect key="frame" x="90" y="44" width="426" height="108"/>
-                                <autoresizingMask key="autoresizingMask" flexibleMaxX="YES" flexibleMaxY="YES"/>
-                                <subviews>
-                                    <label opaque="NO" userInteractionEnabled="NO" contentMode="left" horizontalHuggingPriority="251" verticalHuggingPriority="251" text="Watchlist" textAlignment="natural" lineBreakMode="tailTruncation" baselineAdjustment="alignBaselines" adjustsFontSizeToFit="NO" translatesAutoresizingMaskIntoConstraints="NO" id="3WI-KN-P6d">
-                                        <rect key="frame" x="0.0" y="0.0" width="338" height="90"/>
-                                        <fontDescription key="fontDescription" type="system" weight="heavy" pointSize="75"/>
-                                        <nil key="textColor"/>
-                                        <nil key="highlightedColor"/>
-                                    </label>
-                                </subviews>
-                                <color key="backgroundColor" white="0.0" alpha="0.0" colorSpace="calibratedWhite"/>
-                                <constraints>
-                                    <constraint firstItem="3WI-KN-P6d" firstAttribute="leading" secondItem="52R-Vi-e7E" secondAttribute="leading" id="aoC-Rr-cG8"/>
-                                    <constraint firstItem="3WI-KN-P6d" firstAttribute="top" secondItem="52R-Vi-e7E" secondAttribute="top" id="iji-H2-Rph"/>
-                                </constraints>
-                            </view>
-                        </barButtonItem>
-                    </navigationItem>
+                    <navigationItem key="navigationItem" id="5WB-pT-Oa2" title="Watchlist"/>
                 </viewController>
                 <placeholder placeholderIdentifier="IBFirstResponder" id="eIv-UU-GSi" userLabel="First Responder" sceneMemberID="firstResponder"/>
             </objects>
@@ -1636,27 +1524,7 @@
                             <constraint firstItem="wlH-XA-4p1" firstAttribute="top" secondItem="H08-kb-yzV" secondAttribute="bottom" id="yfv-PE-DP7"/>
                         </constraints>
                     </view>
-                    <navigationItem key="navigationItem" id="U89-YC-dgi">
-                        <barButtonItem key="leftBarButtonItem" id="DKZ-iq-U9Q">
-                            <view key="customView" contentMode="scaleToFill" id="rwt-yL-hj7">
-                                <rect key="frame" x="90" y="44" width="426" height="108"/>
-                                <autoresizingMask key="autoresizingMask" flexibleMaxX="YES" flexibleMaxY="YES"/>
-                                <subviews>
-                                    <label opaque="NO" userInteractionEnabled="NO" contentMode="left" horizontalHuggingPriority="251" verticalHuggingPriority="251" text="Settings" textAlignment="natural" lineBreakMode="tailTruncation" baselineAdjustment="alignBaselines" adjustsFontSizeToFit="NO" translatesAutoresizingMaskIntoConstraints="NO" id="4Ma-4t-EQB">
-                                        <rect key="frame" x="0.0" y="0.0" width="302" height="90"/>
-                                        <fontDescription key="fontDescription" type="system" weight="heavy" pointSize="75"/>
-                                        <nil key="textColor"/>
-                                        <nil key="highlightedColor"/>
-                                    </label>
-                                </subviews>
-                                <color key="backgroundColor" white="0.0" alpha="0.0" colorSpace="calibratedWhite"/>
-                                <constraints>
-                                    <constraint firstItem="4Ma-4t-EQB" firstAttribute="top" secondItem="rwt-yL-hj7" secondAttribute="top" id="3uu-E5-1OS"/>
-                                    <constraint firstItem="4Ma-4t-EQB" firstAttribute="leading" secondItem="rwt-yL-hj7" secondAttribute="leading" id="IyB-GT-UHs"/>
-                                </constraints>
-                            </view>
-                        </barButtonItem>
-                    </navigationItem>
+                    <navigationItem key="navigationItem" id="U89-YC-dgi" title="Settings"/>
                 </viewController>
                 <placeholder placeholderIdentifier="IBFirstResponder" id="qLe-Bf-fCV" userLabel="First Responder" sceneMemberID="firstResponder"/>
             </objects>

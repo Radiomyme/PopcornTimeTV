@@ -9,6 +9,10 @@ target 'PopcornTimetvOS' do
     pod 'XCDYouTubeKit', '~> 2.9'
     pod 'Alamofire', '~> 5.9'
     pod 'AlamofireImage', '~> 4.3'
+    # FloatRatingView 4.0 dropped tvOS support (podspec only declares iOS).
+    # Pinned to 3.0.1 — last release that supports tvOS. The 4.0 changelog
+    # just adds Swift 5 inferred property types, so we're not missing
+    # anything functional.
     pod 'FloatRatingView', '3.0.1'
     pod 'ReachabilitySwift', '~> 5.2'
     pod 'MarqueeLabel', '~> 4.5'

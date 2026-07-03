@@ -83,7 +83,10 @@ class SubtitleSettings: NSObject, NSCoding {
     static let shared = SubtitleSettings()
     
     override init() {
-        guard let codedData = UserDefaults.standard.data(forKey: "subtitleSettings"), let settings = NSKeyedUnarchiver.unarchiveObject(with: codedData) as? SubtitleSettings else { return }
+        super.init()
+        guard let codedData = UserDefaults.standard.data(forKey: "subtitleSettings"),
+              let settings = try? NSKeyedUnarchiver.unarchivedObject(ofClass: SubtitleSettings.self, from: codedData)
+        else { return }
         self.size = settings.size
         self.color = settings.color
         self.encoding = settings.encoding
@@ -91,10 +94,12 @@ class SubtitleSettings: NSObject, NSCoding {
         self.font = settings.font
         self.style = settings.style
     }
-    
+
     func save() {
-        UserDefaults.standard.set(NSKeyedArchiver.archivedData(withRootObject: self), forKey: "subtitleSettings")
-        UserDefaults.standard.synchronize()
+        if let data = try? NSKeyedArchiver.archivedData(withRootObject: self, requiringSecureCoding: false) {
+            UserDefaults.standard.set(data, forKey: "subtitleSettings")
+            UserDefaults.standard.synchronize()
+        }
     }
     
     required init?(coder aDecoder: NSCoder) {

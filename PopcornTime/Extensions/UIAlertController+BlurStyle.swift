@@ -3,18 +3,17 @@
 import Foundation
 
 extension UIAlertController {
-    
-    private struct AssociatedKeys {
-        static var blurStyleKey = "UIAlertController.blurStyleKey"
-    }
-    
-    
+
+    private static let blurStyleKey: UnsafeRawPointer =
+        UnsafeRawPointer(UnsafeMutablePointer<UInt8>.allocate(capacity: 1))
+
+
     public var blurStyle: UIBlurEffect.Style {
         get {
-            return objc_getAssociatedObject(self, &AssociatedKeys.blurStyleKey) as? UIBlurEffect.Style ?? .extraLight
+            return objc_getAssociatedObject(self, Self.blurStyleKey) as? UIBlurEffect.Style ?? .extraLight
         } set (style) {
-            objc_setAssociatedObject(self, &AssociatedKeys.blurStyleKey, style, .OBJC_ASSOCIATION_RETAIN_NONATOMIC)
-            
+            objc_setAssociatedObject(self, Self.blurStyleKey, style, .OBJC_ASSOCIATION_RETAIN_NONATOMIC)
+
             view.setNeedsLayout()
             view.layoutIfNeeded()
         }

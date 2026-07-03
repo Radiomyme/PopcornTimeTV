@@ -106,6 +106,43 @@ extension PCTPlayerViewController: UIViewControllerTransitioningDelegate {
     @IBAction func menuPressed() {
         progressBar.isScrubbing ? endScrubbing() : didFinishPlaying()
     }
+
+    /// Handle the dedicated Play/Pause button on the Siri Remote (or any
+    /// gamepad). The touchpad-click action (`clickGesture`) intentionally
+    /// enters scrubbing mode — that's the standard Apple TV video-app
+    /// pattern and should stay. The Play/Pause button instead toggles
+    /// playback directly without entering scrub.
+    ///
+    /// `presses` is the modern UIKit press-handling API. We must call
+    /// `super` for unhandled press types so the menu / select buttons
+    /// still reach `clickGesture` / `menuPressed`.
+    override func pressesBegan(_ presses: Set<UIPress>, with event: UIPressesEvent?) {
+        var unhandled = Set<UIPress>()
+        for press in presses {
+            if press.type == .playPause {
+                togglePlayPauseDirect()
+            } else {
+                unhandled.insert(press)
+            }
+        }
+        if !unhandled.isEmpty { super.pressesBegan(unhandled, with: event) }
+    }
+
+    /// Direct play/pause toggle — bypasses scrubbing mode.
+    private func togglePlayPauseDirect() {
+        if mediaplayer.isPlaying {
+            // VLCMediaPlayer.canPause guards against unseekable streams
+            // (live HLS) where pause would just buffer and confuse the
+            // user. For a torrent file canPause is always true.
+            if mediaplayer.canPause { mediaplayer.pause() }
+        } else {
+            mediaplayer.play()
+        }
+        // Reveal the controls so the user gets visual feedback that the
+        // toggle was registered, then re-arm the auto-hide timer.
+        if progressBar.isHidden { toggleControlsVisible() }
+        resetIdleTimer()
+    }
     
     func endScrubbing() {
         mediaplayer.willPlay ? mediaplayer.play() : ()

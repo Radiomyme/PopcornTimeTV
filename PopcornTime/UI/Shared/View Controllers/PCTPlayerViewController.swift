@@ -346,7 +346,7 @@ class PCTPlayerViewController: UIViewController, VLCMediaPlayerDelegate, UIGestu
         }
     }
     
-    func mediaPlayerTimeChanged(_ aNotification: Notification!) {
+    func mediaPlayerTimeChanged(_ aNotification: Notification) {
         if loadingActivityIndicatorView.isHidden == false {
             loadingActivityIndicatorView.isHidden = true
             
@@ -378,7 +378,7 @@ class PCTPlayerViewController: UIViewController, VLCMediaPlayerDelegate, UIGestu
         }
     }
     
-    func mediaPlayerStateChanged(_ aNotification: Notification!) {
+    func mediaPlayerStateChanged(_ aNotification: Notification) {
         resetIdleTimer()
         progressBar.isBuffering = false
         nowPlayingInfo?[MPNowPlayingInfoPropertyElapsedPlaybackTime] = (mediaplayer.time.value?.doubleValue ?? 0)/1000

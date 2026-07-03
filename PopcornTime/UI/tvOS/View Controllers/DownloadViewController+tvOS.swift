@@ -5,39 +5,44 @@ import PopcornTorrent
 import PopcornKit
 
 extension DownloadViewController: CollectionViewControllerDelegate, DownloadCollectionViewCellDelegate, UITableViewDelegate, UITableViewDataSource {
-    
-    private struct AssociatedKeys {
-        static var collectionViewControllerKey = "DownloadViewController.collectionViewControllerKey"
-        static var topFocusGuideKey = "DownloadViewController.topFocusGuideKey"
-        static var leftFocusGuideKey = "DownloadViewController.leftFocusGuideKey"
-    }
-    
+
+    // Stable raw-pointer keys for `objc_setAssociatedObject`. Allocated
+    // bytes give us forever-stable addresses that Swift 6 doesn't warn
+    // about (unlike `&someStringStaticVar` which exposes the string's
+    // internal representation).
+    private static let collectionViewControllerKey: UnsafeRawPointer =
+        UnsafeRawPointer(UnsafeMutablePointer<UInt8>.allocate(capacity: 1))
+    private static let topFocusGuideKey: UnsafeRawPointer =
+        UnsafeRawPointer(UnsafeMutablePointer<UInt8>.allocate(capacity: 1))
+    private static let leftFocusGuideKey: UnsafeRawPointer =
+        UnsafeRawPointer(UnsafeMutablePointer<UInt8>.allocate(capacity: 1))
+
     var collectionViewController: CollectionViewController? {
         get {
-            return objc_getAssociatedObject(self, &AssociatedKeys.collectionViewControllerKey) as? CollectionViewController
+            return objc_getAssociatedObject(self, Self.collectionViewControllerKey) as? CollectionViewController
         } set {
-            objc_setAssociatedObject(self, &AssociatedKeys.collectionViewControllerKey, newValue, .OBJC_ASSOCIATION_RETAIN_NONATOMIC)
+            objc_setAssociatedObject(self, Self.collectionViewControllerKey, newValue, .OBJC_ASSOCIATION_RETAIN_NONATOMIC)
         }
     }
-    
-    
+
+
     var collectionView: UICollectionView? {
         return collectionViewController?.collectionView
     }
-    
+
     var topFocusGuide: UIFocusGuide {
         get {
-            return objc_getAssociatedObject(self, &AssociatedKeys.topFocusGuideKey) as! UIFocusGuide
+            return objc_getAssociatedObject(self, Self.topFocusGuideKey) as! UIFocusGuide
         } set {
-            objc_setAssociatedObject(self, &AssociatedKeys.topFocusGuideKey, newValue, .OBJC_ASSOCIATION_RETAIN_NONATOMIC)
+            objc_setAssociatedObject(self, Self.topFocusGuideKey, newValue, .OBJC_ASSOCIATION_RETAIN_NONATOMIC)
         }
     }
-    
+
     var leftFocusGuide: UIFocusGuide {
         get {
-            return objc_getAssociatedObject(self, &AssociatedKeys.leftFocusGuideKey) as! UIFocusGuide
+            return objc_getAssociatedObject(self, Self.leftFocusGuideKey) as! UIFocusGuide
         } set {
-            objc_setAssociatedObject(self, &AssociatedKeys.leftFocusGuideKey, newValue, .OBJC_ASSOCIATION_RETAIN_NONATOMIC)
+            objc_setAssociatedObject(self, Self.leftFocusGuideKey, newValue, .OBJC_ASSOCIATION_RETAIN_NONATOMIC)
         }
     }
     

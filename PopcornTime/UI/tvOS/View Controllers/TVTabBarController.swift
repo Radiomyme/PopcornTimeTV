@@ -13,30 +13,14 @@ class TVTabBarController: UITabBarController {
     }
     
     override func shouldUpdateFocus(in context: UIFocusUpdateContext) -> Bool {
-        guard
-            let previouslyFocusedView = context.previouslyFocusedView,
-            let nextFocusedView = context.nextFocusedView,
-            let navigationController = selectedViewController as? TVNavigationController,
-            let root = navigationController.topViewController as? MainViewController,
-            let collectionView = root.collectionView,
-            let items = root.navigationItem.rightBarButtonItems,
-            !items.isEmpty,
-            collectionView.contentOffset.y + collectionView.contentInset.top < 100 // Make sure we're more or less at the top
-        else {
-            return true
-        }
-        
-        let previousType = type(of: previouslyFocusedView)
-        let nextType = type(of: nextFocusedView)
-        
-        if (previousType === NSClassFromString("UITabBarButton") && nextType is UICollectionViewCell.Type) || (nextType === NSClassFromString("UITabBarButton") && previousType is UICollectionViewCell.Type) // If the tabBarController is about to loose focus to a collectionViewCell or about to gain focus from a collectionViewCell, focus on the tabBarButtons first.
-        {
-            environmentsToFocus = items.compactMap({$0.customView}).reversed()
-            setNeedsFocusUpdate()
-            
-            return false
-        }
-        
-        return true
+        // Sort / Genre moved from custom-view UIButtons (legacy storyboard)
+        // to native `UIBarButtonItem`s — see
+        // `MainViewController.installModernRightBarButtonItems`. tvOS 17+
+        // routes focus through native bar items automatically (they are
+        // first-class focus environments alongside tab pills and the
+        // collection view), so the bespoke redirect this method used to
+        // perform is no longer needed and would actually fight the system's
+        // routing. Default behaviour: let the focus engine decide.
+        return super.shouldUpdateFocus(in: context)
     }
 }

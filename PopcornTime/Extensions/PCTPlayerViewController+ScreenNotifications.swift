@@ -4,16 +4,15 @@ import Foundation
 
 
 extension PCTPlayerViewController {
-    
-    private struct AssociatedKeys {
-        static var windowsKey = "VLCMediaPlayer.windowsKey"
-    }
-    
+
+    private static let windowsKey: UnsafeRawPointer =
+        UnsafeRawPointer(UnsafeMutablePointer<UInt8>.allocate(capacity: 1))
+
     var windows: [UIWindow] {
         get {
-           return objc_getAssociatedObject(self, &AssociatedKeys.windowsKey) as? [UIWindow] ?? []
+           return objc_getAssociatedObject(self, Self.windowsKey) as? [UIWindow] ?? []
         } set {
-           objc_setAssociatedObject(self, &AssociatedKeys.windowsKey, newValue, .OBJC_ASSOCIATION_RETAIN_NONATOMIC)
+           objc_setAssociatedObject(self, Self.windowsKey, newValue, .OBJC_ASSOCIATION_RETAIN_NONATOMIC)
         }
     }
     

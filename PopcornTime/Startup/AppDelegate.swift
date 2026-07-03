@@ -4,6 +4,7 @@ import UIKit
 import PopcornKit
 import Reachability
 import ObjectMapper
+import MarqueeLabel
 
 public let vlcSettingTextEncoding = "subsdec-encoding"
 
@@ -47,6 +48,19 @@ class AppDelegate: UIResponder, UIApplicationDelegate, UITabBarControllerDelegat
 
     func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?) -> Bool {
         print("[App] didFinishLaunching tosAccepted=\(UserDefaults.standard.bool(forKey: "tosAccepted"))")
+
+        // Default to wiping torrent caches when the player exits. Apple TV's
+        // per-app sandbox is ~7–12 GB; without this each streamed movie
+        // leaves 5+ GB of partials behind, and 4K HEVC picks start failing
+        // with "not enough space" after 1–2 watches. The user can flip the
+        // toggle off in Settings if they want to retain partials for
+        // resume-from-disk.
+        UserDefaults.standard.register(defaults: ["removeCacheOnPlayerExit": true])
+
+        // And purge any stragglers from previous sessions (crashes, force
+        // quits, the toggle being off in the past) before any UI loads.
+        purgeOrphanTorrentDownloads()
+
         if let url = launchOptions?[.url] as? URL {
             return self.application(.shared, open: url)
         }
@@ -69,8 +83,19 @@ class AppDelegate: UIResponder, UIApplicationDelegate, UITabBarControllerDelegat
         try? reachability.startNotifier()
         window?.tintColor = .app
 
-        TraktManager.shared.syncUserData()
         awakeObjects()
+
+        // Defer Trakt's user-data sync (6 parallel HTTP requests for
+        // playback progress, watchlists, etc.) to *after* the first
+        // visible frame. Otherwise it competes with the Movies tab's
+        // initial YTS fetch over a small pool of HTTP/1.1 sockets and
+        // makes the grid feel sluggish to populate. The cached
+        // UserDefaults values are returned synchronously by each
+        // sub-call so the UI doesn't need the network results to
+        // render.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+            TraktManager.shared.syncUserData()
+        }
 
         return true
     }
@@ -127,12 +152,23 @@ class AppDelegate: UIResponder, UIApplicationDelegate, UITabBarControllerDelegat
         SubtitlesManager.shared.logout()
     }
 
+    /// Method-swizzling bootstrap — must run before any of these classes
+    /// is instantiated.
+    ///
+    /// The legacy implementation walked **every** Objective-C class
+    /// registered in the runtime (`objc_getClassList`) and tried
+    /// `as? Object.Type` on each to discover swizzlers. On tvOS that's
+    /// ~50 000 classes (UIKit + TVKit + TVUI + TVMLKit + AVKit + libtorrent
+    /// + GCDWebServer + …) and the cast is *not* O(1) — it accounted for
+    /// most of the 40-second cold launch on Apple TV. iOS was unaffected
+    /// because its runtime carries far fewer types.
+    ///
+    /// We only have three Object conformers in our codebase, all in
+    /// PopcornTime.app itself — call them directly. Adding a new
+    /// conformer? Append it here.
     func awakeObjects() {
-        let typeCount = Int(objc_getClassList(nil, 0))
-        let types = UnsafeMutablePointer<AnyClass>.allocate(capacity: typeCount)
-        let autoreleasingTypes = AutoreleasingUnsafeMutablePointer<AnyClass>(types)
-        objc_getClassList(autoreleasingTypes, Int32(typeCount))
-        for index in 0 ..< typeCount { (types[index] as? Object.Type)?.awake() }
-        types.deallocate()
+        UIViewController.awake()
+        UICollectionView.awake()
+        MarqueeLabel.awake()
     }
 }

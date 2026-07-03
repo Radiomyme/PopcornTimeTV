@@ -6,29 +6,29 @@ import PopcornTorrent
 import MediaPlayer.MPMediaItem
 
 extension DownloadDetailViewController: UITableViewDataSource, UITableViewDelegate {
-    
-    private struct AssociatedKeys {
-        static var environmentsToFocusKey = "DownloadDetailViewController.environmentsToFocusKey"
-        static var guideKey = "DownloadDetailViewController.guideKey"
-    }
-    
+
+    private static let environmentsToFocusKey: UnsafeRawPointer =
+        UnsafeRawPointer(UnsafeMutablePointer<UInt8>.allocate(capacity: 1))
+    private static let guideKey: UnsafeRawPointer =
+        UnsafeRawPointer(UnsafeMutablePointer<UInt8>.allocate(capacity: 1))
+
     var environmentsToFocus: [UIFocusEnvironment] {
         get {
-            return objc_getAssociatedObject(self, &AssociatedKeys.environmentsToFocusKey) as? [UIFocusEnvironment] ?? []
+            return objc_getAssociatedObject(self, Self.environmentsToFocusKey) as? [UIFocusEnvironment] ?? []
         } set {
-            objc_setAssociatedObject(self, &AssociatedKeys.environmentsToFocusKey, newValue, .OBJC_ASSOCIATION_RETAIN_NONATOMIC)
+            objc_setAssociatedObject(self, Self.environmentsToFocusKey, newValue, .OBJC_ASSOCIATION_RETAIN_NONATOMIC)
         }
     }
-    
+
     override var preferredFocusEnvironments: [UIFocusEnvironment] {
         return environmentsToFocus.isEmpty ? super.preferredFocusEnvironments : environmentsToFocus
     }
-    
+
     var guide: UIFocusGuide {
         get {
-            return objc_getAssociatedObject(self, &AssociatedKeys.guideKey) as! UIFocusGuide
+            return objc_getAssociatedObject(self, Self.guideKey) as! UIFocusGuide
         } set {
-            objc_setAssociatedObject(self, &AssociatedKeys.guideKey, newValue, .OBJC_ASSOCIATION_RETAIN_NONATOMIC)
+            objc_setAssociatedObject(self, Self.guideKey, newValue, .OBJC_ASSOCIATION_RETAIN_NONATOMIC)
         }
     }
     

@@ -39,20 +39,30 @@ class ContinueWatchingCollectionReusableView: UICollectionReusableView, UICollec
         collectionView.register(UINib(nibName: String(describing: ContinueWatchingCollectionViewCell.self), bundle: nil), forCellWithReuseIdentifier: "cell")
     }
     
+    /// Cap the number of on-deck items we hydrate at refresh time. The user
+    /// can scroll the carousel to surface more, but the first viewport
+    /// typically shows ~3 cells. Without the cap, a long watch history
+    /// fires N parallel `movie_details` requests on every cold launch
+    /// (50 calls observed in the wild) — that's 2-4 seconds of extra
+    /// latency before the Movies grid is interactive on tvOS.
+    private static let onDeckPrefetchCap = 12
+
     func refreshOnDeck() {
         workItem?.cancel()
         workItem = DispatchWorkItem { [unowned self] in
             let group = DispatchGroup()
             var media = [Media]()
-            
+
             let completion: ([Media]) -> Void = { media in
                 self.onDeck = media.sorted(by: { $0.title < $1.title })
                 self.collectionView.reloadData()
                 self.layoutSubviews()
             }
-            
+
             if self.type == .movies {
-                WatchedlistManager<Movie>.movie.getOnDeck().forEach { (id) in
+                let ids = Array(WatchedlistManager<Movie>.movie.getOnDeck()
+                    .prefix(ContinueWatchingCollectionReusableView.onDeckPrefetchCap))
+                ids.forEach { (id) in
                     group.enter()
                     PopcornKit.getMovieInfo(id) { (movie, error) in
                         if let movie = movie { media.append(movie) }
@@ -60,7 +70,9 @@ class ContinueWatchingCollectionReusableView: UICollectionReusableView, UICollec
                     }
                 }
             } else if self.type == .episodes {
-                WatchedlistManager<Episode>.episode.getOnDeck().forEach { (id) in
+                let ids = Array(WatchedlistManager<Episode>.episode.getOnDeck()
+                    .prefix(ContinueWatchingCollectionReusableView.onDeckPrefetchCap))
+                ids.forEach { (id) in
                     group.enter()
                     PopcornKit.getEpisodeInfo(Int(id)!) { (episode, error) in
                         if let episode = episode { media.append(episode) }

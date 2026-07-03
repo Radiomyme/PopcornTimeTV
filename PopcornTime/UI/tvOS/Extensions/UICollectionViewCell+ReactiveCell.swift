@@ -10,16 +10,15 @@ fileprivate extension UILayoutPriority {
 }
 
 extension UICollectionViewCell {
-    
-    private struct AssociatedKeys {
-        static var focusedConstraintsKey = "UICollectionViewCell.focusedConstraintsKey"
-    }
-    
+
+    private static let focusedConstraintsKey: UnsafeRawPointer =
+        UnsafeRawPointer(UnsafeMutablePointer<UInt8>.allocate(capacity: 1))
+
     var focusedConstraints: [NSLayoutConstraint] {
         get {
-            return objc_getAssociatedObject(self, &AssociatedKeys.focusedConstraintsKey) as? [NSLayoutConstraint] ?? []
+            return objc_getAssociatedObject(self, Self.focusedConstraintsKey) as? [NSLayoutConstraint] ?? []
         } set (constraints) {
-            objc_setAssociatedObject(self, &AssociatedKeys.focusedConstraintsKey, constraints, .OBJC_ASSOCIATION_RETAIN_NONATOMIC)
+            objc_setAssociatedObject(self, Self.focusedConstraintsKey, constraints, .OBJC_ASSOCIATION_RETAIN_NONATOMIC)
         }
     }
     

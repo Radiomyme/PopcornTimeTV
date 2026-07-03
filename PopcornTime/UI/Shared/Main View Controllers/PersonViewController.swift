@@ -12,9 +12,14 @@ class PersonViewController: MainViewController {
     @IBOutlet var titleLabel: UILabel?
     
     override func viewDidLoad() {
-        super.viewDidLoad()
-        
+        // Set the title BEFORE super.viewDidLoad so MainViewController's
+        // installInBodyHeader (called from super) reads the actor name and
+        // displays it in the in-body header rather than the storyboard
+        // placeholder text.
         navigationItem.title = currentItem.name
+
+        super.viewDidLoad()
+
         titleLabel?.text = currentItem.name
         collectionViewController.paginated = false
     }

@@ -5,6 +5,34 @@ import PopcornTorrent
 import PopcornKit
 import MediaPlayer.MPMediaItem
 
+/// Walk `NSTemporaryDirectory()/Downloads/` and remove every subfolder.
+/// PTTorrentStreamer stores each torrent's partials there under a hash
+/// directory and never reclaims them on its own. Call this:
+///   • on app launch (`AppDelegate.didFinishLaunching`) — free space
+///     accumulated by previous sessions
+///   • before each new `startStreaming` call — guard against the
+///     "not enough space" assertion in libtorrent (Apple TV sandbox is
+///     ~7–12 GB so two abandoned 4K downloads = full disk).
+///
+/// Standalone function (not a static on `Media`) because Swift forbids
+/// calling static methods on a protocol's metatype like `Media.foo()`.
+func purgeOrphanTorrentDownloads() {
+    let fm = FileManager.default
+    let downloads = (NSTemporaryDirectory() as NSString)
+        .appendingPathComponent("Downloads")
+    guard fm.fileExists(atPath: downloads) else { return }
+    var freed: Int64 = 0
+    let entries = (try? fm.contentsOfDirectory(atPath: downloads)) ?? []
+    for entry in entries {
+        let p = (downloads as NSString).appendingPathComponent(entry)
+        freed += fm.folderSize(atPath: p)
+        try? fm.removeItem(atPath: p)
+    }
+    if freed > 0 {
+        print("[Cache] purged stale torrents (freed \(ByteCountFormatter.string(fromByteCount: freed, countStyle: .file)))")
+    }
+}
+
 extension Media {
     
     /**
@@ -47,22 +75,54 @@ extension Media {
             }
         }
         
-        PTTorrentStreamer.shared().cancelStreamingAndDeleteData(false) // Make sure we're not already streaming
+        // Wipe any leftover torrent partials before starting a new stream.
+        // PTTorrentStreamer caches under `NSTemporaryDirectory()/Downloads/<hash>/...`
+        // and only cleans the *current* torrent on cancel — failed streams,
+        // app crashes, or user-aborted previews leave orphan folders that
+        // each weigh several GB. Apple TV's per-app sandbox tops out around
+        // 7-12 GB of usable space, so two abandoned 4K attempts are enough
+        // to make the next "Highest" pick fail with "not enough space".
+        PTTorrentStreamer.shared().cancelStreamingAndDeleteData(true)
+        purgeOrphanTorrentDownloads()
         
         if url.hasPrefix("magnet") || (url.hasSuffix(".torrent") && !url.hasPrefix("http")) {
             loadingViewController.streamer = .shared()
+            // PTTorrentStreamer dispatches its callbacks on libtorrent's
+            // background queue. The blocks below all touch UIKit
+            // (loadingViewController.progress / present(playerVc) /
+            // alertController.show()) which asserts main-thread. Hop back
+            // to main inside each callback so the caller doesn't have to
+            // care about the streamer's threading.
+            print("[Streamer] startStreaming magnet=\(url.prefix(80))…")
+            var lastLoggedTenth: Float = -1
             PTTorrentStreamer.shared().startStreaming(fromFileOrMagnetLink: url, progress: { (status) in
-                loadingBlock(status, loadingViewController)
+                // Sample every 10% of buffering so the log doesn't drown the console.
+                let bucket = (status.bufferingProgress * 10).rounded(.down)
+                if bucket != lastLoggedTenth {
+                    lastLoggedTenth = bucket
+                    print(String(format: "[Streamer] buffering=%.0f%% seeds=%d peers=%d down=%dKB/s",
+                                 status.bufferingProgress * 100,
+                                 status.seeds, status.peers,
+                                 status.downloadSpeed / 1024))
+                }
+                DispatchQueue.main.async { loadingBlock(status, loadingViewController) }
                 }, readyToPlay: { (videoFileURL, videoFilePath) in
-                    playBlock(videoFileURL, videoFilePath, self, nextEpisode, progress, playViewController, .shared())
-                    finishedLoadingBlock(loadingViewController, playViewController)
+                    print("[Streamer] readyToPlay url=\(videoFileURL)")
+                    DispatchQueue.main.async {
+                        playBlock(videoFileURL, videoFilePath, self, nextEpisode, progress, playViewController, .shared())
+                        finishedLoadingBlock(loadingViewController, playViewController)
+                    }
                 }, failure: { error in
-                    errorBlock(error.localizedDescription)
+                    print("[Streamer] FAILURE: \(error.localizedDescription)")
+                    DispatchQueue.main.async { errorBlock(error.localizedDescription) }
             })
         } else {
             PopcornKit.downloadTorrentFile(url, completion: { (url, error) in
-                guard let url = url, error == nil else { errorBlock(error!.localizedDescription); return }
-                self.play(fromFileOrMagnetLink: url, nextEpisodeInSeries: nextEpisode, loadingViewController: loadingViewController, playViewController: playViewController, progress: progress, loadingBlock: loadingBlock, playBlock: playBlock, errorBlock: errorBlock, finishedLoadingBlock: finishedLoadingBlock)
+                // Alamofire hands the response back on its own queue too.
+                DispatchQueue.main.async {
+                    guard let url = url, error == nil else { errorBlock(error!.localizedDescription); return }
+                    self.play(fromFileOrMagnetLink: url, nextEpisodeInSeries: nextEpisode, loadingViewController: loadingViewController, playViewController: playViewController, progress: progress, loadingBlock: loadingBlock, playBlock: playBlock, errorBlock: errorBlock, finishedLoadingBlock: finishedLoadingBlock)
+                }
             })
         }
     }

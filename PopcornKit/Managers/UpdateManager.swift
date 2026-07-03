@@ -172,7 +172,7 @@ internal class VersionString: NSObject, NSCoding {
     }
 
     class func unarchive(_ data: Data) -> VersionString? {
-        return NSKeyedUnarchiver.unarchiveObject(with: data) as? VersionString
+        return try? NSKeyedUnarchiver.unarchivedObject(ofClass: VersionString.self, from: data)
     }
 }
 
