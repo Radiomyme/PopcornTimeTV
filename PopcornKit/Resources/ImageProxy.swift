@@ -14,8 +14,13 @@ public enum ImageProxy {
 
     /// Hosts whose images need proxying. Matched as a domain suffix so both
     /// `yts.bz` and `img.yts.bz` are caught with a single entry.
+    ///
+    /// NOTE: YTS rotates its image CDN periodically (the API host moved to
+    /// `movies-api.accel.li` but the poster URLs in the JSON now point at
+    /// `yts.gg`). Keep every historical host here — French ISPs DNS-block
+    /// most of them, so anything not proxied renders as a placeholder.
     public static var proxiedHostSuffixes: [String] = [
-        "yts.bz", "yts.mx", "yts.am", "yts.lt", "yts.rs", "yts.ag",
+        "yts.gg", "yts.bz", "yts.mx", "yts.am", "yts.lt", "yts.rs", "yts.ag",
     ]
 
     /// Hosts that are known to be reachable globally and never need proxying
