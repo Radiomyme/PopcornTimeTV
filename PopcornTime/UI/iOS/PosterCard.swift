@@ -12,9 +12,16 @@ struct PosterCard: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
-            posterImage
-                .aspectRatio(2/3, contentMode: .fill)
+            // `Color.clear` carries a locked 2:3 ratio (width-driven via
+            // `.fit`), so every cell is exactly the same size regardless of
+            // the source image's own dimensions. The poster is overlaid and
+            // clipped to that box — using `.fill` on the image container
+            // directly (the previous approach) let each cell's height track
+            // its image ratio, producing the uneven grid.
+            Color.clear
+                .aspectRatio(2/3, contentMode: .fit)
                 .frame(maxWidth: .infinity)
+                .overlay { posterImage.scaledToFill() }
                 .background(Color(.tertiarySystemBackground))
                 .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
                 .overlay(

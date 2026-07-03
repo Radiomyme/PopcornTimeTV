@@ -54,11 +54,60 @@ final class SearchViewModel: ObservableObject {
 struct SearchView: View {
     @StateObject private var viewModel = SearchViewModel()
 
+    /// `.searchable`'s UIKit search bar crashes when the app runs as an
+    /// "iOS app on Mac" (Designed for iPad): activating the field drives
+    /// `_UISearchPresentationController` → `UIScreen._preferredFocusedWindow`,
+    /// which asserts with `_screenBasedFocusUnsupported` because screen-based
+    /// focus doesn't exist on the Mac windowing model. On that platform we
+    /// render our own in-view search field instead; iPhone/iPad keep the
+    /// native `.searchable` experience.
+    private let isiOSAppOnMac = ProcessInfo.processInfo.isiOSAppOnMac
+
     private let columns = [
         GridItem(.adaptive(minimum: 140, maximum: 200), spacing: 14),
     ]
 
     var body: some View {
+        Group {
+            if isiOSAppOnMac {
+                VStack(spacing: 0) {
+                    macSearchField
+                    resultsList
+                }
+            } else {
+                resultsList
+                    .searchable(text: $viewModel.query,
+                                placement: .navigationBarDrawer(displayMode: .always),
+                                prompt: "Films et séries")
+            }
+        }
+        .navigationDestination(for: Movie.self) { MediaDetailView(media: $0) }
+        .navigationDestination(for: Show.self)  { MediaDetailView(media: $0) }
+        .onChange(of: viewModel.query) { _, _ in viewModel.runSearch() }
+    }
+
+    private var macSearchField: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
+            TextField("Films et séries", text: $viewModel.query)
+                .textFieldStyle(.plain)
+                .autocorrectionDisabled()
+            if !viewModel.query.isEmpty {
+                Button {
+                    viewModel.query = ""
+                } label: {
+                    Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary)
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(10)
+        .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .padding(.horizontal, 16)
+        .padding(.vertical, 12)
+    }
+
+    private var resultsList: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 24) {
                 if !viewModel.movies.isEmpty {
@@ -100,10 +149,6 @@ struct SearchView: View {
             }
             .padding(.horizontal, 16)
         }
-        .navigationDestination(for: Movie.self) { MediaDetailView(media: $0) }
-        .navigationDestination(for: Show.self)  { MediaDetailView(media: $0) }
-        .searchable(text: $viewModel.query, placement: .navigationBarDrawer(displayMode: .always), prompt: "Films et séries")
-        .onChange(of: viewModel.query) { _, _ in viewModel.runSearch() }
     }
 
     @ViewBuilder
