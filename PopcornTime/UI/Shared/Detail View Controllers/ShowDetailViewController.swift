@@ -85,22 +85,33 @@ class ShowDetailViewController: DetailViewController {
     }
     
     func loadEpisodeMetadata(for show: Show, completion: @escaping ([Episode]) -> Void) {
+        // The provider (TVMaze) already supplies a per-episode still in
+        // `largeBackgroundImage`, so only reach out to TMDB for episodes
+        // that are still missing artwork. This matters now that a show's
+        // detail carries its full episode guide — long-running series would
+        // otherwise fire hundreds of screenshot requests on open.
         let group = DispatchGroup()
-        
+
         var episodes = [Episode]()
-        
-        for var episode in show.episodes {
+        let lock = NSLock()
+
+        for episode in show.episodes {
+            if episode.largeBackgroundImage != nil {
+                lock.lock(); episodes.append(episode); lock.unlock()
+                continue
+            }
+            var episode = episode
             group.enter()
             TMDBManager.shared.getEpisodeScreenshots(forShowWithImdbId: show.id, orTMDBId: show.tmdbId, season: episode.season, episode: episode.episode, completion: { (tmdbId, image, error) in
                 if let image = image { episode.largeBackgroundImage = image }
                 if let tmdbId = tmdbId { episode.show?.tmdbId = tmdbId }
-                episodes.append(episode)
+                lock.lock(); episodes.append(episode); lock.unlock()
                 group.leave()
             })
         }
-        
+
         group.notify(queue: .main) {
-            episodes.sort(by: { $0.episode < $1.episode })
+            episodes.sort { $0.season == $1.season ? $0.episode < $1.episode : $0.season < $1.season }
             completion(episodes)
         }
     }
