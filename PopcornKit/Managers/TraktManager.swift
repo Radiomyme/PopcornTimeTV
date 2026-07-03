@@ -74,6 +74,10 @@ open class TraktManager: NetworkManager {
      */
     open func getWatched<T: Media>(forMediaOfType type: T.Type, completion:@escaping ([T], NSError?) -> Void) {
         guard var credential = OAuthCredential(identifier: "trakt") else { return }
+        // Resolve the history path here (a plain String, Sendable) so the
+        // background closure below doesn't capture the non-Sendable `T.Type`
+        // metatype value — which trips a Swift 6 concurrency warning.
+        let historyPath = type is Movie.Type ? Trakt.movies : Trakt.episodes
         DispatchQueue.global(qos: .userInitiated).async {
             if credential.expired {
                 do {
@@ -82,9 +86,8 @@ open class TraktManager: NetworkManager {
                     DispatchQueue.main.async(execute: { completion([T](), error) })
                 }
             }
-            let type = type is Movie.Type ? Trakt.movies : Trakt.episodes
             let queue = DispatchQueue(label: "com.popcorntimetv.popcornkit.response.queue", attributes: .concurrent)
-            self.manager.request(Trakt.base + Trakt.sync + Trakt.history + type, parameters: ["extended": "full", "limit": Int.max], headers: HTTPHeaders(Trakt.Headers.Authorization(credential.accessToken))).validate().responseData(queue: queue) { response in
+            self.manager.request(Trakt.base + Trakt.sync + Trakt.history + historyPath, parameters: ["extended": "full", "limit": Int.max], headers: HTTPHeaders(Trakt.Headers.Authorization(credential.accessToken))).validate().responseData(queue: queue) { response in
                 guard case .success(let __data) = response.result, let value = try? JSONSerialization.jsonObject(with: __data, options: .allowFragments) else { completion([T](), response.error as NSError?); return }
                 let responseObject = JSON(value)
                 var watchedlist = [T]()
@@ -117,6 +120,17 @@ open class TraktManager: NetworkManager {
      */
     open func getPlaybackProgress<T: Media>(forMediaOfType type: T.Type, completion:@escaping ([T: Float], NSError?) -> Void) {
         guard var credential = OAuthCredential(identifier: "trakt") else { return }
+        // Resolve the path from `type` here (a Sendable String) so the
+        // background closure below doesn't capture the non-Sendable T.Type.
+        let mediaType: String
+        switch type {
+        case is Movie.Type:
+            mediaType = Trakt.movies
+        case is Episode.Type:
+            mediaType = Trakt.episodes
+        default:
+            fatalError("Only retrieving progress for movies and episode is supported.")
+        }
         DispatchQueue.global(qos: .userInitiated).async {
             if credential.expired {
                 do {
@@ -124,15 +138,6 @@ open class TraktManager: NetworkManager {
                 } catch let error as NSError {
                     DispatchQueue.main.async(execute: { completion([T: Float](), error) })
                 }
-            }
-            let mediaType: String
-            switch type {
-            case is Movie.Type:
-                mediaType = Trakt.movies
-            case is Episode.Type:
-                mediaType = Trakt.episodes
-            default:
-                fatalError("Only retrieving progress for movies and episode is supported.")
             }
             let queue = DispatchQueue(label: "com.popcorntimetv.popcornkit.response.queue", attributes: .concurrent)
             self.manager.request(Trakt.base + Trakt.sync + Trakt.playback + mediaType, parameters: Trakt.extended, headers: HTTPHeaders(Trakt.Headers.Authorization(credential.accessToken))).validate().responseData(queue: queue) { response in
@@ -328,6 +333,17 @@ open class TraktManager: NetworkManager {
      */
     open func getWatchlist<T: Media>(forMediaOfType type: T.Type, completion:@escaping ([T], NSError?) -> Void) {
         guard var credential = OAuthCredential(identifier: "trakt") else { return }
+        // Resolve the path from `type` here (a Sendable String) so the
+        // background closure below doesn't capture the non-Sendable T.Type.
+        let mediaType: String
+        switch type {
+        case is Movie.Type:
+            mediaType = Trakt.movies
+        case is Show.Type:
+            mediaType = Trakt.shows
+        default:
+            mediaType = ""
+        }
         DispatchQueue.global(qos: .userInitiated).async {
             if credential.expired {
                 do {
@@ -335,15 +351,6 @@ open class TraktManager: NetworkManager {
                 } catch let error as NSError {
                     DispatchQueue.main.async(execute: { completion([T](), error) })
                 }
-            }
-            let mediaType: String
-            switch type {
-            case is Movie.Type:
-                mediaType = Trakt.movies
-            case is Show.Type:
-                mediaType = Trakt.shows
-            default:
-                mediaType = ""
             }
             let queue = DispatchQueue(label: "com.popcorntimetv.popcornkit.response.queue", attributes: .concurrent)
             self.manager.request(Trakt.base + Trakt.sync + Trakt.watchlist + mediaType, parameters: Trakt.extended, headers: HTTPHeaders(Trakt.Headers.Authorization(credential.accessToken))).validate().responseData(queue: queue) { response in
@@ -463,6 +470,9 @@ open class TraktManager: NetworkManager {
      */
     open func getMediaCredits<T: Media>(forPersonWithId id: String, mediaType type: T.Type, completion: @escaping ([T], NSError?) -> Void) {
         var typeString = (type is Movie.Type ? Trakt.movies : Trakt.shows)
+        // Sendable Bool resolved from `type` up-front so the response closure
+        // doesn't capture the non-Sendable T.Type metatype.
+        let requestsMovies = type is Movie.Type
         self.manager.request(Trakt.base + Trakt.people + "/\(id)" + typeString, parameters: Trakt.extended, headers: HTTPHeaders(Trakt.Headers.Default)).validate().responseData { response in
             guard case .success(let __data) = response.result, let value = try? JSONSerialization.jsonObject(with: __data, options: .allowFragments) else { completion([T](), response.error as NSError?); return }
             let responseObject = JSON(value)
@@ -478,7 +488,7 @@ open class TraktManager: NetworkManager {
                         if let media = media { medias.append(media as! T) }
                         group.leave()
                     }
-                    type is Movie.Type ?  MovieManager.shared.getInfo(id, completion: completion) : ShowManager.shared.getInfo(id, completion: completion)
+                    requestsMovies ?  MovieManager.shared.getInfo(id, completion: completion) : ShowManager.shared.getInfo(id, completion: completion)
                 }
             }
             for (_, item) in responseObject["cast"] {
@@ -488,7 +498,7 @@ open class TraktManager: NetworkManager {
                     if let media = media { medias.append(media as! T) }
                     group.leave()
                 }
-                type is Movie.Type ?  MovieManager.shared.getInfo(id, completion: completion) : ShowManager.shared.getInfo(id, completion: completion)
+                requestsMovies ?  MovieManager.shared.getInfo(id, completion: completion) : ShowManager.shared.getInfo(id, completion: completion)
             }
             group.notify(queue: .main, execute: { completion(medias, nil) })
         }

@@ -41,8 +41,6 @@ extension UIAlertController {
                 .first
         let key = scene?.windows.first(where: { $0.isKeyWindow })
             ?? scene?.windows.first
-            ?? UIApplication.shared.windows.first(where: { $0.isKeyWindow })
-            ?? UIApplication.shared.windows.first
 
         var top = key?.rootViewController
         while let presented = top?.presentedViewController { top = presented }

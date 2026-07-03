@@ -64,13 +64,11 @@ struct MoviesGridView: View {
     @StateObject private var viewModel = MoviesViewModel()
     @State private var showingFilters = false
 
-    private let columns = [
-        GridItem(.adaptive(minimum: 150, maximum: 220), spacing: 16),
-    ]
+    private let columns = PosterGrid.columns
 
     var body: some View {
         ScrollView {
-            LazyVGrid(columns: columns, spacing: 24) {
+            LazyVGrid(columns: columns, spacing: PosterGrid.lineSpacing) {
                 ForEach(viewModel.movies, id: \.id) { movie in
                     NavigationLink(value: movie) {
                         PosterCard(title: movie.title,

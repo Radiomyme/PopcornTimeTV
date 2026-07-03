@@ -1,7 +1,12 @@
 
 
 import SwiftUI
-import PopcornKit
+// PopcornKit predates Swift concurrency auditing; its models (Movie/Show/…)
+// aren't marked Sendable, so passing them out of the completion handlers we
+// bridge into async trips "non-Sendable capture" warnings. `@preconcurrency`
+// tells the compiler to treat the module as pre-concurrency and silences
+// those (they're value-type structs, safe to hand across in practice).
+@preconcurrency import PopcornKit
 
 @MainActor
 final class SearchViewModel: ObservableObject {
@@ -63,9 +68,7 @@ struct SearchView: View {
     /// native `.searchable` experience.
     private let isiOSAppOnMac = ProcessInfo.processInfo.isiOSAppOnMac
 
-    private let columns = [
-        GridItem(.adaptive(minimum: 140, maximum: 200), spacing: 14),
-    ]
+    private let columns = PosterGrid.columns
 
     var body: some View {
         Group {
@@ -112,7 +115,7 @@ struct SearchView: View {
             VStack(alignment: .leading, spacing: 24) {
                 if !viewModel.movies.isEmpty {
                     section(title: "Films") {
-                        LazyVGrid(columns: columns, spacing: 20) {
+                        LazyVGrid(columns: columns, spacing: PosterGrid.lineSpacing) {
                             ForEach(viewModel.movies, id: \.id) { movie in
                                 NavigationLink(value: movie) {
                                     PosterCard(title: movie.title,
@@ -126,7 +129,7 @@ struct SearchView: View {
                 }
                 if !viewModel.shows.isEmpty {
                     section(title: "Séries") {
-                        LazyVGrid(columns: columns, spacing: 20) {
+                        LazyVGrid(columns: columns, spacing: PosterGrid.lineSpacing) {
                             ForEach(viewModel.shows, id: \.id) { show in
                                 NavigationLink(value: show) {
                                     PosterCard(title: show.title,

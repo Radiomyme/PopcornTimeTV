@@ -86,6 +86,13 @@ post_install do |installer|
             config.build_settings['EXCLUDED_ARCHS[sdk=appletvsimulator*]'] = 'arm64'
             config.build_settings['ENABLE_USER_SCRIPT_SANDBOXING']         = 'NO'
 
+            # These are all vendored third-party pods we don't maintain, and a
+            # clean build surfaces their "future Swift language mode" / label-
+            # mismatch / Sendable warnings (ObjectMapper's TransformOperators,
+            # AlamofireImage, …). Suppress Swift warnings pod-wide so the issue
+            # navigator only shows warnings from OUR code.
+            config.build_settings['SWIFT_SUPPRESS_WARNINGS'] = 'YES'
+
             # Restrict each pod target to its actual platform. CocoaPods names
             # them with `-iOS` / `-tvOS` suffixes; Xcode 26 otherwise tries to
             # compile both flavors for whatever scheme is active and fails on
@@ -101,12 +108,26 @@ post_install do |installer|
             # prototype, enum-mismatch ternary). They're in 3rd-party code
             # we can't patch upstream — silence them so they stop polluting
             # the issue navigator.
-            if name == 'GCDWebServer'
+            # NOTE: with use_frameworks! + multi-platform, CocoaPods names the
+            # target 'GCDWebServer-iOS' / 'GCDWebServer-tvOS' (not bare
+            # 'GCDWebServer'), so match the prefix — an `== ` check silently
+            # never fired, which is why these warnings kept showing up.
+            if name.start_with?('GCDWebServer')
                 config.build_settings['GCC_WARN_ABOUT_MISSING_PROTOTYPES']        = 'NO'
                 config.build_settings['CLANG_WARN_STRICT_PROTOTYPES']             = 'NO'
                 config.build_settings['CLANG_WARN_ENUM_CONVERSION']               = 'NO'
                 config.build_settings['CLANG_WARN_IMPLICIT_FUNCTION_DECLARATION'] = 'NO'
                 config.build_settings['CLANG_WARN_DOCUMENTATION_COMMENTS']        = 'NO'
+                config.build_settings['GCC_WARN_ABOUT_DEPRECATED_FUNCTIONS']      = 'NO'
+                # A few warnings modern clang emits that the boolean settings
+                # above don't cover: the iOS-15 UTType deprecations, the C
+                # "declaration without a prototype" note, and the cross-enum
+                # ternary in GCDWebServerConnection.m. Silence them via raw
+                # -Wno flags since they're all in vendored 3rd-party code.
+                inherited = config.build_settings['OTHER_CFLAGS'] || '$(inherited)'
+                inherited = inherited.join(' ') if inherited.is_a?(Array)
+                config.build_settings['OTHER_CFLAGS'] =
+                    "#{inherited} -Wno-deprecated-declarations -Wno-deprecated-non-prototype -Wno-enum-compare-conditional"
             end
         end
     end

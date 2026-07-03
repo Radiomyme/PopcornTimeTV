@@ -18,7 +18,8 @@ struct SafariSheet: UIViewControllerRepresentable {
         let config = SFSafariViewController.Configuration()
         config.entersReaderIfAvailable = false
         let vc = SFSafariViewController(url: url, configuration: config)
-        vc.preferredControlTintColor = .white
+        // `preferredControlTintColor` is deprecated as of iOS 26 (it clashes
+        // with the system's background effects) — let the system tint.
         vc.modalPresentationStyle = .pageSheet
         return vc
     }
@@ -26,4 +27,10 @@ struct SafariSheet: UIViewControllerRepresentable {
     func updateUIViewController(_ vc: SFSafariViewController, context: Context) {}
 }
 
-extension URL: Identifiable { public var id: String { absoluteString } }
+/// Wrapper so a `URL` can drive `.sheet(item:)` without conforming the
+/// imported `URL` type to the imported `Identifiable` protocol — a
+/// retroactive conformance that would break if Foundation ever adds its own.
+struct IdentifiableURL: Identifiable {
+    let url: URL
+    var id: String { url.absoluteString }
+}

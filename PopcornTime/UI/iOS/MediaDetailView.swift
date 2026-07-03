@@ -97,7 +97,7 @@ struct MediaDetailView: View {
     @State private var peersCount: Int = 0
     @State private var downloadKbps: Double = 0
     @State private var streamErrorMessage: String?
-    @State private var safariURL: URL?
+    @State private var safariURL: IdentifiableURL?
 
     var body: some View {
         ScrollView {
@@ -125,8 +125,8 @@ struct MediaDetailView: View {
             }
             .ignoresSafeArea()
         }
-        .sheet(item: $safariURL) { url in
-            SafariSheet(url: url)
+        .sheet(item: $safariURL) { item in
+            SafariSheet(url: item.url)
                 .ignoresSafeArea()
         }
         .overlay { streamingOverlay }
@@ -221,7 +221,7 @@ struct MediaDetailView: View {
 
             if let trailerURL = trailerURL {
                 Button {
-                    safariURL = trailerURL
+                    safariURL = IdentifiableURL(url: trailerURL)
                 } label: {
                     Image(systemName: "play.rectangle")
                         .font(.title3)

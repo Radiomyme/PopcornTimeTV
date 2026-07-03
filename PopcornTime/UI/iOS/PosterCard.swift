@@ -2,6 +2,21 @@
 
 import SwiftUI
 
+/// Shared layout constants so the Films, Séries and Recherche grids render at
+/// identical, uniform cell sizes. Adaptive columns keep each poster within a
+/// tight width band (denser than the old per-screen values) and the same
+/// spacing everywhere — one source of truth avoids the grids drifting apart.
+enum PosterGrid {
+    static let minCellWidth: CGFloat = 120
+    static let maxCellWidth: CGFloat = 172
+    static let interitemSpacing: CGFloat = 16
+    static let lineSpacing: CGFloat = 22
+
+    static let columns = [
+        GridItem(.adaptive(minimum: minCellWidth, maximum: maxCellWidth), spacing: interitemSpacing),
+    ]
+}
+
 /// Generic 2:3 poster + title cell used by the Movies / Shows / Search grids.
 /// Loads via `AsyncImage` so it benefits from URLSession HTTP caching and
 /// SwiftUI's automatic placeholder shimmer.

@@ -6,7 +6,7 @@ import PopcornKit
 struct SettingsView: View {
     @AppStorage("autoSelectQuality") private var autoSelectQuality = "Highest"
     @AppStorage("streamOnCellular")  private var streamOnCellular  = false
-    @State private var traktAuthURL: URL?
+    @State private var traktAuthURL: IdentifiableURL?
     @State private var isTraktSignedIn = TraktManager.shared.isSignedIn()
 
     var body: some View {
@@ -34,7 +34,7 @@ struct SettingsView: View {
                     }
                 } else {
                     Button {
-                        traktAuthURL = TraktManager.shared.iOSAuthorizationURL()
+                        traktAuthURL = IdentifiableURL(url: TraktManager.shared.iOSAuthorizationURL())
                     } label: {
                         Label("Se connecter à Trakt", systemImage: "person.crop.circle.badge.plus")
                     }
@@ -54,8 +54,8 @@ struct SettingsView: View {
                 }
             }
         }
-        .sheet(item: $traktAuthURL) { url in
-            SafariSheet(url: url)
+        .sheet(item: $traktAuthURL) { item in
+            SafariSheet(url: item.url)
         }
         .onReceive(NotificationCenter.default.publisher(for: .traktDidAuthenticate)) { _ in
             isTraktSignedIn = TraktManager.shared.isSignedIn()

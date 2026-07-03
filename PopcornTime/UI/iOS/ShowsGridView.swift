@@ -48,13 +48,11 @@ final class ShowsViewModel: ObservableObject {
 struct ShowsGridView: View {
     @StateObject private var viewModel = ShowsViewModel()
 
-    private let columns = [
-        GridItem(.adaptive(minimum: 150, maximum: 220), spacing: 16),
-    ]
+    private let columns = PosterGrid.columns
 
     var body: some View {
         ScrollView {
-            LazyVGrid(columns: columns, spacing: 24) {
+            LazyVGrid(columns: columns, spacing: PosterGrid.lineSpacing) {
                 ForEach(viewModel.shows, id: \.id) { show in
                     NavigationLink(value: show) {
                         PosterCard(title: show.title,
