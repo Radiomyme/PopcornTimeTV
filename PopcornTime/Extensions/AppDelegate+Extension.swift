@@ -58,6 +58,25 @@ extension AppDelegate: PCTPlayerViewControllerDelegate, UIViewControllerTransiti
 extension AppDelegate {
     
     func chooseQuality(_ sender: UIView?, media: Media, completion: @escaping (Torrent) -> Void) {
+        // Episodes: EZTV only carries what its uploaders pushed, so before
+        // picking a quality, ask the Torrentio aggregator (YTS/RARBG-archive/
+        // 1337x/TorrentGalaxy/…) for that exact episode and merge the result.
+        // This both fills gaps (old seasons EZTV lacks entirely) and adds
+        // multi-audio releases. Movies are already merged at detail-load
+        // time by the provider.
+        if let episode = media as? Episode, let showId = episode.show?.id, showId.hasPrefix("tt") {
+            TorrentioClient.shared.streams(imdbId: showId, season: episode.season, episode: episode.episode) { [weak self] aggregated in
+                var augmented = episode
+                augmented.torrents = TorrentioClient.merge(episode.torrents, with: aggregated)
+                print("[chooseQuality] episode S\(episode.season)E\(episode.episode): \(episode.torrents.count) EZTV + \(aggregated.count) aggregated -> \(augmented.torrents.count)")
+                self?.presentQualityChoice(sender, media: augmented, completion: completion)
+            }
+            return
+        }
+        presentQualityChoice(sender, media: media, completion: completion)
+    }
+
+    private func presentQualityChoice(_ sender: UIView?, media: Media, completion: @escaping (Torrent) -> Void) {
         // Default behaviour for the modernized tvOS app: always pick the highest
         // quality torrent available (2160p > 1080p > 720p > 480p > 3D, with
         // HDR/DV/Atmos preferred at equal resolution). The user can override the

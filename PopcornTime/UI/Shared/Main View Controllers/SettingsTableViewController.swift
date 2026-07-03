@@ -217,8 +217,10 @@ class SettingsTableViewController: UITableViewController, TraktManagerDelegate {
                 cell.detailTextLabel?.text = subtitleSettings.encoding
             }
         case 2 where indexPath.row == 0:
+            cell.detailTextLabel?.text = UserDefaults.standard.string(forKey: "preferredAudioLanguage") ?? "None".localized
+        case 3 where indexPath.row == 0:
             cell.detailTextLabel?.text = TraktManager.shared.isSignedIn() ? "Sign Out".localized : "Sign In".localized
-        case 3:
+        case 4:
             if indexPath.row == 1 {
                 var date = "Never".localized
                 if let lastChecked = UserDefaults.standard.object(forKey: "lastVersionCheckPerformedOnDate") as? Date {
@@ -231,7 +233,7 @@ class SettingsTableViewController: UITableViewController, TraktManagerDelegate {
         default:
             break
         }
-        
+
         return cell
     }
     
@@ -427,7 +429,29 @@ class SettingsTableViewController: UITableViewController, TraktManagerDelegate {
                 
                 present(alertController, animated: true)
             }
-        case 2 where indexPath.row == 0 :
+        case 2 where indexPath.row == 0:
+            let alertController = UIAlertController(title: "Audio Language".localized, message: "Choose a preferred audio language. When the file carries a matching audio track, it will be selected automatically.".localized, preferredStyle: .actionSheet, blurStyle: .dark)
+
+            let handler: (UIAlertAction) -> Void = { action in
+                let value = action.title == "None".localized ? nil : action.title
+                UserDefaults.standard.set(value, forKey: "preferredAudioLanguage")
+                tableView.reloadData()
+            }
+
+            alertController.addAction(UIAlertAction(title: "None".localized, style: .default, handler: handler))
+            alertController.addAction(UIAlertAction(title: "Cancel".localized, style: .cancel, handler: nil))
+
+            for language in Locale.commonLanguages {
+                alertController.addAction(UIAlertAction(title: language, style: .default, handler: handler))
+            }
+
+            let current = UserDefaults.standard.string(forKey: "preferredAudioLanguage")
+            alertController.preferredAction = alertController.actions.first(where: { $0.title == current }) ?? alertController.actions.first(where: { $0.title == "None".localized })
+
+            alertController.popoverPresentationController?.sourceView = tableView.cellForRow(at: indexPath)
+
+            present(alertController, animated: true)
+        case 3 where indexPath.row == 0:
             if TraktManager.shared.isSignedIn() {
                 let alert = UIAlertController(title: "Sign Out".localized, message: "Are you sure you want to Sign Out?".localized, preferredStyle: .alert)
                 
@@ -442,7 +466,7 @@ class SettingsTableViewController: UITableViewController, TraktManagerDelegate {
                 let vc = TraktManager.shared.loginViewController()
                 present(vc, animated: true)
             }
-        case 3:
+        case 4:
             if indexPath.row == 0 {
                 let controller = UIAlertController(title: nil, message: nil, preferredStyle: .alert)
                 controller.addAction(UIAlertAction(title: "OK".localized, style: .cancel, handler: nil))

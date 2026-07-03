@@ -14,9 +14,10 @@ open class ShowManager: NetworkManager {
         case date = "updated"
         case rating = "rating"
         case trending = "trending"
-        
-        public static let array = [trending, popularity, rating, date, year]
-        
+        case name = "name"
+
+        public static let array = [trending, popularity, rating, date, year, name]
+
         public var string: String {
             switch self {
             case .popularity:
@@ -29,6 +30,8 @@ open class ShowManager: NetworkManager {
                 return "Top Rated".localized
             case .trending:
                 return "Trending".localized
+            case .name:
+                return "A - Z".localized
             }
         }
     }

@@ -236,7 +236,55 @@ class PCTPlayerViewController: UIViewController, VLCMediaPlayerDelegate, UIGestu
     func didSelectAudioDelay(_ delay: Int) {
         mediaplayer.currentAudioPlaybackDelay = Int(1e6) * delay
     }
-    
+
+    func didSelectAudioTrack(_ index: Int32) {
+        mediaplayer.currentAudioTrackIndex = index
+    }
+
+    /// Whether we already tried to honour the "Audio Language" setting for
+    /// this playback. Tracks only become visible to VLC once decoding has
+    /// started, so the check runs on the first time-changed callback.
+    private var didAutoSelectAudioTrack = false
+
+    /// If the file carries an audio track matching the user's preferred
+    /// audio language (Settings → Audio Language), switch to it. Track
+    /// naming is free-form ("Track 1", "French", "[fre]", "VFF - Français"…)
+    /// so we match against the language's localized name, English name and
+    /// ISO 639-1/2 codes.
+    func autoSelectAudioTrackIfNeeded() {
+        guard !didAutoSelectAudioTrack else { return }
+        didAutoSelectAudioTrack = true
+
+        guard
+            let preferred = UserDefaults.standard.string(forKey: "preferredAudioLanguage"),
+            let code = Locale.commonISOLanguageCodes.first(where: {
+                Locale.current.localizedString(forLanguageCode: $0)?.localizedCapitalized == preferred
+            }),
+            let names = mediaplayer.audioTrackNames as? [String],
+            let indexes = mediaplayer.audioTrackIndexes as? [NSNumber],
+            names.count == indexes.count, names.count > 1
+        else { return }
+
+        var tokens: Set<String> = [preferred.lowercased(), code.lowercased()]
+        if let english = Locale(identifier: "en").localizedString(forLanguageCode: code) {
+            tokens.insert(english.lowercased())
+        }
+        if let alpha3 = Locale.LanguageCode(code).identifier(.alpha3) {
+            tokens.insert(alpha3.lowercased())
+        }
+
+        for (name, index) in zip(names, indexes) {
+            // Split on non-letters so the 2-letter code can't false-match
+            // inside an unrelated word ("en" in "Enhanced").
+            let words = Set(name.lowercased().components(separatedBy: CharacterSet.letters.inverted)).subtracting([""])
+            if !words.isDisjoint(with: tokens) {
+                print("[Player] auto-selecting audio track '\(name)' for language '\(preferred)'")
+                mediaplayer.currentAudioTrackIndex = index.int32Value
+                return
+            }
+        }
+    }
+
     
     func didSelectSubtitleDelay(_ delay: Int) {
         mediaplayer.currentVideoSubTitleDelay = Int(1e6) * delay
@@ -349,11 +397,12 @@ class PCTPlayerViewController: UIViewController, VLCMediaPlayerDelegate, UIGestu
     func mediaPlayerTimeChanged(_ aNotification: Notification) {
         if loadingActivityIndicatorView.isHidden == false {
             loadingActivityIndicatorView.isHidden = true
-            
+
             addRemoteCommandCenterHandlers()
             beginReceivingScreenNotifications()
             configureNowPlayingInfo()
-            
+            autoSelectAudioTrackIfNeeded()
+
             resetIdleTimer()
         }
         

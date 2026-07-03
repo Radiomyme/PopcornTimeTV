@@ -18,6 +18,8 @@
 		0D4C7FB7179B8942DE7FEE6F /* MediaDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 63EA10BA5CEAAC75379E9758 /* MediaDetailView.swift */; };
 		18A3290F89077847EC9B5759 /* HtmlDecoding.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4DABD6DA1EACF82E008F7549 /* HtmlDecoding.swift */; };
 		199ED0BEFAAF4B93D90738EB /* YTSEZTVProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = 37DACB023B19FBE420CFFCEA /* YTSEZTVProvider.swift */; };
+		70EBA1D4C0FFEE0000000002 /* TorrentioClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 70EBA1D4C0FFEE0000000001 /* TorrentioClient.swift */; };
+		70EBA1D4C0FFEE0000000003 /* TorrentioClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 70EBA1D4C0FFEE0000000001 /* TorrentioClient.swift */; };
 		1BB8C6E5ACB80F4000D81D3D /* Torrent.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4D0F9D211E6F298000860852 /* Torrent.swift */; };
 		1C241A70671F5212AFDB94E3 /* Pods_TopShelf.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = B747D9446AC930A21B6E6E3D /* Pods_TopShelf.framework */; };
 		28C2A5671ECD2689945C50A6 /* ImageProxy.swift in Sources */ = {isa = PBXBuildFile; fileRef = B46C65CC570E869D860C1CF2 /* ImageProxy.swift */; };
@@ -326,6 +328,7 @@
 		287B85341C9873A200EEF5C8 /* PopcornTime.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = PopcornTime.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		339443987BA9913056C788A2 /* Pods-PopcornKit tvOS.release.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-PopcornKit tvOS.release.xcconfig"; path = "Target Support Files/Pods-PopcornKit tvOS/Pods-PopcornKit tvOS.release.xcconfig"; sourceTree = "<group>"; };
 		37DACB023B19FBE420CFFCEA /* YTSEZTVProvider.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = YTSEZTVProvider.swift; path = PopcornKit/Managers/Providers/YTSEZTVProvider.swift; sourceTree = SOURCE_ROOT; };
+		70EBA1D4C0FFEE0000000001 /* TorrentioClient.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = TorrentioClient.swift; path = PopcornKit/Managers/Providers/TorrentioClient.swift; sourceTree = SOURCE_ROOT; };
 		383706534E1BC6C3E1A47C8A /* PopcornKit.framework */ = {isa = PBXFileReference; explicitFileType = wrapper.framework; includeInIndex = 0; path = PopcornKit.framework; sourceTree = BUILT_PRODUCTS_DIR; };
 		3EC80D936120986C06A00498 /* String+Localized.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = "String+Localized.swift"; path = "PopcornKit/Resources/String+Localized.swift"; sourceTree = SOURCE_ROOT; };
 		44441B28B134A26461FAE05C /* Pods_PopcornKit_tvOS.framework */ = {isa = PBXFileReference; explicitFileType = wrapper.framework; includeInIndex = 0; path = Pods_PopcornKit_tvOS.framework; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -1119,6 +1122,7 @@
 			children = (
 				DE96A3C033AAA0359ED427BC /* MediaProvider.swift */,
 				37DACB023B19FBE420CFFCEA /* YTSEZTVProvider.swift */,
+				70EBA1D4C0FFEE0000000001 /* TorrentioClient.swift */,
 			);
 			path = Providers;
 			sourceTree = "<group>";
@@ -1727,6 +1731,7 @@
 				0AB2A7E42FF63FFBC2A577E1 /* String+Localized.swift in Sources */,
 				732635D2FDD9B7B7A07D737B /* MediaProvider.swift in Sources */,
 				199ED0BEFAAF4B93D90738EB /* YTSEZTVProvider.swift in Sources */,
+				70EBA1D4C0FFEE0000000002 /* TorrentioClient.swift in Sources */,
 				418CA07D415C7F46A48DC457 /* ImageProxy.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -1778,6 +1783,7 @@
 				CB979C2C29286CDC1AFD374E /* String+Localized.swift in Sources */,
 				C3B64F1FC181390C145F21FE /* MediaProvider.swift in Sources */,
 				D480D686B5F9FD5AD13B58BA /* YTSEZTVProvider.swift in Sources */,
+				70EBA1D4C0FFEE0000000003 /* TorrentioClient.swift in Sources */,
 				28C2A5671ECD2689945C50A6 /* ImageProxy.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;

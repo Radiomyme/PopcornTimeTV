@@ -158,7 +158,7 @@ public struct Episode: Media, Equatable {
         return formatter.string(fromByteCount: Int64(bytes))
     }
 
-    public init(title: String = "Unknown".localized, id: String = "0000000", tmdbId: Int? = nil, slug: String = "unknown", summary: String = "No summary available.".localized, torrents: [Torrent] = [], subtitles: [Subtitle] = [], largeBackgroundImage: String? = nil, largeCoverImage: String? = nil, show: Show? = nil, episode: Int = -1, season: Int = -1) {
+    public init(title: String = "Unknown".localized, id: String = "0000000", tmdbId: Int? = nil, slug: String = "unknown", summary: String = "No summary available.".localized, torrents: [Torrent] = [], subtitles: [Subtitle] = [], largeBackgroundImage: String? = nil, largeCoverImage: String? = nil, show: Show? = nil, episode: Int = -1, season: Int = -1, firstAirDate: Date = .distantPast) {
         self.title = title
         self.id = id
         self.tmdbId = tmdbId
@@ -167,7 +167,7 @@ public struct Episode: Media, Equatable {
         self.torrents = torrents
         self.subtitles = subtitles
         self.largeBackgroundImage = largeBackgroundImage
-        self.firstAirDate = .distantPast
+        self.firstAirDate = firstAirDate
         self.show = show
         self.season = season
         self.episode = episode

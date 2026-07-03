@@ -227,30 +227,57 @@ public final class YTSEZTVProvider: MediaProvider {
             "with_images": true,
             "with_cast":   true,
         ]
+
+        // Query YTS (curated qualities, rich metadata) and the Torrentio
+        // aggregator (a dozen extra indexers — REMUX, HDR, multi-audio
+        // releases YTS never carries) in parallel, then merge the torrent
+        // lists by info-hash.
+        let group = DispatchGroup()
+        var ytsMovie: Movie?
+        var ytsError: NSError?
+        var aggregated: [Torrent] = []
+
+        group.enter()
         attempt(hosts: orderedHosts, path: Path.movieInfo, params: params) { data, error in
-            guard let data = data else {
-                DispatchQueue.main.async { completion(nil, error) }
-                return
-            }
+            defer { group.leave() }
+            guard let data = data else { ytsError = error; return }
             guard
                 let json    = try? JSONSerialization.jsonObject(with: data, options: .allowFragments),
                 let root    = json as? [String: Any],
                 let payload = root["data"] as? [String: Any],
                 let movie   = payload["movie"] as? [String: Any]
-            else {
-                DispatchQueue.main.async { completion(nil, nil) }
+            else { return }
+            ytsMovie = Movie(yts: movie)
+        }
+
+        group.enter()
+        TorrentioClient.shared.streams(imdbId: imdbId) { torrents in
+            aggregated = torrents
+            group.leave()
+        }
+
+        group.notify(queue: .main) {
+            guard var movie = ytsMovie else {
+                completion(nil, ytsError)
                 return
             }
-            DispatchQueue.main.async { completion(Movie(yts: movie), nil) }
+            let before = movie.torrents.count
+            movie.torrents = TorrentioClient.merge(movie.torrents, with: aggregated)
+            print("[YTS+Torrentio] \(imdbId): \(before) YTS + \(aggregated.count) aggregated -> \(movie.torrents.count) torrents")
+            completion(movie, nil)
         }
     }
 
     // MARK: - Shows (EZTV + TVMaze)
 
-    /// Fetch a page of episode torrents from EZTV, group by imdb_id, then
-    /// resolve show metadata in parallel via TVMaze (free, unauthenticated).
-    /// EZTV doesn't expose sort/genre filtering; we ignore those args and
-    /// always return the most recently released episodes' shows.
+    /// Catalog entry point.
+    ///
+    /// - Search: TVMaze full-text search (EZTV has no search API). Torrents
+    ///   are resolved later by `getShowInfo` when a result is opened.
+    /// - Browse: fetch a page of episode torrents from EZTV, group by
+    ///   imdb_id, resolve show metadata in parallel via TVMaze, then apply
+    ///   the requested genre filter and sort locally (EZTV itself exposes
+    ///   neither).
     public func loadShows(page: Int,
                           filter: ShowManager.Filters,
                           genre: NetworkManager.Genres,
@@ -258,8 +285,18 @@ public final class YTSEZTVProvider: MediaProvider {
                           order: NetworkManager.Orders,
                           completion: @escaping ([Show]?, NSError?) -> Void) {
 
+        if let term = searchTerm, !term.isEmpty {
+            // TVMaze search isn't paginated — return everything on page 1
+            // and an empty page 2 so the infinite-scroll loop terminates.
+            guard page <= 1 else {
+                DispatchQueue.main.async { completion([], nil) }
+                return
+            }
+            return searchShows(term, completion: completion)
+        }
+
         let params: [String: Any] = ["limit": 100, "page": max(page, 1)]
-        attemptEztv(hosts: orderedEztvHosts, params: params) { [weak self] data, error in
+        attemptEztv(hosts: orderedEztvHosts, path: "/api/get-torrents", params: params) { [weak self] data, error in
             guard let self = self else { return }
             guard let data = data else {
                 DispatchQueue.main.async { completion(nil, error) }
@@ -275,11 +312,37 @@ public final class YTSEZTVProvider: MediaProvider {
                 return
             }
             print("[EZTV] got \(raw.count) torrents")
-            self.buildShows(from: raw, completion: completion)
+            self.buildShows(from: raw, filter: filter, genre: genre, completion: completion)
+        }
+    }
+
+    private func searchShows(_ term: String, completion: @escaping ([Show]?, NSError?) -> Void) {
+        let url = "https://api.tvmaze.com/search/shows"
+        session.request(url, parameters: ["q": term]).validate().responseData { response in
+            switch response.result {
+            case .failure(let error):
+                DispatchQueue.main.async { completion(nil, error.underlyingError as NSError? ?? error as NSError) }
+            case .success(let data):
+                var shows: [Show] = []
+                if let json = try? JSONSerialization.jsonObject(with: data),
+                   let results = json as? [[String: Any]] {
+                    for result in results {
+                        guard
+                            let dict = result["show"] as? [String: Any],
+                            let imdb = (dict["externals"] as? [String: Any])?["imdb"] as? String,
+                            let show = Show(tvmaze: dict, imdbId: imdb)
+                        else { continue }
+                        shows.append(show)
+                    }
+                }
+                print("[TVMaze] search '\(term)' -> \(shows.count) shows")
+                DispatchQueue.main.async { completion(shows, nil) }
+            }
         }
     }
 
     private func attemptEztv(hosts: [String],
+                             path: String,
                              params: [String: Any],
                              completion: @escaping (Data?, NSError?) -> Void) {
         var remaining = hosts
@@ -291,7 +354,7 @@ public final class YTSEZTVProvider: MediaProvider {
                 return
             }
             remaining.removeFirst()
-            let url = host + "/api/get-torrents"
+            let url = host + path
             print("[EZTV] GET \(url) params=\(params)")
             session.request(url, parameters: params).validate().responseData { [weak self] response in
                 let status = response.response?.statusCode ?? -1
@@ -323,27 +386,60 @@ public final class YTSEZTVProvider: MediaProvider {
         tryNext()
     }
 
+    /// Assemble the complete detail-page payload for one show:
+    ///
+    ///   1. TVMaze `lookup/shows?imdb=` — canonical metadata + TVMaze id.
+    ///   2. TVMaze `shows/{id}/episodes` — the FULL episode guide (titles,
+    ///      summaries, stills, air dates) for every season.
+    ///   3. EZTV `get-torrents?imdb_id=` — every torrent the indexer has for
+    ///      the show (paginated), merged into the guide per episode.
+    ///
+    /// Episodes without a torrent are kept: the play flow falls back to the
+    /// Torrentio aggregator at click time, which covers most catalog gaps.
     public func getShowInfo(imdbId: String, completion: @escaping (Show?, NSError?) -> Void) {
-        // First-class source: the show that loadShows already assembled with
-        // its episode list (cached when the catalog rendered). If absent
-        // (deep-linked from a watchlist with no fresh catalog fetch), fall
-        // back to a TVMaze-only metadata refresh — episodes will be empty
-        // but the detail screen renders a "no episodes" path correctly.
         let cached = cacheQueue.sync { showCache[imdbId] }
         if let cached = cached {
             DispatchQueue.main.async { completion(cached, nil) }
             return
         }
-        fetchTVMaze(imdbId: imdbId) { tvmaze in
-            guard let tvmaze = tvmaze, let show = Show(tvmaze: tvmaze, imdbId: imdbId, episodes: []) else {
+
+        fetchTVMaze(imdbId: imdbId) { [weak self] tvmaze in
+            guard let self = self else { return }
+            guard let tvmaze = tvmaze, var show = Show(tvmaze: tvmaze, imdbId: imdbId, episodes: []) else {
                 DispatchQueue.main.async { completion(nil, nil) }
                 return
             }
-            DispatchQueue.main.async { completion(show, nil) }
+
+            let group = DispatchGroup()
+            var guide: [[String: Any]] = []
+            var torrentEntries: [[String: Any]] = []
+
+            if let tvmazeId = tvmaze["id"] as? Int {
+                group.enter()
+                self.fetchTVMazeEpisodes(tvmazeId: tvmazeId) { episodes in
+                    guide = episodes
+                    group.leave()
+                }
+            }
+
+            group.enter()
+            self.fetchAllEztvTorrents(imdbId: imdbId) { entries in
+                torrentEntries = entries
+                group.leave()
+            }
+
+            group.notify(queue: .main) {
+                show.episodes = self.mergedEpisodes(guide: guide, eztvEntries: torrentEntries, show: show)
+                self.cacheQueue.sync { self.showCache[imdbId] = show }
+                print("[EZTV] getShowInfo \(imdbId): guide=\(guide.count) torrents=\(torrentEntries.count) episodes=\(show.episodes.count)")
+                completion(show, nil)
+            }
         }
     }
 
     private func buildShows(from raw: [[String: Any]],
+                            filter: ShowManager.Filters,
+                            genre: NetworkManager.Genres,
                             completion: @escaping ([Show]?, NSError?) -> Void) {
         // Group EZTV torrents by imdb_id (string form, since EZTV stores it
         // as a 7- or 8-digit number without "tt" prefix).
@@ -369,11 +465,8 @@ public final class YTSEZTVProvider: MediaProvider {
             let padded = String(imdbNumeric).leftPadded(to: 7, with: "0")
             let imdbId = "tt\(padded)"
             self.fetchTVMaze(imdbId: imdbId) { tvmaze in
-                let episodes = entries.compactMap { Episode(eztv: $0) }
-                if let tvmaze = tvmaze, var show = Show(tvmaze: tvmaze, imdbId: imdbId, episodes: episodes) {
-                    // Wire each episode back to its show so the player flow
-                    // (which reads episode.show) has the metadata.
-                    show.episodes = episodes.map { var e = $0; e.show = show; return e }
+                if let tvmaze = tvmaze, var show = Show(tvmaze: tvmaze, imdbId: imdbId, episodes: []) {
+                    show.episodes = self.mergedEpisodes(guide: [], eztvEntries: entries, show: show)
                     lock.lock(); shows.append(show); lock.unlock()
                 }
                 group.leave()
@@ -381,21 +474,159 @@ public final class YTSEZTVProvider: MediaProvider {
         }
 
         group.notify(queue: .main) {
-            // Sort by most recent episode air date (descending) so newer
-            // shows surface first — matches the "Latest" feel of the films
-            // tab.
-            shows.sort { lhs, rhs in
-                let l = lhs.episodes.map(\.firstAirDate).max() ?? .distantPast
-                let r = rhs.episodes.map(\.firstAirDate).max() ?? .distantPast
-                return l > r
+            var result = shows
+
+            if genre != .all {
+                let wanted = YTSEZTVProvider.normalizedGenre(genre.rawValue)
+                result = result.filter { show in
+                    show.genres.contains { YTSEZTVProvider.normalizedGenre($0) == wanted }
+                }
             }
-            // Cache for later getShowInfo lookups by detail screens.
-            self.cacheQueue.sync {
-                for s in shows { self.showCache[s.id] = s }
+
+            switch filter {
+            case .name:
+                result.sort { $0.title.localizedCaseInsensitiveCompare($1.title) == .orderedAscending }
+            case .rating:
+                result.sort { $0.rating > $1.rating }
+            case .year:
+                result.sort { $0.year > $1.year }
+            case .popularity:
+                // Best proxy EZTV gives us: total seeders across the page's
+                // torrents for that show.
+                let seeds: (Show) -> Int = { $0.episodes.flatMap(\.torrents).map(\.seeds).reduce(0, +) }
+                result.sort { seeds($0) > seeds($1) }
+            case .trending, .date:
+                // Most recent episode release first — matches the "Latest"
+                // feel of the films tab.
+                let latest: (Show) -> Date = { $0.episodes.map(\.firstAirDate).max() ?? .distantPast }
+                result.sort { latest($0) > latest($1) }
             }
-            print("[EZTV] built \(shows.count) shows from \(grouped.count) imdb groups")
-            completion(shows, nil)
+
+            // Deliberately NOT cached in showCache: catalog entries only
+            // hold the current page's torrents, and getShowInfo builds the
+            // complete guide on demand — a partial entry must never shadow
+            // that full fetch.
+            print("[EZTV] built \(result.count)/\(shows.count) shows from \(grouped.count) imdb groups (filter=\(filter.rawValue) genre=\(genre.rawValue))")
+            completion(result, nil)
         }
+    }
+
+    /// Merge the TVMaze episode guide with EZTV torrents into one Episode
+    /// per (season, episode), sorted by season then episode. Torrents for
+    /// the same episode (different qualities/releases) are attached to that
+    /// single Episode instead of surfacing as duplicate cells.
+    private func mergedEpisodes(guide: [[String: Any]],
+                                eztvEntries: [[String: Any]],
+                                show: Show) -> [Episode] {
+        struct Key: Hashable { let season: Int; let episode: Int }
+
+        var torrentsByKey: [Key: [Torrent]] = [:]
+        var titleByKey: [Key: String] = [:]
+        var dateByKey: [Key: Date] = [:]
+        for entry in eztvEntries {
+            let season  = Int((entry["season"]  as? String) ?? "0") ?? 0
+            let episode = Int((entry["episode"] as? String) ?? "0") ?? 0
+            // episode 0 == season packs / specials without numbering; the
+            // guide can't anchor them so they'd render as junk rows.
+            guard episode > 0, let torrent = YTSEZTVProvider.torrent(fromEztv: entry) else { continue }
+            let key = Key(season: season, episode: episode)
+            torrentsByKey[key, default: []].append(torrent)
+            if titleByKey[key] == nil, let title = entry["title"] as? String {
+                titleByKey[key] = title.removingHtmlEncoding
+            }
+            if let unix = entry["date_released_unix"] as? Int, unix > 0 {
+                let date = Date(timeIntervalSince1970: TimeInterval(unix))
+                dateByKey[key] = min(dateByKey[key] ?? date, date)
+            }
+        }
+
+        let dateFormatter = DateFormatter()
+        dateFormatter.dateFormat = "yyyy-MM-dd"
+        dateFormatter.locale = Locale(identifier: "en_US_POSIX")
+
+        var episodes: [Episode] = []
+        var seenKeys = Set<Key>()
+
+        for dict in guide {
+            guard
+                let season = dict["season"] as? Int,
+                let number = dict["number"] as? Int
+            else { continue }
+            let key = Key(season: season, episode: number)
+            seenKeys.insert(key)
+
+            let image = (dict["image"] as? [String: Any])
+            let airdate = (dict["airdate"] as? String).flatMap { dateFormatter.date(from: $0) }
+            let summary = ((dict["summary"] as? String) ?? "No summary available.".localized).removingHtmlEncoding
+            let name = ((dict["name"] as? String) ?? "Episode \(number)").removingHtmlEncoding
+
+            var episode = Episode(
+                title: name,
+                id: "\(show.id)-s\(season)e\(number)",
+                slug: name.slugged,
+                summary: summary,
+                torrents: (torrentsByKey[key] ?? []).sorted(by: <),
+                largeBackgroundImage: ImageProxy.proxied(image?["original"] as? String ?? image?["medium"] as? String),
+                show: show,
+                episode: number,
+                season: season,
+                firstAirDate: airdate ?? dateByKey[key] ?? .distantPast)
+            episode.show = show
+            episodes.append(episode)
+        }
+
+        // Torrents for episodes the guide doesn't know (brand-new airings,
+        // guide gaps) still deserve a row.
+        for (key, torrents) in torrentsByKey where !seenKeys.contains(key) {
+            var episode = Episode(
+                title: titleByKey[key] ?? "Episode \(key.episode)",
+                id: "\(show.id)-s\(key.season)e\(key.episode)",
+                summary: "No summary available.".localized,
+                torrents: torrents.sorted(by: <),
+                show: show,
+                episode: key.episode,
+                season: key.season,
+                firstAirDate: dateByKey[key] ?? .distantPast)
+            episode.show = show
+            episodes.append(episode)
+        }
+
+        episodes.sort { $0.season == $1.season ? $0.episode < $1.episode : $0.season < $1.season }
+        return episodes
+    }
+
+    /// Build a Torrent from one EZTV `get-torrents` entry. Quality/codec is
+    /// parsed from the filename since EZTV has no structured fields for it.
+    static func torrent(fromEztv entry: [String: Any]) -> Torrent? {
+        guard let magnet = entry["magnet_url"] as? String, !magnet.isEmpty else { return nil }
+        let filename = (entry["filename"] as? String) ?? (entry["title"] as? String) ?? ""
+        let size: String? = (entry["size_bytes"] as? String).flatMap {
+            guard let bytes = Double($0) else { return nil }
+            let formatter = ByteCountFormatter()
+            formatter.allowedUnits = [.useGB, .useMB]
+            formatter.countStyle = .binary
+            return formatter.string(fromByteCount: Int64(bytes))
+        }
+        var torrent = Torrent(
+            health:  .unknown,
+            url:     magnet,
+            quality: filename,
+            seeds:   entry["seeds"] as? Int ?? 0,
+            peers:   entry["peers"] as? Int ?? 0,
+            size:    size,
+            tags:    VideoTags.parse(filename))
+        var label = torrent.qualityValue.displayLabel + torrent.tags.displaySuffix
+        if label.isEmpty { label = "Unknown".localized }
+        torrent.quality = label + " — EZTV"
+        torrent.qualityValue = VideoQuality.parse(filename)
+        torrent.tags = VideoTags.parse(filename)
+        return torrent
+    }
+
+    private static func normalizedGenre(_ raw: String) -> String {
+        return raw.lowercased()
+            .replacingOccurrences(of: "-", with: "")
+            .replacingOccurrences(of: " ", with: "")
     }
 
     private func fetchTVMaze(imdbId: String, completion: @escaping ([String: Any]?) -> Void) {
@@ -410,6 +641,52 @@ public final class YTSEZTVProvider: MediaProvider {
                 completion(nil)
             }
         }
+    }
+
+    private func fetchTVMazeEpisodes(tvmazeId: Int, completion: @escaping ([[String: Any]]) -> Void) {
+        let url = "https://api.tvmaze.com/shows/\(tvmazeId)/episodes"
+        session.request(url).validate().responseData { response in
+            switch response.result {
+            case .success(let data):
+                let json = try? JSONSerialization.jsonObject(with: data, options: .allowFragments)
+                completion(json as? [[String: Any]] ?? [])
+            case .failure:
+                completion([])
+            }
+        }
+    }
+
+    /// Page through EZTV's per-show torrent listing. Long-running shows have
+    /// hundreds of entries; cap the walk so a pathological catalog (The
+    /// Simpsons) can't hold the detail page hostage.
+    private func fetchAllEztvTorrents(imdbId: String, completion: @escaping ([[String: Any]]) -> Void) {
+        let numeric = imdbId.replacingOccurrences(of: "tt", with: "")
+        let pageLimit = 100
+        let maxPages = 5
+
+        var collected: [[String: Any]] = []
+
+        func fetch(page: Int) {
+            let params: [String: Any] = ["imdb_id": numeric, "limit": pageLimit, "page": page]
+            attemptEztv(hosts: orderedEztvHosts, path: "/api/get-torrents", params: params) { data, _ in
+                var entries: [[String: Any]] = []
+                var total = 0
+                if let data = data,
+                   let json = try? JSONSerialization.jsonObject(with: data),
+                   let root = json as? [String: Any] {
+                    entries = (root["torrents"] as? [[String: Any]]) ?? []
+                    total = (root["torrents_count"] as? Int) ?? 0
+                }
+                collected += entries
+                let exhausted = entries.isEmpty || collected.count >= total || page >= maxPages
+                if exhausted {
+                    completion(collected)
+                } else {
+                    fetch(page: page + 1)
+                }
+            }
+        }
+        fetch(page: 1)
     }
 }
 

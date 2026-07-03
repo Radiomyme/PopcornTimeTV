@@ -8,6 +8,7 @@ protocol OptionsViewControllerDelegate: AnyObject {
     func didSelectSubtitleDelay(_ delay: Int)
     func didSelectEncoding(_ encoding: String)
     func didSelectAudioDelay(_ delay: Int)
+    func didSelectAudioTrack(_ index: Int32)
     func didSelectEqualizerProfile(_ profile: EqualizerProfiles)
 }
 

@@ -3,6 +3,7 @@
 import UIKit
 import class PopcornKit.ShowManager
 import func PopcornKit.loadShows
+import struct PopcornKit.Show
 
 class ShowsViewController: MediaViewController {
     
@@ -49,7 +50,17 @@ class ShowsViewController: MediaViewController {
             
             self.collectionViewController.dataSources[0] += shows as [AnyHashable]
             self.collectionViewController.dataSources[0].unique()
-            
+
+            // Each EZTV page brings an unordered batch of shows; for the
+            // "A - Z" filter re-sort the accumulated list so the grid stays
+            // alphabetical as the user scrolls.
+            if self.currentFilter == .name {
+                self.collectionViewController.dataSources[0].sort {
+                    guard let lhs = ($0 as? Show)?.title, let rhs = ($1 as? Show)?.title else { return false }
+                    return lhs.localizedCaseInsensitiveCompare(rhs) == .orderedAscending
+                }
+            }
+
             if shows.isEmpty // If the array passed in is empty, there are no more results so the content inset of the collection view is reset.
             {
                 self.collectionView?.contentInset.bottom = self.tabBarController?.tabBar.frame.height ?? 0

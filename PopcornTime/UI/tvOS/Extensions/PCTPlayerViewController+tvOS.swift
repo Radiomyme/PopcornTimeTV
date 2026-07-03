@@ -52,6 +52,9 @@ extension PCTPlayerViewController: UIViewControllerTransitioningDelegate {
         destinationController.subtitlesViewController.currentSubtitle = currentSubtitle
         destinationController.subtitlesViewController.currentDelay = mediaplayer.currentVideoSubTitleDelay/Int(1e6)
         destinationController.audioViewController.currentDelay = mediaplayer.currentAudioPlaybackDelay/Int(1e6)
+        destinationController.audioViewController.audioTrackNames = (mediaplayer.audioTrackNames as? [String]) ?? []
+        destinationController.audioViewController.audioTrackIndexes = ((mediaplayer.audioTrackIndexes as? [NSNumber]) ?? []).map { $0.int32Value }
+        destinationController.audioViewController.currentAudioTrackIndex = mediaplayer.currentAudioTrackIndex
         destinationController.infoViewController.media = media
     }
     
