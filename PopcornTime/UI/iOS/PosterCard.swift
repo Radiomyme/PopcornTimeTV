@@ -7,9 +7,9 @@ import SwiftUI
 /// tight width band (denser than the old per-screen values) and the same
 /// spacing everywhere — one source of truth avoids the grids drifting apart.
 enum PosterGrid {
-    static let minCellWidth: CGFloat = 120
-    static let maxCellWidth: CGFloat = 172
-    static let interitemSpacing: CGFloat = 16
+    static let minCellWidth: CGFloat = 140
+    static let maxCellWidth: CGFloat = 190
+    static let interitemSpacing: CGFloat = 18
     static let lineSpacing: CGFloat = 22
 
     static let columns = [
@@ -45,17 +45,21 @@ struct PosterCard: View {
                 )
                 .shadow(color: .black.opacity(0.35), radius: 8, x: 0, y: 4)
 
+            // Reserve a fixed 2-line title height + 1 subtitle line so every
+            // cell is exactly the same height regardless of how the title
+            // wraps. Without this, 1-line vs 2-line titles give cells
+            // different heights and the grid rows look ragged.
             VStack(alignment: .leading, spacing: 2) {
                 Text(title)
                     .font(.subheadline.weight(.semibold))
-                    .lineLimit(2)
+                    .lineLimit(2, reservesSpace: true)
                     .foregroundStyle(.primary)
-                if !subtitle.isEmpty {
-                    Text(subtitle)
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                }
+                Text(subtitle.isEmpty ? " " : subtitle)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.horizontal, 4)
         }
     }
