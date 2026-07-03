@@ -209,6 +209,8 @@
 		70433CD27C90DD3315F7F7A6 /* Pods_PopcornTimeiOS.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = C39DBC9A881608E11694A746 /* Pods_PopcornTimeiOS.framework */; };
 		70EBA1D4C0FFEE0000000002 /* TorrentioClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 70EBA1D4C0FFEE0000000001 /* TorrentioClient.swift */; };
 		70EBA1D4C0FFEE0000000003 /* TorrentioClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 70EBA1D4C0FFEE0000000001 /* TorrentioClient.swift */; };
+		70EBA1D4C0FFEE0000000011 /* Time4PopcornClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 70EBA1D4C0FFEE0000000010 /* Time4PopcornClient.swift */; };
+		70EBA1D4C0FFEE0000000012 /* Time4PopcornClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 70EBA1D4C0FFEE0000000010 /* Time4PopcornClient.swift */; };
 		732635D2FDD9B7B7A07D737B /* MediaProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE96A3C033AAA0359ED427BC /* MediaProvider.swift */; };
 		74448587F86FE6D42FE91D85 /* PopcornKit.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4D0F9D041E6F296400860852 /* PopcornKit.swift */; };
 		7744AF919D813FC0BA4F8EBC /* WatchlistManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4D0F9D061E6F296400860852 /* WatchlistManager.swift */; };
@@ -542,6 +544,7 @@
 		6CAD29660BDA0BD45463DF6A /* iOS.plist */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.plist.xml; name = iOS.plist; path = "PopcornTime/Supporting Files/iOS.plist"; sourceTree = SOURCE_ROOT; };
 		70D062EA9E7B9A88F5F7BD6F /* Pods-TopShelf.debug.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-TopShelf.debug.xcconfig"; path = "Target Support Files/Pods-TopShelf/Pods-TopShelf.debug.xcconfig"; sourceTree = "<group>"; };
 		70EBA1D4C0FFEE0000000001 /* TorrentioClient.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = TorrentioClient.swift; path = PopcornKit/Managers/Providers/TorrentioClient.swift; sourceTree = SOURCE_ROOT; };
+		70EBA1D4C0FFEE0000000010 /* Time4PopcornClient.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = Time4PopcornClient.swift; path = PopcornKit/Managers/Providers/Time4PopcornClient.swift; sourceTree = SOURCE_ROOT; };
 		7346E256E49510AF03B05E38 /* SafariSheet.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = SafariSheet.swift; path = PopcornTime/UI/iOS/SafariSheet.swift; sourceTree = SOURCE_ROOT; };
 		7AF0067D5CB4117BCD285131 /* Popcorn Time.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "Popcorn Time.app"; sourceTree = BUILT_PRODUCTS_DIR; };
 		8BB94E0D8A266A44948F11E0 /* Pods-PopcornTimetvOS.debug.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-PopcornTimetvOS.debug.xcconfig"; path = "Target Support Files/Pods-PopcornTimetvOS/Pods-PopcornTimetvOS.debug.xcconfig"; sourceTree = "<group>"; };
@@ -1123,6 +1126,7 @@
 				DE96A3C033AAA0359ED427BC /* MediaProvider.swift */,
 				37DACB023B19FBE420CFFCEA /* YTSEZTVProvider.swift */,
 				70EBA1D4C0FFEE0000000001 /* TorrentioClient.swift */,
+				70EBA1D4C0FFEE0000000010 /* Time4PopcornClient.swift */,
 			);
 			path = Providers;
 			sourceTree = "<group>";
@@ -1732,6 +1736,7 @@
 				732635D2FDD9B7B7A07D737B /* MediaProvider.swift in Sources */,
 				199ED0BEFAAF4B93D90738EB /* YTSEZTVProvider.swift in Sources */,
 				70EBA1D4C0FFEE0000000002 /* TorrentioClient.swift in Sources */,
+				70EBA1D4C0FFEE0000000011 /* Time4PopcornClient.swift in Sources */,
 				418CA07D415C7F46A48DC457 /* ImageProxy.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -1784,6 +1789,7 @@
 				C3B64F1FC181390C145F21FE /* MediaProvider.swift in Sources */,
 				D480D686B5F9FD5AD13B58BA /* YTSEZTVProvider.swift in Sources */,
 				70EBA1D4C0FFEE0000000003 /* TorrentioClient.swift in Sources */,
+				70EBA1D4C0FFEE0000000012 /* Time4PopcornClient.swift in Sources */,
 				28C2A5671ECD2689945C50A6 /* ImageProxy.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;

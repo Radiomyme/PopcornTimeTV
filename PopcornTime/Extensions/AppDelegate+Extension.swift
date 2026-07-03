@@ -60,15 +60,30 @@ extension AppDelegate {
     func chooseQuality(_ sender: UIView?, media: Media, completion: @escaping (Torrent) -> Void) {
         // Episodes: EZTV only carries what its uploaders pushed, so before
         // picking a quality, ask the Torrentio aggregator (YTS/RARBG-archive/
-        // 1337x/TorrentGalaxy/…) for that exact episode and merge the result.
-        // This both fills gaps (old seasons EZTV lacks entirely) and adds
-        // multi-audio releases. Movies are already merged at detail-load
+        // 1337x/TorrentGalaxy/…) AND the Time4Popcorn backend for that exact
+        // episode and merge both. This fills gaps (old seasons EZTV lacks)
+        // and adds extra releases. Movies are already merged at detail-load
         // time by the provider.
         if let episode = media as? Episode, let showId = episode.show?.id, showId.hasPrefix("tt") {
-            TorrentioClient.shared.streams(imdbId: showId, season: episode.season, episode: episode.episode) { [weak self] aggregated in
+            let group = DispatchGroup()
+            var aggregated: [Torrent] = []
+            var t4p: [Torrent] = []
+
+            group.enter()
+            TorrentioClient.shared.streams(imdbId: showId, season: episode.season, episode: episode.episode) { torrents in
+                aggregated = torrents
+                group.leave()
+            }
+            group.enter()
+            Time4PopcornClient.shared.episodeTorrents(imdbId: showId, season: episode.season, episode: episode.episode) { torrents in
+                t4p = torrents
+                group.leave()
+            }
+
+            group.notify(queue: .main) { [weak self] in
                 var augmented = episode
-                augmented.torrents = TorrentioClient.merge(episode.torrents, with: aggregated)
-                print("[chooseQuality] episode S\(episode.season)E\(episode.episode): \(episode.torrents.count) EZTV + \(aggregated.count) aggregated -> \(augmented.torrents.count)")
+                augmented.torrents = TorrentioClient.merge(episode.torrents, with: aggregated + t4p)
+                print("[chooseQuality] episode S\(episode.season)E\(episode.episode): \(episode.torrents.count) EZTV + \(aggregated.count) aggregated + \(t4p.count) t4p -> \(augmented.torrents.count)")
                 self?.presentQualityChoice(sender, media: augmented, completion: completion)
             }
             return

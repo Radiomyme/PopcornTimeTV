@@ -228,14 +228,15 @@ public final class YTSEZTVProvider: MediaProvider {
             "with_cast":   true,
         ]
 
-        // Query YTS (curated qualities, rich metadata) and the Torrentio
-        // aggregator (a dozen extra indexers — REMUX, HDR, multi-audio
-        // releases YTS never carries) in parallel, then merge the torrent
-        // lists by info-hash.
+        // Query YTS (curated qualities, rich metadata), the Torrentio
+        // aggregator (a dozen extra indexers — REMUX, HDR, multi-audio) and
+        // the Time4Popcorn backend (extra scraped releases) in parallel,
+        // then merge every torrent list by info-hash.
         let group = DispatchGroup()
         var ytsMovie: Movie?
         var ytsError: NSError?
         var aggregated: [Torrent] = []
+        var t4p: [Torrent] = []
 
         group.enter()
         attempt(hosts: orderedHosts, path: Path.movieInfo, params: params) { data, error in
@@ -256,14 +257,20 @@ public final class YTSEZTVProvider: MediaProvider {
             group.leave()
         }
 
+        group.enter()
+        Time4PopcornClient.shared.movieTorrents(imdbId: imdbId) { torrents in
+            t4p = torrents
+            group.leave()
+        }
+
         group.notify(queue: .main) {
             guard var movie = ytsMovie else {
                 completion(nil, ytsError)
                 return
             }
             let before = movie.torrents.count
-            movie.torrents = TorrentioClient.merge(movie.torrents, with: aggregated)
-            print("[YTS+Torrentio] \(imdbId): \(before) YTS + \(aggregated.count) aggregated -> \(movie.torrents.count) torrents")
+            movie.torrents = TorrentioClient.merge(movie.torrents, with: aggregated + t4p)
+            print("[YTS+Torrentio+T4P] \(imdbId): \(before) YTS + \(aggregated.count) aggregated + \(t4p.count) t4p -> \(movie.torrents.count) torrents")
             completion(movie, nil)
         }
     }
