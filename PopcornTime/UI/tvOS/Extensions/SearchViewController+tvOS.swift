@@ -122,7 +122,20 @@ extension SearchViewController {
     private func updateResultsFocusGuide(focusInResults: Bool) {
         guard let guide = focusGuide else { return }
         if focusInResults {
-            guide.preferredFocusEnvironments = []
+            // Route an upward move out of the top visible row back to the
+            // search bar. The guide is pinned to the *visible* top of the
+            // collection view, so this works from any row: once the grid has
+            // scrolled earlier rows off-screen, pressing up from the topmost
+            // visible cell lands on the search bar (and from there the tab
+            // bar is reachable). Just clearing the guide isn't enough — the
+            // search bar is a sibling above the collection view, not a
+            // focusable cell, so the engine can't reach it on its own once
+            // scrolled. Pointing at it explicitly guarantees the exit.
+            if let searchBar = searchBar {
+                guide.preferredFocusEnvironments = [searchBar]
+            } else {
+                guide.preferredFocusEnvironments = []
+            }
         } else if let first = collectionViewController?.collectionView?.visibleCells.first {
             guide.preferredFocusEnvironments = [first]
         } else {
