@@ -179,6 +179,7 @@ struct MediaDetailView: View {
     @State private var streamErrorMessage: String?
     @State private var safariURL: IdentifiableURL?
     @State private var selectedSeason: Int = 0
+    @AppStorage("autoSelectQuality") private var autoQuality = "Balanced"
 
     var body: some View {
         ScrollView {
@@ -502,8 +503,15 @@ struct MediaDetailView: View {
     }
 
     private func playFirstAvailable() {
-        guard let best = viewModel.torrents.first else { return }
-        play(best)
+        let torrents = viewModel.torrents   // sorted best-quality first
+        guard !torrents.isEmpty else { return }
+        let pick: Torrent?
+        switch autoQuality {
+        case "Highest": pick = torrents.first
+        case "Lowest":  pick = torrents.last
+        default:        pick = Torrent.balancedPick(from: torrents)  // Balanced / choose-each-time
+        }
+        if let pick = pick { play(pick) }
     }
 
     private func play(_ torrent: Torrent) {

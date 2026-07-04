@@ -243,3 +243,29 @@ public func > (lhs: Torrent, rhs: Torrent) -> Bool {
 public func == (lhs: Torrent, rhs: Torrent) -> Bool {
     return lhs.url == rhs.url
 }
+
+public extension Torrent {
+
+    /// Pick the highest resolution whose best-seeded torrent has a swarm large
+    /// enough to start streaming quickly, rather than the absolute highest.
+    ///
+    /// Higher resolutions carry far more bitrate, so they need a bigger swarm
+    /// before playback can begin. A brand-new 4K release with ~20 seeds can
+    /// take many minutes to buffer, whereas a well-seeded 1080p (roughly a
+    /// third of the size) starts almost immediately. This walks resolutions
+    /// high → low, taking the first whose best-seeded torrent clears a
+    /// resolution-scaled seed floor; if nothing clears its bar it returns the
+    /// most-seeded torrent overall (best shot at a quick start).
+    static func balancedPick(from torrents: [Torrent]) -> Torrent? {
+        guard !torrents.isEmpty else { return nil }
+        let minSeeds: [VideoQuality: Int] = [.uhd2160: 45, .hd1080: 10, .hd720: 5, .sd480: 2]
+        for quality in [VideoQuality.uhd2160, .hd1080, .hd720, .sd480] {
+            let tier = torrents.filter { $0.qualityValue == quality }
+            guard let best = tier.max(by: { $0.seeds < $1.seeds }) else { continue }
+            if best.seeds >= (minSeeds[quality] ?? 1) {
+                return best
+            }
+        }
+        return torrents.max(by: { $0.seeds < $1.seeds })
+    }
+}

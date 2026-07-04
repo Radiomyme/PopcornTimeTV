@@ -4,7 +4,7 @@ import SwiftUI
 import PopcornKit
 
 struct SettingsView: View {
-    @AppStorage("autoSelectQuality") private var autoSelectQuality = "Highest"
+    @AppStorage("autoSelectQuality") private var autoSelectQuality = "Balanced"
     @AppStorage("streamOnCellular")  private var streamOnCellular  = false
     @State private var traktAuthURL: IdentifiableURL?
     @State private var isTraktSignedIn = TraktManager.shared.isSignedIn()
@@ -13,6 +13,7 @@ struct SettingsView: View {
         Form {
             Section("Lecture") {
                 Picker("Qualité automatique", selection: $autoSelectQuality) {
+                    Text("Équilibré (démarrage rapide)").tag("Balanced")
                     Text("La plus haute").tag("Highest")
                     Text("La plus basse").tag("Lowest")
                     Text("Choisir à chaque fois").tag("")

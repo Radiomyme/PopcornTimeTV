@@ -93,11 +93,15 @@ extension AppDelegate {
     }
 
     private func presentQualityChoice(_ sender: UIView?, media: Media, completion: @escaping (Torrent) -> Void) {
-        // Default behaviour for the modernized tvOS app: always pick the highest
-        // quality torrent available (2160p > 1080p > 720p > 480p > 3D, with
-        // HDR/DV/Atmos preferred at equal resolution). The user can override the
-        // preference in Settings ("autoSelectQuality" UserDefault).
-        let preference = UserDefaults.standard.string(forKey: "autoSelectQuality") ?? "Highest".localized
+        // Auto-pick behaviour is controlled by the "autoSelectQuality" setting:
+        //   Balanced (default) — highest resolution the swarm can stream fast;
+        //   Highest            — always the top resolution regardless of seeds;
+        //   Lowest             — smallest/fastest;
+        //   Off                — always ask.
+        // Balanced avoids the classic trap of picking a 14 GB 4K release that
+        // only has a handful of seeders (→ many minutes of buffering) when a
+        // well-seeded 1080p would start almost immediately.
+        let preference = UserDefaults.standard.string(forKey: "autoSelectQuality") ?? "Balanced".localized
         var sorted     = media.torrents.sorted(by: <)
 
         #if targetEnvironment(simulator)
@@ -111,10 +115,14 @@ extension AppDelegate {
         print("[chooseQuality] simulator cap applied: max=\(simulatorCap)")
         #endif
 
-        print("[chooseQuality] media=\(media.title) preference=\(preference) candidates=\(sorted.map { "\($0.quality ?? "?")(\($0.qualityValue))" })")
+        print("[chooseQuality] media=\(media.title) preference=\(preference) candidates=\(sorted.map { "\($0.quality ?? "?")(\($0.qualityValue)) s\($0.seeds)" })")
 
         if preference == "Highest".localized, let best = sorted.last {
-            print("[chooseQuality] picked HIGHEST: quality=\(best.quality ?? "?") url=\(best.url.prefix(120))")
+            print("[chooseQuality] picked HIGHEST: quality=\(best.quality ?? "?") seeds=\(best.seeds) url=\(best.url.prefix(120))")
+            return completion(best)
+        }
+        if preference == "Balanced".localized, let best = balancedPick(from: sorted) {
+            print("[chooseQuality] picked BALANCED: quality=\(best.quality ?? "?") seeds=\(best.seeds)")
             return completion(best)
         }
         if preference == "Lowest".localized, let worst = sorted.first {
@@ -147,7 +155,11 @@ extension AppDelegate {
         alertController.popoverPresentationController?.sourceView = sender
         alertController.show(animated: true)
     }
-    
+
+    private func balancedPick(from torrents: [Torrent]) -> Torrent? {
+        return Torrent.balancedPick(from: torrents)
+    }
+
     func play(_ media: Media, torrent: Torrent) {
         play(media, torrent: torrent, hasAutoCleanedForDiskFull: false)
     }
