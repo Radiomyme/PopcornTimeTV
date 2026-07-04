@@ -46,29 +46,72 @@ public final class Time4PopcornClient {
 
     public init() {}
 
-    // MARK: - Public API
+    // MARK: - Catalog (grid + search)
 
-    /// Torrents for a movie. Always calls back on the main queue; failures
-    /// degrade to an empty array (this is an *additional* source).
-    public func movieTorrents(imdbId: String, completion: @escaping ([Torrent]) -> Void) {
+    /// A page of movies for the grid / search. `searchTerm` uses the API's
+    /// `keywords` filter; browse (nil term) is sorted by seeds. List entries
+    /// carry metadata + TMDB posters but no torrents (those load on detail).
+    public func movies(page: Int, searchTerm: String?, completion: @escaping ([Movie]) -> Void) {
+        var query = "/list?sort=seeds&short=1&quality=\(Time4PopcornClient.qualityFilter)&page=\(max(page, 1))&ver=\(Time4PopcornClient.clientVersion)&os=mac&app_id=\(Time4PopcornClient.appId)"
+        if let term = searchTerm, !term.isEmpty {
+            let encoded = term.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? term
+            query += "&keywords=\(encoded)"
+        }
+        get(path: query) { data in
+            let movies = Time4PopcornClient.parseList(data).compactMap { Movie(t4p: $0) }
+            print("[T4P] movies page \(page) term=\(searchTerm ?? "-") -> \(movies.count)")
+            DispatchQueue.main.async { completion(movies) }
+        }
+    }
+
+    /// A page of shows for the grid / search.
+    public func shows(page: Int, searchTerm: String?, completion: @escaping ([Show]) -> Void) {
+        var query = "/shows?sort=seeds&page=\(max(page, 1))&ver=\(Time4PopcornClient.clientVersion)&os=mac&app_id=\(Time4PopcornClient.appId)"
+        if let term = searchTerm, !term.isEmpty {
+            let encoded = term.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? term
+            query += "&keywords=\(encoded)"
+        }
+        get(path: query) { data in
+            let shows = Time4PopcornClient.parseList(data).compactMap { Show(t4p: $0) }
+            print("[T4P] shows page \(page) term=\(searchTerm ?? "-") -> \(shows.count)")
+            DispatchQueue.main.async { completion(shows) }
+        }
+    }
+
+    private static func parseList(_ data: Data?) -> [[String: Any]] {
+        guard let data = data,
+              let json = try? JSONSerialization.jsonObject(with: data),
+              let root = json as? [String: Any],
+              let list = root["MovieList"] as? [[String: Any]]
+        else { return [] }
+        return list
+    }
+
+    // MARK: - Torrents (detail / play)
+
+    /// Full movie detail: metadata (so T4P-only titles are still openable when
+    /// YTS lacks them) plus its torrents. Always calls back on the main queue.
+    public func movieDetail(imdbId: String, completion: @escaping (Movie?, [Torrent]) -> Void) {
         guard imdbId.hasPrefix("tt") else {
-            DispatchQueue.main.async { completion([]) }
+            DispatchQueue.main.async { completion(nil, []) }
             return
         }
         let query = "/movie?cb=&quality=\(Time4PopcornClient.qualityFilter)&page=1&imdb=\(imdbId)&ver=\(Time4PopcornClient.clientVersion)&os=mac&app_id=\(Time4PopcornClient.appId)"
         get(path: query) { data in
+            var movie: Movie?
             var torrents: [Torrent] = []
             if let data = data,
                let json = try? JSONSerialization.jsonObject(with: data),
                let root = json as? [String: Any] {
                 // Detail returns the movie object directly (with `items`) or
                 // wrapped in a MovieList — handle both.
-                let movie = (root["MovieList"] as? [[String: Any]])?.first ?? root
-                let items = (movie["items"] as? [[String: Any]]) ?? []
+                let dict = (root["MovieList"] as? [[String: Any]])?.first ?? root
+                let items = (dict["items"] as? [[String: Any]]) ?? []
                 torrents = items.compactMap(Time4PopcornClient.torrent(fromItem:))
+                movie = Movie(t4p: dict)
             }
-            print("[T4P] movie \(imdbId) -> \(torrents.count) torrents")
-            DispatchQueue.main.async { completion(torrents) }
+            print("[T4P] movie \(imdbId) -> \(torrents.count) torrents, meta=\(movie != nil)")
+            DispatchQueue.main.async { completion(movie, torrents) }
         }
     }
 
@@ -105,7 +148,7 @@ public final class Time4PopcornClient {
 
     // MARK: - Parsing
 
-    private static func torrent(fromItem item: [String: Any]) -> Torrent? {
+    static func torrent(fromItem item: [String: Any]) -> Torrent? {
         guard let magnet = item["torrent_magnet"] as? String, magnet.hasPrefix("magnet:") else { return nil }
         let file = (item["file"] as? String) ?? ""
         let apiQuality = (item["quality"] as? String) ?? ""

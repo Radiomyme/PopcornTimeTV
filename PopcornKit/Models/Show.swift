@@ -188,6 +188,32 @@ public struct Show: Media, Equatable {
         self.episodes.sort { $0.season == $1.season ? $0.episode < $1.episode : $0.season < $1.season }
     }
 
+    /// Convenience init mapping a Time4Popcorn (`api.apiabcd.com`) show list
+    /// object (`/shows`). Episodes are resolved later by `getShowInfo` via
+    /// TVMaze (the show carries an imdb id TVMaze can look up). Posters are
+    /// TMDB URLs (bypassed by ImageProxy, served directly).
+    public init?(t4p dict: [String: Any]) {
+        guard let title = dict["title"] as? String else { return nil }
+        let rawImdb = (dict["imdb"] as? String) ?? ""
+        guard !rawImdb.isEmpty else { return nil }
+        self.id      = rawImdb.hasPrefix("tt") ? rawImdb : "tt\(rawImdb)"
+        self.tvdbId  = "0"
+        self.slug    = title.slugged
+        self.title   = title.removingHtmlEncoding
+        self.year    = String(dict["year"] as? Int ?? 0)
+        let ratingValue = (dict["rating"] as? Double) ?? Double(dict["rating"] as? Int ?? 0)
+        self.rating  = Float(ratingValue * 10.0)
+        self.summary = ((dict["description"] as? String) ?? "No summary available.".localized).removingHtmlEncoding
+        self.tmdbId  = nil
+        self.runtime = (dict["runtime"] as? Int)
+        self.genres  = (dict["genres"] as? [String]) ?? []
+        // Rewrite the T4P TMDB poster to the image.tmdb.org CDN (see Movie).
+        let poster   = ((dict["poster_big"] as? String) ?? (dict["poster_med"] as? String))?
+            .replacingOccurrences(of: "://www.themoviedb.org/t/p/", with: "://image.tmdb.org/t/p/")
+        self.largeCoverImage      = ImageProxy.proxied(poster)
+        self.largeBackgroundImage = ImageProxy.proxied(poster)
+    }
+
     public init(title: String = "Unknown".localized, id: String = "tt0000000", tmdbId: Int? = nil, slug: String = "unknown", summary: String = "No summary available.".localized, torrents: [Torrent] = [], subtitles: [Subtitle] = [], largeBackgroundImage: String? = nil, largeCoverImage: String? = nil) {
         self.title = title
         self.id = id

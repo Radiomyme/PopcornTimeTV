@@ -11,6 +11,9 @@ final class MediaDetailViewModel: ObservableObject {
     @Published var enrichedShow:  Show?
     @Published var loading = false
     @Published var errorMessage: String?
+    /// Episode torrents (EZTV) augmented with Torrentio + Time4Popcorn for
+    /// the chosen episode. `nil` until augmentation finishes.
+    @Published var augmentedEpisodeTorrents: [Torrent]?
 
     func load(_ media: Media) {
         loading = true
@@ -29,23 +32,50 @@ final class MediaDetailViewModel: ObservableObject {
                     self?.loading = false
                     self?.enrichedShow = show
                     self?.errorMessage = error?.localizedDescription
+                    if let show = show { self?.augmentEpisodeTorrents(for: show) }
                 }
             }
         }
     }
 
-    /// Sorted torrents (best quality first). When the underlying media is a
-    /// Show with episodes, returns the torrents of the first available
-    /// unwatched episode — matches the tvOS auto-pick behaviour.
+    /// The episode the "Lecture" button will play (first unwatched, else first).
+    private func targetEpisode(of show: Show) -> Episode? {
+        show.episodes.first(where: { !$0.isWatched }) ?? show.episodes.first
+    }
+
+    /// EZTV carries only what its uploaders pushed, so ask Torrentio and the
+    /// Time4Popcorn backend for the chosen episode too and merge — matching
+    /// the tvOS play flow so the Mac/iOS series screen gets the same sources.
+    private func augmentEpisodeTorrents(for show: Show) {
+        guard show.id.hasPrefix("tt"), let episode = targetEpisode(of: show) else { return }
+        let base = episode.torrents
+        let group = DispatchGroup()
+        var aggregated: [Torrent] = []
+        var t4p: [Torrent] = []
+
+        group.enter()
+        TorrentioClient.shared.streams(imdbId: show.id, season: episode.season, episode: episode.episode) { torrents in
+            aggregated = torrents
+            group.leave()
+        }
+        group.enter()
+        Time4PopcornClient.shared.episodeTorrents(imdbId: show.id, season: episode.season, episode: episode.episode) { torrents in
+            t4p = torrents
+            group.leave()
+        }
+        group.notify(queue: .main) { [weak self] in
+            self?.augmentedEpisodeTorrents = TorrentioClient.merge(base, with: aggregated + t4p)
+        }
+    }
+
+    /// Sorted torrents (best quality first). For a Show, prefer the augmented
+    /// episode list (EZTV + Torrentio + T4P) once ready, else the EZTV-only
+    /// torrents of the first available unwatched episode.
     var torrents: [Torrent] {
         if let movie = enrichedMovie { return movie.torrents.sorted(by: >) }
         if let show = enrichedShow {
-            // Pick the first unwatched episode, or fall back to the first
-            // available one. The legacy tvOS app has a richer
-            // `latestUnwatchedEpisode()` helper that walks WatchedlistManager,
-            // but for the SwiftUI surface this simpler pick is enough.
-            let next = show.episodes.first(where: { !$0.isWatched }) ?? show.episodes.first
-            return (next?.torrents ?? []).sorted(by: >)
+            if let augmented = augmentedEpisodeTorrents { return augmented.sorted(by: >) }
+            return (targetEpisode(of: show)?.torrents ?? []).sorted(by: >)
         }
         return []
     }

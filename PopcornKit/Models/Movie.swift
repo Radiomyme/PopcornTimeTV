@@ -207,6 +207,40 @@ public struct Movie: Media, Equatable {
         }
     }
 
+    /// Convenience init mapping a Time4Popcorn (`api.apiabcd.com`) movie
+    /// object — used for both catalog entries (`/list`, empty `items`) and
+    /// detail responses (`/movie?imdb=`, populated `items`). Posters are TMDB
+    /// URLs (bypassed by ImageProxy, served directly).
+    public init?(t4p dict: [String: Any]) {
+        guard let title = dict["title"] as? String else { return nil }
+        let rawImdb = (dict["imdb"] as? String) ?? ""
+        guard !rawImdb.isEmpty else { return nil }
+        self.id    = rawImdb.hasPrefix("tt") ? rawImdb : "tt\(rawImdb)"
+        self.title = title.removingHtmlEncoding
+        self.slug  = title.slugged
+        self.year  = String(dict["year"] as? Int ?? 0)
+        let ratingValue = (dict["rating"] as? Double) ?? Double(dict["rating"] as? Int ?? 0)
+        self.rating = Float(ratingValue * 10.0)   // T4P rating is 0–10; codebase expects 0–100.
+        self.runtime = (dict["runtime"] as? Int) ?? 0
+        self.summary = ((dict["description"] as? String) ?? "No summary available.".localized).removingHtmlEncoding
+        if let code = dict["trailer"] as? String, !code.isEmpty {
+            self.trailer = "https://www.youtube.com/watch?v=\(code)"
+        }
+        self.certification = "Unrated"
+        self.genres = (dict["genres"] as? [String]) ?? []
+        self.tmdbId = nil
+        // T4P posters are `www.themoviedb.org/t/p/…` which 301-redirects to
+        // the `image.tmdb.org` CDN; rewrite to the CDN directly so the image
+        // loader doesn't have to follow a cross-host redirect.
+        let poster = ((dict["poster_big"] as? String) ?? (dict["poster_med"] as? String))?
+            .replacingOccurrences(of: "://www.themoviedb.org/t/p/", with: "://image.tmdb.org/t/p/")
+        self.largeCoverImage      = ImageProxy.proxied(poster)
+        self.largeBackgroundImage = ImageProxy.proxied(poster)
+        if let items = dict["items"] as? [[String: Any]] {
+            self.torrents = items.compactMap { Time4PopcornClient.torrent(fromItem: $0) }.sorted(by: <)
+        }
+    }
+
     /// YTS only exposes torrent hashes; build a standard magnet link with the
     /// public trackers YTS recommends.
     private static func ytsMagnet(hash: String, title: String) -> String {

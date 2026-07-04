@@ -131,42 +131,70 @@ public final class YTSEZTVProvider: MediaProvider {
             params["query_term"] = term
         }
 
-        attempt(hosts: orderedHosts, path: Path.listMovies, params: params) { [weak self] data, error in
-            guard let self = self else { return }
-            guard let data = data else {
-                DispatchQueue.main.async { completion(nil, error) }
-                return
-            }
+        // Fetch YTS (primary) and the Time4Popcorn catalog in parallel, then
+        // merge by imdb id so the grid / search show titles from both.
+        let group = DispatchGroup()
+        var ytsMovies: [Movie] = []
+        var ytsError: NSError?
+        var t4pMovies: [Movie] = []
+
+        group.enter()
+        attempt(hosts: orderedHosts, path: Path.listMovies, params: params) { data, error in
+            defer { group.leave() }
+            guard let data = data else { ytsError = error; return }
             guard
                 let json = try? JSONSerialization.jsonObject(with: data, options: .allowFragments),
                 let root = json as? [String: Any]
             else {
                 print("[YTS] ERROR: JSON not parseable")
-                DispatchQueue.main.async { completion([], nil) }
                 return
             }
             if let apiStatus = root["status"] as? String, apiStatus != "ok" {
                 let msg = (root["status_message"] as? String) ?? "YTS error"
                 print("[YTS] ERROR: api status=\(apiStatus) message=\(msg)")
-                DispatchQueue.main.async {
-                    completion([], NSError(domain: "yts", code: -1,
-                                           userInfo: [NSLocalizedDescriptionKey: msg]))
-                }
+                ytsError = NSError(domain: "yts", code: -1, userInfo: [NSLocalizedDescriptionKey: msg])
                 return
             }
             guard
                 let payload = root["data"] as? [String: Any],
                 let raw     = payload["movies"] as? [[String: Any]]
             else {
-                let count = (root["data"] as? [String: Any])?["movie_count"] ?? "nil"
-                print("[YTS] payload missing data.movies (movie_count=\(count))")
-                DispatchQueue.main.async { completion([], nil) }
+                print("[YTS] payload missing data.movies")
                 return
             }
-            let movies = raw.compactMap(Movie.init(yts:))
-            print("[YTS] parsed \(movies.count)/\(raw.count) movies")
-            DispatchQueue.main.async { completion(movies, nil) }
-            _ = self  // silence warning
+            ytsMovies = raw.compactMap(Movie.init(yts:))
+            print("[YTS] parsed \(ytsMovies.count)/\(raw.count) movies")
+        }
+
+        group.enter()
+        Time4PopcornClient.shared.movies(page: page, searchTerm: searchTerm) { movies in
+            var result = movies
+            // T4P /list isn't genre-filtered and its `keywords` search can't
+            // be relied on server-side, so filter client-side to keep the
+            // grid on-genre and search results actually relevant.
+            if let term = searchTerm, !term.isEmpty {
+                result = result.filter { $0.title.localizedCaseInsensitiveContains(term) }
+            }
+            if genre != .all {
+                let wanted = YTSEZTVProvider.normalizedGenre(genre.rawValue)
+                result = result.filter { m in m.genres.contains { YTSEZTVProvider.normalizedGenre($0) == wanted } }
+            }
+            t4pMovies = result
+            group.leave()
+        }
+
+        group.notify(queue: .main) {
+            if ytsMovies.isEmpty && t4pMovies.isEmpty {
+                completion(ytsError == nil ? [] : nil, ytsError)
+                return
+            }
+            var seen = Set(ytsMovies.map { $0.id })
+            var merged = ytsMovies
+            for movie in t4pMovies where seen.insert(movie.id).inserted {
+                merged.append(movie)
+            }
+            print("[Movies] YTS \(ytsMovies.count) + T4P \(t4pMovies.count) -> \(merged.count) (page \(page))")
+            completion(merged, nil)
         }
     }
 
@@ -236,6 +264,7 @@ public final class YTSEZTVProvider: MediaProvider {
         var ytsMovie: Movie?
         var ytsError: NSError?
         var aggregated: [Torrent] = []
+        var t4pMovie: Movie?
         var t4p: [Torrent] = []
 
         group.enter()
@@ -258,19 +287,22 @@ public final class YTSEZTVProvider: MediaProvider {
         }
 
         group.enter()
-        Time4PopcornClient.shared.movieTorrents(imdbId: imdbId) { torrents in
+        Time4PopcornClient.shared.movieDetail(imdbId: imdbId) { movie, torrents in
+            t4pMovie = movie
             t4p = torrents
             group.leave()
         }
 
         group.notify(queue: .main) {
-            guard var movie = ytsMovie else {
+            // Prefer YTS's richer metadata, but fall back to T4P's so a
+            // T4P-only title (absent from YTS) is still openable.
+            guard var movie = ytsMovie ?? t4pMovie else {
                 completion(nil, ytsError)
                 return
             }
             let before = movie.torrents.count
             movie.torrents = TorrentioClient.merge(movie.torrents, with: aggregated + t4p)
-            print("[YTS+Torrentio+T4P] \(imdbId): \(before) YTS + \(aggregated.count) aggregated + \(t4p.count) t4p -> \(movie.torrents.count) torrents")
+            print("[YTS+Torrentio+T4P] \(imdbId): \(before) base + \(aggregated.count) aggregated + \(t4p.count) t4p -> \(movie.torrents.count) torrents")
             completion(movie, nil)
         }
     }
@@ -292,34 +324,76 @@ public final class YTSEZTVProvider: MediaProvider {
                           order: NetworkManager.Orders,
                           completion: @escaping ([Show]?, NSError?) -> Void) {
 
-        if let term = searchTerm, !term.isEmpty {
-            // TVMaze search isn't paginated — return everything on page 1
-            // and an empty page 2 so the infinite-scroll loop terminates.
-            guard page <= 1 else {
-                DispatchQueue.main.async { completion([], nil) }
-                return
+        // Base source (TVMaze search or EZTV browse) and the Time4Popcorn
+        // catalog run in parallel; results merge by imdb id so the shows grid
+        // and search surface titles from both.
+        let group = DispatchGroup()
+        var baseShows: [Show] = []
+        var baseError: NSError?
+        var t4pShows: [Show] = []
+
+        group.enter()
+        Time4PopcornClient.shared.shows(page: page, searchTerm: searchTerm) { shows in
+            var result = shows
+            if let term = searchTerm, !term.isEmpty {
+                result = result.filter { $0.title.localizedCaseInsensitiveContains(term) }
             }
-            return searchShows(term, completion: completion)
+            if genre != .all {
+                let wanted = YTSEZTVProvider.normalizedGenre(genre.rawValue)
+                result = result.filter { s in s.genres.contains { YTSEZTVProvider.normalizedGenre($0) == wanted } }
+            }
+            t4pShows = result
+            group.leave()
         }
 
-        let params: [String: Any] = ["limit": 100, "page": max(page, 1)]
-        attemptEztv(hosts: orderedEztvHosts, path: "/api/get-torrents", params: params) { [weak self] data, error in
-            guard let self = self else { return }
-            guard let data = data else {
-                DispatchQueue.main.async { completion(nil, error) }
+        group.enter()
+        if let term = searchTerm, !term.isEmpty {
+            // TVMaze search isn't paginated — only fetch it on page 1;
+            // subsequent pages come from T4P's paginated catalog above.
+            if page <= 1 {
+                searchShows(term) { shows, error in
+                    baseShows = shows ?? []
+                    baseError = error
+                    group.leave()
+                }
+            } else {
+                group.leave()
+            }
+        } else {
+            let params: [String: Any] = ["limit": 100, "page": max(page, 1)]
+            attemptEztv(hosts: orderedEztvHosts, path: "/api/get-torrents", params: params) { [weak self] data, error in
+                guard let self = self else { group.leave(); return }
+                guard
+                    let data = data,
+                    let json = try? JSONSerialization.jsonObject(with: data, options: .allowFragments),
+                    let root = json as? [String: Any],
+                    let raw  = root["torrents"] as? [[String: Any]]
+                else {
+                    print("[EZTV] JSON parse failed")
+                    baseError = error
+                    group.leave()
+                    return
+                }
+                print("[EZTV] got \(raw.count) torrents")
+                self.buildShows(from: raw, filter: filter, genre: genre) { shows, _ in
+                    baseShows = shows ?? []
+                    group.leave()
+                }
+            }
+        }
+
+        group.notify(queue: .main) {
+            if baseShows.isEmpty && t4pShows.isEmpty {
+                completion(baseError == nil ? [] : nil, baseError)
                 return
             }
-            guard
-                let json = try? JSONSerialization.jsonObject(with: data, options: .allowFragments),
-                let root = json as? [String: Any],
-                let raw  = root["torrents"] as? [[String: Any]]
-            else {
-                print("[EZTV] JSON parse failed")
-                DispatchQueue.main.async { completion([], nil) }
-                return
+            var seen = Set(baseShows.map { $0.id })
+            var merged = baseShows
+            for show in t4pShows where seen.insert(show.id).inserted {
+                merged.append(show)
             }
-            print("[EZTV] got \(raw.count) torrents")
-            self.buildShows(from: raw, filter: filter, genre: genre, completion: completion)
+            print("[Shows] base \(baseShows.count) + T4P \(t4pShows.count) -> \(merged.count) (page \(page))")
+            completion(merged, nil)
         }
     }
 
