@@ -61,27 +61,10 @@ class AppDelegate: UIResponder, UIApplicationDelegate, UITabBarControllerDelegat
         // quits, the toggle being off in the past) before any UI loads.
         purgeOrphanTorrentDownloads()
 
-        if let url = launchOptions?[.url] as? URL {
-            return self.application(.shared, open: url)
-        }
-
         let font = UIFont.systemFont(ofSize: 38, weight: UIFont.Weight.heavy)
         UITabBarItem.appearance().setTitleTextAttributes([NSAttributedString.Key.font: font], for: .normal)
 
-        if !UserDefaults.standard.bool(forKey: "tosAccepted") {
-            let vc = UIStoryboard.main.instantiateViewController(withIdentifier: "TermsOfServiceNavigationController")
-            window?.makeKeyAndVisible()
-            /// Set themeSongVolume to its lowest by default
-            UserDefaults.standard.set(0.25, forKey: "themeSongVolume")
-            OperationQueue.main.addOperation {
-                self.activeRootViewController?.present(vc, animated: false) {
-                    self.activeRootViewController?.environmentsToFocus = [self.tabBarController.tabBar]
-                }
-            }
-        }
-
         try? reachability.startNotifier()
-        window?.tintColor = .app
 
         awakeObjects()
 
@@ -97,7 +80,34 @@ class AppDelegate: UIResponder, UIApplicationDelegate, UITabBarControllerDelegat
             TraktManager.shared.syncUserData()
         }
 
+        // Window creation, the Terms-of-Service gate and launch-URL handling
+        // now happen in `SceneDelegate` (they need the window, which only
+        // exists once the scene connects).
         return true
+    }
+
+    // MARK: - Scene lifecycle
+
+    func application(_ application: UIApplication,
+                     configurationForConnecting connectingSceneSession: UISceneSession,
+                     options: UIScene.ConnectionOptions) -> UISceneConfiguration {
+        // Uses the "Default Configuration" declared in the Info.plist scene
+        // manifest, whose delegate class is `SceneDelegate`.
+        return UISceneConfiguration(name: "Default Configuration", sessionRole: connectingSceneSession.role)
+    }
+
+    /// Presents the Terms-of-Service gate on first launch. Called by the
+    /// scene delegate once the window/root tab bar exists.
+    func presentTermsOfServiceIfNeeded() {
+        guard !UserDefaults.standard.bool(forKey: "tosAccepted") else { return }
+        let vc = UIStoryboard.main.instantiateViewController(withIdentifier: "TermsOfServiceNavigationController")
+        /// Set themeSongVolume to its lowest by default
+        UserDefaults.standard.set(0.25, forKey: "themeSongVolume")
+        OperationQueue.main.addOperation {
+            self.activeRootViewController?.present(vc, animated: false) {
+                self.activeRootViewController?.environmentsToFocus = [self.tabBarController.tabBar]
+            }
+        }
     }
 
     func tabBarController(_ tabBarController: UITabBarController, shouldSelect viewController: UIViewController) -> Bool {

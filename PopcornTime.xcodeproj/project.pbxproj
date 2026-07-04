@@ -141,6 +141,7 @@
 		4D990E231DC4EFA2005CDE34 /* Media+Extension.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4D990E1D1DC4EFA2005CDE34 /* Media+Extension.swift */; };
 		4D990E2D1DC4F00F005CDE34 /* SubtitleSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4D990E271DC4F00F005CDE34 /* SubtitleSettings.swift */; };
 		4D990E471DC4F0F1005CDE34 /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4D990E451DC4F0F1005CDE34 /* AppDelegate.swift */; };
+		70EBA1D4C0FFEE0000000021 /* SceneDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 70EBA1D4C0FFEE0000000020 /* SceneDelegate.swift */; };
 		4D99954F1E5C7B45005C432A /* TVLoadingViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4D99954E1E5C7B45005C432A /* TVLoadingViewController.swift */; };
 		4D9995531E5C7E68005C432A /* LoadingView.xib in Resources */ = {isa = PBXBuildFile; fileRef = 4D9995521E5C7E68005C432A /* LoadingView.xib */; };
 		4D9995551E5C7F81005C432A /* ErrorBackgroundView.xib in Resources */ = {isa = PBXBuildFile; fileRef = 4D9995541E5C7F81005C432A /* ErrorBackgroundView.xib */; };
@@ -471,6 +472,7 @@
 		4D990E281DC4F00F005CDE34 /* PopcornTimetvOS-Bridging-Header.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = "PopcornTimetvOS-Bridging-Header.h"; sourceTree = "<group>"; };
 		4D990E321DC4F028005CDE34 /* Images.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Images.xcassets; sourceTree = "<group>"; };
 		4D990E451DC4F0F1005CDE34 /* AppDelegate.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = AppDelegate.swift; sourceTree = "<group>"; };
+		70EBA1D4C0FFEE0000000020 /* SceneDelegate.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = SceneDelegate.swift; sourceTree = "<group>"; };
 		4D99954E1E5C7B45005C432A /* TVLoadingViewController.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; name = TVLoadingViewController.swift; path = "View Controllers/TVLoadingViewController.swift"; sourceTree = "<group>"; };
 		4D9995521E5C7E68005C432A /* LoadingView.xib */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = file.xib; path = LoadingView.xib; sourceTree = "<group>"; };
 		4D9995541E5C7F81005C432A /* ErrorBackgroundView.xib */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = file.xib; path = ErrorBackgroundView.xib; sourceTree = "<group>"; };
@@ -962,6 +964,7 @@
 			children = (
 				4DBCCEFD1E68220D0066F1A7 /* Launch Screen.storyboard */,
 				4D990E451DC4F0F1005CDE34 /* AppDelegate.swift */,
+				70EBA1D4C0FFEE0000000020 /* SceneDelegate.swift */,
 			);
 			path = Startup;
 			sourceTree = "<group>";
@@ -1578,6 +1581,7 @@
 				4DBE60A11E5E634400C2549B /* EpisodesViewController.swift in Sources */,
 				4DE6FDF21F0823C400A7F274 /* UITableView+FocusedCellIndexPath.swift in Sources */,
 				4D990E471DC4F0F1005CDE34 /* AppDelegate.swift in Sources */,
+				70EBA1D4C0FFEE0000000021 /* SceneDelegate.swift in Sources */,
 				4DCCBA5B1DC50D780046C755 /* UIColor+Extension.swift in Sources */,
 				4DAFAA361E0AF4DE00AE0F9A /* AudioViewController.swift in Sources */,
 				4D0F9E3D1E705AA100860852 /* UICollectionViewCell+ReactiveCell.swift in Sources */,
@@ -2072,6 +2076,7 @@
 				ENABLE_USER_SCRIPT_SANDBOXING = NO;
 				"EXCLUDED_ARCHS[sdk=appletvsimulator*]" = arm64;
 				INFOPLIST_FILE = "$(SRCROOT)/PopcornTime/Supporting Files/tvOS.plist";
+				INFOPLIST_KEY_CFBundleDisplayName = "Popcorn Time";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
@@ -2107,6 +2112,7 @@
 				ENABLE_USER_SCRIPT_SANDBOXING = NO;
 				"EXCLUDED_ARCHS[sdk=appletvsimulator*]" = arm64;
 				INFOPLIST_FILE = "$(SRCROOT)/PopcornTime/Supporting Files/tvOS.plist";
+				INFOPLIST_KEY_CFBundleDisplayName = "Popcorn Time";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
@@ -2339,6 +2345,7 @@
 				ENABLE_USER_SCRIPT_SANDBOXING = NO;
 				"EXCLUDED_ARCHS[sdk=iphonesimulator*]" = arm64;
 				INFOPLIST_FILE = "PopcornTime/Supporting Files/iOS.plist";
+				INFOPLIST_KEY_CFBundleDisplayName = "Popcorn Time";
 				IPHONEOS_DEPLOYMENT_TARGET = 26.0;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
@@ -2373,6 +2380,7 @@
 				ENABLE_USER_SCRIPT_SANDBOXING = NO;
 				"EXCLUDED_ARCHS[sdk=iphonesimulator*]" = arm64;
 				INFOPLIST_FILE = "PopcornTime/Supporting Files/iOS.plist";
+				INFOPLIST_KEY_CFBundleDisplayName = "Popcorn Time";
 				IPHONEOS_DEPLOYMENT_TARGET = 26.0;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
