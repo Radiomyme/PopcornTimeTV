@@ -337,5 +337,25 @@ extension String {
     mutating func removeHtmlEncoding() {
         self = removingHtmlEncoding
     }
+
+    /// Plain-text version of an HTML string for display: strips tags
+    /// (`<p>`, `<br>`, `<b>`, …) *and* decodes entities. Several catalog
+    /// APIs (Time4Popcorn, TVMaze) return rich-text descriptions, and
+    /// `removingHtmlEncoding` only handles entities — so raw `<p>` tags were
+    /// leaking into summaries. Line/paragraph tags become spaces so words
+    /// don't run together, and runs of whitespace are collapsed.
+    var strippedOfHtml: String {
+        let spacedBreaks = self
+            .replacingOccurrences(of: "<br>",   with: " ", options: .caseInsensitive)
+            .replacingOccurrences(of: "<br/>",  with: " ", options: .caseInsensitive)
+            .replacingOccurrences(of: "<br />", with: " ", options: .caseInsensitive)
+            .replacingOccurrences(of: "</p>",   with: " ", options: .caseInsensitive)
+            .replacingOccurrences(of: "</div>", with: " ", options: .caseInsensitive)
+        // Remove every remaining tag, then decode entities on the result.
+        let tagless = spacedBreaks.replacingOccurrences(of: "<[^>]+>", with: "", options: .regularExpression)
+        return tagless.removingHtmlEncoding
+            .replacingOccurrences(of: "[ \\t]+", with: " ", options: .regularExpression)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
 }
 

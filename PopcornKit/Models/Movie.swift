@@ -126,13 +126,13 @@ public struct Movie: Media, Equatable {
             self.id = try map.value("ids.imdb")
             self.year = try map.value("year", using: StringTransform())
             self.rating = try map.value("rating")
-            self.summary = ((try? map.value("overview")) ?? "No summary available.".localized).removingHtmlEncoding
+            self.summary = ((try? map.value("overview")) ?? "No summary available.".localized).strippedOfHtml
             self.runtime = try map.value("runtime")
         } else {
             self.id = try map.value("imdb_id")
             self.year = try map.value("year")
             self.rating = try map.value("rating.percentage")
-            self.summary = ((try? map.value("synopsis")) ?? "No summary available.".localized).removingHtmlEncoding
+            self.summary = ((try? map.value("synopsis")) ?? "No summary available.".localized).strippedOfHtml
             self.largeCoverImage = try? map.value("images.poster"); largeCoverImage = ImageProxy.proxied(largeCoverImage?.replacingOccurrences(of: "w500", with: "w1000").replacingOccurrences(of: "SX300", with: "SX1000"))
             self.largeBackgroundImage = try? map.value("images.fanart"); largeBackgroundImage = ImageProxy.proxied(largeBackgroundImage?.replacingOccurrences(of: "w500", with: "w1920").replacingOccurrences(of: "SX300", with: "SX1920"))
             self.runtime = try map.value("runtime", using: IntTransform())
@@ -175,7 +175,7 @@ public struct Movie: Media, Equatable {
         self.rating  = Float(ytsRating * 10.0)
         self.runtime = (dict["runtime"] as? Int) ?? 0
         let summaryText = (dict["description_full"] as? String) ?? (dict["synopsis"] as? String) ?? (dict["summary"] as? String) ?? "No summary available.".localized
-        self.summary = summaryText.removingHtmlEncoding
+        self.summary = summaryText.strippedOfHtml
         self.trailer = (dict["yt_trailer_code"] as? String).flatMap { code in
             code.isEmpty ? nil : "https://www.youtube.com/watch?v=\(code)"
         }
@@ -222,7 +222,7 @@ public struct Movie: Media, Equatable {
         let ratingValue = (dict["rating"] as? Double) ?? Double(dict["rating"] as? Int ?? 0)
         self.rating = Float(ratingValue * 10.0)   // T4P rating is 0–10; codebase expects 0–100.
         self.runtime = (dict["runtime"] as? Int) ?? 0
-        self.summary = ((dict["description"] as? String) ?? "No summary available.".localized).removingHtmlEncoding
+        self.summary = ((dict["description"] as? String) ?? "No summary available.".localized).strippedOfHtml
         if let code = dict["trailer"] as? String, !code.isEmpty {
             self.trailer = "https://www.youtube.com/watch?v=\(code)"
         }

@@ -97,7 +97,7 @@ public struct Episode: Media, Equatable {
         self.imdbId = try? map.value("ids.imdb")
         self.show = try? map.value("show") // Will only not be `nil` if object is mapped from JSON array, otherwise this is set in `Show` struct.
         self.firstAirDate =  try map.value("first_aired", using: DateTransform())
-        self.summary = ((try? map.value("overview")) ?? "No summary available.".localized).removingHtmlEncoding
+        self.summary = ((try? map.value("overview")) ?? "No summary available.".localized).strippedOfHtml
         self.season = try map.value("season")
         let episode = self.episode // Stop compiler complaining about passing uninitialised variables to closure.
         self.title = ((try? map.value("title")) ?? "Episode \(episode)").removingHtmlEncoding

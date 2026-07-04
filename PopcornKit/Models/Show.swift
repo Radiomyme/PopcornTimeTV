@@ -138,7 +138,7 @@ public struct Show: Media, Equatable {
             self.airDay = try? map.value("air_day")
             self.airTime = try? map.value("air_time")
         }
-        self.summary = ((try? map.value("synopsis")) ?? "No summary available.".localized).removingHtmlEncoding
+        self.summary = ((try? map.value("synopsis")) ?? "No summary available.".localized).strippedOfHtml
         var title: String = try map.value("title")
         title.removeHtmlEncoding()
         self.title = title
@@ -174,7 +174,7 @@ public struct Show: Media, Equatable {
         self.year    = String(premiered.prefix(4))
         self.rating  = Float((dict["rating"] as? [String: Any])?["average"] as? Double ?? 0) * 10.0
         let summary  = (dict["summary"] as? String) ?? "No summary available.".localized
-        self.summary = summary.removingHtmlEncoding
+        self.summary = summary.strippedOfHtml
         self.runtime = (dict["runtime"] as? Int) ?? (dict["averageRuntime"] as? Int)
         self.status  = dict["status"] as? String
         self.genres  = (dict["genres"] as? [String]) ?? []
@@ -203,7 +203,7 @@ public struct Show: Media, Equatable {
         self.year    = String(dict["year"] as? Int ?? 0)
         let ratingValue = (dict["rating"] as? Double) ?? Double(dict["rating"] as? Int ?? 0)
         self.rating  = Float(ratingValue * 10.0)
-        self.summary = ((dict["description"] as? String) ?? "No summary available.".localized).removingHtmlEncoding
+        self.summary = ((dict["description"] as? String) ?? "No summary available.".localized).strippedOfHtml
         self.tmdbId  = nil
         self.runtime = (dict["runtime"] as? Int)
         self.genres  = (dict["genres"] as? [String]) ?? []

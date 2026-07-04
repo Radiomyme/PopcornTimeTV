@@ -641,7 +641,7 @@ public final class YTSEZTVProvider: MediaProvider {
 
             let image = (dict["image"] as? [String: Any])
             let airdate = (dict["airdate"] as? String).flatMap { dateFormatter.date(from: $0) }
-            let summary = ((dict["summary"] as? String) ?? "No summary available.".localized).removingHtmlEncoding
+            let summary = ((dict["summary"] as? String) ?? "No summary available.".localized).strippedOfHtml
             let name = ((dict["name"] as? String) ?? "Episode \(number)").removingHtmlEncoding
 
             var episode = Episode(

@@ -45,19 +45,19 @@ struct PosterCard: View {
                 )
                 .shadow(color: .black.opacity(0.35), radius: 8, x: 0, y: 4)
 
-            // Reserve a fixed 2-line title height + 1 subtitle line so every
-            // cell is exactly the same height regardless of how the title
-            // wraps. Without this, 1-line vs 2-line titles give cells
-            // different heights and the grid rows look ragged.
+            // Date first, then title. Reserve a fixed 1 subtitle line + 2-line
+            // title height so every cell is exactly the same height regardless
+            // of how the title wraps (otherwise 1- vs 2-line titles make the
+            // grid rows ragged).
             VStack(alignment: .leading, spacing: 2) {
-                Text(title)
-                    .font(.subheadline.weight(.semibold))
-                    .lineLimit(2, reservesSpace: true)
-                    .foregroundStyle(.primary)
                 Text(subtitle.isEmpty ? " " : subtitle)
                     .font(.caption2)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
+                Text(title)
+                    .font(.subheadline.weight(.semibold))
+                    .lineLimit(2, reservesSpace: true)
+                    .foregroundStyle(.primary)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.horizontal, 4)
