@@ -188,12 +188,14 @@ public final class YTSEZTVProvider: MediaProvider {
                 completion(ytsError == nil ? [] : nil, ytsError)
                 return
             }
-            var seen = Set(ytsMovies.map { $0.id })
-            var merged = ytsMovies
-            for movie in t4pMovies where seen.insert(movie.id).inserted {
+            // T4P first (primary), YTS appended as fallback/supplement. If T4P
+            // has no answer, the grid is just the YTS results.
+            var seen = Set(t4pMovies.map { $0.id })
+            var merged = t4pMovies
+            for movie in ytsMovies where seen.insert(movie.id).inserted {
                 merged.append(movie)
             }
-            print("[Movies] YTS \(ytsMovies.count) + T4P \(t4pMovies.count) -> \(merged.count) (page \(page))")
+            print("[Movies] T4P \(t4pMovies.count) + YTS \(ytsMovies.count) -> \(merged.count) (page \(page))")
             completion(merged, nil)
         }
     }
@@ -387,12 +389,13 @@ public final class YTSEZTVProvider: MediaProvider {
                 completion(baseError == nil ? [] : nil, baseError)
                 return
             }
-            var seen = Set(baseShows.map { $0.id })
-            var merged = baseShows
-            for show in t4pShows where seen.insert(show.id).inserted {
+            // T4P first (primary), EZTV/TVMaze appended as fallback/supplement.
+            var seen = Set(t4pShows.map { $0.id })
+            var merged = t4pShows
+            for show in baseShows where seen.insert(show.id).inserted {
                 merged.append(show)
             }
-            print("[Shows] base \(baseShows.count) + T4P \(t4pShows.count) -> \(merged.count) (page \(page))")
+            print("[Shows] T4P \(t4pShows.count) + base \(baseShows.count) -> \(merged.count) (page \(page))")
             completion(merged, nil)
         }
     }

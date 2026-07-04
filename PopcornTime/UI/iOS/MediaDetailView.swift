@@ -5,6 +5,13 @@ import PopcornKit
 import AVKit
 import PopcornTorrent
 
+/// The torrents found for one episode, ready to drive a quality-picker sheet.
+struct EpisodeSources: Identifiable {
+    let id = UUID()
+    let title: String
+    let torrents: [Torrent]
+}
+
 @MainActor
 final class MediaDetailViewModel: ObservableObject {
     @Published var enrichedMovie: Movie?
@@ -14,6 +21,48 @@ final class MediaDetailViewModel: ObservableObject {
     /// Episode torrents (EZTV) augmented with Torrentio + Time4Popcorn for
     /// the chosen episode. `nil` until augmentation finishes.
     @Published var augmentedEpisodeTorrents: [Torrent]?
+
+    /// Non-nil once an episode's sources are resolved → presents the quality
+    /// picker sheet. `loadingSourcesFor` marks which episode is resolving.
+    @Published var episodeSources: EpisodeSources?
+    @Published var loadingSourcesFor: String?   // episode id currently fetching
+    @Published var noSourcesMessage: String?
+
+    /// Fetch a specific episode's torrents, **T4P first** then falling back to
+    /// EZTV + Torrentio, and publish them for the quality picker.
+    func loadEpisodeSources(_ episode: Episode, showId: String) {
+        guard showId.hasPrefix("tt") else { return }
+        loadingSourcesFor = episode.id
+        noSourcesMessage = nil
+        let base = episode.torrents   // EZTV (already attached to the episode)
+        let group = DispatchGroup()
+        var t4p: [Torrent] = []
+        var aggregated: [Torrent] = []
+
+        group.enter()
+        Time4PopcornClient.shared.episodeTorrents(imdbId: showId, season: episode.season, episode: episode.episode) { torrents in
+            t4p = torrents
+            group.leave()
+        }
+        group.enter()
+        TorrentioClient.shared.streams(imdbId: showId, season: episode.season, episode: episode.episode) { torrents in
+            aggregated = torrents
+            group.leave()
+        }
+        group.notify(queue: .main) { [weak self] in
+            guard let self = self else { return }
+            self.loadingSourcesFor = nil
+            // T4P primary (base of the merge), EZTV + Torrentio as fallback,
+            // then sorted best-quality-first for the picker.
+            let merged = TorrentioClient.merge(t4p, with: base + aggregated).sorted(by: >)
+            let title = "S\(episode.season)E\(episode.episode)" + (episode.title.isEmpty ? "" : " · \(episode.title)")
+            if merged.isEmpty {
+                self.noSourcesMessage = "Aucune source trouvée pour \(title)."
+            } else {
+                self.episodeSources = EpisodeSources(title: title, torrents: merged)
+            }
+        }
+    }
 
     func load(_ media: Media) {
         loading = true
@@ -64,7 +113,8 @@ final class MediaDetailViewModel: ObservableObject {
             group.leave()
         }
         group.notify(queue: .main) { [weak self] in
-            self?.augmentedEpisodeTorrents = TorrentioClient.merge(base, with: aggregated + t4p)
+            // T4P primary, EZTV + Torrentio as fallback.
+            self?.augmentedEpisodeTorrents = TorrentioClient.merge(t4p, with: base + aggregated)
         }
     }
 
@@ -128,6 +178,7 @@ struct MediaDetailView: View {
     @State private var downloadKbps: Double = 0
     @State private var streamErrorMessage: String?
     @State private var safariURL: IdentifiableURL?
+    @State private var selectedSeason: Int = 0
 
     var body: some View {
         ScrollView {
@@ -135,7 +186,11 @@ struct MediaDetailView: View {
                 hero
                 actionRow
                 summary
-                torrentList
+                if viewModel.enrichedMovie != nil {
+                    movieTorrentList
+                } else if let show = viewModel.enrichedShow, !show.episodes.isEmpty {
+                    seasonEpisodeSection(show)
+                }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.horizontal, 16)
@@ -144,6 +199,11 @@ struct MediaDetailView: View {
         .navigationTitle(media.title)
         .navigationBarTitleDisplayMode(.inline)
         .task { viewModel.load(media) }
+        .onChange(of: viewModel.enrichedShow?.id) { _, _ in
+            if selectedSeason == 0, let first = viewModel.enrichedShow?.seasonNumbers.first {
+                selectedSeason = first
+            }
+        }
         .fullScreenCover(item: $pendingPlayback) { item in
             Group {
                 switch item.engine {
@@ -159,7 +219,83 @@ struct MediaDetailView: View {
             SafariSheet(url: item.url)
                 .ignoresSafeArea()
         }
+        .sheet(item: $viewModel.episodeSources) { sources in
+            QualityPickerSheet(title: sources.title, torrents: sources.torrents) { torrent in
+                viewModel.episodeSources = nil
+                play(torrent)
+            }
+        }
+        .alert("Aucune source",
+               isPresented: Binding(get: { viewModel.noSourcesMessage != nil },
+                                    set: { if !$0 { viewModel.noSourcesMessage = nil } })) {
+            Button("OK", role: .cancel) { viewModel.noSourcesMessage = nil }
+        } message: {
+            Text(viewModel.noSourcesMessage ?? "")
+        }
         .overlay { streamingOverlay }
+    }
+
+    /// Season picker + episode list. Tapping an episode resolves its sources
+    /// (T4P first, then EZTV/Torrentio) and presents the quality picker.
+    @ViewBuilder
+    private func seasonEpisodeSection(_ show: Show) -> some View {
+        let season = selectedSeason == 0 ? (show.seasonNumbers.first ?? 1) : selectedSeason
+        let episodes = show.episodes.filter { $0.season == season }.sorted { $0.episode < $1.episode }
+
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Text("Épisodes").font(.headline)
+                Spacer()
+                if show.seasonNumbers.count > 1 {
+                    Picker("Saison", selection: $selectedSeason) {
+                        ForEach(show.seasonNumbers, id: \.self) { s in
+                            Text("Saison \(s)").tag(s)
+                        }
+                    }
+                    .pickerStyle(.menu)
+                }
+            }
+
+            ForEach(episodes, id: \.id) { episode in
+                Button {
+                    viewModel.loadEpisodeSources(episode, showId: show.id)
+                } label: {
+                    HStack(spacing: 12) {
+                        Text("\(episode.episode)")
+                            .font(.headline.monospacedDigit())
+                            .foregroundStyle(.secondary)
+                            .frame(width: 28, alignment: .trailing)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(episode.title.isEmpty ? "Épisode \(episode.episode)" : episode.title)
+                                .font(.subheadline.weight(.semibold))
+                                .foregroundStyle(.primary)
+                                .lineLimit(2)
+                            if !episode.summary.isEmpty,
+                               episode.summary != "No summary available.".localized {
+                                Text(episode.summary)
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                                    .lineLimit(2)
+                            }
+                        }
+                        Spacer(minLength: 8)
+                        if viewModel.loadingSourcesFor == episode.id {
+                            ProgressView()
+                        } else {
+                            Image(systemName: "play.circle.fill")
+                                .foregroundStyle(.tint)
+                                .font(.title2)
+                        }
+                    }
+                    .padding(12)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                }
+                .buttonStyle(.plain)
+                .disabled(viewModel.loadingSourcesFor != nil)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     @ViewBuilder
@@ -323,7 +459,7 @@ struct MediaDetailView: View {
     }
 
     @ViewBuilder
-    private var torrentList: some View {
+    private var movieTorrentList: some View {
         if !viewModel.torrents.isEmpty {
             VStack(alignment: .leading, spacing: 8) {
                 Text("Qualités disponibles").font(.headline)
@@ -408,5 +544,44 @@ struct MediaDetailView: View {
             }
             print("[iOS Detail] streaming failure: \(error.localizedDescription)")
         })
+    }
+}
+
+/// Quality picker shown after selecting an episode — lists every resolved
+/// source (best quality first) and plays the chosen one.
+private struct QualityPickerSheet: View {
+    let title: String
+    let torrents: [Torrent]
+    let onSelect: (Torrent) -> Void
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            List(torrents, id: \.url) { torrent in
+                Button {
+                    onSelect(torrent)
+                } label: {
+                    HStack {
+                        Image(systemName: "film").foregroundStyle(.secondary)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(torrent.quality ?? "—").font(.subheadline.weight(.semibold))
+                            Text("\(torrent.seeds) seeds · \(torrent.size ?? "—")")
+                                .font(.caption).foregroundStyle(.secondary)
+                        }
+                        Spacer(minLength: 8)
+                        Image(systemName: "play.circle.fill").foregroundStyle(.tint).font(.title2)
+                    }
+                }
+                .buttonStyle(.plain)
+            }
+            .navigationTitle(title)
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Fermer") { dismiss() }
+                }
+            }
+        }
+        .presentationDetents([.medium, .large])
     }
 }

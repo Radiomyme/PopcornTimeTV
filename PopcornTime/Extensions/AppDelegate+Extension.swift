@@ -82,8 +82,9 @@ extension AppDelegate {
 
             group.notify(queue: .main) { [weak self] in
                 var augmented = episode
-                augmented.torrents = TorrentioClient.merge(episode.torrents, with: aggregated + t4p)
-                print("[chooseQuality] episode S\(episode.season)E\(episode.episode): \(episode.torrents.count) EZTV + \(aggregated.count) aggregated + \(t4p.count) t4p -> \(augmented.torrents.count)")
+                // T4P primary, EZTV + Torrentio as fallback.
+                augmented.torrents = TorrentioClient.merge(t4p, with: episode.torrents + aggregated)
+                print("[chooseQuality] episode S\(episode.season)E\(episode.episode): \(t4p.count) t4p + \(episode.torrents.count) EZTV + \(aggregated.count) aggregated -> \(augmented.torrents.count)")
                 self?.presentQualityChoice(sender, media: augmented, completion: completion)
             }
             return
