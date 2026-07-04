@@ -94,14 +94,14 @@ extension AppDelegate {
 
     private func presentQualityChoice(_ sender: UIView?, media: Media, completion: @escaping (Torrent) -> Void) {
         // Auto-pick behaviour is controlled by the "autoSelectQuality" setting:
-        //   Balanced (default) — highest resolution the swarm can stream fast;
-        //   Highest            — always the top resolution regardless of seeds;
-        //   Lowest             — smallest/fastest;
-        //   Off                — always ask.
-        // Balanced avoids the classic trap of picking a 14 GB 4K release that
-        // only has a handful of seeders (→ many minutes of buffering) when a
-        // well-seeded 1080p would start almost immediately.
-        let preference = UserDefaults.standard.string(forKey: "autoSelectQuality") ?? "Balanced".localized
+        //   Highest (default on the Apple TV) — always the top resolution
+        //     (2160p + HDR/DV/Atmos) for the best picture on a 4K TV, accepting
+        //     that a lightly-seeded 4K release takes longer to buffer;
+        //   Balanced — highest resolution the swarm can stream fast (skips a
+        //     lightly-seeded 4K for a well-seeded 1080p);
+        //   Lowest   — smallest/fastest;
+        //   Off      — always ask.
+        let preference = UserDefaults.standard.string(forKey: "autoSelectQuality") ?? "Highest".localized
         var sorted     = media.torrents.sorted(by: <)
 
         #if targetEnvironment(simulator)
