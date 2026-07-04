@@ -94,8 +94,39 @@ extension SearchViewController {
     override func viewDidLayoutSubviews() {
         super.viewDidLayoutSubviews()
         if focusGuide == nil { installResultsFocusGuide() }
-        guard let guide = focusGuide,
-              let first = collectionViewController?.collectionView?.visibleCells.first else { return }
-        guide.preferredFocusEnvironments = [first]
+        updateResultsFocusGuide(focusInResults: isFocusInResults)
+    }
+
+    /// Keep the results focus guide from trapping the user in the grid.
+    ///
+    /// The guide (planted at the top of the results collection view, pointing
+    /// at the first cell) only exists to help the focus engine DESCEND from
+    /// the centered MOVIES/SHOWS/PEOPLE scope tabs into a sparse, left-aligned
+    /// result set. But while it's active it also intercepts an *upward* move
+    /// out of the top row and redirects focus straight back to the first cell
+    /// — so after scrolling down and picking a result, the user could never
+    /// go back up to the search bar or reach the tab bar. Disable the guide's
+    /// redirect whenever focus is inside the results, and restore it once
+    /// focus is above them (for the next downward move).
+    override func didUpdateFocus(in context: UIFocusUpdateContext, with coordinator: UIFocusAnimationCoordinator) {
+        super.didUpdateFocus(in: context, with: coordinator)
+        guard let cv = collectionViewController?.collectionView else { return }
+        let nextInResults = context.nextFocusedView?.isDescendant(of: cv) ?? false
+        updateResultsFocusGuide(focusInResults: nextInResults)
+    }
+
+    private var isFocusInResults: Bool {
+        collectionViewController?.collectionView?.visibleCells.contains(where: { $0.isFocused }) ?? false
+    }
+
+    private func updateResultsFocusGuide(focusInResults: Bool) {
+        guard let guide = focusGuide else { return }
+        if focusInResults {
+            guide.preferredFocusEnvironments = []
+        } else if let first = collectionViewController?.collectionView?.visibleCells.first {
+            guide.preferredFocusEnvironments = [first]
+        } else {
+            guide.preferredFocusEnvironments = []
+        }
     }
 }
