@@ -123,7 +123,7 @@ extension PCTPlayerViewController: UIViewControllerTransitioningDelegate {
         var unhandled = Set<UIPress>()
         for press in presses {
             if press.type == .playPause {
-                togglePlayPauseDirect()
+                playandPause()
             } else if press.type == .downArrow {
                 // Deterministic way to reach Subtitles / Audio / Info. The
                 // storyboard swipe-down gesture is unreliable on the 2nd-gen
@@ -138,22 +138,6 @@ extension PCTPlayerViewController: UIViewControllerTransitioningDelegate {
         if !unhandled.isEmpty { super.pressesBegan(unhandled, with: event) }
     }
 
-    /// Direct play/pause toggle — bypasses scrubbing mode.
-    private func togglePlayPauseDirect() {
-        if mediaplayer.isPlaying {
-            // VLCMediaPlayer.canPause guards against unseekable streams
-            // (live HLS) where pause would just buffer and confuse the
-            // user. For a torrent file canPause is always true.
-            if mediaplayer.canPause { mediaplayer.pause() }
-        } else {
-            mediaplayer.play()
-        }
-        // Reveal the controls so the user gets visual feedback that the
-        // toggle was registered, then re-arm the auto-hide timer.
-        if progressBar.isHidden { toggleControlsVisible() }
-        resetIdleTimer()
-    }
-    
     func endScrubbing() {
         mediaplayer.willPlay ? mediaplayer.play() : ()
         resetIdleTimer()

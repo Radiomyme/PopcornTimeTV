@@ -84,13 +84,22 @@ class PCTPlayerViewController: UIViewController, VLCMediaPlayerDelegate, UIGestu
     
     // MARK: - Button actions
     
+    /// Toggle playback. This is the Siri Remote Play/Pause button (storyboard
+    /// gesture with `allowedPressTypes = playPause`) AND every Now-Playing /
+    /// remote-control play/pause command. It used to fake a Select-click,
+    /// which actually drops into *scrubbing* mode — so the dedicated
+    /// Play/Pause button never toggled playback. Do a clean toggle instead.
     @IBAction func playandPause() {
+        if mediaplayer.isPlaying {
+            // canPause guards unseekable live streams; always true for a torrent file.
+            if mediaplayer.canPause { mediaplayer.pause() }
+        } else {
+            mediaplayer.play()
+        }
 #if os(tvOS)
-            // Make fake gesture to trick clickGesture: into recognising the touch.
-            let gesture = SiriRemoteGestureRecognizer(target: nil, action: nil)
-            gesture.isClick = true
-            gesture.state = .ended
-            clickGesture(gesture)
+        // Reveal the controls for visual feedback, then re-arm auto-hide.
+        if progressBar.isHidden { toggleControlsVisible() }
+        resetIdleTimer()
 #endif
     }
     
@@ -173,17 +182,38 @@ class PCTPlayerViewController: UIViewController, VLCMediaPlayerDelegate, UIGestu
     var subtitles: [Subtitle] {
         return media.subtitles
     }
+    /// Downloaded subtitle awaiting application. VLCKit silently drops an
+    /// `addPlaybackSlave` issued before the media is parsed/playing — which is
+    /// exactly when the preferred-language auto-selection in `viewDidLoad`
+    /// runs, and often when the user picks one from the just-opened options
+    /// panel while the stream is still buffering. So we hold the downloaded
+    /// file and (re)apply it once the player is actually playing.
+    private var pendingSubtitleURL: URL?
+    private var appliedSubtitleURL: URL?
+
     var currentSubtitle: Subtitle? {
         didSet {
-            if let subtitle = currentSubtitle {
-                PopcornKit.downloadSubtitleFile(subtitle.link, downloadDirectory: directory, completion: { (subtitlePath, error) in
-                    guard let subtitlePath = subtitlePath else { return }
-                    self.mediaplayer.addPlaybackSlave(subtitlePath, type: .subtitle, enforce: true)
-                })
-            } else {
+            guard let subtitle = currentSubtitle else {
+                pendingSubtitleURL = nil
                 mediaplayer.currentVideoSubTitleIndex = NSNotFound // Remove all subtitles
+                return
             }
+            PopcornKit.downloadSubtitleFile(subtitle.link, downloadDirectory: directory, completion: { [weak self] (subtitlePath, error) in
+                guard let self = self, let subtitlePath = subtitlePath else { return }
+                self.pendingSubtitleURL = subtitlePath
+                self.applyPendingSubtitle()
+            })
         }
+    }
+
+    /// Attaches the pending subtitle as an enforced playback slave, but only
+    /// once the media is actually playing — otherwise VLCKit drops it on the
+    /// floor. Called from the download callback and again from
+    /// `mediaPlayerStateChanged(.playing)` so whichever happens last wins.
+    func applyPendingSubtitle() {
+        guard let url = pendingSubtitleURL, url != appliedSubtitleURL, mediaplayer.isPlaying else { return }
+        mediaplayer.addPlaybackSlave(url, type: .subtitle, enforce: true)
+        appliedSubtitleURL = url
     }
     
     // MARK: - Private vars
@@ -354,6 +384,22 @@ class PCTPlayerViewController: UIViewController, VLCMediaPlayerDelegate, UIGestu
         ]
         mediaplayer.media?.addOptions(mediaOptions)
 
+#if os(tvOS)
+        // Dolby / DTS bitstream passthrough to the receiver so Atmos, TrueHD,
+        // E-AC3 and DTS-HD reach the AVR undecoded instead of being downmixed
+        // to PCM stereo by VLCKit. This only helps when the Apple TV's audio
+        // output (HDMI/eARC) and the connected AVR/soundbar can decode the
+        // bitstream; on setups that can't, an unsupported track can come back
+        // silent — so it's gated behind a default that can be flipped off
+        // without a rebuild. HDR is a separate matter: VLC 3.7 tone-maps HDR
+        // to SDR and exposes no passthrough for it, so 4K HDR/DV in an .mkv
+        // still plays SDR here (only the AVPlayer path renders true HDR, and
+        // it can't open .mkv).
+        if UserDefaults.standard.object(forKey: "audioPassthrough") as? Bool ?? true {
+            mediaplayer.audio?.passthrough = true
+        }
+#endif
+
         NotificationCenter.default.addObserver(self, selector: #selector(torrentStatusDidChange(_:)), name: .PTTorrentStatusDidChange, object: streamer)
         
         let settings = SubtitleSettings.shared
@@ -447,6 +493,7 @@ class PCTPlayerViewController: UIViewController, VLCMediaPlayerDelegate, UIGestu
             playPauseButton?.setImage(UIImage(named: "Pause"), for: .normal)
             setProgress(status: .watching)
             nowPlayingInfo?[MPNowPlayingInfoPropertyPlaybackRate] = Double(mediaplayer.rate)
+            applyPendingSubtitle() // media is ready now — safe to attach the slave
         case .buffering:
             progressBar.isBuffering = true
         default:
