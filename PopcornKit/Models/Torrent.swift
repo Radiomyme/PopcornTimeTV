@@ -82,6 +82,10 @@ public struct VideoTags: OptionSet, Codable {
     public static let atmos        = VideoTags(rawValue: 1 << 5)
     public static let trueHD       = VideoTags(rawValue: 1 << 6)
     public static let dts          = VideoTags(rawValue: 1 << 7)
+    /// Dolby Digital Plus (E-AC-3). Matters on Apple hardware: tvOS can
+    /// bitstream Atmos ONLY from E-AC-3 JOC ("DDP Atmos" web releases).
+    /// TrueHD Atmos can't leave any tvOS app as Atmos — it decodes to PCM.
+    public static let eac3         = VideoTags(rawValue: 1 << 8)
 
     /// Parse a torrent name string for codec/HDR/audio markers.
     public static func parse(_ raw: String) -> VideoTags {
@@ -95,6 +99,8 @@ public struct VideoTags: OptionSet, Codable {
         if s.contains("atmos") { tags.insert(.atmos) }
         if s.contains("truehd") || s.contains("true hd") { tags.insert(.trueHD) }
         if s.contains("dts") { tags.insert(.dts) }
+        // "-" was replaced by " " above, so E-AC-3 arrives as "e ac 3".
+        if s.contains("ddp") || s.contains("dd+") || s.contains("eac3") || s.contains("eac 3") || s.contains("e ac 3") { tags.insert(.eac3) }
         return tags
     }
 
@@ -104,7 +110,13 @@ public struct VideoTags: OptionSet, Codable {
         if contains(.dolbyVision) { parts.append("DV") }
         if contains(.hdr10Plus)   { parts.append("HDR10+") }
         else if contains(.hdr10)  { parts.append("HDR") }
-        if contains(.atmos)       { parts.append("Atmos") }
+        // Spell out the Atmos flavor: DD+ Atmos actually bitstreams on the
+        // Apple TV; TrueHD Atmos plays as decoded multichannel PCM there.
+        if contains(.atmos) {
+            if contains(.eac3)        { parts.append("DD+ Atmos") }
+            else if contains(.trueHD) { parts.append("TrueHD Atmos") }
+            else                      { parts.append("Atmos") }
+        } else if contains(.eac3)     { parts.append("DD+") }
         if contains(.av1)         { parts.append("AV1") }
         else if contains(.hevc)   { parts.append("HEVC") }
         return parts.isEmpty ? "" : " " + parts.joined(separator: " ")
@@ -230,6 +242,13 @@ public func < (lhs: Torrent, rhs: Torrent) -> Bool {
     if lhs.qualityValue != rhs.qualityValue {
         return lhs.qualityValue < rhs.qualityValue
     }
+    // At equal resolution, prefer Atmos the hardware can actually deliver:
+    // Apple TV bitstreams Atmos only from E-AC-3 (DD+ JOC, i.e. "DDP Atmos"
+    // web releases). TrueHD Atmos decodes to plain multichannel PCM in every
+    // tvOS app, so it should not outrank a DD+ Atmos release.
+    let lhsDeliverableAtmos = lhs.tags.contains(.atmos) && lhs.tags.contains(.eac3)
+    let rhsDeliverableAtmos = rhs.tags.contains(.atmos) && rhs.tags.contains(.eac3)
+    if lhsDeliverableAtmos != rhsDeliverableAtmos { return rhsDeliverableAtmos }
     let lhsScore = lhs.tags.rawValue.nonzeroBitCount
     let rhsScore = rhs.tags.rawValue.nonzeroBitCount
     if lhsScore != rhsScore { return lhsScore < rhsScore }

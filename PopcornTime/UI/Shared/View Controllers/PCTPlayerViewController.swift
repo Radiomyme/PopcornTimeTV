@@ -191,6 +191,22 @@ class PCTPlayerViewController: UIViewController, VLCMediaPlayerDelegate, UIGestu
     private var pendingSubtitleURL: URL?
     private var appliedSubtitleURL: URL?
 
+    /// One-shot: re-select the "encoded" (passthrough) audio device once the
+    /// stream is actually playing — the aout may not exist when viewDidLoad
+    /// sets it — and log the audio tracks so the codec (DD+ vs TrueHD) is
+    /// visible in the console when verifying Atmos on the device.
+    private var didReassertPassthrough = false
+    private func reassertPassthroughIfNeeded() {
+#if os(tvOS)
+        guard !didReassertPassthrough else { return }
+        didReassertPassthrough = true
+        if UserDefaults.standard.object(forKey: "audioPassthrough") as? Bool ?? true {
+            mediaplayer.audio?.passthrough = true
+        }
+        print("[Player] audio tracks: \(mediaplayer.audioTracks.map { $0.trackName })")
+#endif
+    }
+
     var currentSubtitle: Subtitle? {
         didSet {
             guard let subtitle = currentSubtitle else {
@@ -219,7 +235,17 @@ class PCTPlayerViewController: UIViewController, VLCMediaPlayerDelegate, UIGestu
     
     // MARK: - Private vars
     
+#if os(tvOS)
+    // Force VLC's AVSampleBufferAudioRenderer output (",any" keeps fallback).
+    // It's the only aout with an "encoded" device — which is what
+    // VLCAudio.passthrough actually selects (verified: setPassthrough: calls
+    // libvlc_audio_output_device_set(mp, "encoded")). With it, AC-3/E-AC-3
+    // (incl. DD+ Atmos JOC) bitstreams reach the AVR; other codecs gracefully
+    // fall back to PCM. The audiounit_ios output can't passthrough at all.
+    private(set) var mediaplayer = VLCMediaPlayer(options: ["--aout=avsamplebuffer,any"])
+#else
     private(set) var mediaplayer = VLCMediaPlayer()
+#endif
     private(set) var url: URL!
     private(set) var directory: URL!
     private(set) var localPathToMedia: URL!
@@ -504,6 +530,7 @@ class PCTPlayerViewController: UIViewController, VLCMediaPlayerDelegate, UIGestu
             setProgress(status: .watching)
             nowPlayingInfo?[MPNowPlayingInfoPropertyPlaybackRate] = Double(mediaplayer.rate)
             applyPendingSubtitle() // media is ready now — safe to attach the slave
+            reassertPassthroughIfNeeded()
         default:
             break
         }
