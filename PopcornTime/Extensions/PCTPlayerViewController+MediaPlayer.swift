@@ -38,12 +38,12 @@ extension PCTPlayerViewController {
         }
         
         center.skipForwardCommand.addTarget { (event) -> MPRemoteCommandHandlerStatus in
-            self.mediaplayer.jumpForward(Int32((event as! MPSkipIntervalCommandEvent).interval))
+            self.mediaplayer.jumpForward((event as! MPSkipIntervalCommandEvent).interval) // VLCKit 4: seconds as Double
             return .success
         }
-        
+
         center.skipBackwardCommand.addTarget { (event) -> MPRemoteCommandHandlerStatus in
-            self.mediaplayer.jumpBackward(Int32((event as! MPSkipIntervalCommandEvent).interval))
+            self.mediaplayer.jumpBackward((event as! MPSkipIntervalCommandEvent).interval)
             return .success
         }
     }

@@ -1,7 +1,7 @@
 
 
 import AVFoundation
-import TVVLCKit
+import VLCKit
 
 /// Player-engine abstraction shared by `VLCEngine` and `AVPlayerEngine`.
 ///
@@ -79,7 +79,7 @@ public final class VLCEngine: PlaybackEngine {
     }
 
     public func load(url: URL) {
-        let media = VLCMedia(url: url)
+        guard let media = VLCMedia(url: url) else { return } // VLCKit 4: failable init
         media.addOptions([
             "network-caching": NSNumber(value: 5000),
             "file-caching":    NSNumber(value: 5000),

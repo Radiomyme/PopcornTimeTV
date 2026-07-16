@@ -3,7 +3,7 @@
 #ifndef PopcornTimetvOS_Bridging_Header_h
 #define PopcornTimetvOS_Bridging_Header_h
 
-#import <TVVLCKit/TVVLCKit.h>
+#import <VLCKit/VLCKit.h>
 #import "NSObject+Swift_Observer.h"
 #import "ObjCExceptionCatcher.h"
 #import <ifaddrs.h>

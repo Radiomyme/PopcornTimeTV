@@ -52,9 +52,13 @@ extension PCTPlayerViewController: UIViewControllerTransitioningDelegate {
         destinationController.subtitlesViewController.currentSubtitle = currentSubtitle
         destinationController.subtitlesViewController.currentDelay = mediaplayer.currentVideoSubTitleDelay/Int(1e6)
         destinationController.audioViewController.currentDelay = mediaplayer.currentAudioPlaybackDelay/Int(1e6)
-        destinationController.audioViewController.audioTrackNames = (mediaplayer.audioTrackNames as? [String]) ?? []
-        destinationController.audioViewController.audioTrackIndexes = ((mediaplayer.audioTrackIndexes as? [NSNumber]) ?? []).map { $0.int32Value }
-        destinationController.audioViewController.currentAudioTrackIndex = mediaplayer.currentAudioTrackIndex
+        // VLCKit 4 track API: feed the picker each track's name and its
+        // *position* as the "index" (didSelectAudioTrack selects by position),
+        // and mark the currently-selected track.
+        let audioTracks = mediaplayer.audioTracks
+        destinationController.audioViewController.audioTrackNames = audioTracks.map { $0.trackName }
+        destinationController.audioViewController.audioTrackIndexes = audioTracks.indices.map { Int32($0) }
+        destinationController.audioViewController.currentAudioTrackIndex = Int32(audioTracks.firstIndex(where: { $0.isSelected }) ?? -1)
         destinationController.infoViewController.media = media
     }
     
@@ -139,7 +143,7 @@ extension PCTPlayerViewController: UIViewControllerTransitioningDelegate {
     }
 
     func endScrubbing() {
-        mediaplayer.willPlay ? mediaplayer.play() : ()
+        if !mediaplayer.isPlaying { mediaplayer.play() } // VLCKit 4 dropped `willPlay`
         resetIdleTimer()
         progressBar.isScrubbing = false
         dimmerView!.isHidden = true
@@ -191,8 +195,12 @@ extension PCTPlayerViewController: UIViewControllerTransitioningDelegate {
     }
     
     func didSelectEqualizerProfile(_ profile: EqualizerProfiles) {
-        mediaplayer.resetEqualizer(fromProfile: profile.rawValue)
-        mediaplayer.equalizerEnabled = true
+        // VLCKit 4: equalizer is an object set on the player, built from a
+        // preset in the shared presets list (indexed the same as the old
+        // EqualizerProfiles raw values).
+        let presets = VLCAudioEqualizer.presets
+        guard Int(profile.rawValue) < presets.count else { return }
+        mediaplayer.equalizer = VLCAudioEqualizer(preset: presets[Int(profile.rawValue)])
     }
 }
 

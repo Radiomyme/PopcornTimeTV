@@ -195,7 +195,8 @@ class PCTPlayerViewController: UIViewController, VLCMediaPlayerDelegate, UIGestu
         didSet {
             guard let subtitle = currentSubtitle else {
                 pendingSubtitleURL = nil
-                mediaplayer.currentVideoSubTitleIndex = NSNotFound // Remove all subtitles
+                appliedSubtitleURL = nil
+                mediaplayer.deselectAllTextTracks() // Remove all subtitles (VLCKit 4 track API)
                 return
             }
             PopcornKit.downloadSubtitleFile(subtitle.link, downloadDirectory: directory, completion: { [weak self] (subtitlePath, error) in
@@ -268,7 +269,11 @@ class PCTPlayerViewController: UIViewController, VLCMediaPlayerDelegate, UIGestu
     }
 
     func didSelectAudioTrack(_ index: Int32) {
-        mediaplayer.currentAudioTrackIndex = index
+        // VLCKit 4 selects tracks by object, not by VLC's internal index. The
+        // options UI passes the *position* in `audioTracks` (see the adapters
+        // in the tvOS presentOptionsViewController), so select that element.
+        guard index >= 0, Int(index) < mediaplayer.audioTracks.count else { return }
+        mediaplayer.audioTracks[Int(index)].isSelectedExclusively = true
     }
 
     /// Whether we already tried to honour the "Audio Language" setting for
@@ -285,14 +290,13 @@ class PCTPlayerViewController: UIViewController, VLCMediaPlayerDelegate, UIGestu
         guard !didAutoSelectAudioTrack else { return }
         didAutoSelectAudioTrack = true
 
+        let tracks = mediaplayer.audioTracks
         guard
             let preferred = UserDefaults.standard.string(forKey: "preferredAudioLanguage"),
             let code = Locale.commonISOLanguageCodes.first(where: {
                 Locale.current.localizedString(forLanguageCode: $0)?.localizedCapitalized == preferred
             }),
-            let names = mediaplayer.audioTrackNames as? [String],
-            let indexes = mediaplayer.audioTrackIndexes as? [NSNumber],
-            names.count == indexes.count, names.count > 1
+            tracks.count > 1
         else { return }
 
         var tokens: Set<String> = [preferred.lowercased(), code.lowercased()]
@@ -303,13 +307,13 @@ class PCTPlayerViewController: UIViewController, VLCMediaPlayerDelegate, UIGestu
             tokens.insert(alpha3.lowercased())
         }
 
-        for (name, index) in zip(names, indexes) {
+        for track in tracks {
             // Split on non-letters so the 2-letter code can't false-match
             // inside an unrelated word ("en" in "Enhanced").
-            let words = Set(name.lowercased().components(separatedBy: CharacterSet.letters.inverted)).subtracting([""])
+            let words = Set(track.trackName.lowercased().components(separatedBy: CharacterSet.letters.inverted)).subtracting([""])
             if !words.isDisjoint(with: tokens) {
-                print("[Player] auto-selecting audio track '\(name)' for language '\(preferred)'")
-                mediaplayer.currentAudioTrackIndex = index.int32Value
+                print("[Player] auto-selecting audio track '\(track.trackName)' for language '\(preferred)'")
+                track.isSelectedExclusively = true
                 return
             }
         }
@@ -403,10 +407,14 @@ class PCTPlayerViewController: UIViewController, VLCMediaPlayerDelegate, UIGestu
         NotificationCenter.default.addObserver(self, selector: #selector(torrentStatusDidChange(_:)), name: .PTTorrentStatusDidChange, object: streamer)
         
         let settings = SubtitleSettings.shared
-        (mediaplayer as VLCFontAppearance).setTextRendererFontSize!(NSNumber(value: settings.size.rawValue))
-        (mediaplayer as VLCFontAppearance).setTextRendererFontColor!(NSNumber(value: settings.color.hexInt()))
-        (mediaplayer as VLCFontAppearance).setTextRendererFont!(settings.font.fontName as NSString)
-        (mediaplayer as VLCFontAppearance).setTextRendererFontForceBold!(NSNumber(booleanLiteral: settings.style == .bold || settings.style == .boldItalic))
+        // These are private libvlc text-renderer selectors that may not exist
+        // in VLCKit 4's rewritten core. Call them optionally (`?`) so a missing
+        // selector no-ops instead of crashing (force-unwrap would trap). The
+        // font *scale* has a public 4.x replacement, so drive that too.
+        (mediaplayer as VLCFontAppearance).setTextRendererFontSize?(NSNumber(value: settings.size.rawValue))
+        (mediaplayer as VLCFontAppearance).setTextRendererFontColor?(NSNumber(value: settings.color.hexInt()))
+        (mediaplayer as VLCFontAppearance).setTextRendererFont?(settings.font.fontName as NSString)
+        (mediaplayer as VLCFontAppearance).setTextRendererFontForceBold?(NSNumber(booleanLiteral: settings.style == .bold || settings.style == .boldItalic))
         if let preferredLanguage = settings.language {
             currentSubtitle = subtitles.first(where: {$0.language == preferredLanguage})
         }
@@ -464,7 +472,7 @@ class PCTPlayerViewController: UIViewController, VLCMediaPlayerDelegate, UIGestu
         
         progressBar.remainingTimeLabel.text = (mediaplayer.remainingTime ?? VLCTime(int: 0)).stringValue
         progressBar.elapsedTimeLabel.text = mediaplayer.time.stringValue
-        progressBar.progress = mediaplayer.position
+        progressBar.progress = Float(mediaplayer.position) // VLCKit 4: position is Double
         
         if nextEpisode != nil && ((mediaplayer.remainingTime ?? VLCTime(int: 0)).intValue/1000) == -31 && presentedViewController == nil {
             performSegue(withIdentifier: "showUpNext", sender: nil)
@@ -477,10 +485,12 @@ class PCTPlayerViewController: UIViewController, VLCMediaPlayerDelegate, UIGestu
         resetIdleTimer()
         progressBar.isBuffering = false
         nowPlayingInfo?[MPNowPlayingInfoPropertyElapsedPlaybackTime] = (mediaplayer.time.value?.doubleValue ?? 0)/1000
+        // VLCKit 4 collapsed the state enum: `.ended`/`.buffering`/`.esAdded`
+        // are gone. End-of-file and manual stop both surface as `.stopped`;
+        // buffering is no longer a player state (the torrent streamer drives
+        // the buffering UI via torrentStatusDidChange).
         switch mediaplayer.state {
         case .error:
-            fallthrough
-        case .ended:
             fallthrough
         case .stopped:
             setProgress(status: .finished)
@@ -494,8 +504,6 @@ class PCTPlayerViewController: UIViewController, VLCMediaPlayerDelegate, UIGestu
             setProgress(status: .watching)
             nowPlayingInfo?[MPNowPlayingInfoPropertyPlaybackRate] = Double(mediaplayer.rate)
             applyPendingSubtitle() // media is ready now — safe to attach the slave
-        case .buffering:
-            progressBar.isBuffering = true
         default:
             break
         }

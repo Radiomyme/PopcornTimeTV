@@ -2,7 +2,7 @@
 
 import SwiftUI
 import UIKit
-import MobileVLCKit
+import VLCKit
 import PopcornTorrent
 
 /// SwiftUI wrapper around a `VLCMediaPlayer` so the iOS app can play formats
@@ -59,7 +59,7 @@ final class VLCPlayerViewController: UIViewController, VLCMediaPlayerDelegate {
 
         player.delegate = self
         player.drawable = movieView
-        let media = VLCMedia(url: url)
+        guard let media = VLCMedia(url: url) else { return } // VLCKit 4: failable init
         media.addOptions([
             "network-caching":  NSNumber(value: 5000),
             "file-caching":     NSNumber(value: 5000),
@@ -215,8 +215,8 @@ final class VLCPlayerViewController: UIViewController, VLCMediaPlayerDelegate {
     }
 
     @objc private func scrub() {
-        // VLCMediaPlayer.position is normalized 0...1.
-        player.position = progressSlider.value
+        // VLCMediaPlayer.position is normalized 0...1 (Double in VLCKit 4).
+        player.position = Double(progressSlider.value)
     }
 
     @objc private func close() {
@@ -228,38 +228,33 @@ final class VLCPlayerViewController: UIViewController, VLCMediaPlayerDelegate {
     /// Pull (index, name) pairs out of `VLCMediaPlayer.videoSubTitlesIndexes/Names`
     /// (paired NSArrays). Filters out the magic "-1 / Disable" sentinel that VLC
     /// always reports — we add our own "Aucun" entry instead.
+    // VLCKit 4 exposes tracks as `VLCMediaPlayerTrack` objects rather than
+    // paired index/name NSArrays. We keep the picker's (index, name) contract
+    // but treat "index" as the *position* in the track array; selection then
+    // goes through `selectedExclusively` / `deselectAllTextTracks`.
     private func subtitleTracks() -> [(index: Int32, name: String)] {
-        guard let idx = player.videoSubTitlesIndexes as? [NSNumber],
-              let names = player.videoSubTitlesNames as? [String],
-              idx.count == names.count else { return [] }
-        return zip(idx, names).compactMap { (n, name) -> (Int32, String)? in
-            let value = n.int32Value
-            // VLC uses -1 to mean "subtitles disabled". We expose that via a
-            // separate cancel-style action so the list only contains real tracks.
-            return value < 0 ? nil : (value, name)
-        }
+        return player.textTracks.enumerated().map { (Int32($0.offset), $0.element.trackName) }
     }
 
     private func audioTracks() -> [(index: Int32, name: String)] {
-        guard let idx = player.audioTrackIndexes as? [NSNumber],
-              let names = player.audioTrackNames as? [String],
-              idx.count == names.count else { return [] }
-        return zip(idx, names).compactMap { (n, name) -> (Int32, String)? in
-            let value = n.int32Value
-            return value < 0 ? nil : (value, name)
-        }
+        return player.audioTracks.enumerated().map { (Int32($0.offset), $0.element.trackName) }
     }
 
     @objc private func showSubtitlePicker() {
         presentTrackSheet(
             title: "Sous-titres",
             tracks: subtitleTracks(),
-            selectedIndex: player.currentVideoSubTitleIndex,
+            selectedIndex: Int32(player.textTracks.firstIndex(where: { $0.isSelected }) ?? -1),
             allowDisable: true,
             sourceView: subtitleButton
         ) { [weak self] index in
-            self?.player.currentVideoSubTitleIndex = index
-            self?.scheduleHideControls()
+            guard let self = self else { return }
+            if index < 0 {
+                self.player.deselectAllTextTracks()
+            } else if Int(index) < self.player.textTracks.count {
+                self.player.textTracks[Int(index)].isSelectedExclusively = true
+            }
+            self.scheduleHideControls()
         }
     }
 
@@ -267,12 +262,13 @@ final class VLCPlayerViewController: UIViewController, VLCMediaPlayerDelegate {
         presentTrackSheet(
             title: "Audio",
             tracks: audioTracks(),
-            selectedIndex: player.currentAudioTrackIndex,
+            selectedIndex: Int32(player.audioTracks.firstIndex(where: { $0.isSelected }) ?? -1),
             allowDisable: false,
             sourceView: audioButton
         ) { [weak self] index in
-            self?.player.currentAudioTrackIndex = index
-            self?.scheduleHideControls()
+            guard let self = self, index >= 0, Int(index) < self.player.audioTracks.count else { return }
+            self.player.audioTracks[Int(index)].isSelectedExclusively = true
+            self.scheduleHideControls()
         }
     }
 
@@ -335,7 +331,7 @@ final class VLCPlayerViewController: UIViewController, VLCMediaPlayerDelegate {
 
     func mediaPlayerTimeChanged(_ aNotification: Notification) {
         guard !progressSlider.isTracking else { return }
-        progressSlider.setValue(player.position, animated: false)
+        progressSlider.setValue(Float(player.position), animated: false)
         if let elapsed = player.time.value?.intValue {
             timeLabel.text = formatMs(elapsed)
         }
@@ -358,7 +354,7 @@ final class VLCPlayerViewController: UIViewController, VLCMediaPlayerDelegate {
             // so multi-language MKVs surface their tracks as soon as they
             // become available.
             refreshTrackButtonsVisibility()
-        case .error, .stopped, .ended:
+        case .error, .stopped: // VLCKit 4 dropped `.ended`; end-of-file surfaces as `.stopped`
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
                 self?.dismiss(animated: true)
             }

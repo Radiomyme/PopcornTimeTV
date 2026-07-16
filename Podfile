@@ -18,7 +18,12 @@ target 'PopcornTimetvOS' do
     pod 'MarqueeLabel', '~> 4.5'
     pod 'ObjectMapper', '~> 4.4'
     pod 'TvOSMoreButton', '~> 1.4'
-    pod 'TVVLCKit', '~> 3.7'
+    # Unified VLCKit 4.x (VLC 4.0 core) replaces the legacy per-platform
+    # TVVLCKit/MobileVLCKit 3.7 (VLC 3.0). Brings VideoToolbox HEVC/AV1
+    # decoding improvements, the rewritten track API, audio passthrough,
+    # and — the reason for the upgrade — a shot at real HDR output on the
+    # Apple TV 4K. Pinned to an explicit alpha (no stable 4.0 yet).
+    pod 'VLCKit', '4.0.0a21'
     pod 'MBCircularProgressBar', '0.3.5-1'
 end
 
@@ -33,12 +38,8 @@ target 'PopcornTimeiOS' do
     pod 'AlamofireImage', '~> 4.3'
     pod 'ReachabilitySwift', '~> 5.2'
     pod 'ObjectMapper', '~> 4.4'
-    # MobileVLCKit 3.7.3 is the latest available stable build (4.x alphas
-    # are no longer hosted on download.videolan.org). Its xcframework
-    # ships ios-arm64_i386_x86_64-simulator — the post_install hook
-    # already excludes arm64 for iphonesimulator so we hit the x86_64
-    # slice via Rosetta.
-    pod 'MobileVLCKit', '~> 3.7'
+    # Unified VLCKit 4.x (same pod as tvOS). Replaces MobileVLCKit 3.7.
+    pod 'VLCKit', '4.0.0a21'
 end
 
 target 'TopShelf' do
