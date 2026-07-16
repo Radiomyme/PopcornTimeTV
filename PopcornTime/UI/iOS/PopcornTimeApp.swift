@@ -2,6 +2,7 @@
 
 import SwiftUI
 import PopcornKit
+import VLCKit
 
 /// SwiftUI app entry point for the iOS / iPadOS / Mac (Designed for iPad)
 /// build. Re-uses the same `PopcornKit` framework as the tvOS target so the
@@ -10,6 +11,12 @@ import PopcornKit
 @main
 struct PopcornTimeApp: App {
     init() {
+        // VLCKit 4 delivers player delegate callbacks on a background queue by
+        // default; VLCPlayerView touches UIKit in them. Restore VLCKit 3.x
+        // main-thread delivery before any player is created (see AppDelegate
+        // on tvOS for the full rationale).
+        VLCLibrary.sharedEventsConfiguration = VLCEventsLegacyConfiguration()
+
         // The first MovieManager / ShowManager call triggers
         // `MediaProviders.shared = YTSEZTVProvider()` lazy init. Pre-warm it
         // here so the UI doesn't pay the cost on first cell render.

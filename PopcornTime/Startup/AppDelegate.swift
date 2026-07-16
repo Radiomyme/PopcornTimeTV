@@ -5,6 +5,7 @@ import PopcornKit
 import Reachability
 import ObjectMapper
 import MarqueeLabel
+import VLCKit
 
 public let vlcSettingTextEncoding = "subsdec-encoding"
 
@@ -48,6 +49,15 @@ class AppDelegate: UIResponder, UIApplicationDelegate, UITabBarControllerDelegat
 
     func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?) -> Bool {
         print("[App] didFinishLaunching tosAccepted=\(UserDefaults.standard.bool(forKey: "tosAccepted"))")
+
+        // VLCKit 4 rewrote event management and now dispatches player delegate
+        // callbacks (mediaPlayerTimeChanged / StateChanged) on a BACKGROUND
+        // queue. Our player code touches UIKit directly in those callbacks
+        // (e.g. ProgressBar.isBuffering → UIImageView.setHidden), which traps
+        // on the main-queue assertion — the crash seen on play/pause. The
+        // legacy events configuration restores VLCKit 3.x behaviour (callbacks
+        // on the main thread). Must be set before any VLCMediaPlayer is created.
+        VLCLibrary.sharedEventsConfiguration = VLCEventsLegacyConfiguration()
 
         // Default to wiping torrent caches when the player exits. Apple TV's
         // per-app sandbox is ~7–12 GB; without this each streamed movie
