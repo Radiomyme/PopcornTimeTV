@@ -42,12 +42,24 @@ extension PCTPlayerViewController: UIViewControllerTransitioningDelegate {
     }
     
     @IBAction func presentOptionsViewController() {
-        if presentedViewController is OptionsViewController { return }
-        let destinationController = storyboard?.instantiateViewController(withIdentifier: "OptionsViewController") as! OptionsViewController
+        // Never stack over the loading spinner, the continue-watching alert, or
+        // an already-open panel. A stray down-click while one of those is up
+        // would otherwise try to present here and crash on the not-yet-wired
+        // child view controllers.
+        guard presentedViewController == nil else { return }
+        guard let destinationController = storyboard?.instantiateViewController(withIdentifier: "OptionsViewController") as? OptionsViewController else { return }
+
+        // Force the view (and its embed segues) to load NOW so the
+        // subtitles/audio/info child view controllers exist before we configure
+        // them. Previously we presented first and configured after, relying on
+        // `present(animated:)` having synchronously loaded the view — which is
+        // not guaranteed, so `subtitlesViewController` could still be nil.
+        destinationController.loadViewIfNeeded()
+
         destinationController.transitioningDelegate = self
         destinationController.modalPresentationStyle = .custom
         destinationController.delegate = self
-        present(destinationController, animated: true)
+
         destinationController.subtitlesViewController.subtitles = subtitles
         destinationController.subtitlesViewController.currentSubtitle = currentSubtitle
         destinationController.subtitlesViewController.currentDelay = mediaplayer.currentVideoSubTitleDelay/Int(1e6)
@@ -60,6 +72,8 @@ extension PCTPlayerViewController: UIViewControllerTransitioningDelegate {
         destinationController.audioViewController.audioTrackIndexes = audioTracks.indices.map { Int32($0) }
         destinationController.audioViewController.currentAudioTrackIndex = Int32(audioTracks.firstIndex(where: { $0.isSelected }) ?? -1)
         destinationController.infoViewController.media = media
+
+        present(destinationController, animated: true)
     }
     
     @objc func touchLocationDidChange(_ gesture: SiriRemoteGestureRecognizer) {

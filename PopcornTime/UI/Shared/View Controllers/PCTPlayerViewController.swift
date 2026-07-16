@@ -23,6 +23,24 @@ class PCTPlayerViewController: UIViewController, VLCMediaPlayerDelegate, UIGestu
     @IBOutlet var movieView: UIView!
     @IBOutlet var loadingActivityIndicatorView: UIView!
     @IBOutlet var progressBar: ProgressBar!
+
+    /// Buffering HUD overlaid on the loading spinner: buffering %, download
+    /// speed, swarm size and a rough ETA until the first frame plays. Built in
+    /// code so it needs no storyboard outlet.
+    private lazy var bufferingStatusLabel: UILabel = {
+        let label = UILabel()
+        label.translatesAutoresizingMaskIntoConstraints = false
+        label.textColor = .white
+        label.textAlignment = .center
+        label.numberOfLines = 2
+        label.font = .systemFont(ofSize: 26, weight: .medium)
+        label.shadowColor = UIColor.black.withAlphaComponent(0.6)
+        label.shadowOffset = CGSize(width: 0, height: 1)
+        label.isHidden = true
+        return label
+    }()
+    private var lastBufferSample: (progress: Float, time: CFTimeInterval)?
+    private var bufferRateEMA: Double = 0
     
     @IBOutlet var overlayViews: [UIView] = []
     
@@ -370,7 +388,15 @@ class PCTPlayerViewController: UIViewController, VLCMediaPlayerDelegate, UIGestu
     
     override func viewDidLoad() {
         super.viewDidLoad()
-        
+
+        view.addSubview(bufferingStatusLabel)
+        NSLayoutConstraint.activate([
+            bufferingStatusLabel.centerXAnchor.constraint(equalTo: view.centerXAnchor),
+            bufferingStatusLabel.topAnchor.constraint(equalTo: view.centerYAnchor, constant: 60),
+            bufferingStatusLabel.leadingAnchor.constraint(greaterThanOrEqualTo: view.leadingAnchor, constant: 40),
+            bufferingStatusLabel.trailingAnchor.constraint(lessThanOrEqualTo: view.trailingAnchor, constant: -40),
+        ])
+
         mediaplayer.delegate = self
         mediaplayer.drawable = movieView
         mediaplayer.media = VLCMedia(url: url)
@@ -443,14 +469,61 @@ class PCTPlayerViewController: UIViewController, VLCMediaPlayerDelegate, UIGestu
     // MARK: - Player changes notifications
     
     @objc func torrentStatusDidChange(_ aNotification: Notification) {
-        if let streamer = aNotification.object as? PTTorrentStreamer {
-            progressBar?.bufferProgress = streamer.torrentStatus.totalProgress
+        guard let streamer = aNotification.object as? PTTorrentStreamer else { return }
+        let status = streamer.torrentStatus
+        progressBar?.bufferProgress = status.totalProgress
+
+        // While the loading spinner is still up (nothing has played yet), turn
+        // the wait into something informative: buffering %, speed, swarm, ETA.
+        if !loadingActivityIndicatorView.isHidden {
+            updateBufferingHUD(status)
         }
+    }
+
+    /// Refresh the buffering HUD from the latest torrent status. `bufferingProgress`
+    /// runs 0→1 as the streamer fills enough of the file to start; we estimate an
+    /// ETA from a smoothed rate of that progress.
+    private func updateBufferingHUD(_ status: PTTorrentStatus) {
+        bufferingStatusLabel.isHidden = false
+
+        let percent = max(0, min(1, status.bufferingProgress))
+        let now = CACurrentMediaTime()
+        var etaText = ""
+        if let last = lastBufferSample, now > last.time, percent >= last.progress {
+            let instantRate = Double(percent - last.progress) / (now - last.time) // fraction / sec
+            if instantRate > 0 {
+                bufferRateEMA = bufferRateEMA == 0 ? instantRate : (0.7 * bufferRateEMA + 0.3 * instantRate)
+            }
+            if bufferRateEMA > 0.0001 {
+                let eta = Double(1 - percent) / bufferRateEMA
+                if eta.isFinite, eta > 0, eta < 3600 {
+                    etaText = " · " + "Time remaining".localized + " ~" + formatBufferETA(eta)
+                }
+            }
+        }
+        lastBufferSample = (percent, now)
+
+        let speedText: String
+        if status.downloadSpeed >= 1_000_000 {
+            speedText = String(format: "%.1f MB/s", Double(status.downloadSpeed) / 1_000_000)
+        } else {
+            speedText = String(format: "%.0f KB/s", Double(status.downloadSpeed) / 1_000)
+        }
+
+        bufferingStatusLabel.text = String(format: "%@ %.0f%%%@\n%@ · %d %@",
+                                           "Buffering".localized, percent * 100, etaText,
+                                           speedText, status.seeds, "seeds".localized)
+    }
+
+    private func formatBufferETA(_ seconds: Double) -> String {
+        let s = Int(seconds.rounded())
+        return s >= 60 ? "\(s / 60) min \(s % 60) s" : "\(s) s"
     }
     
     func mediaPlayerTimeChanged(_ aNotification: Notification) {
         if loadingActivityIndicatorView.isHidden == false {
             loadingActivityIndicatorView.isHidden = true
+            bufferingStatusLabel.isHidden = true // playback started — drop the buffering HUD
 
             addRemoteCommandCenterHandlers()
             beginReceivingScreenNotifications()
