@@ -124,6 +124,13 @@ extension PCTPlayerViewController: UIViewControllerTransitioningDelegate {
         for press in presses {
             if press.type == .playPause {
                 togglePlayPauseDirect()
+            } else if press.type == .downArrow {
+                // Deterministic way to reach Subtitles / Audio / Info. The
+                // storyboard swipe-down gesture is unreliable on the 2nd-gen
+                // Siri Remote clickpad, which left users unable to open the
+                // options panel at all. A firm click on the bottom of the
+                // clickpad always emits `.downArrow`, so bind it directly.
+                presentOptionsViewController()
             } else {
                 unhandled.insert(press)
             }

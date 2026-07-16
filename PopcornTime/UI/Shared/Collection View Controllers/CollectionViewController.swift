@@ -175,7 +175,14 @@ class CollectionViewController: ResponsiveCollectionViewController, UICollection
         if delegate?.collectionView(collectionView, titleForHeaderInSection: section) != nil {
             return collectionView.numberOfItems(inSection: section) != 0 ? CGSize(width: collectionView.bounds.width, height: 40) : .zero
         } else if delegate?.collectionView(nibForHeaderInCollectionView: collectionView) != nil {
-            return sizingContinueWatchingView?.intrinsicContentSize ?? .min
+            // Measure the *live* header when it exists: it's the only instance
+            // whose `superview` is the collection view AND whose `onDeck` is
+            // populated, so its `intrinsicContentSize` reflects real content.
+            // `sizingContinueWatchingView` is never in the hierarchy, so its
+            // intrinsic size collapses to `.min` regardless of watch history —
+            // which left the reserved header height at ~0 while the real
+            // carousel rendered on top of the first poster row.
+            return (continueWatchingCollectionReusableView ?? sizingContinueWatchingView)?.intrinsicContentSize ?? .min
         }
         return .zero
     }
