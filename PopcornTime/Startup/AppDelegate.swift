@@ -6,6 +6,7 @@ import Reachability
 import ObjectMapper
 import MarqueeLabel
 import VLCKit
+import GCDWebServer
 
 public let vlcSettingTextEncoding = "subsdec-encoding"
 
@@ -58,6 +59,11 @@ class AppDelegate: UIResponder, UIApplicationDelegate, UITabBarControllerDelegat
         // legacy events configuration restores VLCKit 3.x behaviour (callbacks
         // on the main thread). Must be set before any VLCMediaPlayer is created.
         VLCLibrary.sharedEventsConfiguration = VLCEventsLegacyConfiguration()
+
+        // Silence GCDWebServer (PopcornTorrent's HTTP streaming server): in
+        // debug builds it logs "[DEBUG] Connection sent N bytes on socket X"
+        // for every chunk, drowning the console. 3 = warnings and up.
+        GCDWebServer.setLogLevel(3)
 
         // Default to wiping torrent caches when the player exits. Apple TV's
         // per-app sandbox is ~7–12 GB; without this each streamed movie

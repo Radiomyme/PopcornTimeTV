@@ -3,6 +3,7 @@
 import SwiftUI
 import PopcornKit
 import VLCKit
+import GCDWebServer
 
 /// SwiftUI app entry point for the iOS / iPadOS / Mac (Designed for iPad)
 /// build. Re-uses the same `PopcornKit` framework as the tvOS target so the
@@ -16,6 +17,10 @@ struct PopcornTimeApp: App {
         // main-thread delivery before any player is created (see AppDelegate
         // on tvOS for the full rationale).
         VLCLibrary.sharedEventsConfiguration = VLCEventsLegacyConfiguration()
+
+        // Silence GCDWebServer's per-chunk "[DEBUG] Connection sent…" console
+        // flood from the torrent streaming server. 3 = warnings and up.
+        GCDWebServer.setLogLevel(3)
 
         // The first MovieManager / ShowManager call triggers
         // `MediaProviders.shared = YTSEZTVProvider()` lazy init. Pre-warm it

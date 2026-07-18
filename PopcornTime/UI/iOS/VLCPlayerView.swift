@@ -24,6 +24,22 @@ struct VLCPlayerView: UIViewControllerRepresentable {
     func updateUIViewController(_ vc: VLCPlayerViewController, context: Context) {}
 }
 
+#if DEBUG
+/// Prints ONLY VLC's audio-pipeline log lines (aout / spdif / eac3 / a52 /
+/// avsamplebuffer…) so the passthrough negotiation is visible in Xcode's
+/// console without libvlc's full debug flood.
+final class VLCAudioLogFilter: NSObject, VLCLogging {
+    var level: VLCLogLevel = .debug
+    private let keywords = ["aout", "audio output", "spdif", "eac3", "a52", "passthrough", "avsamplebuffer", "audiounit"]
+    func handleMessage(_ message: String, logLevel: VLCLogLevel, context: VLCLogContext?) {
+        let module = context?.module ?? ""
+        let haystack = (module + " " + message).lowercased()
+        guard keywords.contains(where: { haystack.contains($0) }) else { return }
+        print("[VLC \(module)] \(message)")
+    }
+}
+#endif
+
 /// Bare-bones VLC player VC: a movie surface, a tap-to-toggle controls
 /// overlay (play/pause, scrubbing, time labels, close), and the same
 /// max-quality VLCMedia options the tvOS player uses (5s caches,
@@ -79,6 +95,9 @@ final class VLCPlayerViewController: UIViewController, VLCMediaPlayerDelegate, U
 
         player.delegate = self
         player.drawable = movieView
+#if DEBUG
+        player.libraryInstance.loggers = [VLCAudioLogFilter()]
+#endif
         guard let media = VLCMedia(url: url) else { return } // VLCKit 4: failable init
         media.addOptions([
             "network-caching":  NSNumber(value: 5000),
@@ -537,6 +556,14 @@ final class VLCPlayerViewController: UIViewController, VLCMediaPlayerDelegate, U
                 didEnablePassthrough = true
                 if UserDefaults.standard.object(forKey: "audioPassthrough") as? Bool ?? true {
                     player.audio?.passthrough = true
+                    print("[Player] passthrough engaged (t0): \(player.audio?.passthrough ?? false)")
+                    // The aout can be rebuilt when the audio ES starts; retry
+                    // once a few seconds in and log whether it finally stuck.
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 3) { [weak self] in
+                        guard let self = self else { return }
+                        self.player.audio?.passthrough = true
+                        print("[Player] passthrough engaged (t3): \(self.player.audio?.passthrough ?? false)")
+                    }
                 }
             }
         case .error, .stopped: // VLCKit 4 dropped `.ended`; end-of-file surfaces as `.stopped`
