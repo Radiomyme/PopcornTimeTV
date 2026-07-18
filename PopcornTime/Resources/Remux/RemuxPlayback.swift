@@ -202,7 +202,12 @@ final class RemuxPlayback {
         guard let subtitle = subtitles.first(where: { $0.ISO639 == lang }) else { completion(nil); return }
         PopcornKit.downloadSubtitleFile(subtitle.link, downloadDirectory: outputDir) { [weak self] fileURL, _ in
             guard let self = self, let fileURL = fileURL,
-                  let srt = try? String(contentsOf: fileURL, encoding: .utf8) else { completion(nil); return }
+                  let raw = try? Data(contentsOf: fileURL),
+                  // OpenSubtitles SRTs are frequently Windows-1252/Latin-1,
+                  // not UTF-8 — try in order or accented characters die.
+                  let srt = String(data: raw, encoding: .utf8)
+                        ?? String(data: raw, encoding: .windowsCP1252)
+                        ?? String(data: raw, encoding: .isoLatin1) else { completion(nil); return }
             let vtt = Self.srtToVTT(srt)
             let data = vtt.data(using: .utf8) ?? Data()
             self.vttLock.lock(); self.vttCache[lang] = data; self.vttLock.unlock()
@@ -212,8 +217,17 @@ final class RemuxPlayback {
 
     /// SRT → WebVTT: header + decimal comma → dot in cue timings.
     static func srtToVTT(_ srt: String) -> String {
+        // Normalize line endings FIRST. SRT files use CRLF, and splitting on
+        // CharacterSet.newlines treats \r\n as TWO separators — that injected
+        // a blank line after every line, and a blank line ends a WebVTT cue,
+        // so Apple's parser saw timing-only and text-only fragments
+        // ("Couldn't find --> in cue" / "No cue data") and rendered nothing.
+        let normalized = srt
+            .replacingOccurrences(of: "\r\n", with: "\n")
+            .replacingOccurrences(of: "\r", with: "\n")
+            .replacingOccurrences(of: "\u{FEFF}", with: "")
         var out = "WEBVTT\n\n"
-        for line in srt.components(separatedBy: .newlines) {
+        for line in normalized.components(separatedBy: "\n") {
             if line.contains("-->") {
                 out += line.replacingOccurrences(of: ",", with: ".") + "\n"
             } else {
