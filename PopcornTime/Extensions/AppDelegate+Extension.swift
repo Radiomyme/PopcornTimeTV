@@ -327,9 +327,9 @@ extension AppDelegate {
                 let remuxVc = RemuxAVPlayerViewController()
                 remuxVc.modalPresentationStyle = .fullScreen
                 let mediaTitle = media.title
-                let playBlock: (URL, URL, Media, Episode?, Float, UIViewController, PTTorrentStreamer) -> Void = { _, videoFilePath, _, _, _, viewController, streamer in
+                let playBlock: (URL, URL, Media, Episode?, Float, UIViewController, PTTorrentStreamer) -> Void = { _, videoFilePath, playMedia, _, _, viewController, streamer in
                     (viewController as? RemuxAVPlayerViewController)?
-                        .configure(localFile: videoFilePath, streamer: streamer, title: mediaTitle)
+                        .configure(localFile: videoFilePath, streamer: streamer, title: mediaTitle, media: playMedia)
                 }
                 media.play(fromFileOrMagnetLink: torrent.url,
                            nextEpisodeInSeries: nextEpisode,

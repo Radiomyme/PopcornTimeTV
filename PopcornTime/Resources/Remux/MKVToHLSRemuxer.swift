@@ -142,6 +142,7 @@ final class MatroskaDemuxer {
         static let segment: UInt32 = 0x18538067
         static let info: UInt32 = 0x1549A966
         static let timestampScale: UInt32 = 0x2AD7B1
+        static let duration: UInt32 = 0x4489
         static let tracks: UInt32 = 0x1654AE6B
         static let trackEntry: UInt32 = 0xAE
         static let trackNumber: UInt32 = 0xD7
@@ -165,6 +166,8 @@ final class MatroskaDemuxer {
 
     let reader: EBMLReader
     private(set) var timestampScale: UInt64 = 1_000_000 // ns per tick → 1ms default
+    /// Total duration in seconds, from the Segment Info header (0 if absent).
+    private(set) var durationSeconds: Double = 0
     private(set) var tracks: [MKVTrack] = []
     private var segmentDataStart: UInt64 = 0
 
@@ -209,7 +212,9 @@ final class MatroskaDemuxer {
     private func parseInfo(_ body: Data) {
         iterate(body) { id, payload in
             if id == ID.timestampScale { timestampScale = EBMLReader.uint(payload) }
+            if id == ID.duration { durationSeconds = EBMLReader.float(payload) }
         }
+        durationSeconds = durationSeconds * Double(timestampScale) / 1_000_000_000
     }
 
     private func parseTracks(_ body: Data) {
@@ -734,6 +739,19 @@ final class MKVToHLSRemuxSession {
     private var audioDecodeTime: UInt64 = 0
     private var playlistSegments: [(duration: Double, name: String)] = []
     private(set) var progress = Progress()
+    private var firstVideoTs: Int64? = nil
+    /// Serialize access to playlist/progress state: mutated on the pump queue,
+    /// read by the HTTP handlers.
+    let stateLock = NSLock()
+
+    var totalDurationSeconds: Double { return demuxer.durationSeconds }
+    var targetDuration: Double { return targetSegmentSeconds }
+
+    /// Snapshot for the dynamic playlist: actual durations of segments cut so far.
+    func segmentSnapshot() -> [(duration: Double, name: String)] {
+        stateLock.lock(); defer { stateLock.unlock() }
+        return playlistSegments
+    }
 
     init(inputFile: URL, outputDirectory: URL, targetSegmentSeconds: Double = 6) throws {
         self.outputDirectory = outputDirectory
@@ -806,12 +824,17 @@ final class MKVToHLSRemuxSession {
         writeInitIfNeeded()
         guard wroteInit else { return 0 }
         var written = 0
-        // Find a keyframe that closes >= target seconds of video.
+        // Cut at the first keyframe past each ABSOLUTE boundary
+        // (base + (k+1)·target). Absolute grid keeps segment count and
+        // durations aligned with the pre-published VOD playlist: drift is
+        // bounded by one GOP instead of accumulating.
         while true {
             guard let firstTs = pendingVideo.first?.timestamp else { break }
+            if firstVideoTs == nil { firstVideoTs = firstTs }
+            let boundary = Double(firstVideoTs!) / 1000.0 + Double(sequence + 1) * targetSegmentSeconds
             var cutIndex: Int? = nil
             for (index, frame) in pendingVideo.enumerated() where index > 0 && frame.keyframe {
-                if Double(frame.timestamp - firstTs) / 1000.0 >= targetSegmentSeconds {
+                if Double(frame.timestamp) / 1000.0 >= boundary {
                     cutIndex = index
                     break
                 }
@@ -870,10 +893,12 @@ final class MKVToHLSRemuxSession {
         let segmentSeconds = Double(videoSamples.reduce(0) { $0 + $1.duration }) / 90000.0
         videoDecodeTime += UInt64(videoSamples.reduce(0) { $0 + $1.duration })
         audioDecodeTime += UInt64(audioSamples.reduce(0) { $0 + $1.duration })
+        stateLock.lock()
         playlistSegments.append((segmentSeconds, name))
         sequence += 1
         progress.segmentsWritten = Int(sequence)
         progress.mediaSeconds += segmentSeconds
+        stateLock.unlock()
         writePlaylist(ended: false)
     }
 

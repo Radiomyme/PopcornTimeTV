@@ -218,7 +218,7 @@ struct MediaDetailView: View {
                 case .vlc:
                     VLCPlayerView(url: item.url, title: item.title, streamer: item.streamer)
                 case .remux:
-                    RemuxPlayerView(localFile: item.localFile ?? item.url, title: item.title, streamer: item.streamer)
+                    RemuxPlayerView(localFile: item.localFile ?? item.url, title: item.title, streamer: item.streamer, media: media)
                 }
             }
             .ignoresSafeArea()

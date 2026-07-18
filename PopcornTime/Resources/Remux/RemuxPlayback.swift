@@ -7,10 +7,20 @@ import GCDWebServer
 import PopcornTorrent
 import PopcornKit
 
-/// Phase 2 of the remux engine: drives MKVToHLSRemuxSession against the
-/// still-downloading torrent file, serves the HLS output over localhost, and
-/// plays it with AVPlayer — Apple's renderer receives the untouched E-AC-3
-/// (Atmos) bitstream. Used on iOS, macOS (Designed for iPad) and tvOS.
+/// Drives MKVToHLSRemuxSession against the still-downloading torrent file and
+/// serves it to AVPlayer as a **complete VOD** HLS presentation:
+///
+///  - The media playlist is generated dynamically with the movie's TOTAL
+///    duration (from the MKV header): segments already remuxed get their real
+///    durations, future ones get the target estimate, and ENDLIST is always
+///    present. AVPlayer therefore shows the full timeline and scrubber from
+///    the first second — no "live" badge.
+///  - Requests for segments that aren't remuxed yet are HELD by the server
+///    (long-poll) until the remuxer produces them, so seeking within the
+///    downloaded range just works and seeking ahead waits like buffering.
+///  - OpenSubtitles subtitles are exposed as native HLS subtitle tracks
+///    (SRT → WebVTT converted on demand), so they appear in AVPlayer's own
+///    subtitle picker.
 final class RemuxPlayback {
 
     /// Remux candidates: MKV payload whose release name carries DD+/E-AC-3.
@@ -25,19 +35,19 @@ final class RemuxPlayback {
     private(set) var session: MKVToHLSRemuxSession?
     private let server = GCDWebServer()
     private var pumpTimer: Timer?
-    /// All remux work happens off-main: pumping reads/writes gigabytes and
-    /// froze the UI when it ran on the main thread.
     private let workQueue = DispatchQueue(label: "remux.pump", qos: .userInitiated)
     private var isPumping = false
     private var idleTicks = 0
     private let inputFile: URL
     private let outputDir: URL
     weak var streamer: PTTorrentStreamer?
-    /// Called once enough segments exist to start playback.
+    /// Subtitles offered as native tracks (OpenSubtitles model objects).
+    var subtitles: [Subtitle] = []
     var onReady: ((URL) -> Void)?
     var onFailure: ((String) -> Void)?
     private var prepared = false
     private var started = false
+    private var finishedRemux = false
 
     init(localFile: URL, streamer: PTTorrentStreamer?) {
         self.inputFile = localFile
@@ -46,9 +56,10 @@ final class RemuxPlayback {
             .appendingPathComponent("remux-\(UUID().uuidString.prefix(8))")
     }
 
+    // MARK: - Server
+
     func start() {
-        server.addGETHandler(forBasePath: "/", directoryPath: outputDir.path,
-                             indexFilename: nil, cacheAge: 0, allowRangeRequests: true)
+        installHandlers()
         try? server.start(options: [GCDWebServerOption_Port: 50710,
                                     GCDWebServerOption_BindToLocalhost: true,
                                     GCDWebServerOption_AutomaticallySuspendInBackground: false])
@@ -61,6 +72,158 @@ final class RemuxPlayback {
             }
         }
     }
+
+    private func installHandlers() {
+        // Master playlist: video/audio stream + subtitle group.
+        server.addHandler(forMethod: "GET", path: "/master.m3u8", request: GCDWebServerRequest.self) { [weak self] _ in
+            guard let self = self else { return GCDWebServerResponse(statusCode: 410) }
+            return GCDWebServerDataResponse(data: self.masterPlaylist().data(using: .utf8)!,
+                                            contentType: "application/vnd.apple.mpegurl")
+        }
+        // Media playlist: full VOD with estimated tail.
+        server.addHandler(forMethod: "GET", path: "/stream.m3u8", request: GCDWebServerRequest.self) { [weak self] _ in
+            guard let self = self else { return GCDWebServerResponse(statusCode: 410) }
+            return GCDWebServerDataResponse(data: self.mediaPlaylist().data(using: .utf8)!,
+                                            contentType: "application/vnd.apple.mpegurl")
+        }
+        // Subtitle playlists + payloads.
+        server.addHandler(forMethod: "GET", pathRegex: "^/sub_.*\\.m3u8$", request: GCDWebServerRequest.self) { [weak self] request in
+            guard let self = self else { return GCDWebServerResponse(statusCode: 410) }
+            let lang = request.path.replacingOccurrences(of: "/sub_", with: "").replacingOccurrences(of: ".m3u8", with: "")
+            return GCDWebServerDataResponse(data: self.subtitlePlaylist(lang: lang).data(using: .utf8)!,
+                                            contentType: "application/vnd.apple.mpegurl")
+        }
+        server.addHandler(forMethod: "GET", pathRegex: "^/sub_.*\\.vtt$", request: GCDWebServerRequest.self, asyncProcessBlock: { [weak self] request, completion in
+            guard let self = self else { completion(GCDWebServerResponse(statusCode: 410)); return }
+            let lang = request.path.replacingOccurrences(of: "/sub_", with: "").replacingOccurrences(of: ".vtt", with: "")
+            self.vttData(lang: lang) { data in
+                if let data = data {
+                    completion(GCDWebServerDataResponse(data: data, contentType: "text/vtt"))
+                } else {
+                    completion(GCDWebServerResponse(statusCode: 404))
+                }
+            }
+        })
+        // init.mp4 + media segments: long-poll until the remuxer has produced
+        // the file (up to 120 s — covers seeks just past the download frontier).
+        server.addHandler(forMethod: "GET", pathRegex: "^/(init\\.mp4|seg[0-9]+\\.m4s)$", request: GCDWebServerRequest.self, asyncProcessBlock: { [weak self] request, completion in
+            guard let self = self else { completion(GCDWebServerResponse(statusCode: 410)); return }
+            let target = self.outputDir.appendingPathComponent(String(request.path.dropFirst()))
+            DispatchQueue.global(qos: .userInitiated).async {
+                let deadline = Date().addingTimeInterval(120)
+                while Date() < deadline {
+                    if FileManager.default.fileExists(atPath: target.path) {
+                        if let response = GCDWebServerFileResponse(file: target.path) {
+                            completion(response)
+                        } else {
+                            completion(GCDWebServerResponse(statusCode: 500))
+                        }
+                        return
+                    }
+                    // A segment index past what the movie actually produced
+                    // (estimate off by one at the credits): stop waiting once
+                    // remuxing has finished for good.
+                    if self.finishedRemux { break }
+                    Thread.sleep(forTimeInterval: 0.4)
+                }
+                completion(GCDWebServerResponse(statusCode: 404))
+            }
+        })
+    }
+
+    // MARK: - Playlists
+
+    private var expectedSegments: Int {
+        guard let session = session, session.totalDurationSeconds > 0 else { return 0 }
+        return Int((session.totalDurationSeconds / session.targetDuration).rounded(.up))
+    }
+
+    private func masterPlaylist() -> String {
+        var lines = ["#EXTM3U", "#EXT-X-VERSION:7"]
+        var seenLangs = Set<String>()
+        for subtitle in subtitles {
+            let lang = subtitle.ISO639
+            guard !lang.isEmpty, !seenLangs.contains(lang) else { continue }
+            seenLangs.insert(lang)
+            lines.append("#EXT-X-MEDIA:TYPE=SUBTITLES,GROUP-ID=\"subs\",NAME=\"\(subtitle.language)\",LANGUAGE=\"\(lang)\",AUTOSELECT=NO,DEFAULT=NO,URI=\"sub_\(lang).m3u8\"")
+        }
+        let subsAttr = seenLangs.isEmpty ? "" : ",SUBTITLES=\"subs\""
+        lines.append("#EXT-X-STREAM-INF:BANDWIDTH=25000000\(subsAttr)")
+        lines.append("stream.m3u8")
+        return lines.joined(separator: "\n") + "\n"
+    }
+
+    private func mediaPlaylist() -> String {
+        guard let session = session else { return "#EXTM3U\n" }
+        let actual = session.segmentSnapshot()
+        let target = session.targetDuration
+        let total = max(expectedSegments, actual.count)
+        var lines = [
+            "#EXTM3U",
+            "#EXT-X-VERSION:7",
+            "#EXT-X-TARGETDURATION:\(Int(target.rounded(.up)) + 2)",
+            "#EXT-X-MEDIA-SEQUENCE:0",
+            "#EXT-X-PLAYLIST-TYPE:VOD",
+            "#EXT-X-MAP:URI=\"init.mp4\"",
+        ]
+        for index in 0..<total {
+            let duration = index < actual.count ? actual[index].duration : target
+            lines.append(String(format: "#EXTINF:%.3f,", duration))
+            lines.append("seg\(index).m4s")
+        }
+        lines.append("#EXT-X-ENDLIST")
+        return lines.joined(separator: "\n") + "\n"
+    }
+
+    private func subtitlePlaylist(lang: String) -> String {
+        let duration = session?.totalDurationSeconds ?? 7200
+        return """
+        #EXTM3U
+        #EXT-X-VERSION:7
+        #EXT-X-TARGETDURATION:\(Int(duration.rounded(.up)) + 1)
+        #EXT-X-MEDIA-SEQUENCE:0
+        #EXT-X-PLAYLIST-TYPE:VOD
+        #EXTINF:\(String(format: "%.3f", duration)),
+        sub_\(lang).vtt
+        #EXT-X-ENDLIST
+
+        """
+    }
+
+    // MARK: - Subtitles (SRT → WebVTT on demand)
+
+    private var vttCache: [String: Data] = [:]
+    private let vttLock = NSLock()
+
+    private func vttData(lang: String, completion: @escaping (Data?) -> Void) {
+        vttLock.lock()
+        if let cached = vttCache[lang] { vttLock.unlock(); completion(cached); return }
+        vttLock.unlock()
+        guard let subtitle = subtitles.first(where: { $0.ISO639 == lang }) else { completion(nil); return }
+        PopcornKit.downloadSubtitleFile(subtitle.link, downloadDirectory: outputDir) { [weak self] fileURL, _ in
+            guard let self = self, let fileURL = fileURL,
+                  let srt = try? String(contentsOf: fileURL, encoding: .utf8) else { completion(nil); return }
+            let vtt = Self.srtToVTT(srt)
+            let data = vtt.data(using: .utf8) ?? Data()
+            self.vttLock.lock(); self.vttCache[lang] = data; self.vttLock.unlock()
+            completion(data)
+        }
+    }
+
+    /// SRT → WebVTT: header + decimal comma → dot in cue timings.
+    static func srtToVTT(_ srt: String) -> String {
+        var out = "WEBVTT\n\n"
+        for line in srt.components(separatedBy: .newlines) {
+            if line.contains("-->") {
+                out += line.replacingOccurrences(of: ",", with: ".") + "\n"
+            } else {
+                out += line + "\n"
+            }
+        }
+        return out
+    }
+
+    // MARK: - Pump
 
     private var failedTicks = 0
     private func tick() {
@@ -81,20 +244,17 @@ final class RemuxPlayback {
         let newSegments = session.pump(maxNewSegments: 6)
         if !started, session.progress.segmentsWritten >= 2 {
             started = true
-            let url = URL(string: "http://127.0.0.1:\(server.port)/stream.m3u8")!
-            print("[Remux] playback ready: \(session.progress.segmentsWritten) segments — \(url)")
+            let url = URL(string: "http://127.0.0.1:\(server.port)/master.m3u8")!
+            print("[Remux] playback ready: \(session.progress.segmentsWritten)/\(expectedSegments) segments — \(url)")
             DispatchQueue.main.async { self.onReady?(url) }
         }
-        // Completion → VOD: when the demuxer has drained the file (no new
-        // segments for a few ticks) and the torrent reports done, flush the
-        // tail and write ENDLIST. AVPlayer then switches from live-style
-        // EVENT (no scrubbing) to full VOD transport controls.
         guard !session.progress.finished else { return }
         let torrentDone = (streamer?.torrentStatus.totalProgress ?? 1.0) >= 0.999
         idleTicks = newSegments == 0 ? idleTicks + 1 : 0
         if torrentDone && idleTicks >= 3 {
             session.finish()
-            print("[Remux] finished (VOD): \(session.progress.segmentsWritten) segments, \(Int(session.progress.mediaSeconds))s")
+            finishedRemux = true
+            print("[Remux] finished: \(session.progress.segmentsWritten) segments, \(Int(session.progress.mediaSeconds))s")
             DispatchQueue.main.async { self.pumpTimer?.invalidate(); self.pumpTimer = nil }
         }
     }
@@ -102,7 +262,7 @@ final class RemuxPlayback {
     private func fail(_ message: String) {
         print("[Remux] FAIL: \(message)")
         stop()
-        onFailure?(message)
+        DispatchQueue.main.async { self.onFailure?(message) }
     }
 
     func stop() {
@@ -114,14 +274,14 @@ final class RemuxPlayback {
 
     var statsSummary: String {
         guard let session = session else { return "preparing…" }
-        return "\(session.progress.segmentsWritten) segs · \(Int(session.progress.mediaSeconds))s remuxed"
+        let expected = expectedSegments
+        return "\(session.progress.segmentsWritten)/\(expected > 0 ? "\(expected)" : "?") segs · \(Int(session.progress.mediaSeconds))s remuxed"
     }
 }
 
-/// AVPlayerViewController wrapper for the remux path, with a built-in nerd
-/// stats overlay (in contentOverlayView) proving what AVPlayer is playing —
-/// the Audio line reading `ec-3` means Apple's renderer gets the raw E-AC-3
-/// and performs the Atmos rendering itself.
+/// AVPlayerViewController wrapper for the remux path with a toggleable nerd
+/// stats overlay — `Audio ec-3` is the on-screen proof Apple's renderer gets
+/// the raw E-AC-3 and performs the Atmos rendering.
 final class RemuxAVPlayerViewController: AVPlayerViewController {
 
     private var remux: RemuxPlayback?
@@ -129,7 +289,7 @@ final class RemuxAVPlayerViewController: AVPlayerViewController {
     private let statsLabel = UILabel()
     private var statsTimer: Timer?
 
-    func configure(localFile: URL, streamer: PTTorrentStreamer?, title: String) {
+    func configure(localFile: URL, streamer: PTTorrentStreamer?, title: String, media: Media? = nil) {
         keepAliveStreamer = streamer
         let remux = RemuxPlayback(localFile: localFile, streamer: streamer)
         self.remux = remux
@@ -138,6 +298,25 @@ final class RemuxAVPlayerViewController: AVPlayerViewController {
             let player = AVPlayer(playerItem: item)
             self?.player = player
             player.play()
+        }
+        // Fetch OpenSubtitles in parallel; they surface as native HLS
+        // subtitle tracks in AVPlayer's own picker.
+        if let media = media {
+            if media.subtitles.isEmpty {
+                // SubtitlesManager directly (getSubtitles lives in a
+                // tvOS-only extension).
+                if let episode = media as? Episode {
+                    SubtitlesManager.shared.search(episode, imdbId: episode.show?.id) { subtitles, _ in
+                        remux.subtitles = subtitles
+                    }
+                } else {
+                    SubtitlesManager.shared.search(imdbId: media.id) { subtitles, _ in
+                        remux.subtitles = subtitles
+                    }
+                }
+            } else {
+                remux.subtitles = media.subtitles
+            }
         }
         remux.start()
     }
@@ -160,7 +339,7 @@ final class RemuxAVPlayerViewController: AVPlayerViewController {
             self?.refreshStats()
         }
         // Visible briefly at start (proof-of-Atmos), then out of the way.
-        // Toggle back anytime with the "n" key (Mac / iPad keyboard).
+        // Toggle with "n" (Mac/iPad keyboard) or up-click (Siri Remote).
         DispatchQueue.main.asyncAfter(deadline: .now() + 10) { [weak self] in
             self?.statsLabel.isHidden = true
         }
@@ -178,6 +357,15 @@ final class RemuxAVPlayerViewController: AVPlayerViewController {
         stats.wantsPriorityOverSystemBehavior = true
         return [stats]
     }
+
+#if os(tvOS)
+    override func pressesBegan(_ presses: Set<UIPress>, with event: UIPressesEvent?) {
+        if presses.contains(where: { $0.type == .upArrow }) {
+            toggleStatsOverlay()
+        }
+        super.pressesBegan(presses, with: event)
+    }
+#endif
 
     @objc private func toggleStatsOverlay() {
         statsLabel.isHidden.toggle()
@@ -223,10 +411,11 @@ struct RemuxPlayerView: UIViewControllerRepresentable {
     let localFile: URL
     let title: String
     let streamer: PTTorrentStreamer?
+    var media: Media? = nil
 
     func makeUIViewController(context: Context) -> RemuxAVPlayerViewController {
         let vc = RemuxAVPlayerViewController()
-        vc.configure(localFile: localFile, streamer: streamer, title: title)
+        vc.configure(localFile: localFile, streamer: streamer, title: title, media: media)
         return vc
     }
 
