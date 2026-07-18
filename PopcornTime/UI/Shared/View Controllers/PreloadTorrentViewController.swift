@@ -36,7 +36,16 @@ class PreloadTorrentViewController: UIViewController {
 
     override func viewDidLoad() {
         super.viewDidLoad()
+        installETALabelIfNeeded()
+    }
 
+    /// Idempotent install, called from viewDidLoad AND from the first status
+    /// update. The play flow historically called `loadView()` directly on this
+    /// controller, which wires outlets but bypasses UIKit's loading machinery
+    /// so viewDidLoad never fires — install lazily so the label exists no
+    /// matter how the view was loaded.
+    private func installETALabelIfNeeded() {
+        guard etaLabel.superview == nil, isViewLoaded else { return }
         view.addSubview(etaLabel)
         // Anchor under the container that holds the progress bar + speed/seeds
         // labels so it can't overlap them; fall back to the progress bar.
@@ -75,6 +84,7 @@ class PreloadTorrentViewController: UIViewController {
     /// Show buffering % and a smoothed ETA (from the rate of the buffering
     /// progress) until playback can start.
     private func updateETA(_ progress: Float) {
+        installETALabelIfNeeded()
         etaLabel.isHidden = false
         let percent = max(0, min(1, progress))
 

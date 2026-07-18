@@ -189,7 +189,11 @@ extension AppDelegate {
         
         let loadingViewController = storyboard.instantiateViewController(withIdentifier: "PreloadTorrentViewController") as! PreloadTorrentViewController
         loadingViewController.transitioningDelegate = self
-        loadingViewController.loadView()
+        // loadViewIfNeeded, NOT loadView(): calling loadView() directly wires
+        // the outlets but bypasses UIKit's loading machinery, so viewDidLoad
+        // never fires — anything the controller sets up there silently
+        // doesn't exist (this is why the buffering %/ETA label never showed).
+        loadingViewController.loadViewIfNeeded()
         
         let backgroundImage: String?
         
