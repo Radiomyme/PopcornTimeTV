@@ -25,6 +25,11 @@ final class RemuxPlayback {
     private(set) var session: MKVToHLSRemuxSession?
     private let server = GCDWebServer()
     private var pumpTimer: Timer?
+    /// All remux work happens off-main: pumping reads/writes gigabytes and
+    /// froze the UI when it ran on the main thread.
+    private let workQueue = DispatchQueue(label: "remux.pump", qos: .userInitiated)
+    private var isPumping = false
+    private var idleTicks = 0
     private let inputFile: URL
     private let outputDir: URL
     weak var streamer: PTTorrentStreamer?
@@ -48,9 +53,13 @@ final class RemuxPlayback {
                                     GCDWebServerOption_BindToLocalhost: true,
                                     GCDWebServerOption_AutomaticallySuspendInBackground: false])
         pumpTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
-            self?.tick()
+            guard let self = self, !self.isPumping else { return }
+            self.isPumping = true
+            self.workQueue.async {
+                self.tick()
+                self.isPumping = false
+            }
         }
-        tick()
     }
 
     private var failedTicks = 0
@@ -67,17 +76,24 @@ final class RemuxPlayback {
                 return
             }
         }
-        session.pump()
+        let newSegments = session.pump()
         if !started, session.progress.segmentsWritten >= 2 {
             started = true
             let url = URL(string: "http://127.0.0.1:\(server.port)/stream.m3u8")!
             print("[Remux] playback ready: \(session.progress.segmentsWritten) segments — \(url)")
-            onReady?(url)
+            DispatchQueue.main.async { self.onReady?(url) }
         }
-        // Torrent finished → flush the tail and finalize the playlist.
-        if let status = streamer?.torrentStatus, status.totalProgress >= 0.999, !session.progress.finished {
+        // Completion → VOD: when the demuxer has drained the file (no new
+        // segments for a few ticks) and the torrent reports done, flush the
+        // tail and write ENDLIST. AVPlayer then switches from live-style
+        // EVENT (no scrubbing) to full VOD transport controls.
+        guard !session.progress.finished else { return }
+        let torrentDone = (streamer?.torrentStatus.totalProgress ?? 1.0) >= 0.999
+        idleTicks = newSegments == 0 ? idleTicks + 1 : 0
+        if torrentDone && idleTicks >= 3 {
             session.finish()
-            print("[Remux] finished: \(session.progress.segmentsWritten) segments, \(session.progress.mediaSeconds)s")
+            print("[Remux] finished (VOD): \(session.progress.segmentsWritten) segments, \(Int(session.progress.mediaSeconds))s")
+            DispatchQueue.main.async { self.pumpTimer?.invalidate(); self.pumpTimer = nil }
         }
     }
 
