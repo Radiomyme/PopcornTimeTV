@@ -159,6 +159,28 @@ final class RemuxAVPlayerViewController: AVPlayerViewController {
         statsTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
             self?.refreshStats()
         }
+        // Visible briefly at start (proof-of-Atmos), then out of the way.
+        // Toggle back anytime with the "n" key (Mac / iPad keyboard).
+        DispatchQueue.main.asyncAfter(deadline: .now() + 10) { [weak self] in
+            self?.statsLabel.isHidden = true
+        }
+    }
+
+    override var canBecomeFirstResponder: Bool { return true }
+
+    override func viewDidAppear(_ animated: Bool) {
+        super.viewDidAppear(animated)
+        becomeFirstResponder()
+    }
+
+    override var keyCommands: [UIKeyCommand]? {
+        let stats = UIKeyCommand(input: "n", modifierFlags: [], action: #selector(toggleStatsOverlay))
+        stats.wantsPriorityOverSystemBehavior = true
+        return [stats]
+    }
+
+    @objc private func toggleStatsOverlay() {
+        statsLabel.isHidden.toggle()
     }
 
     private func refreshStats() {
