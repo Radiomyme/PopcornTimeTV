@@ -461,6 +461,12 @@ final class VLCPlayerViewController: UIViewController, VLCMediaPlayerDelegate, U
             lines.append("Track   \(track.trackName)")
         }
 
+        // On iOS/macOS the player never attempts bitstream passthrough (that's
+        // a tvOS/AVR concern), so this reads "PCM (decoded)" — shown anyway so
+        // the overlay matches tvOS and doesn't leave the question open.
+        let passthrough = player.audio?.passthrough ?? false
+        lines.append("Output  " + (passthrough ? "Bitstream (Dolby passthrough)" : "PCM (decoded)"))
+
         let textTrack = player.textTracks.first(where: { $0.isSelected })
         lines.append("Subs    " + (textTrack?.trackName ?? "none"))
 
