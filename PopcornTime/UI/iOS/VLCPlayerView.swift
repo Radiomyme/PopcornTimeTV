@@ -34,7 +34,21 @@ final class VLCPlayerViewController: UIViewController, VLCMediaPlayerDelegate, U
     var url: URL!
     var streamer: PTTorrentStreamer?
 
-    private let player = VLCMediaPlayer()
+    // Same passthrough attempt as the tvOS player: force VLC's
+    // AVSampleBufferAudioRenderer output and enable the core spdif option so
+    // AC-3/E-AC-3 (incl. DD+ Atmos) is handed COMPRESSED to Apple's renderer,
+    // which is what performs Atmos (spatial) rendering on macOS — VLC's own
+    // decoder would discard the Atmos metadata and emit plain PCM. If the
+    // encoded device is refused, playback falls back to decoded PCM exactly
+    // as before, so the attempt costs nothing.
+    private let player: VLCMediaPlayer = {
+        var options = ["--aout=avsamplebuffer,any"]
+        if UserDefaults.standard.object(forKey: "audioPassthrough") as? Bool ?? true {
+            options.append("--spdif")
+        }
+        return VLCMediaPlayer(options: options)
+    }()
+    private var didEnablePassthrough = false
     private let movieView = UIView()
     private let controlsView = UIView()
     private let playPauseButton = UIButton(type: .system)
@@ -461,9 +475,8 @@ final class VLCPlayerViewController: UIViewController, VLCMediaPlayerDelegate, U
             lines.append("Track   \(track.trackName)")
         }
 
-        // On iOS/macOS the player never attempts bitstream passthrough (that's
-        // a tvOS/AVR concern), so this reads "PCM (decoded)" — shown anyway so
-        // the overlay matches tvOS and doesn't leave the question open.
+        // Reports whether the encoded (passthrough) device engaged — same
+        // semantics as the tvOS overlay.
         let passthrough = player.audio?.passthrough ?? false
         lines.append("Output  " + (passthrough ? "Bitstream (Dolby passthrough)" : "PCM (decoded)"))
 
@@ -518,6 +531,14 @@ final class VLCPlayerViewController: UIViewController, VLCMediaPlayerDelegate, U
             // so multi-language MKVs surface their tracks as soon as they
             // become available.
             refreshTrackButtonsVisibility()
+            // Request the encoded (passthrough) device once the aout exists;
+            // the nerd-stats Output line reports whether it engaged.
+            if !didEnablePassthrough {
+                didEnablePassthrough = true
+                if UserDefaults.standard.object(forKey: "audioPassthrough") as? Bool ?? true {
+                    player.audio?.passthrough = true
+                }
+            }
         case .error, .stopped: // VLCKit 4 dropped `.ended`; end-of-file surfaces as `.stopped`
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
                 self?.dismiss(animated: true)
