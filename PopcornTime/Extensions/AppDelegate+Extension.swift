@@ -320,6 +320,28 @@ extension AppDelegate {
             print("[Play] subtitles=\(subtitles.count) starting streamer for \(media.title)")
             media.subtitles = subtitles
 
+            // MKV with DD+ audio: remux to fMP4/HLS on the fly and play via
+            // AVPlayer — Apple's renderer gets the raw E-AC-3, i.e. real
+            // Atmos (VLC's passthrough is broken in the bundled 4.0 alpha).
+            if RemuxPlayback.canRemux(magnet: torrent.url, tags: torrent.tags) {
+                let remuxVc = RemuxAVPlayerViewController()
+                remuxVc.modalPresentationStyle = .fullScreen
+                let mediaTitle = media.title
+                let playBlock: (URL, URL, Media, Episode?, Float, UIViewController, PTTorrentStreamer) -> Void = { _, videoFilePath, _, _, _, viewController, streamer in
+                    (viewController as? RemuxAVPlayerViewController)?
+                        .configure(localFile: videoFilePath, streamer: streamer, title: mediaTitle)
+                }
+                media.play(fromFileOrMagnetLink: torrent.url,
+                           nextEpisodeInSeries: nextEpisode,
+                           loadingViewController: loadingViewController,
+                           playViewController: remuxVc,
+                           progress: currentProgress,
+                           playBlock: playBlock,
+                           errorBlock: error,
+                           finishedLoadingBlock: finishedLoading)
+                return
+            }
+
             // Codec sniff: AVPlayer renders HDR10 / Dolby Vision / Atmos
             // natively on tvOS 17+ but only handles .mp4/.m4v/.mov.
             // Almost all YTS torrents are .mkv → fall back to PCTPlayer/VLC.

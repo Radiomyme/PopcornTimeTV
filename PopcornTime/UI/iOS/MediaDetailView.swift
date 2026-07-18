@@ -138,6 +138,9 @@ final class MediaDetailViewModel: ObservableObject {
 private enum PreferredEngine {
     case avPlayer
     case vlc
+    /// MKV with DD+ audio: remux to fMP4/HLS on the fly and play via
+    /// AVPlayer for true Dolby Atmos (see RemuxPlayback).
+    case remux
 }
 
 private func sniffEngine(for url: URL, magnetFallback: String?) -> PreferredEngine {
@@ -165,6 +168,8 @@ private struct PendingPlayback: Identifiable {
     let engine: PreferredEngine
     let title: String
     let streamer: PTTorrentStreamer?
+    /// Local path of the (still downloading) payload — remux engine input.
+    var localFile: URL? = nil
 }
 
 struct MediaDetailView: View {
@@ -212,6 +217,8 @@ struct MediaDetailView: View {
                     VideoPlayerWrapper(url: item.url)
                 case .vlc:
                     VLCPlayerView(url: item.url, title: item.title, streamer: item.streamer)
+                case .remux:
+                    RemuxPlayerView(localFile: item.localFile ?? item.url, title: item.title, streamer: item.streamer)
                 }
             }
             .ignoresSafeArea()
@@ -534,14 +541,18 @@ struct MediaDetailView: View {
                 // libtorrent reports bytes/s; surface as KB/s.
                 downloadKbps = Double(status.downloadSpeed) / 1024.0
             }
-        }, readyToPlay: { fileURL, _ in
+        }, readyToPlay: { fileURL, filePath in
             DispatchQueue.main.async {
                 startingStream = false
-                let engine = sniffEngine(for: fileURL, magnetFallback: magnet)
+                var engine = sniffEngine(for: fileURL, magnetFallback: magnet)
+                if engine == .vlc && RemuxPlayback.canRemux(magnet: magnet, tags: torrent.tags) {
+                    engine = .remux
+                }
                 pendingPlayback = PendingPlayback(url: fileURL,
                                                   engine: engine,
                                                   title: mediaTitle,
-                                                  streamer: streamer)
+                                                  streamer: streamer,
+                                                  localFile: filePath)
             }
         }, failure: { error in
             DispatchQueue.main.async {
