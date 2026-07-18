@@ -48,7 +48,11 @@ class OptionsStackViewController: UIViewController, UITableViewDelegate {
             $0?.reloadData()
         }
         
-        parent?.view.layoutGuides.forEach({$0.owningView?.removeLayoutGuide($0)})
+        // Clear only the focus guides the option tabs add when switching
+        // between them. `view.layoutGuides` also lists SYSTEM-owned guides
+        // (safe area, layout margins) on tvOS 26, and removing those raises
+        // NSException — this used to sweep everything and crashed the panel.
+        parent?.view.layoutGuides.filter({ $0 is UIFocusGuide }).forEach({ $0.owningView?.removeLayoutGuide($0) })
         
         [topGuide, leftGuide, rightGuide, bottomGuide].forEach { (guide) in
             self.parent?.view.addLayoutGuide(guide)

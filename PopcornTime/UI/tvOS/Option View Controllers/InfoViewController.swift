@@ -38,7 +38,11 @@ class InfoViewController: UIViewController, UIViewControllerTransitioningDelegat
     override func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)
         
-        parent?.view.layoutGuides.forEach({$0.owningView?.removeLayoutGuide($0)})
+        // Clear only the focus guides the option tabs add when switching
+        // between them. `view.layoutGuides` also lists SYSTEM-owned guides
+        // (safe area, layout margins) on tvOS 26, and removing those raises
+        // NSException — this used to sweep everything and crashed the panel.
+        parent?.view.layoutGuides.filter({ $0 is UIFocusGuide }).forEach({ $0.owningView?.removeLayoutGuide($0) })
         parent?.view.addLayoutGuide(topGuide)
         
         topGuide.topAnchor.constraint(equalTo: tabBar.bottomAnchor).isActive = true
