@@ -486,15 +486,6 @@ class PCTPlayerViewController: UIViewController, VLCMediaPlayerDelegate, UIGestu
         if UserDefaults.standard.object(forKey: "audioPassthrough") as? Bool ?? true {
             mediaplayer.audio?.passthrough = true
         }
-
-#if DEBUG
-        // Surface libvlc's own log in Xcode's console — the aout lines show
-        // whether the avsamplebuffer "encoded" device engaged and whether the
-        // A/52 packetizer went passthrough or fell back to decoding.
-        let vlcLogger = VLCConsoleLogger()
-        vlcLogger.level = .debug
-        mediaplayer.libraryInstance.loggers = [vlcLogger]
-#endif
 #endif
 
         NotificationCenter.default.addObserver(self, selector: #selector(torrentStatusDidChange(_:)), name: .PTTorrentStatusDidChange, object: streamer)
