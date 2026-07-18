@@ -149,6 +149,10 @@ extension PCTPlayerViewController: UIViewControllerTransitioningDelegate {
                 // options panel at all. A firm click on the bottom of the
                 // clickpad always emits `.downArrow`, so bind it directly.
                 presentOptionsViewController()
+            } else if press.type == .upArrow {
+                // Up-click mirrors the down-click: playback nerd stats
+                // (codec / resolution / fps / audio format / output mode).
+                toggleNerdStats()
             } else {
                 unhandled.insert(press)
             }
@@ -215,6 +219,91 @@ extension PCTPlayerViewController: UIViewControllerTransitioningDelegate {
         let presets = VLCAudioEqualizer.presets
         guard Int(profile.rawValue) < presets.count else { return }
         mediaplayer.equalizer = VLCAudioEqualizer(preset: presets[Int(profile.rawValue)])
+    }
+
+    // MARK: - Nerd stats (up-click on the clickpad)
+
+    func toggleNerdStats() {
+        if let container = nerdStatsContainer {
+            nerdStatsTimer?.invalidate()
+            nerdStatsTimer = nil
+            container.removeFromSuperview()
+            nerdStatsContainer = nil
+            nerdStatsLabel = nil
+            return
+        }
+
+        let label = UILabel()
+        label.translatesAutoresizingMaskIntoConstraints = false
+        label.font = .monospacedSystemFont(ofSize: 23, weight: .medium)
+        label.textColor = .white
+        label.numberOfLines = 0
+
+        let container = UIView()
+        container.translatesAutoresizingMaskIntoConstraints = false
+        container.backgroundColor = UIColor.black.withAlphaComponent(0.72)
+        container.layer.cornerRadius = 12
+        container.layer.masksToBounds = true
+        container.addSubview(label)
+        view.addSubview(container)
+
+        NSLayoutConstraint.activate([
+            container.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 30),
+            container.leadingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.leadingAnchor, constant: 30),
+            container.trailingAnchor.constraint(lessThanOrEqualTo: view.centerXAnchor),
+            label.topAnchor.constraint(equalTo: container.topAnchor, constant: 18),
+            label.bottomAnchor.constraint(equalTo: container.bottomAnchor, constant: -18),
+            label.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 24),
+            label.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -24),
+        ])
+
+        nerdStatsContainer = container
+        nerdStatsLabel = label
+        label.text = nerdStatsText()
+        nerdStatsTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] timer in
+            guard let self = self, self.nerdStatsLabel != nil else { timer.invalidate(); return }
+            self.nerdStatsLabel?.text = self.nerdStatsText()
+        }
+    }
+
+    /// libvlc packs fourccs low-byte-first (VLC_FOURCC('h','e','v','c')).
+    private func fourCCString(_ cc: UInt32) -> String {
+        let bytes: [UInt8] = [UInt8(cc & 0xff), UInt8((cc >> 8) & 0xff), UInt8((cc >> 16) & 0xff), UInt8((cc >> 24) & 0xff)]
+        let printable = bytes.map { (32...126).contains($0) ? Character(UnicodeScalar($0)) : "?" }
+        return String(printable).trimmingCharacters(in: .whitespaces)
+    }
+
+    private func nerdStatsText() -> String {
+        var lines: [String] = []
+
+        let videoTrack = mediaplayer.videoTracks.first(where: { $0.isSelected }) ?? mediaplayer.videoTracks.first
+        if let track = videoTrack, let video = track.video {
+            let fps: Double = video.frameRateDenominator > 0
+                ? Double(video.frameRate) / Double(video.frameRateDenominator)
+                : Double(video.frameRate)
+            lines.append(String(format: "Video   %@  %u×%u  %.3f fps", fourCCString(track.codec), video.width, video.height, fps))
+        }
+
+        let audioTrack = mediaplayer.audioTracks.first(where: { $0.isSelected }) ?? mediaplayer.audioTracks.first
+        if let track = audioTrack, let audio = track.audio {
+            lines.append(String(format: "Audio   %@  %u ch  %u Hz", fourCCString(track.codec), audio.channelsNumber, audio.rate))
+            lines.append("Track   \(track.trackName)")
+        }
+
+        let passthrough = mediaplayer.audio?.passthrough ?? false
+        lines.append("Output  " + (passthrough ? "Bitstream (Dolby passthrough)" : "PCM (decoded)"))
+
+        let textTrack = mediaplayer.textTracks.first(where: { $0.isSelected })
+        lines.append("Subs    " + (textTrack?.trackName ?? "none"))
+
+        if let stats = mediaplayer.media?.statistics {
+            // input_bitrate is in bytes/ms — ×8000 gives bit/s, then to Mb/s.
+            lines.append(String(format: "Input   %.1f Mb/s  ·  demux %.1f Mb/s", Double(stats.inputBitrate) * 8000 / 1_000_000, Double(stats.demuxBitrate) * 8000 / 1_000_000))
+            lines.append("Frames  \(stats.displayedPictures) shown · \(stats.latePictures) late · \(stats.lostPictures) lost")
+        }
+
+        lines.append("Buffer  \(Int((progressBar?.bufferProgress ?? 0) * 100))% downloaded")
+        return lines.joined(separator: "\n")
     }
 }
 

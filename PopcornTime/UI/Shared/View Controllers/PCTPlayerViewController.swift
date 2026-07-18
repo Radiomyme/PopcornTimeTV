@@ -29,8 +29,17 @@ class PCTPlayerViewController: UIViewController, VLCMediaPlayerDelegate, UIGestu
     // tvOS exclusive
     @IBOutlet var dimmerView: UIView?
     @IBOutlet var infoHelperView: UIView?
-    
+
     var lastTranslation: CGFloat = 0.0
+
+#if os(tvOS)
+    // Nerd-stats overlay (toggled with an up-click on the Siri Remote
+    // clickpad). Stored here because extensions can't add stored properties;
+    // all behavior lives in PCTPlayerViewController+tvOS.swift.
+    var nerdStatsContainer: UIView?
+    var nerdStatsLabel: UILabel?
+    var nerdStatsTimer: Timer?
+#endif
     
     // iOS exclusive
     @IBOutlet var airPlayingView: UIView?
@@ -223,14 +232,34 @@ class PCTPlayerViewController: UIViewController, VLCMediaPlayerDelegate, UIGestu
         }
     }
 
+    /// Text-track ids that existed before the last `addPlaybackSlave` call.
+    /// Non-nil means "a slave was added and its track hasn't been selected
+    /// yet" — VLCKit 4's `enforce:` flag does NOT reliably select the slave's
+    /// track, so we watch for the new track to appear (it registers a moment
+    /// after the call) and select it explicitly from the time-changed tick.
+    private var textTrackIdsBeforeSlave: Set<String>?
+
     /// Attaches the pending subtitle as an enforced playback slave, but only
     /// once the media is actually playing — otherwise VLCKit drops it on the
     /// floor. Called from the download callback and again from
     /// `mediaPlayerStateChanged(.playing)` so whichever happens last wins.
     func applyPendingSubtitle() {
         guard let url = pendingSubtitleURL, url != appliedSubtitleURL, mediaplayer.isPlaying else { return }
+        textTrackIdsBeforeSlave = Set(mediaplayer.textTracks.map { $0.trackId })
         mediaplayer.addPlaybackSlave(url, type: .subtitle, enforce: true)
         appliedSubtitleURL = url
+    }
+
+    /// Select the slave's text track once VLC registers it. Distinguishing by
+    /// track id (rather than "select the last one") keeps MKV-embedded
+    /// subtitle tracks from being picked by mistake.
+    func selectSlaveTextTrackIfNeeded() {
+        guard let priorIds = textTrackIdsBeforeSlave else { return }
+        let newTracks = mediaplayer.textTracks.filter { !priorIds.contains($0.trackId) }
+        guard let slaveTrack = newTracks.last else { return } // not registered yet — keep waiting
+        slaveTrack.isSelectedExclusively = true
+        textTrackIdsBeforeSlave = nil
+        print("[Player] subtitles ON: selected text track '\(slaveTrack.trackName)' (\(mediaplayer.textTracks.count) total)")
     }
     
     // MARK: - Private vars
@@ -415,6 +444,13 @@ class PCTPlayerViewController: UIViewController, VLCMediaPlayerDelegate, UIGestu
         mediaplayer.media?.addOptions(mediaOptions)
 
 #if os(tvOS)
+        // Long-form movie audio session: this is what tvOS expects from a
+        // video player before it will negotiate Dolby output with the AVR /
+        // soundbar over HDMI-eARC. Without it the session runs in the generic
+        // default and the renderer may stay in PCM.
+        try? AVAudioSession.sharedInstance().setCategory(.playback, mode: .moviePlayback)
+        try? AVAudioSession.sharedInstance().setActive(true)
+
         // Dolby / DTS bitstream passthrough to the receiver so Atmos, TrueHD,
         // E-AC3 and DTS-HD reach the AVR undecoded instead of being downmixed
         // to PCM stereo by VLCKit. This only helps when the Apple TV's audio
@@ -499,6 +535,7 @@ class PCTPlayerViewController: UIViewController, VLCMediaPlayerDelegate, UIGestu
         progressBar.remainingTimeLabel.text = (mediaplayer.remainingTime ?? VLCTime(int: 0)).stringValue
         progressBar.elapsedTimeLabel.text = mediaplayer.time.stringValue
         progressBar.progress = Float(mediaplayer.position) // VLCKit 4: position is Double
+        selectSlaveTextTrackIfNeeded()
         
         if nextEpisode != nil && ((mediaplayer.remainingTime ?? VLCTime(int: 0)).intValue/1000) == -31 && presentedViewController == nil {
             performSegue(withIdentifier: "showUpNext", sender: nil)
