@@ -264,6 +264,22 @@ final class MatroskaDemuxer {
         }
     }
 
+    static func containsLongZeroRun(_ data: Data, threshold: Int = 64 * 1024) -> Bool {
+        var run = 0
+        var found = false
+        data.withUnsafeBytes { (raw: UnsafeRawBufferPointer) in
+            for byte in raw {
+                if byte == 0 {
+                    run += 1
+                    if run >= threshold { found = true; break }
+                } else {
+                    run = 0
+                }
+            }
+        }
+        return found
+    }
+
     /// Reads the next complete cluster's frames. Returns nil when no full
     /// cluster is available yet (EOF or still downloading).
     func readNextCluster() -> [MKVFrame]? {
@@ -277,6 +293,14 @@ final class MatroskaDemuxer {
             }
             guard let body = reader.readBytes(Int(size)) else {
                 reader.seek(to: elementStart) // incomplete — retry later
+                return nil
+            }
+            // Torrent payloads are PREALLOCATED at full file size: regions not
+            // yet downloaded read as zeros. A >=64 KiB zero run can't occur
+            // inside a real cluster (compressed AV data), so treat it as
+            // not-downloaded-yet: rewind and retry on a later pump.
+            if Self.containsLongZeroRun(body) {
+                reader.seek(to: elementStart)
                 return nil
             }
             var clusterTime: Int64 = 0
@@ -747,9 +771,9 @@ final class MKVToHLSRemuxSession {
     /// Pump: read available clusters, cut segments at keyframes near the
     /// target duration. Returns the number of NEW segments written.
     @discardableResult
-    func pump() -> Int {
+    func pump(maxNewSegments: Int = Int.max) -> Int {
         var newSegments = 0
-        while let frames = demuxer.readNextCluster() {
+        while newSegments < maxNewSegments, let frames = demuxer.readNextCluster() {
             for frame in frames {
                 if frame.trackNumber == videoTrack?.number { pendingVideo.append(frame) }
                 else if frame.trackNumber == audioTrack?.number {

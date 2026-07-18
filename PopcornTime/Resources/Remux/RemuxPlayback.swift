@@ -76,7 +76,9 @@ final class RemuxPlayback {
                 return
             }
         }
-        let newSegments = session.pump()
+        // Cap per-tick work so a mostly-downloaded file doesn't remux in one
+        // giant I/O burst that starves AVPlayer's own segment reads.
+        let newSegments = session.pump(maxNewSegments: 6)
         if !started, session.progress.segmentsWritten >= 2 {
             started = true
             let url = URL(string: "http://127.0.0.1:\(server.port)/stream.m3u8")!
