@@ -89,7 +89,9 @@ class AudioViewController: OptionsStackViewController, UITableViewDataSource {
         case secondTableView:
             return "Delay".localized
         case thirdTableView:
-            return section == 0 ? "Sound".localized : "Speakers".localized
+            // Hide the Speakers header entirely when there are no routes to
+            // list (the private AVSpeakerManager API is dead on tvOS 26).
+            return section == 0 ? "Sound".localized : (manager.speakerRoutes.isEmpty ? nil : "Speakers".localized)
         default:
             return nil
         }

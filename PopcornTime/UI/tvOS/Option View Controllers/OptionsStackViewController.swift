@@ -103,7 +103,10 @@ class OptionsStackViewController: UIViewController, UITableViewDelegate {
     
     func tableView(_ tableView: UITableView, didUpdateFocusIn context: UITableViewFocusUpdateContext, with coordinator: UIFocusAnimationCoordinator) {
         
-        tableView.visibleCells.forEach({ $0.textLabel?.textColor = UIColor(white: 1.0, alpha: 0.5) })
+        tableView.visibleCells.forEach({
+            $0.textLabel?.textColor = UIColor(white: 1.0, alpha: 0.5)
+            $0.tintColor = .white // checkmark on the dark panel
+        })
         
         if let previous = context.previouslyFocusedView, type(of: previous) == NSClassFromString("UITabBarButton")  {
             topGuide.preferredFocusEnvironments = [tabBar]
@@ -112,7 +115,10 @@ class OptionsStackViewController: UIViewController, UITableViewDelegate {
         }
         
         if let indexPath = context.nextFocusedIndexPath, let cell = context.nextFocusedView as? UITableViewCell {
-            cell.textLabel?.textColor = .white
+            // tvOS renders the focused row as a WHITE pill — the text (and
+            // the checkmark) must flip to black or they vanish into it.
+            cell.textLabel?.textColor = .black
+            cell.tintColor = .black
             tableView.scrollToRow(at: indexPath, at: .none, animated: true)
             
             switch cell.tableView! {
@@ -144,7 +150,8 @@ class OptionsStackViewController: UIViewController, UITableViewDelegate {
     func tableView(_ tableView: UITableView, willDisplayHeaderView view: UIView, forSection section: Int) {
         guard let header = view as? UITableViewHeaderFooterView else { return }
         header.textLabel?.font = UIFont.boldSystemFont(ofSize: 18)
-        header.textLabel?.alpha = 0.45
+        header.textLabel?.textColor = .white
+        header.textLabel?.alpha = 0.7
     }
     
     override func shouldUpdateFocus(in context: UIFocusUpdateContext) -> Bool {

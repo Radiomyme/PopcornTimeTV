@@ -41,11 +41,17 @@ final class VLCPlayerViewController: UIViewController, VLCMediaPlayerDelegate, U
     private let closeButton = UIButton(type: .system)
     private let subtitleButton = UIButton(type: .system)
     private let audioButton = UIButton(type: .system)
+    private let statsButton = UIButton(type: .system)
     private let progressSlider = UISlider()
     private let timeLabel = UILabel()
     private let durationLabel = UILabel()
     private let titleLabel = UILabel()
     private var hideControlsTask: DispatchWorkItem?
+
+    // Nerd-stats overlay (toggled by the gauge button or the "n" key).
+    private var nerdStatsContainer: UIView?
+    private var nerdStatsLabel: UILabel?
+    private var nerdStatsTimer: Timer?
 
     override func viewDidLoad() {
         super.viewDidLoad()
@@ -103,9 +109,10 @@ final class VLCPlayerViewController: UIViewController, VLCMediaPlayerDelegate, U
         let space = UIKeyCommand(input: " ", modifierFlags: [], action: #selector(togglePlayback))
         let back  = UIKeyCommand(input: UIKeyCommand.inputLeftArrow,  modifierFlags: [], action: #selector(seekBackward))
         let fwd   = UIKeyCommand(input: UIKeyCommand.inputRightArrow, modifierFlags: [], action: #selector(seekForward))
+        let stats = UIKeyCommand(input: "n", modifierFlags: [], action: #selector(toggleNerdStats))
         // Without priority, the system eats space/arrows for focus/scroll.
-        [space, back, fwd].forEach { $0.wantsPriorityOverSystemBehavior = true }
-        return [space, back, fwd]
+        [space, back, fwd, stats].forEach { $0.wantsPriorityOverSystemBehavior = true }
+        return [space, back, fwd, stats]
     }
 
     @objc private func seekBackward() {
@@ -161,6 +168,14 @@ final class VLCPlayerViewController: UIViewController, VLCMediaPlayerDelegate, U
         audioButton.addTarget(self, action: #selector(showAudioPicker), for: .touchUpInside)
         controlsView.addSubview(audioButton)
 
+        // Nerd stats toggle (gauge icon).
+        statsButton.translatesAutoresizingMaskIntoConstraints = false
+        statsButton.setImage(UIImage(systemName: "gauge"), for: .normal)
+        statsButton.tintColor = .white
+        statsButton.setPreferredSymbolConfiguration(UIImage.SymbolConfiguration(pointSize: 22, weight: .regular), forImageIn: .normal)
+        statsButton.addTarget(self, action: #selector(toggleNerdStats), for: .touchUpInside)
+        controlsView.addSubview(statsButton)
+
         playPauseButton.translatesAutoresizingMaskIntoConstraints = false
         playPauseButton.setImage(UIImage(systemName: "pause.fill"), for: .normal)
         playPauseButton.tintColor = .white
@@ -202,7 +217,7 @@ final class VLCPlayerViewController: UIViewController, VLCMediaPlayerDelegate, U
 
             titleLabel.topAnchor.constraint(equalTo: controlsView.topAnchor, constant: 12),
             titleLabel.leadingAnchor.constraint(equalTo: controlsView.leadingAnchor, constant: 16),
-            titleLabel.trailingAnchor.constraint(lessThanOrEqualTo: audioButton.leadingAnchor, constant: -8),
+            titleLabel.trailingAnchor.constraint(lessThanOrEqualTo: statsButton.leadingAnchor, constant: -8),
 
             closeButton.topAnchor.constraint(equalTo: controlsView.topAnchor, constant: 8),
             closeButton.trailingAnchor.constraint(equalTo: controlsView.trailingAnchor, constant: -16),
@@ -218,6 +233,11 @@ final class VLCPlayerViewController: UIViewController, VLCMediaPlayerDelegate, U
             audioButton.trailingAnchor.constraint(equalTo: subtitleButton.leadingAnchor, constant: -8),
             audioButton.widthAnchor.constraint(equalToConstant: 36),
             audioButton.heightAnchor.constraint(equalToConstant: 36),
+
+            statsButton.centerYAnchor.constraint(equalTo: closeButton.centerYAnchor),
+            statsButton.trailingAnchor.constraint(equalTo: audioButton.leadingAnchor, constant: -8),
+            statsButton.widthAnchor.constraint(equalToConstant: 36),
+            statsButton.heightAnchor.constraint(equalToConstant: 36),
 
             playPauseButton.bottomAnchor.constraint(equalTo: controlsView.bottomAnchor, constant: -20),
             playPauseButton.leadingAnchor.constraint(equalTo: controlsView.leadingAnchor, constant: 16),
@@ -370,6 +390,90 @@ final class VLCPlayerViewController: UIViewController, VLCMediaPlayerDelegate, U
     /// hiding) the very controls being used.
     func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldReceive touch: UITouch) -> Bool {
         return !(touch.view?.isDescendant(of: controlsView) ?? false)
+    }
+
+    // MARK: - Nerd stats
+
+    @objc private func toggleNerdStats() {
+        if let container = nerdStatsContainer {
+            nerdStatsTimer?.invalidate()
+            nerdStatsTimer = nil
+            container.removeFromSuperview()
+            nerdStatsContainer = nil
+            nerdStatsLabel = nil
+            return
+        }
+
+        let label = UILabel()
+        label.translatesAutoresizingMaskIntoConstraints = false
+        label.font = .monospacedSystemFont(ofSize: 13, weight: .medium)
+        label.textColor = .white
+        label.numberOfLines = 0
+
+        let container = UIView()
+        container.translatesAutoresizingMaskIntoConstraints = false
+        container.backgroundColor = UIColor.black.withAlphaComponent(0.72)
+        container.layer.cornerRadius = 10
+        container.layer.masksToBounds = true
+        container.addSubview(label)
+        view.addSubview(container)
+
+        NSLayoutConstraint.activate([
+            container.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 16),
+            container.leadingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.leadingAnchor, constant: 16),
+            container.trailingAnchor.constraint(lessThanOrEqualTo: view.centerXAnchor),
+            label.topAnchor.constraint(equalTo: container.topAnchor, constant: 10),
+            label.bottomAnchor.constraint(equalTo: container.bottomAnchor, constant: -10),
+            label.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 14),
+            label.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -14),
+        ])
+
+        nerdStatsContainer = container
+        nerdStatsLabel = label
+        label.text = nerdStatsText()
+        nerdStatsTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] timer in
+            guard let self = self, self.nerdStatsLabel != nil else { timer.invalidate(); return }
+            self.nerdStatsLabel?.text = self.nerdStatsText()
+        }
+    }
+
+    /// libvlc packs fourccs low-byte-first (VLC_FOURCC('h','e','v','c')).
+    private func fourCCString(_ cc: UInt32) -> String {
+        let bytes: [UInt8] = [UInt8(cc & 0xff), UInt8((cc >> 8) & 0xff), UInt8((cc >> 16) & 0xff), UInt8((cc >> 24) & 0xff)]
+        let printable = bytes.map { (32...126).contains($0) ? Character(UnicodeScalar($0)) : "?" }
+        return String(printable).trimmingCharacters(in: .whitespaces)
+    }
+
+    private func nerdStatsText() -> String {
+        var lines: [String] = []
+
+        let videoTrack = player.videoTracks.first(where: { $0.isSelected }) ?? player.videoTracks.first
+        if let track = videoTrack, let video = track.video {
+            let fps: Double = video.frameRateDenominator > 0
+                ? Double(video.frameRate) / Double(video.frameRateDenominator)
+                : Double(video.frameRate)
+            lines.append(String(format: "Video   %@  %u×%u  %.3f fps", fourCCString(track.codec), video.width, video.height, fps))
+        }
+
+        let audioTrack = player.audioTracks.first(where: { $0.isSelected }) ?? player.audioTracks.first
+        if let track = audioTrack, let audio = track.audio {
+            lines.append(String(format: "Audio   %@  %u ch  %u Hz", fourCCString(track.codec), audio.channelsNumber, audio.rate))
+            lines.append("Track   \(track.trackName)")
+        }
+
+        let textTrack = player.textTracks.first(where: { $0.isSelected })
+        lines.append("Subs    " + (textTrack?.trackName ?? "none"))
+
+        if let stats = player.media?.statistics {
+            lines.append(String(format: "Input   %.1f Mb/s  ·  demux %.1f Mb/s", Double(stats.inputBitrate) * 8000 / 1_000_000, Double(stats.demuxBitrate) * 8000 / 1_000_000))
+            lines.append("Frames  \(stats.displayedPictures) shown · \(stats.latePictures) late · \(stats.lostPictures) lost")
+        }
+
+        if let status = streamer?.torrentStatus {
+            lines.append("Buffer  \(Int(status.totalProgress * 100))% downloaded")
+        }
+
+        return lines.joined(separator: "\n")
     }
 
     @objc private func scheduleHideControls() {

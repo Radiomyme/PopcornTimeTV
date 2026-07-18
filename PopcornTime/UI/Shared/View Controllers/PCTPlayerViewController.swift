@@ -271,7 +271,20 @@ class PCTPlayerViewController: UIViewController, VLCMediaPlayerDelegate, UIGestu
     // libvlc_audio_output_device_set(mp, "encoded")). With it, AC-3/E-AC-3
     // (incl. DD+ Atmos JOC) bitstreams reach the AVR; other codecs gracefully
     // fall back to PCM. The audiounit_ios output can't passthrough at all.
-    private(set) var mediaplayer = VLCMediaPlayer(options: ["--aout=avsamplebuffer,any"])
+    //
+    // "--spdif" is the second half of the puzzle: selecting the encoded
+    // device alone is NOT enough — VLC's decoder chain still decodes AC-3/
+    // E-AC-3 to PCM unless the core `spdif` option makes the A/52 packetizer
+    // hand the compressed frames to the aout (via the tospdif encapsulation
+    // filter). Observed on-device: eac3 track + encoded device still showed
+    // "PCM (decoded)" until spdif was set.
+    private(set) var mediaplayer: VLCMediaPlayer = {
+        var options = ["--aout=avsamplebuffer,any"]
+        if UserDefaults.standard.object(forKey: "audioPassthrough") as? Bool ?? true {
+            options.append("--spdif")
+        }
+        return VLCMediaPlayer(options: options)
+    }()
 #else
     private(set) var mediaplayer = VLCMediaPlayer()
 #endif
@@ -464,6 +477,15 @@ class PCTPlayerViewController: UIViewController, VLCMediaPlayerDelegate, UIGestu
         if UserDefaults.standard.object(forKey: "audioPassthrough") as? Bool ?? true {
             mediaplayer.audio?.passthrough = true
         }
+
+#if DEBUG
+        // Surface libvlc's own log in Xcode's console — the aout lines show
+        // whether the avsamplebuffer "encoded" device engaged and whether the
+        // A/52 packetizer went passthrough or fell back to decoding.
+        let vlcLogger = VLCConsoleLogger()
+        vlcLogger.level = .debug
+        mediaplayer.libraryInstance.loggers = [vlcLogger]
+#endif
 #endif
 
         NotificationCenter.default.addObserver(self, selector: #selector(torrentStatusDidChange(_:)), name: .PTTorrentStatusDidChange, object: streamer)

@@ -39,11 +39,20 @@ class OptionsViewController: UIViewController, UIGestureRecognizerDelegate, UITa
     
     override func viewDidLoad() {
         super.viewDidLoad()
-        
+
+        // The storyboard panel is near-transparent, which leaves white text
+        // floating over whatever bright frame is paused underneath —
+        // unreadable. Back the whole panel with a dark blur like the system
+        // players do.
+        let blur = UIVisualEffectView(effect: UIBlurEffect(style: .dark))
+        blur.frame = view.bounds
+        blur.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+        view.insertSubview(blur, at: 0)
+
         let menuGesture = UITapGestureRecognizer(target: self, action: #selector(menuPressed))
         menuGesture.allowedTouchTypes = [NSNumber(value: UITouch.TouchType.indirect.rawValue)]
         menuGesture.allowedPressTypes = [NSNumber(value: UIPress.PressType.menu.rawValue)]
-        
+
         view.addGestureRecognizer(menuGesture)
     }
 
