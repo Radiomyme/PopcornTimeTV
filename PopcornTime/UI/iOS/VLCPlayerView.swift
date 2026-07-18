@@ -30,7 +30,7 @@ struct VLCPlayerView: UIViewControllerRepresentable {
 /// drop-late-frames=0). Subtitle/audio track pickers are intentionally
 /// minimal here; the SwiftUI surface treats the VLC path as a fallback for
 /// MKV/AVI rather than a full feature parity rewrite.
-final class VLCPlayerViewController: UIViewController, VLCMediaPlayerDelegate {
+final class VLCPlayerViewController: UIViewController, VLCMediaPlayerDelegate, UIGestureRecognizerDelegate {
     var url: URL!
     var streamer: PTTorrentStreamer?
 
@@ -69,16 +69,53 @@ final class VLCPlayerViewController: UIViewController, VLCMediaPlayerDelegate {
         ])
         player.media = media
 
-        // Tap on the movie surface toggles controls.
+        // Tap anywhere toggles controls. Attached to the ROOT view, not the
+        // movie surface: VLCKit's drawable installs its own rendering
+        // subviews over movieView, and on macOS those swallow mouse clicks —
+        // a recognizer on movieView never fired there, so once the controls
+        // auto-hid they could never be brought back. Taps landing on the
+        // control bar itself are filtered out via the gesture delegate.
         let tap = UITapGestureRecognizer(target: self, action: #selector(toggleControls))
-        movieView.addGestureRecognizer(tap)
-        movieView.isUserInteractionEnabled = true
+        tap.cancelsTouchesInView = false
+        tap.delegate = self
+        view.addGestureRecognizer(tap)
+
+        // Pointer hover (Mac / iPad trackpad) reveals the controls, like any
+        // native video player.
+        let hover = UIHoverGestureRecognizer(target: self, action: #selector(hoverDidChange(_:)))
+        view.addGestureRecognizer(hover)
     }
 
     override func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)
         player.play()
         scheduleHideControls()
+        // Put us in the responder chain so the keyboard shortcuts (space,
+        // arrow keys) work on Mac and iPad with a hardware keyboard.
+        becomeFirstResponder()
+    }
+
+    // MARK: - Keyboard (Mac / iPad hardware keyboard)
+
+    override var canBecomeFirstResponder: Bool { return true }
+
+    override var keyCommands: [UIKeyCommand]? {
+        let space = UIKeyCommand(input: " ", modifierFlags: [], action: #selector(togglePlayback))
+        let back  = UIKeyCommand(input: UIKeyCommand.inputLeftArrow,  modifierFlags: [], action: #selector(seekBackward))
+        let fwd   = UIKeyCommand(input: UIKeyCommand.inputRightArrow, modifierFlags: [], action: #selector(seekForward))
+        // Without priority, the system eats space/arrows for focus/scroll.
+        [space, back, fwd].forEach { $0.wantsPriorityOverSystemBehavior = true }
+        return [space, back, fwd]
+    }
+
+    @objc private func seekBackward() {
+        player.jumpBackward(10)
+        showControls()
+    }
+
+    @objc private func seekForward() {
+        player.jumpForward(10)
+        showControls()
     }
 
     override func viewWillDisappear(_ animated: Bool) {
@@ -211,7 +248,8 @@ final class VLCPlayerViewController: UIViewController, VLCMediaPlayerDelegate {
             player.play()
             playPauseButton.setImage(UIImage(systemName: "pause.fill"), for: .normal)
         }
-        scheduleHideControls()
+        // Reveal the bar so keyboard-triggered toggles give visual feedback.
+        showControls()
     }
 
     @objc private func scrub() {
@@ -316,6 +354,22 @@ final class VLCPlayerViewController: UIViewController, VLCMediaPlayerDelegate {
         let target: CGFloat = controlsView.alpha > 0 ? 0 : 1
         UIView.animate(withDuration: 0.2) { self.controlsView.alpha = target }
         if target == 1 { scheduleHideControls() }
+    }
+
+    private func showControls() {
+        UIView.animate(withDuration: 0.2) { self.controlsView.alpha = 1 }
+        scheduleHideControls()
+    }
+
+    @objc private func hoverDidChange(_ gesture: UIHoverGestureRecognizer) {
+        guard gesture.state == .began || gesture.state == .changed else { return }
+        if controlsView.alpha == 0 { showControls() }
+    }
+
+    /// Keep taps on the control bar from also toggling (and instantly
+    /// hiding) the very controls being used.
+    func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldReceive touch: UITouch) -> Bool {
+        return !(touch.view?.isDescendant(of: controlsView) ?? false)
     }
 
     @objc private func scheduleHideControls() {
