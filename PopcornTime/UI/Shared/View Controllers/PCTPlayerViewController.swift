@@ -209,10 +209,19 @@ class PCTPlayerViewController: UIViewController, VLCMediaPlayerDelegate, UIGestu
 #if os(tvOS)
         guard !didReassertPassthrough else { return }
         didReassertPassthrough = true
-        if UserDefaults.standard.object(forKey: "audioPassthrough") as? Bool ?? true {
-            mediaplayer.audio?.passthrough = true
-        }
+        guard UserDefaults.standard.object(forKey: "audioPassthrough") as? Bool ?? true else { return }
+        mediaplayer.audio?.passthrough = true
         print("[Player] audio tracks: \(mediaplayer.audioTracks.map { $0.trackName })")
+        print("[Player] passthrough engaged (t0): \(mediaplayer.audio?.passthrough ?? false)")
+        // The aout can be torn down/recreated when the audio ES actually
+        // starts decoding; a single early device-set request can be lost in
+        // that window. Re-request a couple of seconds in and log whether the
+        // encoded device finally stuck — key data point for the Atmos hunt.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 3) { [weak self] in
+            guard let self = self else { return }
+            self.mediaplayer.audio?.passthrough = true
+            print("[Player] passthrough engaged (t3): \(self.mediaplayer.audio?.passthrough ?? false)")
+        }
 #endif
     }
 
