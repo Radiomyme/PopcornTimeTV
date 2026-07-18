@@ -243,12 +243,22 @@ public func < (lhs: Torrent, rhs: Torrent) -> Bool {
         return lhs.qualityValue < rhs.qualityValue
     }
     // At equal resolution, prefer Atmos the hardware can actually deliver:
-    // Apple TV bitstreams Atmos only from E-AC-3 (DD+ JOC, i.e. "DDP Atmos"
-    // web releases). TrueHD Atmos decodes to plain multichannel PCM in every
-    // tvOS app, so it should not outrank a DD+ Atmos release.
-    let lhsDeliverableAtmos = lhs.tags.contains(.atmos) && lhs.tags.contains(.eac3)
-    let rhsDeliverableAtmos = rhs.tags.contains(.atmos) && rhs.tags.contains(.eac3)
-    if lhsDeliverableAtmos != rhsDeliverableAtmos { return rhsDeliverableAtmos }
+    //  tier 2 — Atmos in an AVPlayer-native container (.mp4/.m4v/.mov):
+    //           plays through Apple's player with TRUE Atmos (and HDR/DV).
+    //  tier 1 — DD+ Atmos in MKV: the right source, but the bundled VLC 4
+    //           alpha has a passthrough bug (aout stream opened with rate 0)
+    //           so it currently decodes to multichannel PCM.
+    //  tier 0 — TrueHD Atmos / no Atmos: TrueHD can't leave any tvOS app
+    //           as Atmos regardless.
+    func atmosDeliveryTier(_ t: Torrent) -> Int {
+        guard t.tags.contains(.atmos) else { return 0 }
+        if t.isAppleNativeContainer { return 2 }
+        if t.tags.contains(.eac3) { return 1 }
+        return 0
+    }
+    let lhsTier = atmosDeliveryTier(lhs)
+    let rhsTier = atmosDeliveryTier(rhs)
+    if lhsTier != rhsTier { return lhsTier < rhsTier }
     let lhsScore = lhs.tags.rawValue.nonzeroBitCount
     let rhsScore = rhs.tags.rawValue.nonzeroBitCount
     if lhsScore != rhsScore { return lhsScore < rhsScore }
@@ -264,6 +274,19 @@ public func == (lhs: Torrent, rhs: Torrent) -> Bool {
 }
 
 public extension Torrent {
+
+    /// True when the torrent's payload (magnet display-name) is a container
+    /// AVPlayer can open natively (.mp4/.m4v/.mov). On Apple hardware those
+    /// play through the system player with true HDR/Dolby Vision and Atmos —
+    /// no VLC involved — so they outrank MKV at equal quality when Atmos is
+    /// present.
+    var isAppleNativeContainer: Bool {
+        guard let dn = url.components(separatedBy: "&dn=").last?
+                .components(separatedBy: "&").first?
+                .removingPercentEncoding?.lowercased()
+        else { return false }
+        return [".mp4", ".m4v", ".mov"].contains(where: { dn.hasSuffix($0) })
+    }
 
     /// Pick the highest resolution whose best-seeded torrent has a swarm large
     /// enough to start streaming quickly, rather than the absolute highest.
