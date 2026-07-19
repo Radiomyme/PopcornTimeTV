@@ -58,7 +58,15 @@ final class MacVLCController: NSObject, ObservableObject {
     private var timer: Timer?
 
     func play(_ url: URL) {
-        player.media = VLCMedia(url: url)
+        let media = VLCMedia(url: url)
+        // Force software decoding on the fallback path. VLCKit 4's macOS
+        // OpenGL video output aborts (CreateFilters, vout_helper.c:164) when
+        // the VideoToolbox hardware decoder hands it a 10-bit / HDR pixel
+        // format it can't build filters for. Software decode emits a planar
+        // format the OpenGL output handles, avoiding the crash — acceptable
+        // since this path only runs for the rare files the remuxer can't take.
+        media?.addOption(":avcodec-hw=none")
+        player.media = media
         player.play()
         isPlaying = true
         timer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in
