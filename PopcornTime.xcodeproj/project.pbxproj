@@ -2918,7 +2918,7 @@
 		};
 		8191D6C34B1BAD6204F1FFBE /* XCRemoteSwiftPackageReference "PopcornTorrent" */ = {
 			isa = XCRemoteSwiftPackageReference;
-			repositoryURL = "https://github.com/alextud/PopcornTorrent";
+			repositoryURL = "https://github.com/Radiomyme/PopcornTorrent";
 			requirement = {
 				branch = master;
 				kind = branch;

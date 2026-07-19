@@ -1,5 +1,5 @@
 {
-  "originHash" : "0c8a6a87b2fdab31c0e008a159f19099b483c161d77fd18233a43a07f7902f1e",
+  "originHash" : "f5403fd93c916571b8dd9f0340a36715232d4441b5af12ba61a904afb76d325e",
   "pins" : [
     {
       "identity" : "alamofire",
@@ -31,10 +31,10 @@
     {
       "identity" : "popcorntorrent",
       "kind" : "remoteSourceControl",
-      "location" : "https://github.com/alextud/PopcornTorrent",
+      "location" : "https://github.com/Radiomyme/PopcornTorrent",
       "state" : {
         "branch" : "master",
-        "revision" : "ec98cb40aca5dde4f50625910831423db2fcbd19"
+        "revision" : "feb2b1defeb1f38c4d1cd43ae4489f4b2f48a770"
       }
     }
   ],
