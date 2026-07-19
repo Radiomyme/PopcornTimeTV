@@ -17,7 +17,10 @@ struct MacPlayerView: View {
 
     var body: some View {
         ZStack(alignment: .topLeading) {
-            if let player = controller.player {
+            if let vlcURL = controller.vlcURL {
+                MacVLCPlayerView(url: vlcURL)
+                    .ignoresSafeArea()
+            } else if let player = controller.player {
                 MacAVPlayerRepresentable(player: player)
                     .ignoresSafeArea()
             } else {
@@ -70,6 +73,11 @@ final class MacPlayerController: ObservableObject {
     @Published var statusLine = "Connexion aux sources…"
     @Published var showStats = true
     @Published var statsText = ""
+    /// Set when the remux path gives up (DTS audio, unsupported codec…) —
+    /// the view swaps to the VLC fallback player at this URL.
+    @Published var vlcURL: URL?
+    /// The torrent's direct HTTP endpoint, kept for the VLC fallback.
+    private var directURL: URL?
 
     private var remux: RemuxPlayback?
     private var statsTimer: Timer?
@@ -98,19 +106,20 @@ final class MacPlayerController: ObservableObject {
         }, readyToPlay: { [weak self] videoFileURL, videoFilePath in
             DispatchQueue.main.async {
                 guard let self = self, !self.stopped else { return }
-                // On macOS there is no VLC fallback, so EVERY .mkv goes
-                // through the remuxer (it handles HEVC/H.264 + E-AC-3/AC-3 —
-                // not just the DD+ Atmos case iOS/tvOS gates on).
+                // alextud's GCDWebServer reports its URL as 0.0.0.0 —
+                // rewrite to 127.0.0.1 (routable local endpoint).
+                var components = URLComponents(url: videoFileURL, resolvingAgainstBaseURL: false)
+                if components?.host == "0.0.0.0" { components?.host = "127.0.0.1" }
+                self.directURL = components?.url ?? videoFileURL
+                // Every .mkv goes through the remuxer first (HEVC/H.264 +
+                // E-AC-3/AC-3, preserves Atmos); if the remux can't handle it
+                // (DTS audio…) onFailure falls back to VLC below.
                 if videoFilePath.path.lowercased().hasSuffix(".mkv") {
                     self.startRemux(localFile: videoFilePath, isAtmos: isAtmos, subtitles: subtitles)
                 } else {
                     // AVPlayer-friendly payloads (mp4/m4v/mov) play straight
-                    // from the torrent's local HTTP endpoint. alextud's
-                    // GCDWebServer reports its URL as 0.0.0.0 — rewrite to
-                    // 127.0.0.1 (routable, and matches the local server).
-                    var components = URLComponents(url: videoFileURL, resolvingAgainstBaseURL: false)
-                    if components?.host == "0.0.0.0" { components?.host = "127.0.0.1" }
-                    self.attachPlayer(to: components?.url ?? videoFileURL)
+                    // from the torrent's local HTTP endpoint.
+                    self.attachPlayer(to: self.directURL!)
                 }
             }
         }, failure: { [weak self] (error: Error) in
@@ -138,7 +147,16 @@ final class MacPlayerController: ObservableObject {
             DispatchQueue.main.async { self?.attachPlayer(to: playlistURL) }
         }
         remux.onFailure = { [weak self] message in
-            DispatchQueue.main.async { self?.statusLine = "Remux impossible: \(message)" }
+            DispatchQueue.main.async {
+                guard let self = self, !self.stopped else { return }
+                // Codec the remuxer can't repackage (DTS audio, etc.) —
+                // fall back to VLC on the torrent's direct HTTP endpoint,
+                // exactly like the iOS/tvOS VLC path.
+                print("[Player] remux failed (\(message)) — bascule sur VLC")
+                self.remux?.stop()
+                self.remux = nil
+                self.vlcURL = self.directURL
+            }
         }
         remux.start()
     }

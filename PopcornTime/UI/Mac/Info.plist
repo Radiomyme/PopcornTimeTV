@@ -12,5 +12,18 @@
 		<key>NSAllowsArbitraryLoads</key>
 		<true/>
 	</dict>
+	<!-- Trakt OAuth finishes by redirecting to popcorntime://trakt?code=… —
+	     the same scheme the iOS app registers. -->
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleURLName</key>
+			<string>com.popcorntime.mac.trakt</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>popcorntime</string>
+			</array>
+		</dict>
+	</array>
 </dict>
 </plist>
