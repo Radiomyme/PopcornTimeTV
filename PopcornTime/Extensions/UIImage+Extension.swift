@@ -44,27 +44,30 @@ extension UIImage {
     }
     
     func removingTransparency() -> UIImage? {
-        guard
-            let cgImage = cgImage,
-            let colorSpace = cgImage.colorSpace,
-            let bitmapContext = CGContext(data: nil,
-                                          width: Int(size.width),
-                                          height: Int(size.height),
-                                          bitsPerComponent: cgImage.bitsPerComponent,
-                                          bytesPerRow: cgImage.bytesPerRow,
-                                          space: colorSpace,
-                                          bitmapInfo: cgImage.bitmapInfo.rawValue)
+        guard let cgImage = cgImage, let colorSpace = cgImage.colorSpace else { return nil }
+        // Use the CGImage's PIXEL dimensions, not the UIImage's point `size`.
+        // Mixing point width with the cgImage's (pixel-sized) bytesPerRow trips
+        // CoreGraphics' "verify_image_parameters: invalid bytes/row" and the
+        // context fails to build on any @2x/@3x image. Passing bytesPerRow: 0
+        // lets CG compute the correct stride for the given width.
+        guard let bitmapContext = CGContext(data: nil,
+                                            width: cgImage.width,
+                                            height: cgImage.height,
+                                            bitsPerComponent: cgImage.bitsPerComponent,
+                                            bytesPerRow: 0,
+                                            space: colorSpace,
+                                            bitmapInfo: cgImage.bitmapInfo.rawValue)
             else {
                 return nil
         }
-    
+
+        let rect = CGRect(x: 0, y: 0, width: cgImage.width, height: cgImage.height)
         bitmapContext.setFillColor(UIColor.white.cgColor)
-        bitmapContext.fill(CGRect(origin: .zero, size: size))
-        
-        bitmapContext.draw(cgImage, in: CGRect(origin: .zero, size: size))
-        let image = bitmapContext.makeImage()!
-        
-        return UIImage(cgImage: image)
+        bitmapContext.fill(rect)
+        bitmapContext.draw(cgImage, in: rect)
+
+        guard let image = bitmapContext.makeImage() else { return nil }
+        return UIImage(cgImage: image, scale: scale, orientation: imageOrientation)
     }
     
     func scaled(to size: CGSize) -> UIImage {
