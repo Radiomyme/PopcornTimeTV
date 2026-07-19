@@ -471,28 +471,15 @@ struct MediaDetailView: View {
     @ViewBuilder
     private var movieTorrentList: some View {
         if !viewModel.torrents.isEmpty {
+            let recommended = Torrent.recommendedURL(in: viewModel.torrents)
             VStack(alignment: .leading, spacing: 8) {
                 Text("Qualités disponibles").font(.headline)
                 ForEach(viewModel.torrents, id: \.url) { torrent in
                     Button {
                         play(torrent)
                     } label: {
-                        HStack {
-                            Image(systemName: "film")
-                                .foregroundStyle(.secondary)
-                            VStack(alignment: .leading) {
-                                Text(torrent.quality ?? "—").font(.subheadline.weight(.semibold))
-                                Text("\(torrent.seeds) seeds · \(torrent.size ?? "—")")
-                                    .font(.caption).foregroundStyle(.secondary)
-                            }
-                            Spacer(minLength: 8)
-                            Image(systemName: "play.circle.fill")
-                                .foregroundStyle(.tint)
-                                .font(.title2)
-                        }
-                        .padding(12)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                        TorrentPickerRow(torrent: torrent, recommended: torrent.url == recommended)
+                            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
                     }
                     .buttonStyle(.plain)
                 }
@@ -581,21 +568,13 @@ private struct QualityPickerSheet: View {
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
+        let recommended = Torrent.recommendedURL(in: torrents)
         NavigationStack {
             List(torrents, id: \.url) { torrent in
                 Button {
                     onSelect(torrent)
                 } label: {
-                    HStack {
-                        Image(systemName: "film").foregroundStyle(.secondary)
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(torrent.quality ?? "—").font(.subheadline.weight(.semibold))
-                            Text("\(torrent.seeds) seeds · \(torrent.size ?? "—")")
-                                .font(.caption).foregroundStyle(.secondary)
-                        }
-                        Spacer(minLength: 8)
-                        Image(systemName: "play.circle.fill").foregroundStyle(.tint).font(.title2)
-                    }
+                    TorrentPickerRow(torrent: torrent, recommended: torrent.url == recommended)
                 }
                 .buttonStyle(.plain)
             }

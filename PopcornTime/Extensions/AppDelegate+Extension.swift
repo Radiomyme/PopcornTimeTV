@@ -145,13 +145,24 @@ extension AppDelegate {
         let blurStyle: UIBlurEffect.Style  = style == .alert ? .extraLight : .dark
         let alertController = UIAlertController(title: "Choose Quality".localized, message: nil, preferredStyle: style, blurStyle: blurStyle)
 
+        // Enrich each row with seeds + size so the best quality/seeds ratio is
+        // visible at a glance (like the iOS/macOS pickers), and star the
+        // recommended `balancedPick`. Best resolution first.
+        let recommendedURL = Torrent.balancedPick(from: sorted)?.url
+        var recommendedAction: UIAlertAction?
         for torrent in sorted.reversed() {
-            alertController.addAction(UIAlertAction(title: torrent.quality, style: .default) { _ in
-                completion(torrent)
-            })
+            var label = torrent.quality ?? "—"
+            label += "   ·   \(torrent.seeds) seeds"
+            if let size = torrent.size, !size.isEmpty { label += "   ·   \(size)" }
+            if torrent.url == recommendedURL { label = "⭐︎ " + label }
+            let action = UIAlertAction(title: label, style: .default) { _ in completion(torrent) }
+            alertController.addAction(action)
+            if torrent.url == recommendedURL { recommendedAction = action }
         }
 
         alertController.addAction(UIAlertAction(title: "Cancel".localized, style: .cancel, handler: nil))
+        // Put initial focus on the recommended pick.
+        if let recommendedAction = recommendedAction { alertController.preferredAction = recommendedAction }
         alertController.popoverPresentationController?.sourceView = sender
         alertController.show(animated: true)
     }

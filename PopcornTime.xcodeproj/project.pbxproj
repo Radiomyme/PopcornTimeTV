@@ -31,8 +31,10 @@
 		22600BD9E04DEB11A506937B /* ImageProxy.swift in Sources */ = {isa = PBXBuildFile; fileRef = B46C65CC570E869D860C1CF2 /* ImageProxy.swift */; };
 		28C2A5671ECD2689945C50A6 /* ImageProxy.swift in Sources */ = {isa = PBXBuildFile; fileRef = B46C65CC570E869D860C1CF2 /* ImageProxy.swift */; };
 		2D245AF106582145558D5990 /* MacPlayerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7DA130AB1B495A42FD87FDF9 /* MacPlayerView.swift */; };
+		32B7FD6AF55B886929E46B1A /* TorrentPickerRow.swift in Sources */ = {isa = PBXBuildFile; fileRef = 348DF6D1091376473D7E1AA8 /* TorrentPickerRow.swift */; };
 		3743DB05D71C4F092D0D2465 /* Movie.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4D0F9D1C1E6F298000860852 /* Movie.swift */; };
 		3B0039C3C51E36E463D40C7D /* PopcornKit.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4D0F9D041E6F296400860852 /* PopcornKit.swift */; };
+		3B1A65A373004CA2D62F47B3 /* TorrentPickerRow.swift in Sources */ = {isa = PBXBuildFile; fileRef = 348DF6D1091376473D7E1AA8 /* TorrentPickerRow.swift */; };
 		3D4647311E3A3112B512785B /* Crew.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4D0F9D1F1E6F298000860852 /* Crew.swift */; };
 		3DA939004EE08521F19A35C9 /* SearchView.swift in Sources */ = {isa = PBXBuildFile; fileRef = EAAA2FC5821AA9CA5E484C9C /* SearchView.swift */; };
 		3E09E9659556489690C72B9A /* Show.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4D0F9D1A1E6F298000860852 /* Show.swift */; };
@@ -410,6 +412,7 @@
 		31EBBB7F68C83D064E2EA422 /* PopcornTimeMac.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = PopcornTimeMac.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		32D92ACED7B347099CB75A83 /* PopcornTimeMacApp.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PopcornTimeMacApp.swift; sourceTree = "<group>"; };
 		339443987BA9913056C788A2 /* Pods-PopcornKit tvOS.release.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-PopcornKit tvOS.release.xcconfig"; path = "Target Support Files/Pods-PopcornKit tvOS/Pods-PopcornKit tvOS.release.xcconfig"; sourceTree = "<group>"; };
+		348DF6D1091376473D7E1AA8 /* TorrentPickerRow.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = TorrentPickerRow.swift; sourceTree = "<group>"; };
 		37DACB023B19FBE420CFFCEA /* YTSEZTVProvider.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = YTSEZTVProvider.swift; path = PopcornKit/Managers/Providers/YTSEZTVProvider.swift; sourceTree = SOURCE_ROOT; };
 		383706534E1BC6C3E1A47C8A /* PopcornKit.framework */ = {isa = PBXFileReference; explicitFileType = wrapper.framework; includeInIndex = 0; path = PopcornKit.framework; sourceTree = BUILT_PRODUCTS_DIR; };
 		3EC80D936120986C06A00498 /* String+Localized.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = "String+Localized.swift"; path = "PopcornKit/Resources/String+Localized.swift"; sourceTree = SOURCE_ROOT; };
@@ -1073,6 +1076,7 @@
 				4D689A101DD88D1D001D1318 /* tvOS */,
 				2744A7FDC2C3FC1003BB7FA5 /* iOS */,
 				201081766D16F44E5031F858 /* Mac */,
+				828779AD255474508A60787F /* Shared SwiftUI */,
 			);
 			path = UI;
 			sourceTree = "<group>";
@@ -1272,6 +1276,15 @@
 			);
 			name = Remux;
 			path = Remux;
+			sourceTree = "<group>";
+		};
+		828779AD255474508A60787F /* Shared SwiftUI */ = {
+			isa = PBXGroup;
+			children = (
+				348DF6D1091376473D7E1AA8 /* TorrentPickerRow.swift */,
+			);
+			name = "Shared SwiftUI";
+			path = "Shared SwiftUI";
 			sourceTree = "<group>";
 		};
 		A9D998D701235B659ECF4A1C /* OS X */ = {
@@ -2079,6 +2092,7 @@
 				CE989558EC8A29B39C6E5A54 /* RemuxPlayback.swift in Sources */,
 				11DD8A5EDD67B4DD19D4EFC0 /* MacSettingsView.swift in Sources */,
 				948D64B7C10EED78226ABEA9 /* MacVLCPlayerView.swift in Sources */,
+				3B1A65A373004CA2D62F47B3 /* TorrentPickerRow.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -2101,6 +2115,7 @@
 				49D321FE2AF60D7F28CF686A /* MKVToHLSRemuxer.swift in Sources */,
 				B6950884CCBB1C2D93F42FEF /* RemuxPlayback.swift in Sources */,
 				8921264F047B0730DF439E4C /* TorrentCacheCleanup.swift in Sources */,
+				32B7FD6AF55B886929E46B1A /* TorrentPickerRow.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

@@ -137,35 +137,20 @@ struct MacMediaDetailView: View {
     private func movieTorrentList(_ movie: Movie) -> some View {
         let torrents = movie.torrents.sorted(by: >)
         if !torrents.isEmpty {
+            let recommended = Torrent.recommendedURL(in: torrents)
             VStack(alignment: .leading, spacing: 8) {
                 Text("Qualités disponibles").font(.headline)
                 ForEach(torrents, id: \.url) { torrent in
                     Button {
                         start(torrent, media: movie, title: movie.title)
                     } label: {
-                        torrentRow(torrent)
+                        TorrentPickerRow(torrent: torrent, recommended: torrent.url == recommended)
+                            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
                     }
                     .buttonStyle(.plain)
                 }
             }
         }
-    }
-
-    private func torrentRow(_ torrent: Torrent) -> some View {
-        HStack {
-            Image(systemName: "film").foregroundStyle(.secondary)
-            VStack(alignment: .leading) {
-                Text(torrent.quality ?? "—").font(.subheadline.weight(.semibold))
-                Text("\(torrent.seeds) seeds · \(torrent.size ?? "—")")
-                    .font(.caption).foregroundStyle(.secondary)
-            }
-            Spacer(minLength: 8)
-            Image(systemName: "play.circle.fill").foregroundStyle(.tint).font(.title2)
-        }
-        .padding(12)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-        .contentShape(Rectangle())
     }
 
     // MARK: Season picker + episode cards (same as iPad)
@@ -336,24 +321,14 @@ struct MacQualityPickerSheet: View {
         VStack(alignment: .leading, spacing: 14) {
             Text(title).font(.headline).lineLimit(2)
             ScrollView {
+                let recommended = Torrent.recommendedURL(in: torrents)
                 VStack(spacing: 8) {
                     ForEach(torrents, id: \.url) { torrent in
                         Button {
                             onPick(torrent)
                         } label: {
-                            HStack {
-                                VStack(alignment: .leading) {
-                                    Text(torrent.quality ?? "—").font(.subheadline.weight(.semibold))
-                                    Text("\(torrent.seeds) seeds · \(torrent.size ?? "—")")
-                                        .font(.caption).foregroundStyle(.secondary)
-                                }
-                                Spacer()
-                                Image(systemName: "play.circle.fill").foregroundStyle(.tint)
-                            }
-                            .padding(10)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-                            .contentShape(Rectangle())
+                            TorrentPickerRow(torrent: torrent, recommended: torrent.url == recommended)
+                                .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
                         }
                         .buttonStyle(.plain)
                     }
