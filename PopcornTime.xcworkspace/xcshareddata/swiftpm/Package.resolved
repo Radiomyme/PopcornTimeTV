@@ -1,0 +1,42 @@
+{
+  "originHash" : "f5403fd93c916571b8dd9f0340a36715232d4441b5af12ba61a904afb76d325e",
+  "pins" : [
+    {
+      "identity" : "alamofire",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/Alamofire/Alamofire",
+      "state" : {
+        "revision" : "7595cbcf59809f9977c5f6378500de2ad73b7ddb",
+        "version" : "5.12.0"
+      }
+    },
+    {
+      "identity" : "gcdwebserver",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/alextud/GCDWebServer",
+      "state" : {
+        "branch" : "swift-package-manager",
+        "revision" : "bc58c7f8358c90542e9195840a89405d7bf4a24e"
+      }
+    },
+    {
+      "identity" : "objectmapper",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/tristanhimmelman/ObjectMapper",
+      "state" : {
+        "revision" : "6021c6035e83a306047348666f6400dc61445d3b",
+        "version" : "4.4.3"
+      }
+    },
+    {
+      "identity" : "popcorntorrent",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/Radiomyme/PopcornTorrent",
+      "state" : {
+        "branch" : "master",
+        "revision" : "feb2b1defeb1f38c4d1cd43ae4489f4b2f48a770"
+      }
+    }
+  ],
+  "version" : 3
+}
