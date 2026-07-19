@@ -31,6 +31,7 @@
 		22600BD9E04DEB11A506937B /* ImageProxy.swift in Sources */ = {isa = PBXBuildFile; fileRef = B46C65CC570E869D860C1CF2 /* ImageProxy.swift */; };
 		28C2A5671ECD2689945C50A6 /* ImageProxy.swift in Sources */ = {isa = PBXBuildFile; fileRef = B46C65CC570E869D860C1CF2 /* ImageProxy.swift */; };
 		2D245AF106582145558D5990 /* MacPlayerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7DA130AB1B495A42FD87FDF9 /* MacPlayerView.swift */; };
+		2DDFD29B22CACBCA9B2FEA83 /* DetailComponents.swift in Sources */ = {isa = PBXBuildFile; fileRef = D3E47D5AE31F6942353FEA5C /* DetailComponents.swift */; };
 		32B7FD6AF55B886929E46B1A /* TorrentPickerRow.swift in Sources */ = {isa = PBXBuildFile; fileRef = 348DF6D1091376473D7E1AA8 /* TorrentPickerRow.swift */; };
 		3743DB05D71C4F092D0D2465 /* Movie.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4D0F9D1C1E6F298000860852 /* Movie.swift */; };
 		3B0039C3C51E36E463D40C7D /* PopcornKit.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4D0F9D041E6F296400860852 /* PopcornKit.swift */; };
@@ -301,6 +302,7 @@
 		E7A5B6C01687D7BACE9A7124 /* VLCPlayerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = BAA2707D98245AD65397F0CA /* VLCPlayerView.swift */; };
 		E9E5141F1B95C1F603C78CC9 /* SafariSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7346E256E49510AF03B05E38 /* SafariSheet.swift */; };
 		EA335D2315869F466A5843F5 /* NetworkManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4D0F9CFC1E6F296400860852 /* NetworkManager.swift */; };
+		EF3FD47376F1CC28BB1B9356 /* DetailComponents.swift in Sources */ = {isa = PBXBuildFile; fileRef = D3E47D5AE31F6942353FEA5C /* DetailComponents.swift */; };
 		F08409000BBED2C737F68198 /* PopcornKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 383706534E1BC6C3E1A47C8A /* PopcornKit.framework */; };
 		F15FA38AE58B85B64C1B89D4 /* UIAlertController+Show.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4DCB39391E844D4500388374 /* UIAlertController+Show.swift */; };
 		F3307A40B7538186DA7C8EC7 /* WatchedlistManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4D0F9CFE1E6F296400860852 /* WatchedlistManager.swift */; };
@@ -651,6 +653,7 @@
 		BE23C29C7331612CD4A38E6B /* PosterCard.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = PosterCard.swift; path = PopcornTime/UI/iOS/PosterCard.swift; sourceTree = SOURCE_ROOT; };
 		BFB220FFCCA0BD315227CAF6 /* MoviesGridView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = MoviesGridView.swift; path = PopcornTime/UI/iOS/MoviesGridView.swift; sourceTree = SOURCE_ROOT; };
 		C39DBC9A881608E11694A746 /* Pods_PopcornTimeiOS.framework */ = {isa = PBXFileReference; explicitFileType = wrapper.framework; includeInIndex = 0; path = Pods_PopcornTimeiOS.framework; sourceTree = BUILT_PRODUCTS_DIR; };
+		D3E47D5AE31F6942353FEA5C /* DetailComponents.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = DetailComponents.swift; sourceTree = "<group>"; };
 		D569C7F4DE25DED1535F57A2 /* ShowsGridView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = ShowsGridView.swift; path = PopcornTime/UI/iOS/ShowsGridView.swift; sourceTree = SOURCE_ROOT; };
 		D68B9D49F99BBA923F0A9374 /* MacVLCPlayerView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MacVLCPlayerView.swift; sourceTree = "<group>"; };
 		DE96A3C033AAA0359ED427BC /* MediaProvider.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = MediaProvider.swift; path = PopcornKit/Managers/Providers/MediaProvider.swift; sourceTree = SOURCE_ROOT; };
@@ -1282,6 +1285,7 @@
 			isa = PBXGroup;
 			children = (
 				348DF6D1091376473D7E1AA8 /* TorrentPickerRow.swift */,
+				D3E47D5AE31F6942353FEA5C /* DetailComponents.swift */,
 			);
 			name = "Shared SwiftUI";
 			path = "Shared SwiftUI";
@@ -2093,6 +2097,7 @@
 				11DD8A5EDD67B4DD19D4EFC0 /* MacSettingsView.swift in Sources */,
 				948D64B7C10EED78226ABEA9 /* MacVLCPlayerView.swift in Sources */,
 				3B1A65A373004CA2D62F47B3 /* TorrentPickerRow.swift in Sources */,
+				2DDFD29B22CACBCA9B2FEA83 /* DetailComponents.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -2116,6 +2121,7 @@
 				B6950884CCBB1C2D93F42FEF /* RemuxPlayback.swift in Sources */,
 				8921264F047B0730DF439E4C /* TorrentCacheCleanup.swift in Sources */,
 				32B7FD6AF55B886929E46B1A /* TorrentPickerRow.swift in Sources */,
+				EF3FD47376F1CC28BB1B9356 /* DetailComponents.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

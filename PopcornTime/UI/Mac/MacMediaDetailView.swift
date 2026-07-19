@@ -36,6 +36,8 @@ struct MacMediaDetailView: View {
                 if let show = enrichedShow {
                     seasonEpisodeSection(show)
                 }
+                castSection
+                relatedSection
             }
             .padding(24)
             .frame(maxWidth: 900, alignment: .leading)
@@ -86,9 +88,12 @@ struct MacMediaDetailView: View {
         if let movie = enrichedMovie {
             VStack(alignment: .leading, spacing: 8) {
                 Text(movie.title).font(.title.bold())
-                Text(metadataLine(year: movie.year, runtime: movie.runtime,
-                                  certification: movie.certification, rating: movie.rating))
-                    .font(.subheadline).foregroundStyle(.secondary)
+                HStack(spacing: 10) {
+                    Text(metadataLine(year: movie.year, runtime: movie.runtime,
+                                      certification: movie.certification, rating: 0))
+                        .font(.subheadline).foregroundStyle(.secondary)
+                    StarRatingView(rating: movie.rating)
+                }
                 Text(movie.summary).font(.body).padding(.top, 4)
                 actionRow(torrents: movie.torrents.sorted(by: >), media: movie, title: movie.title)
                     .padding(.top, 8)
@@ -96,8 +101,11 @@ struct MacMediaDetailView: View {
         } else if let show = enrichedShow {
             VStack(alignment: .leading, spacing: 8) {
                 Text(show.title).font(.title.bold())
-                Text("\(show.year)\(show.network.map { " · \($0)" } ?? "")")
-                    .font(.subheadline).foregroundStyle(.secondary)
+                HStack(spacing: 10) {
+                    Text("\(show.year)\(show.network.map { " · \($0)" } ?? "")")
+                        .font(.subheadline).foregroundStyle(.secondary)
+                    StarRatingView(rating: show.rating)
+                }
                 Text(show.summary).font(.body).padding(.top, 4)
             }
         } else if loading {
@@ -243,6 +251,29 @@ struct MacMediaDetailView: View {
     }
 
     // MARK: Data
+
+    @ViewBuilder
+    private var castSection: some View {
+        if let movie = enrichedMovie {
+            CastScroller(directors: directorNames(movie.crew), actors: movie.actors)
+        } else if let show = enrichedShow {
+            CastScroller(directors: directorNames(show.crew), actors: show.actors)
+        }
+    }
+
+    @ViewBuilder
+    private var relatedSection: some View {
+        if let movie = enrichedMovie, !movie.related.isEmpty {
+            RelatedRow(title: "Vus aussi", items: movie.related)
+        } else if let show = enrichedShow, !show.related.isEmpty {
+            RelatedRow(title: "Vus aussi", items: show.related)
+        }
+    }
+
+    private func directorNames(_ crew: [Crew]) -> [String] {
+        var seen = Set<String>()
+        return crew.filter { $0.roleType == .director }.map(\.name).filter { seen.insert($0).inserted }
+    }
 
     private func metadataLine(year: String, runtime: Int, certification: String, rating: Float) -> String {
         var parts: [String] = []

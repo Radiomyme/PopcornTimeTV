@@ -199,6 +199,8 @@ struct MediaDetailView: View {
                 } else if let show = viewModel.enrichedShow, !show.episodes.isEmpty {
                     seasonEpisodeSection(show)
                 }
+                castSection
+                relatedSection
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.horizontal, 16)
@@ -439,9 +441,12 @@ struct MediaDetailView: View {
             VStack(alignment: .leading, spacing: 8) {
                 Text(movie.title).font(.title2.bold())
                     .fixedSize(horizontal: false, vertical: true)
-                Text(metadataLine(year: movie.year, runtime: movie.runtime, certification: movie.certification, rating: movie.rating))
-                    .font(.subheadline).foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
+                HStack(spacing: 10) {
+                    Text(metadataLine(year: movie.year, runtime: movie.runtime, certification: movie.certification, rating: 0))
+                        .font(.subheadline).foregroundStyle(.secondary)
+                    StarRatingView(rating: movie.rating)
+                }
+                .fixedSize(horizontal: false, vertical: true)
                 Text(movie.summary)
                     .font(.body)
                     .foregroundStyle(.primary)
@@ -453,9 +458,12 @@ struct MediaDetailView: View {
             VStack(alignment: .leading, spacing: 8) {
                 Text(show.title).font(.title2.bold())
                     .fixedSize(horizontal: false, vertical: true)
-                Text("\(show.year)\(show.network.map { " · \($0)" } ?? "")")
-                    .font(.subheadline).foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
+                HStack(spacing: 10) {
+                    Text("\(show.year)\(show.network.map { " · \($0)" } ?? "")")
+                        .font(.subheadline).foregroundStyle(.secondary)
+                    StarRatingView(rating: show.rating)
+                }
+                .fixedSize(horizontal: false, vertical: true)
                 Text(show.summary)
                     .font(.body)
                     .foregroundStyle(.primary)
@@ -486,6 +494,29 @@ struct MediaDetailView: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
         }
+    }
+
+    @ViewBuilder
+    private var castSection: some View {
+        if let movie = viewModel.enrichedMovie {
+            CastScroller(directors: directorNames(movie.crew), actors: movie.actors)
+        } else if let show = viewModel.enrichedShow {
+            CastScroller(directors: directorNames(show.crew), actors: show.actors)
+        }
+    }
+
+    @ViewBuilder
+    private var relatedSection: some View {
+        if let movie = viewModel.enrichedMovie, !movie.related.isEmpty {
+            RelatedRow(title: "Vus aussi", items: movie.related)
+        } else if let show = viewModel.enrichedShow, !show.related.isEmpty {
+            RelatedRow(title: "Vus aussi", items: show.related)
+        }
+    }
+
+    private func directorNames(_ crew: [Crew]) -> [String] {
+        var seen = Set<String>()
+        return crew.filter { $0.roleType == .director }.map(\.name).filter { seen.insert($0).inserted }
     }
 
     private func metadataLine(year: String, runtime: Int, certification: String, rating: Float) -> String {
