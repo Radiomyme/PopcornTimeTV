@@ -1,7 +1,9 @@
 
 
 import Foundation
+#if canImport(UIKit)
 import UIKit.NSAttributedString
+#endif
 
 extension String {
 

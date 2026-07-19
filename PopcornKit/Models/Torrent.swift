@@ -2,6 +2,13 @@
 
 import Foundation
 import ObjectMapper
+#if canImport(UIKit)
+import UIKit
+public typealias PlatformColor = UIColor
+#elseif canImport(AppKit)
+import AppKit
+public typealias PlatformColor = NSColor
+#endif
 
 /**
  Health of a torrent.
@@ -13,13 +20,13 @@ public enum Health {
     case excellent
     case unknown
 
-    public var color: UIColor {
+    public var color: PlatformColor {
         switch self {
-        case .bad:       return UIColor(red: 212.0/255.0, green:  14.0/255.0, blue:   0.0/255.0, alpha: 1.0)
-        case .medium:    return UIColor(red: 212.0/255.0, green: 120.0/255.0, blue:   0.0/255.0, alpha: 1.0)
-        case .good:      return UIColor(red: 201.0/255.0, green: 212.0/255.0, blue:   0.0/255.0, alpha: 1.0)
-        case .excellent: return UIColor(red:  90.0/255.0, green: 186.0/255.0, blue:   0.0/255.0, alpha: 1.0)
-        case .unknown:   return UIColor(red: 105.0/255.0, green: 105.0/255.0, blue: 105.0/255.0, alpha: 1.0)
+        case .bad:       return PlatformColor(red: 212.0/255.0, green:  14.0/255.0, blue:   0.0/255.0, alpha: 1.0)
+        case .medium:    return PlatformColor(red: 212.0/255.0, green: 120.0/255.0, blue:   0.0/255.0, alpha: 1.0)
+        case .good:      return PlatformColor(red: 201.0/255.0, green: 212.0/255.0, blue:   0.0/255.0, alpha: 1.0)
+        case .excellent: return PlatformColor(red:  90.0/255.0, green: 186.0/255.0, blue:   0.0/255.0, alpha: 1.0)
+        case .unknown:   return PlatformColor(red: 105.0/255.0, green: 105.0/255.0, blue: 105.0/255.0, alpha: 1.0)
         }
     }
 }

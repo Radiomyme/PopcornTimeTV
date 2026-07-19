@@ -1,5 +1,6 @@
 
 
+import Foundation
 import ObjectMapper
 import Alamofire
 
@@ -606,9 +607,10 @@ struct TraktContext: MapContext {}
 
 extension TraktManager {
     
+    #if canImport(UIKit)
     /**
      First part of the Trakt authentication process.
-     
+
      - Returns: A login view controller to be presented.
      */
     public func loginViewController() -> UIViewController {
@@ -618,6 +620,7 @@ extension TraktManager {
         return UIViewController()
         #endif
     }
+    #endif
 
     /// Build the Trakt authorize URL for the iOS OAuth flow. The host app
     /// presents this in `SFSafariViewController`; once the user grants access

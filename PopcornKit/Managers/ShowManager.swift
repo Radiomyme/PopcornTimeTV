@@ -1,5 +1,6 @@
 
 
+import Foundation
 import ObjectMapper
 
 open class ShowManager: NetworkManager {

@@ -54,8 +54,11 @@ public class ThemeSongManager: NSObject, AVAudioPlayerDelegate {
         self.task = URLSession.shared.dataTask(with: URL(string: url)!, completionHandler: { (data, response, error) in
             do {
                 if let data = data {
+                    // AVAudioSession doesn't exist on macOS — playback just works.
+                    #if !os(macOS)
                     try AVAudioSession.sharedInstance().setCategory(.playback)
-                    
+                    #endif
+
                     let player = try AVAudioPlayer(data: data)
                     player.volume = 0
                     player.numberOfLoops = NSNotFound

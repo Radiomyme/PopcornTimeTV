@@ -1,5 +1,6 @@
 
 
+import Foundation
 import Alamofire
 
 /// Thread-safe one-shot box for sharing a download destination URL between

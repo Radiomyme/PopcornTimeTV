@@ -76,9 +76,13 @@ final class RemuxPlayback {
 
     func start() {
         installHandlers()
-        try? server.start(options: [GCDWebServerOption_Port: 50710,
-                                    GCDWebServerOption_BindToLocalhost: true,
-                                    GCDWebServerOption_AutomaticallySuspendInBackground: false])
+        var options: [String: Any] = [GCDWebServerOption_Port: 50710,
+                                      GCDWebServerOption_BindToLocalhost: true]
+        #if !os(macOS)
+        // iOS/tvOS-only option (ties into UIApplication background suspension).
+        options[GCDWebServerOption_AutomaticallySuspendInBackground] = false
+        #endif
+        try? server.start(options: options)
         pumpTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
             guard let self = self, !self.isPumping else { return }
             self.isPumping = true
@@ -380,9 +384,12 @@ final class RemuxPlayback {
     }
 }
 
+#if canImport(UIKit)
 /// AVPlayerViewController wrapper for the remux path with a toggleable nerd
 /// stats overlay — `Audio ec-3` is the on-screen proof Apple's renderer gets
 /// the raw E-AC-3 and performs the Atmos rendering.
+/// (UIKit-only: the native macOS app has its own AVPlayerView-based player —
+/// the shared `RemuxPlayback` engine above is what both build on.)
 final class RemuxAVPlayerViewController: AVPlayerViewController {
 
     private var remux: RemuxPlayback?
@@ -586,3 +593,4 @@ struct RemuxPlayerView: UIViewControllerRepresentable {
 
     func updateUIViewController(_ vc: RemuxAVPlayerViewController, context: Context) {}
 }
+#endif
