@@ -5,54 +5,8 @@ import PopcornTorrent
 import PopcornKit
 import MediaPlayer.MPMediaItem
 
-/// Reclaim disk from two sources that otherwise leak, especially after a
-/// crash: the torrent partials under `NSTemporaryDirectory()/Downloads/<hash>/`
-/// (PTTorrentStreamer never cleans them itself), AND the remux fMP4 output
-/// under `NSTemporaryDirectory()/remux-XXXX/` (RemuxPlayback only deletes its
-/// own folder on a clean `stop()`; a crash orphans the whole remuxed copy — up
-/// to another ~14 GB for a 4K film, which is why usage hit ~2× the movie size).
-///
-/// Call this:
-///   • on app launch (`AppDelegate.didFinishLaunching`) — free space
-///     accumulated by previous sessions / crashes
-///   • before each new `startStreaming` call — guard against the
-///     "not enough space" assertion in libtorrent (Apple TV sandbox is
-///     ~7–12 GB so two abandoned 4K downloads = full disk).
-///
-/// Safe to call before playback: the *new* remux folder is created later (in
-/// RemuxPlayback.init, after this runs), and any previous player was dismissed
-/// (its remux stopped) before a new stream starts — so we only ever delete
-/// orphans, never the live output.
-///
-/// Standalone function (not a static on `Media`) because Swift forbids
-/// calling static methods on a protocol's metatype like `Media.foo()`.
-func purgeOrphanTorrentDownloads() {
-    let fm = FileManager.default
-    let tmp = NSTemporaryDirectory() as NSString
-    var freed: Int64 = 0
-
-    // 1. Torrent partials: Downloads/<hash>/…
-    let downloads = tmp.appendingPathComponent("Downloads")
-    if fm.fileExists(atPath: downloads) {
-        for entry in (try? fm.contentsOfDirectory(atPath: downloads)) ?? [] {
-            let p = (downloads as NSString).appendingPathComponent(entry)
-            freed += fm.folderSize(atPath: p)
-            try? fm.removeItem(atPath: p)
-        }
-    }
-
-    // 2. Orphaned remux output: remux-XXXX/ (leaks when the player crashes
-    //    before RemuxPlayback.stop() runs).
-    for entry in (try? fm.contentsOfDirectory(atPath: tmp as String)) ?? [] where entry.hasPrefix("remux-") {
-        let p = tmp.appendingPathComponent(entry)
-        freed += fm.folderSize(atPath: p)
-        try? fm.removeItem(atPath: p)
-    }
-
-    if freed > 0 {
-        print("[Cache] purged stale torrent/remux caches (freed \(ByteCountFormatter.string(fromByteCount: freed, countStyle: .file)))")
-    }
-}
+// `purgeOrphanTorrentDownloads()` now lives in TorrentCacheCleanup.swift so it
+// can be shared with the iOS/macOS target (this file is tvOS-only).
 
 extension Media {
     

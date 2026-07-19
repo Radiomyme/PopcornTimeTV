@@ -26,6 +26,12 @@ struct PopcornTimeApp: App {
         // `MediaProviders.shared = YTSEZTVProvider()` lazy init. Pre-warm it
         // here so the UI doesn't pay the cost on first cell render.
         _ = MediaProviders.shared
+
+        // Reclaim disk left behind by previous sessions / crashes — torrent
+        // partials AND orphaned remux fMP4 output. Same cleanup the tvOS
+        // AppDelegate runs at launch; without it a crashed 4K stream can
+        // strand ~2× the movie size on disk.
+        purgeOrphanTorrentDownloads()
     }
 
     var body: some Scene {

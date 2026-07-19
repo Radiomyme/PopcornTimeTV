@@ -533,7 +533,10 @@ struct MediaDetailView: View {
         let streamer = PTTorrentStreamer.shared()
         let mediaTitle = media.title
         let magnet = torrent.url
-        streamer.cancelStreamingAndDeleteData(false)
+        // Clean slate before a new stream: reset the streamer and reclaim disk
+        // from prior torrent partials + orphaned remux output (same as tvOS).
+        streamer.cancelStreamingAndDeleteData(true)
+        purgeOrphanTorrentDownloads()
         print("[iOS Detail] starting torrent: \(magnet.prefix(80))…")
         streamer.startStreaming(fromFileOrMagnetLink: torrent.url, progress: { status in
             DispatchQueue.main.async {

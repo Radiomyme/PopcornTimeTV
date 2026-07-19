@@ -53,6 +53,17 @@ final class RemuxPlayback {
     private var started = false
     private var finishedRemux = false
 
+    /// Highest segment index whose files have been deleted to reclaim disk
+    /// (see `pruneSegments`). Read on the server's request threads, written on
+    /// the main thread — guarded by `pruneLock`.
+    private var prunedThrough = -1
+    private let pruneLock = NSLock()
+    /// How many seconds of already-played segments to keep on disk behind the
+    /// playhead, so short rewinds still hit cached files. Beyond this, played
+    /// segments are deleted; the remux fMP4 copy then stays small instead of
+    /// growing to the full movie size (~14 GB for 4K).
+    private let keepBehindSeconds: Double = 180
+
     init(localFile: URL, streamer: PTTorrentStreamer?, isAtmos: Bool = false) {
         self.inputFile = localFile
         self.streamer = streamer
@@ -121,7 +132,14 @@ final class RemuxPlayback {
         // just past the download frontier).
         server.addHandler(forMethod: "GET", pathRegex: "^/(video_init\\.mp4|audio_init\\.mp4|vseg[0-9]+\\.m4s|aseg[0-9]+\\.m4s)$", request: GCDWebServerRequest.self, asyncProcessBlock: { [weak self] request, completion in
             guard let self = self else { completion(GCDWebServerResponse(statusCode: 410)); return }
-            let target = self.outputDir.appendingPathComponent(String(request.path.dropFirst()))
+            let name = String(request.path.dropFirst())
+            // A media segment we've already deleted behind the playhead: don't
+            // long-poll 120 s waiting for a file that will never come back —
+            // 404 immediately (a rewind past the retained window re-buffers).
+            if let index = Self.segmentIndex(name), self.isPruned(index) {
+                completion(GCDWebServerResponse(statusCode: 404)); return
+            }
+            let target = self.outputDir.appendingPathComponent(name)
             DispatchQueue.global(qos: .userInitiated).async {
                 let deadline = Date().addingTimeInterval(120)
                 while Date() < deadline {
@@ -315,6 +333,46 @@ final class RemuxPlayback {
         try? FileManager.default.removeItem(at: outputDir)
     }
 
+    // MARK: - Played-segment pruning
+
+    /// Numeric index of a `vsegN.m4s` / `asegN.m4s` file, or nil for init/other.
+    static func segmentIndex(_ name: String) -> Int? {
+        guard name.hasSuffix(".m4s"),
+              let range = name.range(of: "seg") else { return nil }
+        return Int(name[range.upperBound...].dropLast(4))
+    }
+
+    private func isPruned(_ index: Int) -> Bool {
+        pruneLock.lock(); defer { pruneLock.unlock() }
+        return index <= prunedThrough
+    }
+
+    /// Delete video+audio segment files that ended more than `keepBehindSeconds`
+    /// before `playheadSeconds`, so the remux fMP4 copy on disk stays bounded to
+    /// a window around the playhead instead of the whole movie. Called ~1/s from
+    /// the player VC with the current playback time. init.mp4 files are never
+    /// touched — AVPlayer needs them for the whole session.
+    func pruneSegments(playheadSeconds: Double) {
+        guard playheadSeconds > keepBehindSeconds, let session = session else { return }
+        let cutoff = playheadSeconds - keepBehindSeconds
+        let segments = session.segmentSnapshot()   // [(duration, name)] in order
+        // Find the last segment index whose END time is still before the cutoff.
+        var elapsed = 0.0
+        var deleteThrough = -1
+        for (index, seg) in segments.enumerated() {
+            elapsed += seg.duration
+            if elapsed < cutoff { deleteThrough = index } else { break }
+        }
+        pruneLock.lock(); let from = prunedThrough + 1; pruneLock.unlock()
+        guard deleteThrough >= from else { return }
+        let fm = FileManager.default
+        for index in from...deleteThrough {
+            try? fm.removeItem(at: outputDir.appendingPathComponent("vseg\(index).m4s"))
+            try? fm.removeItem(at: outputDir.appendingPathComponent("aseg\(index).m4s"))
+        }
+        pruneLock.lock(); prunedThrough = deleteThrough; pruneLock.unlock()
+    }
+
     var statsSummary: String {
         guard let session = session else { return "preparing…" }
         let expected = expectedSegments
@@ -423,6 +481,11 @@ final class RemuxAVPlayerViewController: AVPlayerViewController {
         }
         statsTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
             self?.refreshStats()
+            // Reclaim disk as playback advances: drop segments well behind the
+            // playhead so the remux copy doesn't grow to the full movie size.
+            if let time = self?.player?.currentTime().seconds, time.isFinite {
+                self?.remux?.pruneSegments(playheadSeconds: time)
+            }
         }
         // Visible briefly at start (proof-of-Atmos), then out of the way.
         // Toggle with "n" (Mac/iPad keyboard) or up-click (Siri Remote).

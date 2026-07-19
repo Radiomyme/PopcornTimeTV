@@ -29,6 +29,7 @@
 		47B4719BEE70F041913B00D0 /* ShowManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4D0F9D081E6F296400860852 /* ShowManager.swift */; };
 		48B830EC7270C5FC30750018 /* JSONValue.swift in Sources */ = {isa = PBXBuildFile; fileRef = B9A5B2894233AEB853E7A1E1 /* JSONValue.swift */; };
 		49D321FE2AF60D7F28CF686A /* MKVToHLSRemuxer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0E46BAE46A212B6608B5BBC3 /* MKVToHLSRemuxer.swift */; };
+		4B9522DFF0F10432F24D6DDF /* TorrentCacheCleanup.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0672CB356732DF7D08526F83 /* TorrentCacheCleanup.swift */; };
 		4C5CAD9E7DCFC29BC8964B33 /* DispatchQueue+Extension.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4DB0EA641E7D8C38004B57B1 /* DispatchQueue+Extension.swift */; };
 		4D0183A91DC3ACB500AB75B3 /* Locale+Langs.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4D0183A81DC3ACB400AB75B3 /* Locale+Langs.swift */; };
 		4D07E17C1E8C364F00457FCB /* Object.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4D07E17B1E8C364F00457FCB /* Object.swift */; };
@@ -219,6 +220,7 @@
 		7744AF919D813FC0BA4F8EBC /* WatchlistManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4D0F9D061E6F296400860852 /* WatchlistManager.swift */; };
 		78BB8FA592F829A7DF75E821 /* UpdateManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4D0F9D011E6F296400860852 /* UpdateManager.swift */; };
 		8590BB6FC22FE7E6C36EE139 /* Pods_PopcornKit_iOS.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 1EA105EEC765A7BAF4B04611 /* Pods_PopcornKit_iOS.framework */; };
+		8921264F047B0730DF439E4C /* TorrentCacheCleanup.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0672CB356732DF7D08526F83 /* TorrentCacheCleanup.swift */; };
 		894D8123408D471D25966100 /* MoviesGridView.swift in Sources */ = {isa = PBXBuildFile; fileRef = BFB220FFCCA0BD315227CAF6 /* MoviesGridView.swift */; };
 		9021B73B2596C9348E7B8F44 /* Foundation.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 472C1E7E6E93A7021BE53826 /* Foundation.framework */; };
 		94CEA843733D801FA96304B2 /* SubtitlesManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4D0F9CFD1E6F296400860852 /* SubtitlesManager.swift */; };
@@ -325,6 +327,7 @@
 
 /* Begin PBXFileReference section */
 		002682111CD0B76200F51D31 /* TVServices.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = TVServices.framework; path = System/Library/Frameworks/TVServices.framework; sourceTree = SDKROOT; };
+		0672CB356732DF7D08526F83 /* TorrentCacheCleanup.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = TorrentCacheCleanup.swift; sourceTree = "<group>"; };
 		0E46BAE46A212B6608B5BBC3 /* MKVToHLSRemuxer.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MKVToHLSRemuxer.swift; sourceTree = "<group>"; };
 		0E7132A04857CCE1F0E2A23F /* PopcornTimeApp.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = PopcornTimeApp.swift; path = PopcornTime/UI/iOS/PopcornTimeApp.swift; sourceTree = SOURCE_ROOT; };
 		1B75AFB00989AD9B4CBA5A5D /* Pods-PopcornKit iOS.release.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-PopcornKit iOS.release.xcconfig"; path = "Target Support Files/Pods-PopcornKit iOS/Pods-PopcornKit iOS.release.xcconfig"; sourceTree = "<group>"; };
@@ -760,6 +763,7 @@
 				4D3A401D1EBDEAD1006E7F23 /* URL+MIME.swift */,
 				4DBE60891E5E49B200C2549B /* FileManager+Extension.swift */,
 				4DCCBA5A1DC50D780046C755 /* UIColor+Extension.swift */,
+				0672CB356732DF7D08526F83 /* TorrentCacheCleanup.swift */,
 			);
 			path = Extensions;
 			sourceTree = "<group>";
@@ -1714,6 +1718,7 @@
 				FAC2D3EA9D431CC30DC4593B /* NativeAVPlayerViewController.swift in Sources */,
 				43EC3DA027B3D9931BDDBAC5 /* MKVToHLSRemuxer.swift in Sources */,
 				9B35D6FF8E16F86307B20B6E /* RemuxPlayback.swift in Sources */,
+				4B9522DFF0F10432F24D6DDF /* TorrentCacheCleanup.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -1833,6 +1838,7 @@
 				C729C107309FBC9D01AFD67D /* TrackPickerSheet.swift in Sources */,
 				49D321FE2AF60D7F28CF686A /* MKVToHLSRemuxer.swift in Sources */,
 				B6950884CCBB1C2D93F42FEF /* RemuxPlayback.swift in Sources */,
+				8921264F047B0730DF439E4C /* TorrentCacheCleanup.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -2010,7 +2016,7 @@
 				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
 				GCC_WARN_UNUSED_FUNCTION = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
-				MARKETING_VERSION = 4.2.0;
+				MARKETING_VERSION = 5.0.0;
 				MTL_ENABLE_DEBUG_INFO = YES;
 				ONLY_ACTIVE_ARCH = YES;
 				SDKROOT = appletvos;
@@ -2065,7 +2071,7 @@
 				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
 				GCC_WARN_UNUSED_FUNCTION = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
-				MARKETING_VERSION = 4.2.0;
+				MARKETING_VERSION = 5.0.0;
 				MTL_ENABLE_DEBUG_INFO = NO;
 				ONLY_ACTIVE_ARCH = NO;
 				SDKROOT = appletvos;
@@ -2102,7 +2108,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 4.2.0;
+				MARKETING_VERSION = 5.0.0;
 				OTHER_LDFLAGS = (
 					"$(inherited)",
 					"-Wl,-no_warn_duplicate_libraries",
@@ -2140,7 +2146,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 4.2.0;
+				MARKETING_VERSION = 5.0.0;
 				OTHER_LDFLAGS = (
 					"$(inherited)",
 					"-Wl,-no_warn_duplicate_libraries",
@@ -2180,7 +2186,7 @@
 					"@executable_path/Frameworks",
 					"@loader_path/Frameworks",
 				);
-				MARKETING_VERSION = 4.2.0;
+				MARKETING_VERSION = 5.0.0;
 				MODULE_VERIFIER_SUPPORTED_LANGUAGE_STANDARDS = "gnu99 gnu++11";
 				PRODUCT_BUNDLE_IDENTIFIER = com.popcorntime.ios.PopcornKit;
 				PRODUCT_NAME = PopcornKit;
@@ -2228,7 +2234,7 @@
 					"@executable_path/Frameworks",
 					"@loader_path/Frameworks",
 				);
-				MARKETING_VERSION = 4.2.0;
+				MARKETING_VERSION = 5.0.0;
 				MODULEMAP_FILE = "$(SRCROOT)/PopcornKit/Supporting Files/PopcornKit.modulemap";
 				MODULE_VERIFIER_SUPPORTED_LANGUAGE_STANDARDS = "gnu99 gnu++11";
 				PRODUCT_BUNDLE_IDENTIFIER = com.king.popcornkit;
@@ -2272,7 +2278,7 @@
 					"@executable_path/Frameworks",
 					"@loader_path/Frameworks",
 				);
-				MARKETING_VERSION = 4.2.0;
+				MARKETING_VERSION = 5.0.0;
 				MODULEMAP_FILE = "$(SRCROOT)/PopcornKit/Supporting Files/PopcornKit.modulemap";
 				MODULE_VERIFIER_SUPPORTED_LANGUAGE_STANDARDS = "gnu99 gnu++11";
 				PRODUCT_BUNDLE_IDENTIFIER = com.king.popcornkit;
@@ -2312,7 +2318,7 @@
 					"@executable_path/Frameworks",
 					"@executable_path/../../Frameworks",
 				);
-				MARKETING_VERSION = 4.2.0;
+				MARKETING_VERSION = 5.0.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.popcorntime.tvos.TopShelf;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SKIP_INSTALL = YES;
@@ -2345,7 +2351,7 @@
 					"@executable_path/Frameworks",
 					"@executable_path/../../Frameworks",
 				);
-				MARKETING_VERSION = 4.2.0;
+				MARKETING_VERSION = 5.0.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.popcorntime.tvos.TopShelf;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SKIP_INSTALL = YES;
@@ -2375,7 +2381,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 4.2.0;
+				MARKETING_VERSION = 5.0.0;
 				OTHER_LDFLAGS = (
 					"$(inherited)",
 					"-Wl,-no_warn_duplicate_libraries",
@@ -2410,7 +2416,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 4.2.0;
+				MARKETING_VERSION = 5.0.0;
 				OTHER_LDFLAGS = (
 					"$(inherited)",
 					"-Wl,-no_warn_duplicate_libraries",
@@ -2448,7 +2454,7 @@
 					"@executable_path/Frameworks",
 					"@loader_path/Frameworks",
 				);
-				MARKETING_VERSION = 4.2.0;
+				MARKETING_VERSION = 5.0.0;
 				MODULE_VERIFIER_SUPPORTED_LANGUAGE_STANDARDS = "gnu99 gnu++11";
 				PRODUCT_BUNDLE_IDENTIFIER = com.popcorntime.ios.PopcornKit;
 				PRODUCT_NAME = PopcornKit;
