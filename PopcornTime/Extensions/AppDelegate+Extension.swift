@@ -101,7 +101,12 @@ extension AppDelegate {
         //     lightly-seeded 4K for a well-seeded 1080p);
         //   Lowest   — smallest/fastest;
         //   Off      — always ask.
-        let preference = UserDefaults.standard.string(forKey: "autoSelectQuality") ?? "Highest".localized
+        // Default to "Off" (always show the picker) so the user can weigh
+        // quality vs seeds themselves — the rich chooser below stars the
+        // recommended pick and pre-focuses it, so accepting the smart default
+        // is still one click. Set Highest/Balanced/Lowest in Settings to
+        // auto-pick instead.
+        let preference = UserDefaults.standard.string(forKey: "autoSelectQuality") ?? "Off".localized
         var sorted     = media.torrents.sorted(by: <)
 
         #if targetEnvironment(simulator)

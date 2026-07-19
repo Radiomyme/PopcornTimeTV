@@ -198,7 +198,7 @@ class SettingsTableViewController: UITableViewController, TraktManagerDelegate {
             } else if indexPath.row == 1 {
                 cell.detailTextLabel?.text = UserDefaults.standard.bool(forKey: "removeCacheOnPlayerExit") ? "On".localized : "Off".localized
             } else if indexPath.row == 2 {
-                cell.detailTextLabel?.text = UserDefaults.standard.string(forKey: "autoSelectQuality") ?? "Highest".localized
+                cell.detailTextLabel?.text = UserDefaults.standard.string(forKey: "autoSelectQuality") ?? "Off".localized
             }
         case 1:
             let subtitleSettings = SubtitleSettings.shared
@@ -293,7 +293,7 @@ class SettingsTableViewController: UITableViewController, TraktManagerDelegate {
                     alertController.addAction(UIAlertAction(title: quality, style: .default, handler: handler))
                 }
 
-                alertController.preferredAction = alertController.actions.first(where: { $0.title == UserDefaults.standard.string(forKey: "autoSelectQuality") ?? "Highest".localized })
+                alertController.preferredAction = alertController.actions.first(where: { $0.title == UserDefaults.standard.string(forKey: "autoSelectQuality") ?? "Off".localized })
                 
                 alertController.popoverPresentationController?.sourceView = tableView.cellForRow(at: indexPath)
                 
