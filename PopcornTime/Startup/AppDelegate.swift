@@ -73,9 +73,12 @@ class AppDelegate: UIResponder, UIApplicationDelegate, UITabBarControllerDelegat
         // resume-from-disk.
         UserDefaults.standard.register(defaults: ["removeCacheOnPlayerExit": true])
 
-        // And purge any stragglers from previous sessions (crashes, force
-        // quits, the toggle being off in the past) before any UI loads.
-        purgeOrphanTorrentDownloads()
+        // NOTE: we deliberately do NOT purge torrent partials at launch. That
+        // would delete the download of a movie the user was midway through,
+        // forcing a re-buffer from zero on the next launch. Space is instead
+        // reclaimed just before each new stream (Media.play), which keeps the
+        // folder of the movie about to play and wipes only the others — so at
+        // most one leftover partial ever survives, and it's a resumable one.
 
         let font = UIFont.systemFont(ofSize: 38, weight: UIFont.Weight.heavy)
         UITabBarItem.appearance().setTitleTextAttributes([NSAttributedString.Key.font: font], for: .normal)
