@@ -1,5 +1,5 @@
 <p align="left">
-  <img src="https://imgur.com/agYgrmo.png" alt="Popcorn Time" title="Popcorn Time">
+  <img src="https://i.imgur.com/agYgrmo.jpeg" alt="Popcorn Time" title="Popcorn Time" width="260">
 </p>
 
 # PopcornTimeTV — modernized fork
