@@ -404,6 +404,10 @@ final class RemuxAVPlayerViewController: AVPlayerViewController {
             try? AVAudioSession.sharedInstance().setCategory(.playback, mode: .moviePlayback)
             try? AVAudioSession.sharedInstance().setActive(true)
             let item = AVPlayerItem(url: playlistURL)
+            // Allow AVPlayer to spatialize the multichannel (5.1 + Atmos objects)
+            // audio — this is what renders Atmos to AirPods / built-in speakers
+            // on iOS & Mac (and is a no-op for the Apple TV bitstream path).
+            item.allowedAudioSpatializationFormats = .monoStereoAndMultichannel
             let player = AVPlayer(playerItem: item)
             self?.player = player
             player.play()
@@ -461,6 +465,17 @@ final class RemuxAVPlayerViewController: AVPlayerViewController {
                 var ch = 0
                 if let asbd = CMAudioFormatDescriptionGetStreamBasicDescription(desc) { ch = Int(asbd.pointee.mChannelsPerFrame) }
                 print("[Remux] resolved audio track: '\(cc)' \(ch)ch enabled=\(track.isEnabled)")
+            }
+            // Output-side proof of Atmos on iOS/Mac: whether the current audio
+            // route is actually rendering Spatial Audio (AirPods / built-in
+            // speakers). `true` = the DD+/Atmos is being spatialized right now.
+            let route = AVAudioSession.sharedInstance().currentRoute
+            for out in route.outputs {
+                if #available(iOS 15.0, tvOS 15.0, *) {
+                    print("[Remux] output '\(out.portName)' [\(out.portType.rawValue)] spatialAudioEnabled=\(out.isSpatialAudioEnabled)")
+                } else {
+                    print("[Remux] output '\(out.portName)' [\(out.portType.rawValue)]")
+                }
             }
         }
     }
