@@ -95,11 +95,15 @@ extension UIImage {
         guard
             let copy = copy() as? UIImage,
             let image = copy.colored(.black)?.removingTransparency(), // Image has to have a black foreground on a white background for mask to work.
-            let ciImage = CIImage(image: image),
+            // Guard the CGImage up front: `CIImage(image:)` logs
+            // "initWithCGImage: … CGImage is nil" before returning nil when the
+            // UIImage has no backing CGImage, so build from the CGImage directly.
+            let cgImage = image.cgImage,
             let filter = CIFilter(name:"CIMaskToAlpha")
             else {
                 return nil
         }
+        let ciImage = CIImage(cgImage: cgImage)
         filter.setValue(ciImage, forKey: "inputImage")
         let out = filter.outputImage!
         let layer = CALayer()
