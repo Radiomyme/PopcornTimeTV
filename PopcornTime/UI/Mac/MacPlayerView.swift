@@ -74,6 +74,7 @@ final class MacPlayerController: ObservableObject {
     private var remux: RemuxPlayback?
     private var statsTimer: Timer?
     private var stopped = false
+    private var loggedAtmosVerdict = false
     /// alextud's PopcornTorrent has no singleton — each stream owns an instance.
     private let streamer = PTTorrentStreamer()
 
@@ -178,6 +179,16 @@ final class MacPlayerController: ObservableObject {
                     }
                     let atmos = cc == "ec-3" ? "  → Dolby (Atmos, rendu spatial macOS)" : ""
                     lines.append("Audio   \(cc)  \(channels) ch\(atmos)")
+                    // One clear, greppable verdict line the first time the
+                    // audio format resolves — THE line to read for Atmos.
+                    if !loggedAtmosVerdict {
+                        loggedAtmosVerdict = true
+                        if cc == "ec-3" {
+                            print("[Atmos] ✅ DOLBY ATMOS ACTIF — flux DD+ JOC (16 objets), AVPlayer décode ec-3 \(channels) ch. Rendu spatial: Centre de contrôle ▸ Son ▸ Audio spatial.")
+                        } else {
+                            print("[Atmos] ❌ pas d'Atmos — piste audio '\(cc)' \(channels) ch (il faut une release DD+/E-AC-3 Atmos)")
+                        }
+                    }
                 }
             }
         }

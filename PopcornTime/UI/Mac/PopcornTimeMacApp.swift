@@ -2,6 +2,7 @@
 
 import SwiftUI
 import PopcornKit
+import GCDWebServer
 
 /// Native macOS app entry point. Shares the whole core with iOS/tvOS —
 /// PopcornKit (catalog, torrents metadata, subtitles), PopcornTorrent (SPM,
@@ -13,6 +14,11 @@ import PopcornKit
 @main
 struct PopcornTimeMacApp: App {
     init() {
+        // Silence GCDWebServer's per-chunk "[DEBUG] Connection sent…" console
+        // flood from both the torrent streaming server and the remux HLS
+        // server. 3 = warnings and up (same as the iOS/tvOS apps).
+        GCDWebServer.setLogLevel(3)
+
         // Pre-warm the provider chain (same as the iOS app).
         _ = MediaProviders.shared
         // Reclaim torrent partials + orphaned remux output from previous

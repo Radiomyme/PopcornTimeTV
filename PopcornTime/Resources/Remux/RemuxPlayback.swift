@@ -195,7 +195,10 @@ final class RemuxPlayback {
         lines.append("#EXT-X-STREAM-INF:BANDWIDTH=25000000\(codecsAttr),AUDIO=\"aud\"\(subsAttr)")
         lines.append("video.m3u8")
         let playlist = lines.joined(separator: "\n") + "\n"
-        if !loggedMaster { loggedMaster = true; print("[Remux] master.m3u8 served:\n\(playlist)") }
+        if !loggedMaster {
+            loggedMaster = true
+            print("[Remux] master.m3u8 served — CHANNELS=\"\(channels)\"\(codecsAttr.isEmpty ? "" : " CODECS=\"\(session?.codecsAttribute ?? "")\"") · \(seenLangs.count) subtitle langs")
+        }
         return playlist
     }
     private var loggedMaster = false
