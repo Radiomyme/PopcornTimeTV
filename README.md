@@ -4,14 +4,40 @@
 
 # PopcornTimeTV — modernized fork
 
-[![Platform](http://img.shields.io/badge/platform-tvOS%2026%20%7C%20iOS%2026-lightgrey.svg?style=flat)](https://github.com/Radiomyme/PopcornTimeTV)
+[![Version](https://img.shields.io/badge/version-5.0.0-blue.svg?style=flat)](https://github.com/Radiomyme/PopcornTimeTV/releases)
+[![Platform](http://img.shields.io/badge/platform-tvOS%2026%20%7C%20iOS%2026%20%7C%20macOS-lightgrey.svg?style=flat)](https://github.com/Radiomyme/PopcornTimeTV)
 [![Swift](https://img.shields.io/badge/swift-5-orange.svg?style=flat)](https://swift.org)
 [![License](https://img.shields.io/badge/license-GPL_v3-373737.svg?style=flat)](LICENSE.md)
 
 An Apple TV, iPhone and iPad application to stream movies and TV shows over BitTorrent.
 This fork brings the project up to date for **Xcode 26**, **tvOS 26** and **iOS 26**, rebuilds the
-data layer around pluggable content providers, and adds a native SwiftUI app for iPhone / iPad /
-Mac (Designed for iPad).
+data layer around pluggable content providers, adds a native SwiftUI app for iPhone / iPad /
+Mac (Designed for iPad), and — new in **5.0.0** — ships a zero-dependency, pure-Swift
+**MKV → fMP4/HLS remux engine** that unlocks true **Dolby Atmos** (and HDR) through Apple's
+native `AVPlayer`.
+
+## New in 5.0.0 — the remux engine (true Dolby Atmos)
+
+MKV releases used to fall back to VLC, whose bundled build can't bitstream Dolby and tone-maps
+HDR to SDR. 5.0.0 adds a **pure-Swift, dependency-free Matroska demuxer + fragmented-MP4 (CMAF)
+muxer** (`MKVToHLSRemuxer.swift`) that repackages an MKV **while it's still downloading** and
+serves it to `AVPlayer` as a complete VOD HLS presentation over a localhost server:
+
+- **True Dolby Atmos** — the E-AC-3 (DD+) audio, JOC objects and all, is passed to Apple's
+  decoder untouched. The audio is exposed as its own HLS rendition tagged `CHANNELS="16/JOC"`
+  and the player session is put in `.moviePlayback`, so an Apple TV lights the receiver's
+  **Dolby Atmos** badge and renders true object audio.
+- **HDR / Dolby Vision** preserved (HEVC `hvc1` + `hvcC` copied verbatim — no tone-mapping).
+- **Native subtitles** — OpenSubtitles tracks converted SRT → WebVTT on demand and offered in
+  `AVPlayer`'s own picker (with CRLF/encoding handling for real-world files).
+- **Full VOD timeline from t=0** — dynamic playlist with the real total duration, scrubbing and
+  seeking, no "live" badge; segments are long-polled until remuxed.
+- **Bounded disk use** — already-played segments are pruned behind the playhead, and torrent /
+  remux caches are reclaimed at launch and before each stream on **all** platforms.
+
+> Note: macOS decodes Dolby to PCM and can't bitstream Atmos, so the Atmos badge is an **Apple
+> TV** capability; on Mac the remux still gives you the untouched HDR video and the full-quality
+> audio stream. AirPlay from a Mac does **not** carry Atmos.
 
 ## What's new in this fork
 
@@ -38,8 +64,23 @@ Mac (Designed for iPad).
   subtitle-language preference applied automatically
 - **Audio-language** track picker in the player + a preferred-audio-language setting that
   auto-selects a matching track
-- Quality system rewrite (2160p → 1080p → 720p → 480p, HDR/Dolby Vision/Atmos preferred),
-  hybrid AVPlayer/VLC engine (HDR/DV/Atmos for mp4/m4v/mov, VLC for mkv)
+- Quality system rewrite (2160p → 1080p → 720p → 480p, HDR/Dolby Vision/Atmos preferred)
+- Three-way playback routing: **remux → AVPlayer** for DD+/E-AC-3 MKV (true Atmos, see above),
+  **AVPlayer** for mp4/m4v/mov, **VLC** as the universal fallback
+
+## Supported formats
+
+| Kind | Supported |
+|------|-----------|
+| **Containers** | `.mkv` (remuxed to fMP4/HLS), `.mp4`, `.m4v`, `.mov` (native), anything else via VLC fallback |
+| **Video** | HEVC / H.265 (`hvc1`, incl. 10-bit), H.264 / AVC; **HDR10** and **Dolby Vision** preserved through the remux path (no tone-mapping) |
+| **Audio** | **Dolby Digital Plus (E-AC-3) with Dolby Atmos (JOC)** — true object audio on Apple TV; Dolby Digital (AC-3); AAC; others decoded via VLC |
+| **Resolution** | up to **2160p (4K)**; auto-picks 2160p → 1080p → 720p → 480p by preference |
+| **Subtitles** | OpenSubtitles (SRT → WebVTT), native `AVPlayer` picker, per-language preference; VLC subtitles on the fallback path |
+
+> Atmos and Dolby Vision passthrough require an **Apple TV 4K** connected to a compatible
+> display / receiver. On iPhone / iPad / Mac the same files play with full-quality decoded audio
+> and HDR video where the device supports it.
 
 ## Build
 
