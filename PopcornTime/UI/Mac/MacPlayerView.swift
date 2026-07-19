@@ -84,7 +84,6 @@ final class MacPlayerController: ObservableObject {
         purgeOrphanTorrentDownloads()
 
         let isAtmos = playback.torrent.tags.contains(.atmos)
-        let canRemux = RemuxPlayback.canRemux(magnet: magnet, tags: playback.torrent.tags)
         let subtitles = playback.media.subtitles
 
         streamer.startStreaming(fromMultiTorrentFileOrMagnetLink: magnet, progress: { [weak self] status in
@@ -98,12 +97,19 @@ final class MacPlayerController: ObservableObject {
         }, readyToPlay: { [weak self] videoFileURL, videoFilePath in
             DispatchQueue.main.async {
                 guard let self = self, !self.stopped else { return }
-                if canRemux {
+                // On macOS there is no VLC fallback, so EVERY .mkv goes
+                // through the remuxer (it handles HEVC/H.264 + E-AC-3/AC-3 —
+                // not just the DD+ Atmos case iOS/tvOS gates on).
+                if videoFilePath.path.lowercased().hasSuffix(".mkv") {
                     self.startRemux(localFile: videoFilePath, isAtmos: isAtmos, subtitles: subtitles)
                 } else {
                     // AVPlayer-friendly payloads (mp4/m4v/mov) play straight
-                    // from the torrent's local HTTP endpoint.
-                    self.attachPlayer(to: videoFileURL)
+                    // from the torrent's local HTTP endpoint. alextud's
+                    // GCDWebServer reports its URL as 0.0.0.0 — rewrite to
+                    // 127.0.0.1 (routable, and matches the local server).
+                    var components = URLComponents(url: videoFileURL, resolvingAgainstBaseURL: false)
+                    if components?.host == "0.0.0.0" { components?.host = "127.0.0.1" }
+                    self.attachPlayer(to: components?.url ?? videoFileURL)
                 }
             }
         }, failure: { [weak self] (error: Error) in

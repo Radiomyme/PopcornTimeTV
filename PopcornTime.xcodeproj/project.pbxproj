@@ -2757,6 +2757,7 @@
 				CURRENT_PROJECT_VERSION = 1;
 				ENABLE_HARDENED_RUNTIME = NO;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = PopcornTime/UI/Mac/Info.plist;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.entertainment";
 				INFOPLIST_KEY_NSAppTransportSecurity = "";
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
@@ -2783,6 +2784,7 @@
 				CURRENT_PROJECT_VERSION = 1;
 				ENABLE_HARDENED_RUNTIME = NO;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = PopcornTime/UI/Mac/Info.plist;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.entertainment";
 				INFOPLIST_KEY_NSAppTransportSecurity = "";
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";

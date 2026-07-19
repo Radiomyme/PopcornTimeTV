@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- The torrent streaming server (GCDWebServer, plain HTTP on a local
+	     port), the localhost remux HLS server, and the Time4Popcorn catalog
+	     (http://api.apiabcd.com — the "PopcornTime default" source the
+	     iOS/tvOS apps list first) all require non-TLS connections. Same
+	     exception the iOS/tvOS plists carry. -->
+	<key>NSAppTransportSecurity</key>
+	<dict>
+		<key>NSAllowsArbitraryLoads</key>
+		<true/>
+	</dict>
+</dict>
+</plist>

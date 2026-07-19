@@ -14,9 +14,15 @@ final class MacMoviesViewModel: ObservableObject {
 
     private var currentPage = 1
     private(set) var filter: MovieManager.Filters = .trending
+    private(set) var genre: NetworkManager.Genres = .all
 
     func setFilter(_ newFilter: MovieManager.Filters) {
         filter = newFilter
+        reload()
+    }
+
+    func setGenre(_ newGenre: NetworkManager.Genres) {
+        genre = newGenre
         reload()
     }
 
@@ -32,10 +38,10 @@ final class MacMoviesViewModel: ObservableObject {
         guard !isLoading, hasMore else { return }
         isLoading = true
         let page = currentPage
-        let captured = filter
-        PopcornKit.loadMovies(page, filterBy: captured) { [weak self] results, error in
+        let captured = (filter, genre)
+        PopcornKit.loadMovies(page, filterBy: captured.0, genre: captured.1) { [weak self] results, error in
             DispatchQueue.main.async {
-                guard let self = self, self.filter == captured else { return }
+                guard let self = self, self.filter == captured.0, self.genre == captured.1 else { return }
                 self.isLoading = false
                 if let error = error { self.errorMessage = error.localizedDescription; self.hasMore = false; return }
                 let new = results ?? []
@@ -82,6 +88,13 @@ struct MacMoviesGridView: View {
                 Text("Récents").tag(MovieManager.Filters.date)
             }
             .pickerStyle(.menu)
+            Picker("Genre", selection: Binding(get: { viewModel.genre },
+                                               set: { viewModel.setGenre($0) })) {
+                ForEach(NetworkManager.Genres.array, id: \.self) { genre in
+                    Text(genre.string).tag(genre)
+                }
+            }
+            .pickerStyle(.menu)
         }
         .task { if viewModel.movies.isEmpty { viewModel.loadMore() } }
     }
@@ -97,14 +110,35 @@ final class MacShowsViewModel: ObservableObject {
     @Published var errorMessage: String?
 
     private var currentPage = 1
+    private(set) var filter: ShowManager.Filters = .trending
+    private(set) var genre: ShowManager.Genres = .all
+
+    func setFilter(_ newFilter: ShowManager.Filters) {
+        filter = newFilter
+        reload()
+    }
+
+    func setGenre(_ newGenre: ShowManager.Genres) {
+        genre = newGenre
+        reload()
+    }
+
+    func reload() {
+        currentPage = 1
+        shows = []
+        hasMore = true
+        errorMessage = nil
+        loadMore()
+    }
 
     func loadMore() {
         guard !isLoading, hasMore else { return }
         isLoading = true
         let page = currentPage
-        PopcornKit.loadShows(page) { [weak self] results, error in
+        let captured = (filter, genre)
+        PopcornKit.loadShows(page, filterBy: captured.0, genre: captured.1) { [weak self] results, error in
             DispatchQueue.main.async {
-                guard let self = self else { return }
+                guard let self = self, self.filter == captured.0, self.genre == captured.1 else { return }
                 self.isLoading = false
                 if let error = error { self.errorMessage = error.localizedDescription; self.hasMore = false; return }
                 let new = results ?? []
@@ -142,6 +176,24 @@ struct MacShowsGridView: View {
             }
         }
         .navigationTitle("Séries")
+        .toolbar {
+            Picker("Filtre", selection: Binding(get: { viewModel.filter },
+                                                set: { viewModel.setFilter($0) })) {
+                Text("Tendances").tag(ShowManager.Filters.trending)
+                Text("Populaires").tag(ShowManager.Filters.popularity)
+                Text("Mieux notées").tag(ShowManager.Filters.rating)
+                Text("Récentes").tag(ShowManager.Filters.date)
+                Text("A–Z").tag(ShowManager.Filters.name)
+            }
+            .pickerStyle(.menu)
+            Picker("Genre", selection: Binding(get: { viewModel.genre },
+                                               set: { viewModel.setGenre($0) })) {
+                ForEach(NetworkManager.Genres.array, id: \.self) { genre in
+                    Text(genre.string).tag(genre)
+                }
+            }
+            .pickerStyle(.menu)
+        }
         .task { if viewModel.shows.isEmpty { viewModel.loadMore() } }
     }
 }
