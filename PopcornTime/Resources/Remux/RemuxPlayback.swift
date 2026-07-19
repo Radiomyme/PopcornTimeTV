@@ -94,6 +94,7 @@ final class RemuxPlayback {
         // Audio media playlist (demuxed rendition — carries Atmos signaling).
         server.addHandler(forMethod: "GET", path: "/audio.m3u8", request: GCDWebServerRequest.self) { [weak self] _ in
             guard let self = self else { return GCDWebServerResponse(statusCode: 410) }
+            if !self.loggedAudioFetch { self.loggedAudioFetch = true; print("[Remux] AVPlayer fetched audio.m3u8 (Atmos rendition IS being pulled)") }
             return GCDWebServerDataResponse(data: self.mediaPlaylist(initName: "audio_init.mp4", segPrefix: "aseg").data(using: .utf8)!,
                                             contentType: "application/vnd.apple.mpegurl")
         }
@@ -171,8 +172,12 @@ final class RemuxPlayback {
         let codecsAttr = session?.codecsAttribute.map { ",CODECS=\"\($0)\"" } ?? ""
         lines.append("#EXT-X-STREAM-INF:BANDWIDTH=25000000\(codecsAttr),AUDIO=\"aud\"\(subsAttr)")
         lines.append("video.m3u8")
-        return lines.joined(separator: "\n") + "\n"
+        let playlist = lines.joined(separator: "\n") + "\n"
+        if !loggedMaster { loggedMaster = true; print("[Remux] master.m3u8 served:\n\(playlist)") }
+        return playlist
     }
+    private var loggedMaster = false
+    fileprivate var loggedAudioFetch = false
 
     /// Video (`video_init.mp4` + `vseg*.m4s`) or audio (`audio_init.mp4` +
     /// `aseg*.m4s`) media playlist. Both renditions share the same segment
@@ -336,6 +341,10 @@ final class RemuxAVPlayerViewController: AVPlayerViewController {
             let player = AVPlayer(playerItem: item)
             self?.player = player
             player.play()
+            // Diagnostic: once the item loads, dump what AVPlayer resolved for
+            // audio — the format, channel count, and whether it saw a JOC/Atmos
+            // rendition. Tells us if the Atmos signal reached the player at all.
+            self?.logResolvedAudio(after: item)
         }
         // Fetch OpenSubtitles in parallel; they surface as native HLS
         // subtitle tracks in AVPlayer's own picker.
@@ -357,6 +366,37 @@ final class RemuxAVPlayerViewController: AVPlayerViewController {
             }
         }
         remux.start()
+    }
+
+    /// Poll the item until it's readyToPlay, then log what AVPlayer resolved
+    /// for audio: the media-selection options (does it see a JOC rendition?)
+    /// and the selected track's fourCC + channel count. Purely diagnostic.
+    private func logResolvedAudio(after item: AVPlayerItem, attempt: Int = 0) {
+        guard attempt < 40 else { return }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
+            guard item.status == .readyToPlay else {
+                self?.logResolvedAudio(after: item, attempt: attempt + 1); return
+            }
+            if let group = item.asset.mediaSelectionGroup(forMediaCharacteristic: .audible) {
+                print("[Remux] audio media-selection options: \(group.options.count)")
+                for opt in group.options {
+                    print("[Remux]   option: \(opt.displayName) — \(opt.mediaType.rawValue)")
+                }
+                if let sel = item.currentMediaSelection.selectedMediaOption(in: group) {
+                    print("[Remux] selected audio option: \(sel.displayName)")
+                }
+            } else {
+                print("[Remux] NO audible media-selection group — audio is muxed/not a rendition")
+            }
+            for track in item.tracks where track.assetTrack?.mediaType == .audio {
+                guard let desc = (track.assetTrack?.formatDescriptions as? [CMFormatDescription])?.first else { continue }
+                let sub = CMFormatDescriptionGetMediaSubType(desc)
+                let cc = String(bytes: [UInt8(sub >> 24 & 0xff), UInt8(sub >> 16 & 0xff), UInt8(sub >> 8 & 0xff), UInt8(sub & 0xff)], encoding: .ascii) ?? "?"
+                var ch = 0
+                if let asbd = CMAudioFormatDescriptionGetStreamBasicDescription(desc) { ch = Int(asbd.pointee.mChannelsPerFrame) }
+                print("[Remux] resolved audio track: '\(cc)' \(ch)ch enabled=\(track.isEnabled)")
+            }
+        }
     }
 
     override func viewDidLoad() {
