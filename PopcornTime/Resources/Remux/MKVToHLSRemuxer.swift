@@ -762,6 +762,51 @@ final class MKVToHLSRemuxSession {
     var totalDurationSeconds: Double { return demuxer.durationSeconds }
     var targetDuration: Double { return targetSegmentSeconds }
 
+    // MARK: - HLS master-playlist metadata (demuxed renditions)
+
+    /// The `CHANNELS` attribute for the audio `EXT-X-MEDIA` rendition. For a
+    /// Dolby Atmos release this MUST be `"<objs>/JOC"` — the `/JOC` suffix is
+    /// the exact token tvOS reads to recognize the stream as Atmos and light
+    /// the receiver's badge (Apple HLS Authoring Spec). Otherwise it's just the
+    /// channel count.
+    var audioChannelsAttribute: String {
+        guard isAtmos else { return "\(max(audioConfig?.channels ?? 6, 1))" }
+        return "16/JOC"
+    }
+
+    /// RFC 6381 `CODECS` value for the variant: `hvc1.…,ec-3`. Nil until headers
+    /// are parsed or if the HEVC config can't be read (then CODECS is omitted).
+    var codecsAttribute: String? {
+        guard let hvcC = videoConfig?.codecPrivate,
+              let hevc = Self.hevcCodecString(hvcC: hvcC) else { return nil }
+        return "\(hevc),ec-3"
+    }
+
+    /// Build the RFC 6381 codec string for an HEVC track from its
+    /// HEVCDecoderConfigurationRecord (`hvcC`, which is the MKV CodecPrivate).
+    /// Format: `hvc1.<space><profile>.<compat-flags-reversed-hex>.<tier><level>.<constraints>`.
+    static func hevcCodecString(hvcC: Data) -> String? {
+        let b = [UInt8](hvcC)
+        guard b.count >= 13, b[0] == 1 else { return nil }
+        let profileSpace = (b[1] >> 6) & 0x3
+        let tierFlag = (b[1] >> 5) & 0x1
+        let profileIDC = b[1] & 0x1F
+        let compat = (UInt32(b[2]) << 24) | (UInt32(b[3]) << 16) | (UInt32(b[4]) << 8) | UInt32(b[5])
+        // The compatibility flags are printed with the 32 bits in reverse order.
+        var rev: UInt32 = 0
+        for i in 0..<32 where compat & (1 << i) != 0 { rev |= (1 << (31 - i)) }
+        let levelIDC = b[12]
+        var constraints = Array(b[6..<12])
+        while let last = constraints.last, last == 0 { constraints.removeLast() }
+
+        let spacePrefix = ["", "A", "B", "C"][Int(profileSpace)]
+        var s = "hvc1." + spacePrefix + String(profileIDC)
+        s += "." + String(rev, radix: 16).uppercased()
+        s += "." + (tierFlag == 1 ? "H" : "L") + String(levelIDC)
+        for byte in constraints { s += "." + String(format: "%02X", byte) }
+        return s
+    }
+
     /// Snapshot for the dynamic playlist: actual durations of segments cut so far.
     func segmentSnapshot() -> [(duration: Double, name: String)] {
         stateLock.lock(); defer { stateLock.unlock() }
@@ -828,12 +873,16 @@ final class MKVToHLSRemuxSession {
         progress.finished = true
     }
 
-    /// Write init.mp4 once the first audio frame is known (dec3 needs it).
+    /// Write the init segments once the first audio frame is known (dec3 needs
+    /// it). Audio and video are written as SEPARATE single-track fMP4 movies so
+    /// they can be exposed as demuxed HLS renditions — the only way to attach a
+    /// `CHANNELS="16/JOC"` attribute to the audio, which is what tvOS reads to
+    /// recognize Dolby Atmos and light the receiver's badge.
     private var wroteInit = false
     private func writeInitIfNeeded() {
         guard !wroteInit, let video = videoConfig, let audio = audioConfig, !audio.firstAudioFrame.isEmpty else { return }
-        let data = FMP4Muxer.initSegment(tracks: [video, audio])
-        try? data.write(to: outputDirectory.appendingPathComponent("init.mp4"))
+        try? FMP4Muxer.initSegment(tracks: [video]).write(to: outputDirectory.appendingPathComponent("video_init.mp4"))
+        try? FMP4Muxer.initSegment(tracks: [audio]).write(to: outputDirectory.appendingPathComponent("audio_init.mp4"))
         wroteInit = true
     }
 
@@ -900,12 +949,17 @@ final class MKVToHLSRemuxSession {
         let audioFrameDuration = Self.eac3SamplesPerFrame(audioCfg.firstAudioFrame)
         let audioSamples = audioFrames.map { FMP4Muxer.Sample(data: $0.data, duration: audioFrameDuration, sync: true) }
 
-        let segment = FMP4Muxer.mediaSegment(sequence: sequence + 1, trackSamples: [
+        // Demuxed output: one video-only segment and one audio-only segment
+        // sharing the same index so the two HLS renditions stay aligned.
+        let videoSegment = FMP4Muxer.mediaSegment(sequence: sequence + 1, trackSamples: [
             (videoCfg, videoDecodeTime, videoSamples),
+        ])
+        try? videoSegment.write(to: outputDirectory.appendingPathComponent("vseg\(sequence).m4s"))
+        let audioSegment = FMP4Muxer.mediaSegment(sequence: sequence + 1, trackSamples: [
             (audioCfg, audioDecodeTime, audioSamples),
         ])
-        let name = "seg\(sequence).m4s"
-        try? segment.write(to: outputDirectory.appendingPathComponent(name))
+        try? audioSegment.write(to: outputDirectory.appendingPathComponent("aseg\(sequence).m4s"))
+        let name = "vseg\(sequence).m4s"
 
         let segmentSeconds = Double(videoSamples.reduce(0) { $0 + $1.duration }) / 90000.0
         videoDecodeTime += UInt64(videoSamples.reduce(0) { $0 + $1.duration })
@@ -938,7 +992,7 @@ final class MKVToHLSRemuxSession {
             "#EXT-X-TARGETDURATION:\(Int(targetSegmentSeconds.rounded(.up)) + 1)",
             "#EXT-X-MEDIA-SEQUENCE:0",
             "#EXT-X-PLAYLIST-TYPE:\(ended ? "VOD" : "EVENT")",
-            "#EXT-X-MAP:URI=\"init.mp4\"",
+            "#EXT-X-MAP:URI=\"video_init.mp4\"",
         ]
         for segment in playlistSegments {
             lines.append(String(format: "#EXTINF:%.3f,", segment.duration))

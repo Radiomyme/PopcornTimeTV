@@ -85,10 +85,16 @@ final class RemuxPlayback {
             return GCDWebServerDataResponse(data: self.masterPlaylist().data(using: .utf8)!,
                                             contentType: "application/vnd.apple.mpegurl")
         }
-        // Media playlist: full VOD with estimated tail.
-        server.addHandler(forMethod: "GET", path: "/stream.m3u8", request: GCDWebServerRequest.self) { [weak self] _ in
+        // Video media playlist: full VOD with estimated tail.
+        server.addHandler(forMethod: "GET", path: "/video.m3u8", request: GCDWebServerRequest.self) { [weak self] _ in
             guard let self = self else { return GCDWebServerResponse(statusCode: 410) }
-            return GCDWebServerDataResponse(data: self.mediaPlaylist().data(using: .utf8)!,
+            return GCDWebServerDataResponse(data: self.mediaPlaylist(initName: "video_init.mp4", segPrefix: "vseg").data(using: .utf8)!,
+                                            contentType: "application/vnd.apple.mpegurl")
+        }
+        // Audio media playlist (demuxed rendition — carries Atmos signaling).
+        server.addHandler(forMethod: "GET", path: "/audio.m3u8", request: GCDWebServerRequest.self) { [weak self] _ in
+            guard let self = self else { return GCDWebServerResponse(statusCode: 410) }
+            return GCDWebServerDataResponse(data: self.mediaPlaylist(initName: "audio_init.mp4", segPrefix: "aseg").data(using: .utf8)!,
                                             contentType: "application/vnd.apple.mpegurl")
         }
         // Subtitle playlists + payloads.
@@ -109,9 +115,10 @@ final class RemuxPlayback {
                 }
             }
         })
-        // init.mp4 + media segments: long-poll until the remuxer has produced
-        // the file (up to 120 s — covers seeks just past the download frontier).
-        server.addHandler(forMethod: "GET", pathRegex: "^/(init\\.mp4|seg[0-9]+\\.m4s)$", request: GCDWebServerRequest.self, asyncProcessBlock: { [weak self] request, completion in
+        // init segments + media segments (video + audio renditions): long-poll
+        // until the remuxer has produced the file (up to 120 s — covers seeks
+        // just past the download frontier).
+        server.addHandler(forMethod: "GET", pathRegex: "^/(video_init\\.mp4|audio_init\\.mp4|vseg[0-9]+\\.m4s|aseg[0-9]+\\.m4s)$", request: GCDWebServerRequest.self, asyncProcessBlock: { [weak self] request, completion in
             guard let self = self else { completion(GCDWebServerResponse(statusCode: 410)); return }
             let target = self.outputDir.appendingPathComponent(String(request.path.dropFirst()))
             DispatchQueue.global(qos: .userInitiated).async {
@@ -145,6 +152,11 @@ final class RemuxPlayback {
 
     private func masterPlaylist() -> String {
         var lines = ["#EXTM3U", "#EXT-X-VERSION:7"]
+        // Audio is a demuxed rendition so it can carry CHANNELS — for a Dolby
+        // Atmos release that's "16/JOC", the exact token tvOS reads to light
+        // the receiver's Atmos badge. (Muxed audio has nowhere to put it.)
+        let channels = session?.audioChannelsAttribute ?? (isAtmos ? "16/JOC" : "6")
+        lines.append("#EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID=\"aud\",NAME=\"Audio\",DEFAULT=YES,AUTOSELECT=YES,CHANNELS=\"\(channels)\",URI=\"audio.m3u8\"")
         var seenLangs = Set<String>()
         for subtitle in subtitles {
             let lang = subtitle.ISO639
@@ -153,12 +165,19 @@ final class RemuxPlayback {
             lines.append("#EXT-X-MEDIA:TYPE=SUBTITLES,GROUP-ID=\"subs\",NAME=\"\(subtitle.language)\",LANGUAGE=\"\(lang)\",AUTOSELECT=NO,DEFAULT=NO,URI=\"sub_\(lang).m3u8\"")
         }
         let subsAttr = seenLangs.isEmpty ? "" : ",SUBTITLES=\"subs\""
-        lines.append("#EXT-X-STREAM-INF:BANDWIDTH=25000000\(subsAttr)")
-        lines.append("stream.m3u8")
+        // CODECS must list the audio codec (ec-3) for tvOS to treat the audio
+        // rendition as Atmos-capable; the video codec is included when the
+        // HEVC config has been parsed.
+        let codecsAttr = session?.codecsAttribute.map { ",CODECS=\"\($0)\"" } ?? ""
+        lines.append("#EXT-X-STREAM-INF:BANDWIDTH=25000000\(codecsAttr),AUDIO=\"aud\"\(subsAttr)")
+        lines.append("video.m3u8")
         return lines.joined(separator: "\n") + "\n"
     }
 
-    private func mediaPlaylist() -> String {
+    /// Video (`video_init.mp4` + `vseg*.m4s`) or audio (`audio_init.mp4` +
+    /// `aseg*.m4s`) media playlist. Both renditions share the same segment
+    /// grid and durations, so one generator serves both.
+    private func mediaPlaylist(initName: String, segPrefix: String) -> String {
         guard let session = session else { return "#EXTM3U\n" }
         let actual = session.segmentSnapshot()
         let target = session.targetDuration
@@ -169,12 +188,12 @@ final class RemuxPlayback {
             "#EXT-X-TARGETDURATION:\(Int(target.rounded(.up)) + 2)",
             "#EXT-X-MEDIA-SEQUENCE:0",
             "#EXT-X-PLAYLIST-TYPE:VOD",
-            "#EXT-X-MAP:URI=\"init.mp4\"",
+            "#EXT-X-MAP:URI=\"\(initName)\"",
         ]
         for index in 0..<total {
             let duration = index < actual.count ? actual[index].duration : target
             lines.append(String(format: "#EXTINF:%.3f,", duration))
-            lines.append("seg\(index).m4s")
+            lines.append("\(segPrefix)\(index).m4s")
         }
         lines.append("#EXT-X-ENDLIST")
         return lines.joined(separator: "\n") + "\n"
