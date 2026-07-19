@@ -1,27 +1,9 @@
 
 
 import Foundation
-import CryptoKit
 import PopcornTorrent
 import PopcornKit
 import MediaPlayer.MPMediaItem
-
-/// The download subfolder `PTTorrentStreamer` uses for a given magnet.
-///
-/// The streamer stores each torrent under
-/// `NSTemporaryDirectory()/Downloads/<first 16 hex chars of md5(magnetLink)>/`
-/// (PTTorrentStreamer.mm: `pathComponent = [[CocoaSecurity md5:magnetLink].hexLower substringToIndex:16]`).
-/// If that folder — with its `resumeData.fastresume` — survives, the streamer
-/// resumes the partial download from disk instead of re-buffering from zero.
-///
-/// Returns `nil` for non-magnet inputs (a `.torrent` file is keyed by its data
-/// hash, which we can't reproduce from the URL alone).
-func torrentDownloadFolderName(forMagnet magnetLink: String) -> String? {
-    guard magnetLink.hasPrefix("magnet"),
-          let data = magnetLink.data(using: .utf8) else { return nil }
-    let hex = Insecure.MD5.hash(data: data).map { String(format: "%02x", $0) }.joined()
-    return String(hex.prefix(16))
-}
 
 /// Walk `NSTemporaryDirectory()/Downloads/` and remove every subfolder.
 /// PTTorrentStreamer stores each torrent's partials there under a hash
@@ -101,37 +83,16 @@ extension Media {
         // 7-12 GB of usable space, so two abandoned 4K attempts are enough
         // to make the next "Highest" pick fail with "not enough space".
         //
-        // Exception: if the movie we're about to play is the one already
-        // partially downloaded, keep its folder so the streamer fast-resumes
-        // from disk (no re-buffer). We stash it OUT of Downloads across the
-        // full reset — surviving both `cancelStreamingAndDeleteData(true)`
-        // (which nukes the session + the *current* savePath) and the purge —
-        // then move it back. Any OTHER partials are still wiped for space.
-        // A different movie (or a non-magnet input) → nothing to keep → the
-        // reset wipes everything as before.
-        let fm = FileManager.default
-        let downloadsDir = (NSTemporaryDirectory() as NSString).appendingPathComponent("Downloads")
-        var restoreKeep: (stash: String, original: String)? = nil
-        if let keepName = torrentDownloadFolderName(forMagnet: url) {
-            let keepPath = (downloadsDir as NSString).appendingPathComponent(keepName)
-            if fm.fileExists(atPath: keepPath) {
-                let stash = (NSTemporaryDirectory() as NSString).appendingPathComponent("keep-\(keepName)")
-                try? fm.removeItem(atPath: stash)
-                if (try? fm.moveItem(atPath: keepPath, toPath: stash)) != nil {
-                    restoreKeep = (stash: stash, original: keepPath)
-                    print("[Cache] resuming in-progress download \(keepName) (kept across purge)")
-                }
-            }
-        }
-
+        // NOTE: we intentionally do NOT try to keep a movie's partial for
+        // fast-resume. Resuming a preallocated partial makes libtorrent read
+        // back pieces from disk, and this build crashes in
+        // `torrent::on_disk_read_complete` (a memmove overrun at a piece
+        // boundary) — a bug in the prebuilt PopcornTorrent/libtorrent we can't
+        // patch. So every stream starts clean; re-buffering on replay is the
+        // safe trade until the torrent library is replaced/updated.
         PTTorrentStreamer.shared().cancelStreamingAndDeleteData(true)
         purgeOrphanTorrentDownloads()
 
-        if let keep = restoreKeep {
-            try? fm.createDirectory(atPath: downloadsDir, withIntermediateDirectories: true)
-            try? fm.moveItem(atPath: keep.stash, toPath: keep.original)
-        }
-        
         if url.hasPrefix("magnet") || (url.hasSuffix(".torrent") && !url.hasPrefix("http")) {
             loadingViewController.streamer = .shared()
             // PTTorrentStreamer dispatches its callbacks on libtorrent's

@@ -73,12 +73,12 @@ class AppDelegate: UIResponder, UIApplicationDelegate, UITabBarControllerDelegat
         // resume-from-disk.
         UserDefaults.standard.register(defaults: ["removeCacheOnPlayerExit": true])
 
-        // NOTE: we deliberately do NOT purge torrent partials at launch. That
-        // would delete the download of a movie the user was midway through,
-        // forcing a re-buffer from zero on the next launch. Space is instead
-        // reclaimed just before each new stream (Media.play), which keeps the
-        // folder of the movie about to play and wipes only the others — so at
-        // most one leftover partial ever survives, and it's a resumable one.
+        // Purge any stragglers from previous sessions (crashes, force quits)
+        // before any UI loads. We can't keep partials for resume: libtorrent
+        // crashes reading back a resumed preallocated partial (see Media.play),
+        // so a leftover partial is only dead weight on the small Apple TV
+        // sandbox — clear it.
+        purgeOrphanTorrentDownloads()
 
         let font = UIFont.systemFont(ofSize: 38, weight: UIFont.Weight.heavy)
         UITabBarItem.appearance().setTitleTextAttributes([NSAttributedString.Key.font: font], for: .normal)
