@@ -40,6 +40,10 @@ final class RemuxPlayback {
     private var idleTicks = 0
     private let inputFile: URL
     private let outputDir: URL
+    /// Release name carried the Atmos tag → signal JOC in the dec3 box so the
+    /// Apple TV lights the receiver's Atmos badge. Gated on the reliable
+    /// `.atmos` tag rather than fragile in-bitstream JOC parsing.
+    private let isAtmos: Bool
     weak var streamer: PTTorrentStreamer?
     /// Subtitles offered as native tracks (OpenSubtitles model objects).
     var subtitles: [Subtitle] = []
@@ -49,9 +53,10 @@ final class RemuxPlayback {
     private var started = false
     private var finishedRemux = false
 
-    init(localFile: URL, streamer: PTTorrentStreamer?) {
+    init(localFile: URL, streamer: PTTorrentStreamer?, isAtmos: Bool = false) {
         self.inputFile = localFile
         self.streamer = streamer
+        self.isAtmos = isAtmos
         self.outputDir = FileManager.default.temporaryDirectory
             .appendingPathComponent("remux-\(UUID().uuidString.prefix(8))")
     }
@@ -242,7 +247,7 @@ final class RemuxPlayback {
     private var failedTicks = 0
     private func tick() {
         if session == nil {
-            session = try? MKVToHLSRemuxSession(inputFile: inputFile, outputDirectory: outputDir)
+            session = try? MKVToHLSRemuxSession(inputFile: inputFile, outputDirectory: outputDir, isAtmos: isAtmos)
         }
         guard let session = session else { return }
         if !prepared {
@@ -303,9 +308,9 @@ final class RemuxAVPlayerViewController: AVPlayerViewController {
     private let statsLabel = UILabel()
     private var statsTimer: Timer?
 
-    func configure(localFile: URL, streamer: PTTorrentStreamer?, title: String, media: Media? = nil) {
+    func configure(localFile: URL, streamer: PTTorrentStreamer?, title: String, media: Media? = nil, isAtmos: Bool = false) {
         keepAliveStreamer = streamer
-        let remux = RemuxPlayback(localFile: localFile, streamer: streamer)
+        let remux = RemuxPlayback(localFile: localFile, streamer: streamer, isAtmos: isAtmos)
         self.remux = remux
         remux.onReady = { [weak self] playlistURL in
             let item = AVPlayerItem(url: playlistURL)
@@ -426,10 +431,11 @@ struct RemuxPlayerView: UIViewControllerRepresentable {
     let title: String
     let streamer: PTTorrentStreamer?
     var media: Media? = nil
+    var isAtmos: Bool = false
 
     func makeUIViewController(context: Context) -> RemuxAVPlayerViewController {
         let vc = RemuxAVPlayerViewController()
-        vc.configure(localFile: localFile, streamer: streamer, title: title, media: media)
+        vc.configure(localFile: localFile, streamer: streamer, title: title, media: media, isAtmos: isAtmos)
         return vc
     }
 

@@ -170,6 +170,8 @@ private struct PendingPlayback: Identifiable {
     let streamer: PTTorrentStreamer?
     /// Local path of the (still downloading) payload — remux engine input.
     var localFile: URL? = nil
+    /// Release name carried the Atmos tag — signal JOC in the remux dec3 box.
+    var isAtmos: Bool = false
 }
 
 struct MediaDetailView: View {
@@ -218,7 +220,7 @@ struct MediaDetailView: View {
                 case .vlc:
                     VLCPlayerView(url: item.url, title: item.title, streamer: item.streamer)
                 case .remux:
-                    RemuxPlayerView(localFile: item.localFile ?? item.url, title: item.title, streamer: item.streamer, media: media)
+                    RemuxPlayerView(localFile: item.localFile ?? item.url, title: item.title, streamer: item.streamer, media: media, isAtmos: item.isAtmos)
                 }
             }
             .ignoresSafeArea()
@@ -552,7 +554,8 @@ struct MediaDetailView: View {
                                                   engine: engine,
                                                   title: mediaTitle,
                                                   streamer: streamer,
-                                                  localFile: filePath)
+                                                  localFile: filePath,
+                                                  isAtmos: torrent.tags.contains(.atmos))
             }
         }, failure: { error in
             DispatchQueue.main.async {

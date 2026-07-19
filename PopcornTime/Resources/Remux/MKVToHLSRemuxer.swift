@@ -458,6 +458,10 @@ final class FMP4Muxer {
         let codecPrivate: Data
         /// First audio frame, used to synthesize dec3/dac3.
         var firstAudioFrame: Data = Data()
+        /// Release is DD+ *Atmos* (E-AC-3 JOC): make dec3 signal it so tvOS
+        /// enables the object-audio path. Gated on the torrent's .atmos tag,
+        /// not merely on E-AC-3, so plain DD+ 5.1 is never mislabeled.
+        var isAtmos: Bool = false
     }
 
     struct Sample {
@@ -580,7 +584,7 @@ final class FMP4Muxer {
             w.u32(0)
             w.u32(UInt32(track.sampleRate) << 16)
             if isEAC3 {
-                w.bytes(box("dec3") { c in c.bytes(dec3Payload(firstFrame: track.firstAudioFrame, sampleRate: track.sampleRate)) })
+                w.bytes(box("dec3") { c in c.bytes(dec3Payload(firstFrame: track.firstAudioFrame, sampleRate: track.sampleRate, isAtmos: track.isAtmos)) })
             } else {
                 w.bytes(box("dac3") { c in c.bytes(dac3Payload(firstFrame: track.firstAudioFrame)) })
             }
@@ -589,7 +593,7 @@ final class FMP4Muxer {
 
     /// EC3SpecificBox (ETSI TS 102 366 F.6) synthesized from the first
     /// E-AC-3 syncframe's BSI fields.
-    static func dec3Payload(firstFrame: Data, sampleRate: Double) -> Data {
+    static func dec3Payload(firstFrame: Data, sampleRate: Double, isAtmos: Bool = false) -> Data {
         let bytes = [UInt8](firstFrame)
         var fscod: UInt32 = 0, bsid: UInt32 = 16, bsmod: UInt32 = 0
         var acmod: UInt32 = 7, lfeon: UInt32 = 1
@@ -632,6 +636,16 @@ final class FMP4Muxer {
         bits |= (0) << 1           // num_dep_sub(4)
         bits |= 0                  // reserved(1)
         w.u24(bits)
+        // Dolby Atmos (JOC) extension — ETSI TS 103 420, required by Apple's
+        // HLS Authoring Spec for tvOS to recognize the stream as Atmos and
+        // enable object-audio passthrough. The raw E-AC-3 frames already
+        // carry JOC, but without this flag in the container tvOS treats them
+        // as plain DD+ 5.1 and never lights the receiver's Atmos badge.
+        //   reserved(7)=0  flag_ec3_extension_type_a(1)=1  complexity_index(8)
+        if isAtmos {
+            w.u8(0x01)             // 7 reserved zeros + extension flag = 1
+            w.u8(0x10)             // complexity_index_type_a: 16 objects (standard for DD+ JOC)
+        }
         return w.data
     }
 
@@ -726,6 +740,7 @@ final class MKVToHLSRemuxSession {
 
     let outputDirectory: URL
     private let demuxer: MatroskaDemuxer
+    private let isAtmos: Bool
     private var videoTrack: MKVTrack?
     private var audioTrack: MKVTrack?
     private var videoConfig: FMP4Muxer.TrackConfig?
@@ -753,9 +768,10 @@ final class MKVToHLSRemuxSession {
         return playlistSegments
     }
 
-    init(inputFile: URL, outputDirectory: URL, targetSegmentSeconds: Double = 6) throws {
+    init(inputFile: URL, outputDirectory: URL, targetSegmentSeconds: Double = 6, isAtmos: Bool = false) throws {
         self.outputDirectory = outputDirectory
         self.targetSegmentSeconds = targetSegmentSeconds
+        self.isAtmos = isAtmos
         let handle = try FileHandle(forReadingFrom: inputFile)
         let path = inputFile.path
         let reader = EBMLReader(handle: handle) {
@@ -783,6 +799,7 @@ final class MKVToHLSRemuxSession {
                                             width: 0, height: 0,
                                             channels: audio.channels, sampleRate: audio.samplingFrequency,
                                             codecID: audio.codecID, codecPrivate: audio.codecPrivate)
+        audioConfig?.isAtmos = isAtmos
         return true
     }
 
