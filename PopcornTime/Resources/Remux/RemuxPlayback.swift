@@ -337,6 +337,14 @@ final class RemuxAVPlayerViewController: AVPlayerViewController {
         let remux = RemuxPlayback(localFile: localFile, streamer: streamer, isAtmos: isAtmos)
         self.remux = remux
         remux.onReady = { [weak self] playlistURL in
+            // tvOS only routes surround / Dolby (Atmos) to the receiver when the
+            // audio session is .playback / .moviePlayback. AVPlayerViewController
+            // does NOT configure this for us, so without it the session stays in a
+            // stereo-downmixing default and a byte-perfect Atmos stream still
+            // reaches the soundbar as 2.0 — no Atmos badge. The VLC path already
+            // sets this (PCTPlayerViewController); the remux path must too.
+            try? AVAudioSession.sharedInstance().setCategory(.playback, mode: .moviePlayback)
+            try? AVAudioSession.sharedInstance().setActive(true)
             let item = AVPlayerItem(url: playlistURL)
             let player = AVPlayer(playerItem: item)
             self?.player = player
