@@ -54,6 +54,9 @@
             ReferencedContainer = "container:PopcornTime.xcodeproj">
          </BuildableReference>
       </BuildableProductRunnable>
+      <MetalAPIValidationSettings
+         isEnabled = "No">
+      </MetalAPIValidationSettings>
    </LaunchAction>
    <ProfileAction
       buildConfiguration = "Release"
