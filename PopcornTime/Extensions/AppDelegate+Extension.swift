@@ -130,7 +130,12 @@ extension AppDelegate {
             print("[chooseQuality] picked BALANCED: quality=\(best.quality ?? "?") seeds=\(best.seeds)")
             return completion(best)
         }
-        if preference == "Lowest".localized, let worst = sorted.first {
+        // Lowest = the smallest resolution bucket, but the BEST-playing
+        // release inside it (the comparator puts penalized AVI / CAM / AV1-
+        // without-hardware releases first within a bucket).
+        if preference == "Lowest".localized,
+           let lowestBucket = sorted.first?.qualityValue,
+           let worst = sorted.last(where: { $0.qualityValue == lowestBucket }) {
             print("[chooseQuality] picked LOWEST: quality=\(worst.quality ?? "?")")
             return completion(worst)
         }
@@ -336,74 +341,122 @@ extension AppDelegate {
             print("[Play] subtitles=\(subtitles.count) starting streamer for \(media.title)")
             media.subtitles = subtitles
 
-            // MKV with DD+ audio: remux to fMP4/HLS on the fly and play via
-            // AVPlayer — Apple's renderer gets the raw E-AC-3, i.e. real
-            // Atmos (VLC's passthrough is broken in the bundled 4.0 alpha).
-            if RemuxPlayback.canRemux(magnet: torrent.url, tags: torrent.tags) {
-                let remuxVc = RemuxAVPlayerViewController()
-                remuxVc.modalPresentationStyle = .fullScreen
-                let mediaTitle = media.title
-                let hasAtmos = torrent.tags.contains(.atmos)
-                let playBlock: (URL, URL, Media, Episode?, Float, UIViewController, PTTorrentStreamer) -> Void = { _, videoFilePath, playMedia, _, _, viewController, streamer in
-                    (viewController as? RemuxAVPlayerViewController)?
-                        .configure(localFile: videoFilePath, streamer: streamer, title: mediaTitle, media: playMedia, isAtmos: hasAtmos)
-                }
-                media.play(fromFileOrMagnetLink: torrent.url,
-                           nextEpisodeInSeries: nextEpisode,
-                           loadingViewController: loadingViewController,
-                           playViewController: remuxVc,
-                           progress: currentProgress,
-                           playBlock: playBlock,
-                           errorBlock: error,
-                           finishedLoadingBlock: finishedLoading)
+            // Only a display name that clearly names a VLC-only container
+            // (AVI, TS, WMV…) starts on VLC directly. Everything else starts
+            // on the native AVPlayer controller, which re-routes on the REAL
+            // file name once the torrent is ready (YTS display names carry no
+            // extension): MKV/WebM → on-the-fly fMP4/HLS remux (native HDR10 /
+            // Dolby Vision, true Atmos), MP4/MOV → AVPlayer directly. When
+            // AVFoundation can't play the payload it hands the SAME torrent
+            // stream over to VLC (see `handOffToVLC`).
+            if PlaybackRouting.route(forMagnet: torrent.url) == .vlc {
+                let playViewController = storyboard.instantiateViewController(withIdentifier: "PCTPlayerViewController") as! PCTPlayerViewController
+                playViewController.delegate = self
+                // A title saved part-way is offered « Resume Playing » at that
+                // point; a finished (or nearly finished, ≥ 95 %) one restarts
+                // from the beginning without asking, as on the native players
+                // and the iOS VLC player. (A native → VLC hand-off,
+                // `handOffToVLC`, passes its own position as is.)
+                let startPosition = ResumePolicy.startPosition(forSavedProgress: currentProgress)
+                media.play(fromFileOrMagnetLink: torrent.url, nextEpisodeInSeries: nextEpisode, loadingViewController: loadingViewController, playViewController: playViewController, progress: startPosition, errorBlock: error, finishedLoadingBlock: finishedLoading)
                 return
             }
 
-            // Codec sniff: AVPlayer renders HDR10 / Dolby Vision / Atmos
-            // natively on tvOS 17+ but only handles .mp4/.m4v/.mov.
-            // Almost all YTS torrents are .mkv → fall back to PCTPlayer/VLC.
-            if AppDelegate.shouldUseAVPlayer(forMagnet: torrent.url) {
-                let avVc = NativeAVPlayerViewController()
-                avVc.modalPresentationStyle = .fullScreen
-                let captured = media
-                let mediaCopy = media
-                let playBlock: (URL, URL, Media, Episode?, Float, UIViewController, PTTorrentStreamer) -> Void = { videoFileURL, _, _, _, progress, viewController, streamer in
-                    guard let avVc = viewController as? NativeAVPlayerViewController else { return }
-                    avVc.configure(url: videoFileURL,
-                                   startPositionPercent: progress,
-                                   media: captured,
-                                   streamer: streamer)
+            let nativeViewController = RemuxAVPlayerViewController()
+            nativeViewController.modalPresentationStyle = .fullScreen
+            let hasAtmos = torrent.tags.contains(.atmos)
+            let hintsHDR = !torrent.tags.isDisjoint(with: [.hdr10, .hdr10Plus, .dolbyVision])
+            // Downloads (`hasDownloaded`) flow through these same blocks.
+            let playBlock: (URL, URL, Media, Episode?, Float, UIViewController, PTTorrentStreamer) -> Void = { videoFileURL, videoFilePath, playMedia, upNext, progress, viewController, streamer in
+                guard let nativeViewController = viewController as? RemuxAVPlayerViewController else { return }
+                nativeViewController.onFallback = { [weak self, weak nativeViewController] reason, resumeFraction, resumeDecided in
+                    guard let self = self, let nativeViewController = nativeViewController else { return }
+                    self.handOffToVLC(from: nativeViewController,
+                                      media: playMedia,
+                                      videoFileURL: videoFileURL,
+                                      videoFilePath: videoFilePath,
+                                      progress: resumeFraction,
+                                      resumeDecided: resumeDecided,
+                                      nextEpisode: upNext,
+                                      streamer: streamer,
+                                      reason: reason)
                 }
-                _ = mediaCopy
-                mediaCopy.play(fromFileOrMagnetLink: torrent.url,
-                               nextEpisodeInSeries: nextEpisode,
-                               loadingViewController: loadingViewController,
-                               playViewController: avVc,
-                               progress: currentProgress,
-                               playBlock: playBlock,
-                               errorBlock: error,
-                               finishedLoadingBlock: finishedLoading)
-                return
+                // Saved progress: resumed natively (direct MP4, payload on
+                // disk) or asked about (remux of a still-downloading file).
+                // Episodes get "Up Next" 30 s before the end; accepting it
+                // closes this player (stream cancelled) and then plays
+                // `upNext` through the normal flow, like the VLC player.
+                nativeViewController.configure(localFile: videoFilePath,
+                                               remoteURL: videoFileURL,
+                                               streamer: streamer,
+                                               title: playMedia.title,
+                                               media: playMedia,
+                                               isAtmos: hasAtmos,
+                                               releaseHintsHDR: hintsHDR,
+                                               startPosition: progress,
+                                               nextEpisode: upNext,
+                                               onPlayNext: { [weak self] episode in
+                                                   self?.playNext(episode)
+                                               })
             }
-
-            let playViewController = storyboard.instantiateViewController(withIdentifier: "PCTPlayerViewController") as! PCTPlayerViewController
-            playViewController.delegate = self
-            media.play(fromFileOrMagnetLink: torrent.url, nextEpisodeInSeries: nextEpisode, loadingViewController: loadingViewController, playViewController: playViewController, progress: currentProgress, errorBlock: error, finishedLoadingBlock: finishedLoading)
+            media.play(fromFileOrMagnetLink: torrent.url,
+                       nextEpisodeInSeries: nextEpisode,
+                       loadingViewController: loadingViewController,
+                       playViewController: nativeViewController,
+                       progress: currentProgress,
+                       playBlock: playBlock,
+                       errorBlock: error,
+                       finishedLoadingBlock: finishedLoading)
         }
     }
 
-    /// Inspect the magnet's `dn=` (display name, set by the torrent creator
-    /// to the file name) for an extension AVPlayer can decode. Without this
-    /// the user lands on a black PCTPlayerViewController for unsupported
-    /// containers (mkv with proprietary subtitle tracks, etc.). YTS encodes
-    /// most 4K HEVC inside `.mkv` containers — those keep going to VLC.
-    fileprivate static func shouldUseAVPlayer(forMagnet magnet: String) -> Bool {
-        guard let dn = magnet.components(separatedBy: "&dn=").last?
-                .components(separatedBy: "&").first?
-                .removingPercentEncoding?.lowercased()
-        else { return false }
-        let avFriendly = [".mp4", ".m4v", ".mov"]
-        return avFriendly.contains(where: { dn.hasSuffix($0) })
+    /// The native player gave up (container / codecs AVFoundation can't
+    /// play, item failure, readiness timeout): continue on VLC with the SAME
+    /// torrent stream — not restarted — from the position the native player
+    /// reached. The native controller is flagged as handing off, so its
+    /// dismissal keeps the stream alive; VLC owns it from here (cancels it
+    /// when the user leaves).
+    /// - Parameter resumeDecided: the user chose « Reprendre » in the native
+    ///   player, or was watching when it failed — VLC continues at
+    ///   `progress` without asking. False (e.g. a DTS-only MKV rejected
+    ///   before the native resume question): VLC asks « Resume Playing /
+    ///   Start from Beginning » itself.
+    private func handOffToVLC(from nativeViewController: RemuxAVPlayerViewController,
+                              media: Media,
+                              videoFileURL: URL,
+                              videoFilePath: URL,
+                              progress: Float,
+                              resumeDecided: Bool,
+                              nextEpisode: Episode?,
+                              streamer: PTTorrentStreamer,
+                              reason: String) {
+        print("[Play] native player → VLC fallback (\(reason)) at \(Int(progress * 100)) %"
+              + (resumeDecided ? "" : " — VLC asks whether to resume"))
+        let vlcViewController = UIStoryboard.main.instantiateViewController(withIdentifier: "PCTPlayerViewController") as! PCTPlayerViewController
+        vlcViewController.delegate = self
+        // Only skip VLC's own resume question when it was already answered
+        // (« Reprendre » in the native player) or playback was under way.
+        vlcViewController.resumesWithoutPrompt = resumeDecided
+        vlcViewController.play(media,
+                               fromURL: videoFileURL,
+                               localURL: videoFilePath,
+                               progress: progress,
+                               nextEpisode: nextEpisode,
+                               directory: videoFilePath.deletingLastPathComponent(),
+                               streamer: streamer)
+        let presentVLC = { [weak self] in
+            guard let self = self else { return }
+            self.present(vlcViewController, animated: true)
+        }
+        // Dismiss from the PRESENTER: it takes down the native player and
+        // anything still presented over it (calling dismiss on the player
+        // itself would only close such an alert, and VLC could then not be
+        // presented).
+        if let presenter = nativeViewController.presentingViewController {
+            presenter.dismiss(animated: false, completion: presentVLC)
+        } else {
+            presentVLC()
+        }
     }
     
     func downloadButton(_ button: DownloadButton, wasPressedWith download: PTTorrentDownload, didDeleteHandler: (() -> Void)? = nil) {

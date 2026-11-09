@@ -130,10 +130,12 @@ class PCTPlayerViewController: UIViewController, VLCMediaPlayerDelegate, UIGestu
     
     @IBAction func fastForward() {
         mediaplayer.jumpForward(30)
+        noteUserMovedPlayhead()
     }
     
     @IBAction func rewind() {
         mediaplayer.jumpBackward(30)
+        noteUserMovedPlayhead()
     }
     
     @IBAction func fastForwardHeld(_ sender: UIGestureRecognizer) {
@@ -186,16 +188,33 @@ class PCTPlayerViewController: UIViewController, VLCMediaPlayerDelegate, UIGestu
         }
     }
     
+    /// Closes the player: the user left, Up Next proceeds, or VLC stopped by
+    /// itself (end of file, error). The final progress save comes first,
+    /// before `stop()`: the last position VLC reached.
     @IBAction func didFinishPlaying() {
+        if !isClosing {
+            notePlayerPosition()
+            setProgress(status: .finished)
+            isClosing = true
+        }
+        NotificationCenter.default.removeObserver(self, name: UIApplication.didEnterBackgroundNotification, object: nil)
         mediaplayer.delegate = nil
         mediaplayer.stop()
         
         removeRemoteCommandCenterHandlers()
         endReceivingScreenNotifications()
         
+        // The payload is deleted next: nothing of this player may keep it
+        // open (a deleted file's disk space comes back only once its last
+        // descriptor closes). The asset behind the scrub thumbnails and the
+        // duration fallback holds it open once read; a pending thumbnail
+        // would read it again.
+        workItem?.cancel()
+        idleWorkItem?.cancel()
+        imageGenerator = nil
+        
         streamer.cancelStreamingAndDeleteData(UserDefaults.standard.bool(forKey: "removeCacheOnPlayerExit"))
         
-        setProgress(status: .finished)
         NotificationCenter.default.removeObserver(self, name: .PTTorrentStatusDidChange, object: nil)
         
         dismiss(animated: true)
@@ -208,13 +227,14 @@ class PCTPlayerViewController: UIViewController, VLCMediaPlayerDelegate, UIGestu
         return media.subtitles
     }
     /// Downloaded subtitle awaiting application. VLCKit silently drops an
-    /// `addPlaybackSlave` issued before the media is parsed/playing — which is
-    /// exactly when the preferred-language auto-selection in `viewDidLoad`
-    /// runs, and often when the user picks one from the just-opened options
-    /// panel while the stream is still buffering. So we hold the downloaded
-    /// file and (re)apply it once the player is actually playing.
-    private var pendingSubtitleURL: URL?
-    private var appliedSubtitleURL: URL?
+    /// `addPlaybackSlave` issued before the media is parsed/playing — often
+    /// when the user picks one from the just-opened options panel while the
+    /// stream is still buffering. So we hold the downloaded file, and
+    /// convert + apply it once the player is actually playing (the
+    /// conversion needs the video's frame rate, which VLC knows by then).
+    private var pendingSubtitle: (subtitle: Subtitle, file: URL)?
+    /// A pending file is being converted for VLC (one at a time).
+    private var isConvertingSubtitle = false
 
     /// One-shot: re-select the "encoded" (passthrough) audio device once the
     /// stream is actually playing — the aout may not exist when viewDidLoad
@@ -241,50 +261,291 @@ class PCTPlayerViewController: UIViewController, VLCMediaPlayerDelegate, UIGestu
 #endif
     }
 
+    /// The OpenSubtitles file on screen (or on its way). nil: none of them —
+    /// the file's own text track the user or the auto-selection picked
+    /// (`selectedEmbeddedTrackId`), or no subtitles. Setting nil turns every
+    /// text track off. A file that can't be shown — its download failed, or
+    /// VLC never registered its track — stops being the choice
+    /// (`dropFailedSubtitle`): the options panel shows what is on screen,
+    /// and one click on the entry tries it again.
     var currentSubtitle: Subtitle? {
         didSet {
+            // `dropFailedSubtitle` hands the choice back to what VLC already
+            // shows: nothing to download, nothing to turn off.
+            guard !choiceFollowsScreen else { return }
             guard let subtitle = currentSubtitle else {
-                pendingSubtitleURL = nil
-                appliedSubtitleURL = nil
+                pendingSubtitle = nil
                 mediaplayer.deselectAllTextTracks() // Remove all subtitles (VLCKit 4 track API)
                 return
             }
-            PopcornKit.downloadSubtitleFile(subtitle.link, downloadDirectory: directory, completion: { [weak self] (subtitlePath, error) in
-                guard let self = self, let subtitlePath = subtitlePath else { return }
-                self.pendingSubtitleURL = subtitlePath
+            // Downloaded now; normalised to a UTF-8 SubRip once VLC plays
+            // (applyPendingSubtitle): OpenSubtitles serves the original code
+            // page (CP1251, CP1252…) and formats such as MicroDVD that VLC
+            // would otherwise mis-decode or mis-time.
+            ExternalSubtitleLoader.download(subtitle, into: directory) { [weak self] file in
+                // The user may have picked another one (or none) meanwhile.
+                guard let self = self, !self.isClosing, self.currentSubtitle == subtitle else { return }
+                guard let file = file else {
+                    // HTTP 404 / 429 / 5xx, network error: none of it is on screen.
+                    print("[Player] subtitles: download failed for '\(subtitle.language)'")
+                    self.dropFailedSubtitle(subtitle)
+                    return
+                }
+                self.pendingSubtitle = (subtitle, file)
                 self.applyPendingSubtitle()
-            })
+            }
         }
+    }
+
+    /// Set while `dropFailedSubtitle` hands the choice back to what VLC shows.
+    private var choiceFollowsScreen = false
+
+    /// The OpenSubtitles file `subtitle` can't be shown: its download failed,
+    /// or VLC never registered its track (`giveUpOnSlaveIfOverdue`). It stops
+    /// being the choice, and what VLC shows stays on screen — nothing is
+    /// turned off. The choice becomes that: an earlier OpenSubtitles file VLC
+    /// still shows (`currentSubtitle` again, not downloaded again), the
+    /// file's own track (`selectedEmbeddedTrackId`), or nothing. The options
+    /// panel then shows what is on screen — one already open is refreshed
+    /// (`refreshSubtitlesPanelIfPresented`) — and one click on the entry
+    /// tries it again. (The iOS and macOS VLC players' rule.)
+    private func dropFailedSubtitle(_ subtitle: Subtitle) {
+        guard currentSubtitle == subtitle else { return }
+        let shown = mediaplayer.textTracks.first(where: { $0.isSelected })
+        choiceFollowsScreen = true
+        currentSubtitle = shown.flatMap { attachedSlaveSubtitles[$0.trackId] }
+        choiceFollowsScreen = false
+        selectedEmbeddedTrackId = shown.flatMap { ExternalSubtitleLoader.isVLCSlaveTrackId($0.trackId) ? nil : $0.trackId }
+        pendingSubtitle = nil // an earlier pick waiting to be attached was replaced by this one
+#if os(tvOS)
+        // An open panel still has the dropped entry checked: a click on it
+        // would turn off what is on screen instead of retrying.
+        refreshSubtitlesPanelIfPresented()
+#endif
+    }
+
+    /// The playing video's frame rate (selected video track), nil while VLC
+    /// doesn't know it.
+    private func currentVideoFrameRate() -> Double? {
+        guard let video = (mediaplayer.videoTracks.first(where: { $0.isSelected }) ?? mediaplayer.videoTracks.first)?.video else { return nil }
+        return ExternalSubtitleLoader.videoFrameRate(numerator: video.frameRate, denominator: video.frameRateDenominator)
     }
 
     /// Text-track ids that existed before the last `addPlaybackSlave` call.
     /// Non-nil means "a slave was added and its track hasn't been selected
     /// yet" — VLCKit 4's `enforce:` flag does NOT reliably select the slave's
     /// track, so we watch for the new track to appear (it registers a moment
-    /// after the call) and select it explicitly from the time-changed tick.
+    /// after the call) and select it explicitly from the time-changed tick
+    /// — for `slaveRegistrationTimeout` at most (`giveUpOnSlaveIfOverdue`).
     private var textTrackIdsBeforeSlave: Set<String>?
+    /// The subtitle of that slave: its track is selected only while it is
+    /// still `currentSubtitle`.
+    private var slaveSubtitleAwaitingTrack: Subtitle?
+    /// That slave's converted file (attached once more if VLC doesn't
+    /// register it) and when it was attached.
+    private var slaveFileAwaitingTrack: URL?
+    private var slaveRequestDate: Date?
+    /// The subtitle whose file was already attached a second time.
+    private var slaveRetrySubtitle: Subtitle?
+    /// VLC drops a slave it can't read — an HTML « download limit » page
+    /// served as the file — without registering any track: after this long
+    /// it is attached once more, then given up (the iOS and macOS VLC
+    /// players' delay).
+    private static let slaveRegistrationTimeout: TimeInterval = 8
+    /// The OpenSubtitles file of each registered slave track (by VLC track
+    /// id): what VLC shows becomes the choice again when a later file can't
+    /// be shown (`dropFailedSubtitle`).
+    private var attachedSlaveSubtitles: [String: Subtitle] = [:]
 
-    /// Attaches the pending subtitle as an enforced playback slave, but only
-    /// once the media is actually playing — otherwise VLCKit drops it on the
-    /// floor. Called from the download callback and again from
-    /// `mediaPlayerStateChanged(.playing)` so whichever happens last wins.
+    /// Converts the pending subtitle to UTF-8 SRT — frame-based files
+    /// (MicroDVD) timed with the video's frame rate — and attaches it as an
+    /// enforced playback slave, but only once the media is actually playing:
+    /// otherwise VLCKit drops it on the floor, and the frame rate isn't known.
+    /// Called from the download callback, from
+    /// `mediaPlayerStateChanged(.playing)` and from the time tick, so
+    /// whichever happens last wins.
     func applyPendingSubtitle() {
-        guard let url = pendingSubtitleURL, url != appliedSubtitleURL, mediaplayer.isPlaying else { return }
-        textTrackIdsBeforeSlave = Set(mediaplayer.textTracks.map { $0.trackId })
-        mediaplayer.addPlaybackSlave(url, type: .subtitle, enforce: true)
-        appliedSubtitleURL = url
+        // VLCKit 4 reports `isPlaying` during `.opening` too, before the file's
+        // tracks exist — only the `.playing` state guarantees the slave sticks;
+        // with the file's tracks listed, the id snapshot below already holds
+        // the embedded ones and the video's frame rate is known (otherwise
+        // retried on the next time tick).
+        guard let pending = pendingSubtitle, !isConvertingSubtitle, mediaplayer.state == .playing,
+              !mediaplayer.videoTracks.isEmpty || !mediaplayer.audioTracks.isEmpty else { return }
+        isConvertingSubtitle = true
+        let frameRate = currentVideoFrameRate()
+        print("[Player] subtitles: converting '\(pending.subtitle.language)' for VLC (video \(frameRate.map { String(format: "%.3f fps", $0) } ?? "frame rate unknown"))")
+        ExternalSubtitleLoader.convertForVLC(fileAt: pending.file, subtitle: pending.subtitle, frameRate: frameRate) { [weak self] converted in
+            guard let self = self else { return }
+            self.isConvertingSubtitle = false
+            // Another subtitle (or none) was picked meanwhile: that one goes next.
+            guard let current = self.pendingSubtitle, current.file == pending.file else {
+                self.applyPendingSubtitle()
+                return
+            }
+            // Stopped meanwhile: kept pending, converted again on `.playing`.
+            guard self.mediaplayer.state == .playing || self.mediaplayer.state == .paused else { return }
+            self.pendingSubtitle = nil
+            self.attachSlave(converted, for: pending.subtitle)
+        }
     }
 
-    /// Select the slave's text track once VLC registers it. Distinguishing by
-    /// track id (rather than "select the last one") keeps MKV-embedded
-    /// subtitle tracks from being picked by mistake.
+    /// Attaches `subtitle`'s converted `file` as an enforced playback slave;
+    /// its track is selected once VLC registers it
+    /// (`selectSlaveTextTrackIfNeeded`).
+    private func attachSlave(_ file: URL, for subtitle: Subtitle) {
+        textTrackIdsBeforeSlave = Set(mediaplayer.textTracks.map { $0.trackId })
+        slaveSubtitleAwaitingTrack = subtitle
+        slaveFileAwaitingTrack = file
+        slaveRequestDate = Date()
+        let result = mediaplayer.addPlaybackSlave(file, type: .subtitle, enforce: true)
+        if result != 0 { print("[Player] subtitles: addPlaybackSlave refused (\(result))") } // no track: given up as an unreadable file
+    }
+
+    /// No longer waits for the attached slave's track.
+    private func endSlaveWait() {
+        textTrackIdsBeforeSlave = nil
+        slaveSubtitleAwaitingTrack = nil
+        slaveFileAwaitingTrack = nil
+        slaveRequestDate = nil
+    }
+
+    /// The slave's track hasn't registered `slaveRegistrationTimeout` after
+    /// the attach: the same file is attached once more, and the next time
+    /// the subtitle is given up — no longer the choice (`dropFailedSubtitle`),
+    /// so later selections aren't blocked either. A slave the user no longer
+    /// wants is just no longer waited for.
+    private func giveUpOnSlaveIfOverdue() {
+        guard let requested = slaveRequestDate,
+              Date().timeIntervalSince(requested) > Self.slaveRegistrationTimeout else { return }
+        let subtitle = slaveSubtitleAwaitingTrack
+        let file = slaveFileAwaitingTrack
+        endSlaveWait()
+        guard let subtitle = subtitle, currentSubtitle == subtitle else { return }
+        if slaveRetrySubtitle != subtitle, let file = file {
+            slaveRetrySubtitle = subtitle
+            print("[Player] subtitles: VLC didn't register '\(subtitle.language)' — attaching it once more")
+            attachSlave(file, for: subtitle)
+        } else {
+            print("[Player] subtitles: VLC never registered the OpenSubtitles track — giving up")
+            dropFailedSubtitle(subtitle)
+        }
+    }
+
+    /// Select the slave's text track once VLC registers it. Recognised by its
+    /// track id (`ExternalSubtitleLoader.slaveTrackIds`), never "the last new
+    /// track": the file's own subtitle tracks — MKV-embedded ones, or one
+    /// registering late such as closed captions — are never picked by
+    /// mistake. If the user picked another subtitle (or none) meanwhile, the
+    /// slave's track isn't selected; `enforce:` may have turned it on, so
+    /// the current choice is applied again: its OpenSubtitles file when VLC
+    /// already registered it, the file's own track the user picked, else
+    /// nothing. A track that doesn't register in time is given up
+    /// (`giveUpOnSlaveIfOverdue`).
     func selectSlaveTextTrackIfNeeded() {
         guard let priorIds = textTrackIdsBeforeSlave else { return }
-        let newTracks = mediaplayer.textTracks.filter { !priorIds.contains($0.trackId) }
-        guard let slaveTrack = newTracks.last else { return } // not registered yet — keep waiting
-        slaveTrack.isSelectedExclusively = true
-        textTrackIdsBeforeSlave = nil
-        print("[Player] subtitles ON: selected text track '\(slaveTrack.trackName)' (\(mediaplayer.textTracks.count) total)")
+        let tracks = mediaplayer.textTracks
+        let registered = ExternalSubtitleLoader.slaveTrackIds(tracks.map { $0.trackId }, addedAfter: priorIds)
+        guard let slaveId = registered.last, let slaveTrack = tracks.first(where: { $0.trackId == slaveId }) else {
+            giveUpOnSlaveIfOverdue() // not registered yet — keep waiting, up to the timeout
+            return
+        }
+        let subtitle = slaveSubtitleAwaitingTrack
+        endSlaveWait()
+        if let subtitle = subtitle {
+            for id in registered { attachedSlaveSubtitles[id] = subtitle }
+        }
+        if let subtitle = subtitle, currentSubtitle == subtitle {
+            slaveTrack.isSelectedExclusively = true
+            print("[Player] subtitles ON: selected text track '\(slaveTrack.trackName)' (\(slaveTrack.trackId), \(tracks.count) total)")
+        } else if currentSubtitle == nil {
+            if let id = selectedEmbeddedTrackId, let track = tracks.first(where: { $0.trackId == id }) {
+                track.isSelectedExclusively = true
+            } else {
+                mediaplayer.deselectAllTextTracks()
+            }
+        } else if let current = currentSubtitle,
+                  let track = tracks.first(where: { attachedSlaveSubtitles[$0.trackId] == current }) {
+            track.isSelectedExclusively = true // the current choice, already attached, stays on screen
+        } // else: another subtitle is on its way — selected once attached
+    }
+
+    // MARK: - The file's own subtitle tracks
+
+    /// The file's own text track the user or the auto-selection picked — or
+    /// the one VLC showed when an OpenSubtitles file that can't be shown was
+    /// dropped (`dropFailedSubtitle`); nil when an OpenSubtitles file
+    /// (`currentSubtitle`) or nothing is on.
+    private(set) var selectedEmbeddedTrackId: String?
+    /// The preferred subtitle language was applied (or there was nothing to apply).
+    private var didAutoSelectSubtitle = false
+    /// The user picked subtitles in the options panel: the auto-selection
+    /// never overrides that.
+    private var userChoseSubtitle = false
+    /// Latched by `isInputReady` once VLC played with its tracks registered.
+    private var didReachPlayingWithTracks = false
+
+    /// The file's own text tracks: VLC's text tracks minus the OpenSubtitles
+    /// playback slaves (`ExternalSubtitleLoader.isVLCSlaveTrackId`).
+    func embeddedTextTracks() -> [VLCMediaPlayer.Track] {
+        return mediaplayer.textTracks.filter { !ExternalSubtitleLoader.isVLCSlaveTrackId($0.trackId) }
+    }
+
+    /// True once VLC really plays the input with its tracks registered.
+    /// VLCKit 4 reports `isPlaying` through the whole `.opening` phase too,
+    /// which can last seconds on a torrent stream, while the demuxer hasn't
+    /// registered a single track yet: deciding then would pick OpenSubtitles
+    /// over the file's own subtitle track. So: wait for the `.playing` state
+    /// with an audio or video track listed (the file's own text tracks are
+    /// registered by then), latch it, and from then on only require the
+    /// input to run. (Same rule as the iOS VLC player.)
+    private var isInputReady: Bool {
+        guard !isClosing else { return false }
+        let state = mediaplayer.state
+        if !didReachPlayingWithTracks {
+            guard state == .playing, !mediaplayer.audioTracks.isEmpty || !mediaplayer.videoTracks.isEmpty else { return false }
+            didReachPlayingWithTracks = true
+        }
+        return state == .playing || state == .paused
+    }
+
+    /// Preferred subtitle language (Settings → Subtitles): the file's own
+    /// matching text track first — never a forced-only one, a non-SDH one
+    /// preferred — else the OpenSubtitles entry. Decided once, when the
+    /// input is ready (`isInputReady`), unless the user already picked; the
+    /// iOS VLC player's rule (`autoSelectSubtitleIfNeeded` there). The
+    /// release's own track keeps playing in a native → VLC hand-off, where
+    /// the remux showed it too.
+    func autoSelectSubtitleIfNeeded() {
+        guard !didAutoSelectSubtitle, !userChoseSubtitle, isInputReady else { return }
+        didAutoSelectSubtitle = true
+        guard let code = PlaybackLanguagePreferences.preferredSubtitleLanguageCode else { return }
+        let embedded = embeddedTextTracks().filter {
+            (PlaybackLanguagePreferences.matches($0.language, code: code)
+                || PlaybackLanguagePreferences.matches($0.trackName, code: code))
+                && !PlaybackLanguagePreferences.isForcedSubtitle($0.trackName)
+        }
+        if let track = embedded.first(where: { !PlaybackLanguagePreferences.isHearingImpaired($0.trackName) }) ?? embedded.first {
+            selectedEmbeddedTrackId = track.trackId
+            if !track.isSelected { track.isSelectedExclusively = true }
+            print("[Player] auto-selecting subtitle track '\(track.trackName)' for '\(code)'")
+            return
+        }
+        if let subtitle = ExternalSubtitleLoader.preferredSubtitle(in: subtitles, code: code) {
+            print("[Player] auto-selecting OpenSubtitles '\(subtitle.language)' for '\(code)'")
+            currentSubtitle = subtitle
+        }
+    }
+
+    /// The user picked one of the file's own text tracks in the options
+    /// panel (nil: turned it off). Any OpenSubtitles file goes off first.
+    func didSelectEmbeddedSubtitleTrack(_ trackId: String?) {
+        userChoseSubtitle = true
+        currentSubtitle = nil // every text track off, nothing pending
+        selectedEmbeddedTrackId = trackId
+        if let trackId = trackId, let track = mediaplayer.textTracks.first(where: { $0.trackId == trackId }) {
+            track.isSelectedExclusively = true
+        }
     }
     
     // MARK: - Private vars
@@ -323,11 +584,34 @@ class PCTPlayerViewController: UIViewController, VLCMediaPlayerDelegate, UIGestu
     private var idleWorkItem: DispatchWorkItem?
     internal var shouldHideStatusBar = true
     private let NSNotFound: Int32 = -1
-    private var imageGenerator: AVAssetImageGenerator!
+    /// Scrub thumbnails and `streamDuration`'s fallback, on the torrent
+    /// payload itself. Its asset keeps the payload's file descriptor open
+    /// once it has read the file: released at close, before the payload is
+    /// deleted (`didFinishPlaying`).
+    private var imageGenerator: AVAssetImageGenerator?
     internal var workItem: DispatchWorkItem?
+    /// The targets this player added to the shared `MPRemoteCommandCenter`,
+    /// with their command (`addRemoteCommandCenterHandlers`): removed at
+    /// close.
+    var remoteCommandTargets: [(command: MPRemoteCommand, target: Any)] = []
+    /// The resume seek to `startPosition` is due: the hand-off continues
+    /// there, or the user chose « Resume Playing ». Issued once the input is
+    /// seekable (`applyStartPositionIfNeeded`).
     private var resumePlayback = false
+    /// This session's watched progress, under the iOS VLC player's rules
+    /// (`VLCWatchProgress`) — set up in `viewDidLoad`, once `startPosition`
+    /// and `media` are known.
+    private var watchProgress = VLCWatchProgress(startPosition: 0, resumePoint: 0)
+    /// VLCKit posted a time tick: libvlc has reported a time point, so
+    /// `position` is real from now on. Before the first one it reads 0.0
+    /// (no time point yet), even while `.playing`.
+    private var didReceiveTimeTick = false
+    /// The player is closing (`didFinishPlaying`): its final save is done.
+    private(set) var isClosing = false
     internal var streamDuration: Float {
-        guard let remaining = (mediaplayer.remainingTime ?? VLCTime(int: 0)).value?.floatValue, let elapsed = mediaplayer.time.value?.floatValue else { return Float(CMTimeGetSeconds(imageGenerator.asset.duration) * 1000) }
+        guard let remaining = (mediaplayer.remainingTime ?? VLCTime(int: 0)).value?.floatValue, let elapsed = mediaplayer.time.value?.floatValue else {
+            return imageGenerator.map { Float(CMTimeGetSeconds($0.asset.duration) * 1000) } ?? 0
+        }
         return fabsf(remaining) + elapsed
     }
     internal var nowPlayingInfo: [String: Any]? {
@@ -354,6 +638,8 @@ class PCTPlayerViewController: UIViewController, VLCMediaPlayerDelegate, UIGestu
     // MARK: - Options view controller delegate
     
     func didSelectSubtitle(_ subtitle: Subtitle?) {
+        userChoseSubtitle = true
+        selectedEmbeddedTrackId = nil
         currentSubtitle = subtitle
     }
     
@@ -381,35 +667,29 @@ class PCTPlayerViewController: UIViewController, VLCMediaPlayerDelegate, UIGestu
     /// ISO 639-1/2 codes.
     func autoSelectAudioTrackIfNeeded() {
         guard !didAutoSelectAudioTrack else { return }
-        didAutoSelectAudioTrack = true
-
         let tracks = mediaplayer.audioTracks
-        guard
-            let preferred = UserDefaults.standard.string(forKey: "preferredAudioLanguage"),
-            let code = Locale.commonISOLanguageCodes.first(where: {
-                Locale.current.localizedString(forLanguageCode: $0)?.localizedCapitalized == preferred
-            }),
-            tracks.count > 1
-        else { return }
+        guard !tracks.isEmpty else { return } // not known yet — retried on the next tick
+        didAutoSelectAudioTrack = true
+        guard tracks.count > 1, let code = PlaybackLanguagePreferences.preferredAudioLanguageCode else { return }
 
-        var tokens: Set<String> = [preferred.lowercased(), code.lowercased()]
-        if let english = Locale(identifier: "en").localizedString(forLanguageCode: code) {
-            tokens.insert(english.lowercased())
+        // Same matching as the iOS / macOS players: the container's language
+        // code first, then the free-form track name; commentary and audio
+        // description tracks are avoided.
+        let matching = tracks.filter {
+            PlaybackLanguagePreferences.matches($0.language, code: code)
+                || PlaybackLanguagePreferences.matches($0.trackName, code: code)
         }
-        if let alpha3 = Locale.LanguageCode(code).identifier(.alpha3) {
-            tokens.insert(alpha3.lowercased())
+        guard !matching.isEmpty else { return }
+        func isSecondary(_ track: VLCMediaPlayer.Track) -> Bool {
+            return PlaybackLanguagePreferences.isCommentary(track.trackName)
+                || PlaybackLanguagePreferences.isAudioDescription(track.trackName)
         }
-
-        for track in tracks {
-            // Split on non-letters so the 2-letter code can't false-match
-            // inside an unrelated word ("en" in "Enhanced").
-            let words = Set(track.trackName.lowercased().components(separatedBy: CharacterSet.letters.inverted)).subtracting([""])
-            if !words.isDisjoint(with: tokens) {
-                print("[Player] auto-selecting audio track '\(track.trackName)' for language '\(preferred)'")
-                track.isSelectedExclusively = true
-                return
-            }
-        }
+        // Keep VLC's pick (the file's default track) when it already fits.
+        if let current = tracks.first(where: { $0.isSelected }),
+           matching.contains(where: { $0.trackId == current.trackId }), !isSecondary(current) { return }
+        let best = matching.first(where: { !isSecondary($0) }) ?? matching[0]
+        print("[Player] auto-selecting audio track '\(best.trackName)' for '\(code)'")
+        best.isSelectedExclusively = true
     }
 
     
@@ -422,16 +702,27 @@ class PCTPlayerViewController: UIViewController, VLCMediaPlayerDelegate, UIGestu
     }
     
     func screenshotAtTime(_ time: NSNumber) -> UIImage? {
-        guard let image = try? imageGenerator.copyCGImage(at: CMTimeMakeWithSeconds(time.doubleValue/1000.0, preferredTimescale: 1000), actualTime: nil) else { return nil }
+        guard let image = try? imageGenerator?.copyCGImage(at: CMTimeMakeWithSeconds(time.doubleValue/1000.0, preferredTimescale: 1000), actualTime: nil) else { return nil }
         return UIImage(cgImage: image)
     }
     
     // MARK: - View Methods
     
+    /// Set when VLC takes over from the native (AVPlayer) player: the user has
+    /// either already chosen to resume there, or was watching when the native
+    /// path failed — continue at `startPosition` without asking again.
+    var resumesWithoutPrompt = false
+
     override func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)
         guard mediaplayer.state == .stopped || mediaplayer.state == .opening else { return }
-        if startPosition > 0.0 {
+        // A start at 0 or at the very end (a finished title) plays from the
+        // beginning, without asking (`VLCWatchProgress.seeksAtStart`).
+        let seeksAtStart = VLCWatchProgress.seeksAtStart(startPosition)
+        if seeksAtStart && resumesWithoutPrompt {
+            resumePlayback = true
+            mediaplayer.play()
+        } else if seeksAtStart {
             let isRegular = traitCollection.horizontalSizeClass == .regular && traitCollection.verticalSizeClass == .regular
             let style: UIAlertController.Style = isRegular ? .alert : .actionSheet
             let continueWatchingAlert = UIAlertController(title: nil, message: nil, preferredStyle: style)
@@ -451,6 +742,9 @@ class PCTPlayerViewController: UIViewController, VLCMediaPlayerDelegate, UIGestu
             }))
             continueWatchingAlert.addAction(UIAlertAction(title: "Start from Beginning".localized, style: .default, handler: { action in
                 UIDevice.current.userInterfaceIdiom == .tv ? NotificationCenter.default.removeObserver(self, name: .UIViewControllerFocusedViewDidChange, object: continueWatchingAlert) : ()
+                // The saved resume point is no longer protected: what VLC
+                // plays from 0:00 is saved as is.
+                self.watchProgress.restartFromBeginning()
                 self.loadingActivityIndicatorView.isHidden = false
                 self.mediaplayer.play()
             }))
@@ -463,6 +757,16 @@ class PCTPlayerViewController: UIViewController, VLCMediaPlayerDelegate, UIGestu
     
     override func viewDidLoad() {
         super.viewDidLoad()
+
+        // The protected point is what the title has saved NOW — its resume
+        // point, or what the native player saved at its hand-off (made
+        // before this player exists) — not `startPosition`.
+        watchProgress = VLCWatchProgress(startPosition: startPosition,
+                                         resumePoint: ResumePolicy.startPosition(forSavedProgress: Self.savedProgress(for: media)))
+        // Home, then tvOS terminates the suspended app (or a crash later):
+        // what was watched is kept.
+        NotificationCenter.default.addObserver(self, selector: #selector(applicationDidEnterBackground),
+                                               name: UIApplication.didEnterBackgroundNotification, object: nil)
 
         mediaplayer.delegate = self
         mediaplayer.drawable = movieView
@@ -521,9 +825,8 @@ class PCTPlayerViewController: UIViewController, VLCMediaPlayerDelegate, UIGestu
         (mediaplayer as VLCFontAppearance).setTextRendererFontColor?(NSNumber(value: settings.color.hexInt()))
         (mediaplayer as VLCFontAppearance).setTextRendererFont?(settings.font.fontName as NSString)
         (mediaplayer as VLCFontAppearance).setTextRendererFontForceBold?(NSNumber(booleanLiteral: settings.style == .bold || settings.style == .boldItalic))
-        if let preferredLanguage = settings.language {
-            currentSubtitle = subtitles.first(where: {$0.language == preferredLanguage})
-        }
+        // The preferred subtitle language is applied once VLC lists the
+        // file's own tracks (`autoSelectSubtitleIfNeeded`).
         mediaplayer.media?.addOptions([vlcSettingTextEncoding: settings.encoding])
         
         if let first = tapOnVideoRecognizer, let second = doubleTapToZoomOnVideoRecognizer {
@@ -555,6 +858,9 @@ class PCTPlayerViewController: UIViewController, VLCMediaPlayerDelegate, UIGestu
     }
     
     func mediaPlayerTimeChanged(_ aNotification: Notification) {
+        // A tick delivered after close would register the remote handlers
+        // and the Now Playing info again.
+        guard !isClosing else { return }
         if loadingActivityIndicatorView.isHidden == false {
             loadingActivityIndicatorView.isHidden = true
 
@@ -566,11 +872,9 @@ class PCTPlayerViewController: UIViewController, VLCMediaPlayerDelegate, UIGestu
             resetIdleTimer()
         }
         
-        if resumePlayback && mediaplayer.isSeekable {
-            resumePlayback = false
-            let time = NSNumber(value: startPosition * streamDuration)
-            mediaplayer.time = VLCTime(number: time)
-        }
+        didReceiveTimeTick = true
+        applyStartPositionIfNeeded()
+        notePlayerPosition() // after the resume seek was issued
         
         playPauseButton?.setImage(UIImage(named: "Pause"), for: .normal)
         
@@ -579,7 +883,10 @@ class PCTPlayerViewController: UIViewController, VLCMediaPlayerDelegate, UIGestu
         progressBar.remainingTimeLabel.text = (mediaplayer.remainingTime ?? VLCTime(int: 0)).stringValue
         progressBar.elapsedTimeLabel.text = mediaplayer.time.stringValue
         progressBar.progress = Float(mediaplayer.position) // VLCKit 4: position is Double
+        autoSelectSubtitleIfNeeded() // one-shot; waits until VLC has listed the file's tracks
+        applyPendingSubtitle() // no-op unless a downloaded subtitle still waits for `.playing`
         selectSlaveTextTrackIfNeeded()
+        autoSelectAudioTrackIfNeeded() // one-shot; waits until VLC has listed the tracks
         
         if nextEpisode != nil && ((mediaplayer.remainingTime ?? VLCTime(int: 0)).intValue/1000) == -31 && presentedViewController == nil {
             performSegue(withIdentifier: "showUpNext", sender: nil)
@@ -588,28 +895,39 @@ class PCTPlayerViewController: UIViewController, VLCMediaPlayerDelegate, UIGestu
         }
     }
     
-    func mediaPlayerStateChanged(_ aNotification: Notification) {
+    /// VLCKit 4 (4.0.0a21) passes the new STATE here, not a Notification as
+    /// VLCKit 3 did. The old `(_ aNotification: Notification)` signature only
+    /// "nearly matched" the optional protocol requirement, so it was never
+    /// called: the subtitle re-apply on `.playing`, the passthrough
+    /// re-assertion, paused/finished progress and close-at-end never ran.
+    func mediaPlayerStateChanged(_ newState: VLCMediaPlayerState) {
         resetIdleTimer()
         progressBar.isBuffering = false
         nowPlayingInfo?[MPNowPlayingInfoPropertyElapsedPlaybackTime] = (mediaplayer.time.value?.doubleValue ?? 0)/1000
         // VLCKit 4 collapsed the state enum: `.ended`/`.buffering`/`.esAdded`
         // are gone. End-of-file and manual stop both surface as `.stopped`;
         // buffering is no longer a player state (the torrent streamer drives
-        // the buffering UI via torrentStatusDidChange).
-        switch mediaplayer.state {
-        case .error:
-            fallthrough
-        case .stopped:
-            setProgress(status: .finished)
+        // the buffering UI via torrentStatusDidChange). `didFinishPlaying()`
+        // clears the delegate before stopping, so our own stop can't re-enter.
+        switch newState {
+        case .error, .stopped:
+            // Saves (`.finished`: at the end of the file the last tick
+            // reported 1.0), then closes.
             didFinishPlaying()
         case .paused:
-            setProgress(status: .paused)
+            checkpointProgress()
             playPauseButton?.setImage(UIImage(named: "Play"), for: .normal)
             nowPlayingInfo?[MPNowPlayingInfoPropertyPlaybackRate] = 0.0
         case .playing:
             playPauseButton?.setImage(UIImage(named: "Pause"), for: .normal)
+            // Trakt « start » on resuming from a pause. The first `.playing`
+            // comes before any time tick: nothing is saved then
+            // (`setProgress`), so the stored resume point stays.
             setProgress(status: .watching)
             nowPlayingInfo?[MPNowPlayingInfoPropertyPlaybackRate] = Double(mediaplayer.rate)
+            // The file's tracks are known now: the preferred subtitles (the
+            // file's own track wins over OpenSubtitles), then the slave.
+            autoSelectSubtitleIfNeeded()
             applyPendingSubtitle() // media is ready now — safe to attach the slave
             reassertPassthroughIfNeeded()
         default:
@@ -641,7 +959,9 @@ class PCTPlayerViewController: UIViewController, VLCMediaPlayerDelegate, UIGestu
     
     func resetIdleTimer() {
         idleWorkItem?.cancel()
-        idleWorkItem = DispatchWorkItem() { [unowned self] in
+        // Weak: a closed player is released, possibly before the item runs.
+        idleWorkItem = DispatchWorkItem() { [weak self] in
+            guard let self = self else { return }
             if !self.progressBar.isHidden && self.mediaplayer.isPlaying && !self.progressBar.isScrubbing && !self.progressBar.isBuffering && self.mediaplayer.rate == 1.0  && self.movieView.isDescendant(of: self.view) // If paused, scrubbing, fast forwarding, loading or mirroring, cancel work Item so UI doesn't disappear
             {
                 self.toggleControlsVisible()
@@ -656,18 +976,92 @@ class PCTPlayerViewController: UIViewController, VLCMediaPlayerDelegate, UIGestu
         return true
     }
     
+    // MARK: - Watched progress
+
+    /// Seeks to `startPosition` once the input is seekable, when the resume
+    /// is due (`resumePlayback`) — by POSITION, as the iOS VLC player does,
+    /// never by `startPosition × streamDuration`: at VLCKit 4's first time
+    /// tick `remainingTime` is often still nil (libvlc has only reported its
+    /// time point at position 0.0), and `streamDuration` then falls back to
+    /// AVAsset's duration of the payload, 0 for a Matroska file — the seek
+    /// went to 0:00 and was never retried. libvlc maps a position with the
+    /// demuxer's own duration (measured on 4.0.0a21: lands at the target).
+    private func applyStartPositionIfNeeded() {
+        guard resumePlayback, mediaplayer.isSeekable else { return }
+        resumePlayback = false // before the seek: a seek can post a nested time tick (seen with `time =`)
+        mediaplayer.position = Double(startPosition)
+        print("[Player] resuming at \(Int(startPosition * 100)) %")
+    }
+
+    /// The saved progress (0…1) of a movie / episode, 0 when none.
+    private static func savedProgress(for media: Media?) -> Float {
+        if let movie = media as? Movie { return WatchedlistManager<Movie>.movie.currentProgress(movie.id) }
+        if let episode = media as? Episode { return WatchedlistManager<Episode>.episode.currentProgress(episode.id) }
+        return 0
+    }
+
+    /// Samples VLC's position (time tick, pause, background, close) once
+    /// VLC has reported a time point, while its input plays or is paused.
+    private func notePlayerPosition() {
+        guard !isClosing, didReceiveTimeTick, mediaplayer.state == .playing || mediaplayer.state == .paused else { return }
+        watchProgress.note(position: mediaplayer.position)
+    }
+
+    /// ±30 s, end of a scrub: the position VLC reports from now on is the
+    /// user's, even before the resume point. (A non-seekable input ignores
+    /// them.)
+    func noteUserMovedPlayhead() {
+        guard mediaplayer.isSeekable else { return }
+        watchProgress.userMovedPlayhead()
+    }
+
+    /// Pause / background: saves the position reached so far, so a kill or
+    /// a crash afterwards doesn't lose it.
+    private func checkpointProgress() {
+        guard !isClosing else { return }
+        notePlayerPosition()
+        setProgress(status: .paused)
+    }
+
+    /// tvOS suspends the app in the background (no background mode) and may
+    /// terminate it there.
+    @objc private func applicationDidEnterBackground() {
+        checkpointProgress()
+    }
+
+    /// Watched progress (local + Trakt scrobble, watched mark from 80 %),
+    /// under the native players' rules through `VLCWatchProgress`: the saved
+    /// resume point — or the native player's save at its hand-off — is never
+    /// replaced by a smaller fraction unless VLC played past it or the user
+    /// chose « Start from Beginning »; until the resume seek lands the
+    /// position is at least `startPosition`. Nothing is saved before VLC has
+    /// reported a real position (its first time tick): until then the store
+    /// still holds what the title had when this player opened — a `.playing`
+    /// or `.error` at open, a kill or a close in the first second never
+    /// replace it. And a 0 is never written: WatchedlistManager deletes the
+    /// entry for it (and Trakt its playback progress), while VLC at 0:00 has
+    /// nothing to add.
     func setProgress(status: Trakt.WatchedStatus) {
+        guard let media = media, watchProgress.lastPosition != nil else { return }
+        guard let value = watchProgress.progressToSave(), value > 0 else {
+            if let current = watchProgress.current, current > 0 {
+                print("[Player] progress \(Int(current * 100)) % not saved — keeps the resume point at \(Int(watchProgress.resumePoint * 100)) %")
+            }
+            return
+        }
         if let movie = media as? Movie {
-            WatchedlistManager<Movie>.movie.setCurrentProgress(progressBar.progress, for: movie.id, with: status)
+            WatchedlistManager<Movie>.movie.setCurrentProgress(value, for: movie.id, with: status)
         } else if let episode = media as? Episode {
-            WatchedlistManager<Episode>.episode.setCurrentProgress(progressBar.progress, for: episode.id, with: status)
+            WatchedlistManager<Episode>.episode.setCurrentProgress(value, for: episode.id, with: status)
         }
     }
     
     // MARK: UpNextViewControllerDelegate
     
     func viewController(_ viewController: UpNextViewController, proceedToNextVideo proceed: Bool) {
-        let completion: (() -> Void) = { [unowned self] in
+        // Weak: the player may have closed and been released meanwhile.
+        let completion: (() -> Void) = { [weak self] in
+            guard let self = self else { return }
             if proceed {
                 self.didFinishPlaying()
                 self.delegate?.playNext(self.nextEpisode!)

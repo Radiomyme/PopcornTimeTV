@@ -76,6 +76,23 @@ extension Media {
             // alertController.show()) which asserts main-thread. Hop back
             // to main inside each callback so the caller doesn't have to
             // care about the streamer's threading.
+            //
+            // Always the single-file API, which streams the torrent's LARGEST
+            // file, even when the magnet carries a BEP 53 `so=` file selection
+            // (Torrentio `fileIdx`). Never call
+            // `startStreaming(fromMultiTorrentFileOrMagnetLink:…selectFileToStream:)`
+            // with this PopcornTorrent pod (1.3.15 binary):
+            //  • it sets a process-wide `shouldUserSelectFiles` flag that only
+            //    its first file lookup clears — a stream cancelled before the
+            //    metadata arrives leaves it set, and the next single-file
+            //    stream or download then calls a nil selection block (crash on
+            //    the libtorrent alerts thread);
+            //  • its later lookups ignore the selection anyway, so it would
+            //    serve the largest file while only the selected one downloads.
+            // `so=` stays in the magnet: harmless here (the pod re-prioritises
+            // the largest file once the metadata arrives) and honoured by the
+            // macOS SPM streamer. Season packs are filtered out of iOS/tvOS
+            // episode results instead (`TorrentioClient.dropsEpisodePacks`).
             print("[Streamer] startStreaming magnet=\(url.prefix(80))…")
             var lastLoggedTenth: Float = -1
             PTTorrentStreamer.shared().startStreaming(fromFileOrMagnetLink: url, progress: { (status) in

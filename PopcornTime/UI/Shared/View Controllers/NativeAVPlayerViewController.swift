@@ -6,12 +6,14 @@ import AVFoundation
 import PopcornKit
 import PopcornTorrent
 
-/// Apple's native `AVPlayerViewController`, used when the underlying torrent
-/// contains an `.mp4` / `.m4v` / `.mov` payload. This is the only path on
-/// tvOS 17+ that renders HDR10 / Dolby Vision / Atmos correctly. The vast
-/// majority of YTS 4K torrents are `.mkv` containers (which AVPlayer can't
-/// open), so the codec sniffer in AppDelegate.play(_:torrent:) routes those
-/// to the existing VLC-backed `PCTPlayerViewController`.
+/// Apple's native `AVPlayerViewController` for `.mp4` / `.m4v` / `.mov`
+/// payloads.
+///
+/// UNUSED since the format-coverage overhaul: the tvOS play flow
+/// (`AppDelegate.play(_:torrent:)`) now presents `RemuxAVPlayerViewController`
+/// for every non-VLC payload — it plays MP4/MOV directly too, with external
+/// subtitles, failure detection and the automatic VLC fallback this class
+/// lacks. Kept compiling for reference; safe to delete from the target.
 public final class NativeAVPlayerViewController: AVPlayerViewController {
 
     /// Held to keep the underlying torrent stream alive while AVPlayer is
