@@ -65,13 +65,10 @@ class AppDelegate: UIResponder, UIApplicationDelegate, UITabBarControllerDelegat
         // for every chunk, drowning the console. 3 = warnings and up.
         GCDWebServer.setLogLevel(3)
 
-        // Default to wiping torrent caches when the player exits. Apple TV's
-        // per-app sandbox is ~7–12 GB; without this each streamed movie
-        // leaves 5+ GB of partials behind, and 4K HEVC picks start failing
-        // with "not enough space" after 1–2 watches. The user can flip the
-        // toggle off in Settings if they want to retain partials for
-        // resume-from-disk.
-        UserDefaults.standard.register(defaults: ["removeCacheOnPlayerExit": true])
+        // Stored preferences written by older versions: subtitle language
+        // moved to its own key, Auto Select Quality re-spelled in the current
+        // UI language (see GlassSettingsStore).
+        GlassSettingsStore.migrateStoredPreferences()
 
         // Purge any stragglers from previous sessions (crashes, force quits)
         // before any UI loads. We can't keep partials for resume: libtorrent
@@ -120,8 +117,9 @@ class AppDelegate: UIResponder, UIApplicationDelegate, UITabBarControllerDelegat
     func presentTermsOfServiceIfNeeded() {
         guard !UserDefaults.standard.bool(forKey: "tosAccepted") else { return }
         let vc = UIStoryboard.main.instantiateViewController(withIdentifier: "TermsOfServiceNavigationController")
-        /// Set themeSongVolume to its lowest by default
-        UserDefaults.standard.set(0.25, forKey: "themeSongVolume")
+        // Theme songs are on by default (Settings > Theme Songs), at the
+        // volume Settings writes for "On".
+        GlassSettingsStore.themeSongs = true
         OperationQueue.main.addOperation {
             self.activeRootViewController?.present(vc, animated: false) {
                 self.activeRootViewController?.environmentsToFocus = [self.tabBarController.tabBar]
@@ -140,6 +138,10 @@ class AppDelegate: UIResponder, UIApplicationDelegate, UITabBarControllerDelegat
 
     func application(_ app: UIApplication, open url: URL, options: [UIApplication.OpenURLOptionsKey : Any] = [:]) -> Bool {
         if url.scheme == "PopcornTime" {
+            // Playback is presented from the root view controller, which must
+            // not be showing the release notes then.
+            WhatsNewPresenter.dismiss(animated: false)
+
             guard
                 let actions = url.absoluteString.removingPercentEncoding?.components(separatedBy: "PopcornTime:?action=").last?.components(separatedBy: "»"),
                 let type = actions.first, let json = actions.last
@@ -171,10 +173,6 @@ class AppDelegate: UIResponder, UIApplicationDelegate, UITabBarControllerDelegat
     }
 
     func applicationWillEnterForeground(_ application: UIApplication) {
-    }
-
-    func applicationDidBecomeActive(_ application: UIApplication) {
-        UpdateManager.shared.checkVersion(.daily)
     }
 
     func applicationWillTerminate(_ application: UIApplication) {

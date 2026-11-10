@@ -11,6 +11,8 @@ struct SettingsView: View {
     @AppStorage(PlaybackLanguagePreferences.subtitleLanguageDefaultsKey) private var preferredSubtitleLanguage: String?
     @State private var traktAuthURL: IdentifiableURL?
     @State private var isTraktSignedIn = TraktManager.shared.isSignedIn()
+    /// The release notes of this version, again (they show once at launch).
+    @State private var showWhatsNew = false
 
     var body: some View {
         Form {
@@ -62,6 +64,11 @@ struct SettingsView: View {
 
             Section("À propos") {
                 LabeledContent("Version", value: Bundle.main.shortVersion)
+                Button {
+                    showWhatsNew = true
+                } label: {
+                    Label("Nouveautés", systemImage: "sparkles")
+                }
                 Link(destination: URL(string: "https://github.com/PopcornTimeTV/PopcornTimeTV")!) {
                     Label("Code source", systemImage: "chevron.left.forwardslash.chevron.right")
                 }
@@ -69,6 +76,9 @@ struct SettingsView: View {
         }
         .sheet(item: $traktAuthURL) { item in
             SafariSheet(url: item.url)
+        }
+        .sheet(isPresented: $showWhatsNew) {
+            WhatsNewView { showWhatsNew = false }
         }
         .onReceive(NotificationCenter.default.publisher(for: .traktDidAuthenticate)) { _ in
             isTraktSignedIn = TraktManager.shared.isSignedIn()

@@ -46,12 +46,18 @@ public struct Crew: Person, Equatable {
     }
     
     public init(name: String = "Unknown", imdbId: String = "nm0000000", tmdbId: Int = 0000000, largeImage: String? = nil) {
+        self.init(name: name, job: "", roleType: .unknown, imdbId: imdbId, tmdbId: tmdbId, largeImage: largeImage)
+    }
+
+    /// A crew member from a source other than Trakt (TVMaze, Cinemeta).
+    /// `imdbId` is any id unique to the person ("nm…" when known).
+    public init(name: String, job: String, roleType: Role, imdbId: String, tmdbId: Int = 0, largeImage: String? = nil) {
         self.name = name
-        self.job = ""
+        self.job = job
         self.largeImage = largeImage
         self.imdbId = imdbId
         self.tmdbId = tmdbId
-        self.roleType =  .unknown
+        self.roleType = roleType
     }
     
     public mutating func mapping(map: Map) {

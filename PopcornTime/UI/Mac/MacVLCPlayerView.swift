@@ -15,13 +15,21 @@ struct MacVLCPlayerView: View {
     let media: Media?
     /// Resume point (fraction 0…1) when taking over from a failed AVPlayer.
     let startPosition: Float
+    /// The point the session protects (MacPlayerController, read when it
+    /// opened); nil = what `media` has saved now.
+    let resumePoint: Float?
+    /// The furthest position the native player reached before handing over.
+    let nativeHighWater: Float
     @StateObject private var controller = MacVLCController()
 
-    init(url: URL, subtitles: [Subtitle] = [], media: Media? = nil, startPosition: Float = 0) {
+    init(url: URL, subtitles: [Subtitle] = [], media: Media? = nil, startPosition: Float = 0,
+         resumePoint: Float? = nil, nativeHighWater: Float = 0) {
         self.url = url
         self.subtitles = subtitles
         self.media = media
         self.startPosition = startPosition
+        self.resumePoint = resumePoint
+        self.nativeHighWater = nativeHighWater
     }
 
     var body: some View {
@@ -61,15 +69,18 @@ struct MacVLCPlayerView: View {
             .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 12))
             .padding(16)
         }
-        .onAppear { controller.play(url, subtitles: subtitles, media: media, startPosition: startPosition) }
+        .onAppear {
+            controller.play(url, subtitles: subtitles, media: media, startPosition: startPosition,
+                            resumePoint: resumePoint, nativeHighWater: nativeHighWater)
+        }
         .onDisappear { controller.stop() }
     }
 
     private var subtitleMenu: some View {
         Menu {
-            Toggle("Désactivés", isOn: subtitleBinding(.off))
+            Toggle("Off", isOn: subtitleBinding(.off))
             if !controller.embeddedSubtitleTracks.isEmpty {
-                Section("Pistes du fichier") {
+                Section("Tracks in the File") {
                     ForEach(controller.embeddedSubtitleTracks) { track in
                         Toggle(track.name, isOn: subtitleBinding(.embedded(track.id)))
                     }
@@ -83,18 +94,18 @@ struct MacVLCPlayerView: View {
                     }
                 }
             } else if controller.isSearchingSubtitles {
-                Text("Recherche des sous-titres…")
+                Text("Searching for subtitles…")
             }
         } label: {
             Image(systemName: controller.subtitleSelection == .off ? "captions.bubble" : "captions.bubble.fill")
                 .font(.title3)
-                .accessibilityLabel("Sous-titres")
+                .accessibilityLabel(Text("Subtitles"))
         }
         .menuStyle(.button)
         .buttonStyle(.plain)
         .menuIndicator(.hidden)
         .fixedSize()
-        .help("Sous-titres")
+        .help(Text("Subtitles"))
     }
 
     private var audioMenu: some View {
@@ -108,13 +119,13 @@ struct MacVLCPlayerView: View {
         } label: {
             Image(systemName: "speaker.wave.2")
                 .font(.title3)
-                .accessibilityLabel("Audio")
+                .accessibilityLabel(Text("Audio"))
         }
         .menuStyle(.button)
         .buttonStyle(.plain)
         .menuIndicator(.hidden)
         .fixedSize()
-        .help("Audio")
+        .help(Text("Audio"))
     }
 
     /// Radio-style checkmark binding for a subtitle choice.
@@ -159,6 +170,15 @@ final class MacVLCController: NSObject, ObservableObject, VLCMediaPlayerDelegate
     private var userChoseSubtitle = false
     /// Latched by `isInputReady` once VLC played with its tracks registered.
     private var didReachPlayingWithTracks = false
+    /// What plays: its progress is saved when the player closes.
+    private var media: Media?
+    /// Watched progress of this session, under the iOS / tvOS VLC players'
+    /// rules (`VLCWatchProgress`): the last position VLC reported while it
+    /// played (it reports -1 once the input has ended), and the hand-off
+    /// position until the resume seek has landed.
+    private var watch = VLCWatchProgress(startPosition: 0, resumePoint: 0)
+    /// The session's furthest position before VLC: the native player's.
+    private var nativeHighWater: Float = 0
 
     // External subtitles: downloaded right away, then — once the input is
     // ready (see `isInputReady`) — converted to UTF-8 SRT (frame-based files
@@ -185,7 +205,8 @@ final class MacVLCController: NSObject, ObservableObject, VLCMediaPlayerDelegate
     private var slaveTrackIds: [String: String] = [:]
     private var slaveTrackIdSet: Set<String> = []
 
-    func play(_ url: URL, subtitles: [Subtitle] = [], media: Media? = nil, startPosition: Float = 0) {
+    func play(_ url: URL, subtitles: [Subtitle] = [], media: Media? = nil, startPosition: Float = 0,
+              resumePoint: Float? = nil, nativeHighWater: Float = 0) {
         let vlcMedia = VLCMedia(url: url)
         // Force software decoding on the fallback path. VLCKit 4's macOS
         // OpenGL video output aborts (CreateFilters, vout_helper.c:164) when
@@ -200,6 +221,13 @@ final class MacVLCController: NSObject, ObservableObject, VLCMediaPlayerDelegate
         player.play()
         isPlaying = true
         self.startPosition = startPosition
+        self.media = media
+        // The protected point is the session's — what the title had saved
+        // when the player opened (the native player saves nothing when it
+        // hands over) —, not `startPosition`.
+        watch = VLCWatchProgress(startPosition: startPosition,
+                                 resumePoint: resumePoint ?? media.map(MacPlaybackProgress.resumePoint(for:)) ?? 0)
+        self.nativeHighWater = nativeHighWater
         externalSubtitles = subtitles
         if subtitles.isEmpty, let media {
             if !media.subtitles.isEmpty {
@@ -224,6 +252,7 @@ final class MacVLCController: NSObject, ObservableObject, VLCMediaPlayerDelegate
         timeLabel = player.time.stringValue
         remainingLabel = player.remainingTime?.stringValue ?? "--:--"
         isPlaying = player.isPlaying
+        notePlayerPosition()
 
         if isInputReady {
             applyStartPositionIfNeeded()
@@ -272,10 +301,34 @@ final class MacVLCController: NSObject, ObservableObject, VLCMediaPlayerDelegate
     }
 
     func seek(to newPosition: Double) {
+        // The position VLC reports from now on is the user's, even before
+        // the hand-off point. (A non-seekable input ignores the slider.)
+        if player.isSeekable { watch.userMovedPlayhead() }
         player.position = newPosition
     }
 
+    /// One position for the watched progress, while VLC plays or is paused
+    /// (`VLCWatchProgress.note` ignores the -1 of an input that ended).
+    private func notePlayerPosition() {
+        guard player.state == .playing || player.state == .paused else { return }
+        watch.note(position: player.position)
+    }
+
     func stop() {
+        // Closing: save where playback got (≥ 80 % marks the title watched):
+        // the last position VLC reported while playing — a title played to
+        // its end keeps its last one — or the hand-off position while the
+        // resume seek has not landed. A smaller fraction never replaces the
+        // saved one unless the session — the native player before VLC, or
+        // VLC — played past it (`VLCWatchProgress`, `ResumePolicy`).
+        notePlayerPosition()
+        if let media, let current = watch.current,
+           let value = ResumePolicy.progressToSave(current: current, resumePoint: watch.resumePoint,
+                                                   highWater: max(watch.highWater, current, nativeHighWater),
+                                                   userRestarted: false) {
+            MacPlaybackProgress.store(value, for: media)
+        }
+        media = nil
         timer?.invalidate()
         timer = nil
         player.delegate = nil

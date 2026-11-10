@@ -22,7 +22,8 @@ struct MacPlayerView: View {
             if let vlcURL = controller.vlcURL {
                 // Resumes where the native player stopped.
                 MacVLCPlayerView(url: vlcURL, subtitles: controller.subtitles, media: playback.media,
-                                 startPosition: controller.vlcStartPosition)
+                                 startPosition: controller.vlcStartPosition,
+                                 resumePoint: controller.resumePoint, nativeHighWater: controller.highWater)
                     .ignoresSafeArea()
             } else if let player = controller.player {
                 MacAVPlayerRepresentable(player: player, onPictureInPictureChanged: { active in
@@ -43,10 +44,10 @@ struct MacPlayerView: View {
                     VStack(spacing: 10) {
                         ProgressView()
                             .controlSize(.large)
-                        Text("Mise en mémoire tampon…")
+                        Text("Buffering…")
                             .font(.headline)
                         if !controller.isRebuildingStuckItem {
-                            Text("Le téléchargement est plus lent que la lecture")
+                            Text("The download is slower than playback")
                                 .font(.callout)
                                 .foregroundStyle(.secondary)
                         }
@@ -107,7 +108,7 @@ struct MacPlayerView: View {
 final class MacPlayerController: ObservableObject {
     @Published var player: AVPlayer?
     @Published var buffering: Double = 0
-    @Published var statusLine = "Connexion aux sources…"
+    @Published var statusLine = "Connecting to sources…".localized
     @Published var showStats = true
     @Published var statsText = ""
     /// Set when the native path gives up (DTS / TrueHD-only audio, VP9,
@@ -177,6 +178,12 @@ final class MacPlayerController: ObservableObject {
     private var playerObservers: [NSObjectProtocol] = []
     /// alextud's PopcornTorrent has no singleton — each stream owns an instance.
     private let streamer = PTTorrentStreamer()
+    /// The saved progress this session protects (read when it starts; 0 for
+    /// none or a finished title) and the furthest position (0…1) reached
+    /// natively (1 Hz): `MacPlaybackProgress.save`'s rules. Both go to the
+    /// VLC fallback, which saves the rest of the session.
+    private(set) var resumePoint: Float = 0
+    private(set) var highWater: Float = 0
 
     func start(_ playback: MacPendingPlayback) {
         let magnet = playback.torrent.url
@@ -185,6 +192,7 @@ final class MacPlayerController: ObservableObject {
         purgeOrphanTorrentDownloads()
 
         media = playback.media
+        resumePoint = MacPlaybackProgress.resumePoint(for: playback.media)
         subtitles = playback.media.subtitles
         let isAtmos = playback.torrent.tags.contains(.atmos)
         let hintsHDR = !playback.torrent.tags.isDisjoint(with: [.hdr10, .hdr10Plus, .dolbyVision])
@@ -195,7 +203,7 @@ final class MacPlayerController: ObservableObject {
             DispatchQueue.main.async {
                 guard let self = self, self.player == nil, self.vlcURL == nil else { return }
                 self.buffering = Double(status.bufferingProgress)
-                self.statusLine = String(format: "Buffering %.0f%% · %d seeds · %d KB/s",
+                self.statusLine = String(format: "Buffering %.0f%% · %d seeds · %d KB/s".localized,
                                          status.bufferingProgress * 100, status.seeds,
                                          status.downloadSpeed / 1024)
             }
@@ -222,7 +230,7 @@ final class MacPlayerController: ObservableObject {
                 }
             }
         }, failure: { [weak self] (error: Error) in
-            DispatchQueue.main.async { self?.statusLine = "Échec: \(error.localizedDescription)" }
+            DispatchQueue.main.async { self?.statusLine = String(format: "Failed: %@".localized, error.localizedDescription) }
         }, selectFileToStream: { @Sendable (fileNames: [String], fileSizes: [NSNumber]) -> Int32 in
             // Runs on libtorrent's thread (pure helper only). Multi-file
             // torrents: the magnet's `so=` file when valid, else the largest
@@ -242,7 +250,7 @@ final class MacPlayerController: ObservableObject {
     // MARK: - Remux path (MKV / WebM)
 
     private func startRemux(localFile: URL, isAtmos: Bool, releaseHintsHDR: Bool) {
-        statusLine = "Remuxage MKV → HLS…"
+        statusLine = "Remuxing MKV → HLS…".localized
         engineLine = "MKV remux → AVPlayer (macOS natif)"
         let remux = RemuxPlayback(localFile: localFile,
                                   streamer: streamer,
@@ -313,7 +321,7 @@ final class MacPlayerController: ObservableObject {
 
     private func startDirect() {
         guard let url = directURL else { return }
-        statusLine = "Ouverture du fichier…"
+        statusLine = "Opening the file…".localized
         engineLine = "MP4 direct → AVPlayer (macOS natif)"
         // Nothing is ever pruned on the torrent's own file.
         starvation.positionUnavailable = nil
@@ -654,9 +662,11 @@ final class MacPlayerController: ObservableObject {
     private func fallBackToVLC(_ reason: String, resumeTime: Double? = nil) {
         guard !stopped, vlcURL == nil else { return }
         guard let url = directURL else {
-            statusLine = "Lecture impossible : \(reason)"
+            statusLine = String(format: "Cannot play: %@".localized, reason)
             return
         }
+        // The native part of the session, up to now (VLC gets it as nativeHighWater).
+        noteHighWater()
         let reached = resumeTime.flatMap { fraction(ofPlayerTime: $0) } ?? knownPlaybackFraction()
         if let fraction = reached, fraction > 0.001 {
             vlcStartPosition = ResumePolicy.handOffFraction(reached: fraction)
@@ -675,7 +685,7 @@ final class MacPlayerController: ObservableObject {
         player = nil
         remux?.stop()
         remux = nil
-        statusLine = "Lecture via VLC…"
+        statusLine = "Playing with VLC…".localized
         vlcURL = url
     }
 
@@ -722,6 +732,7 @@ final class MacPlayerController: ObservableObject {
             let duration = item.duration.seconds
             if duration.isFinite, duration > 0 { lastKnownDuration = duration }
         }
+        noteHighWater()
         reportPlaybackPositions()
         checkStuckPlayback()
         rebuildLiveBornItemIfEnded()
@@ -861,12 +872,30 @@ final class MacPlayerController: ObservableObject {
                               resumesPlayback: playing, exactPosition: true)
     }
 
+    /// The session's furthest native position (1 Hz, and at close).
+    private func noteHighWater() {
+        guard player != nil, vlcURL == nil, let fraction = knownPlaybackFraction() else { return }
+        highWater = max(highWater, fraction)
+    }
+
+    /// Closing the native player: saves the known position (≥ 80 % marks the
+    /// title watched) — never below the session's resume point unless it
+    /// played past it. Nothing while buffering, and nothing once VLC took
+    /// over: MacVLCController saves its own position.
+    private func saveProgressIfNeeded() {
+        guard !stopped, vlcURL == nil, player != nil, let media,
+              let fraction = knownPlaybackFraction(), fraction > 0 else { return }
+        noteHighWater()
+        MacPlaybackProgress.save(fraction, for: media, resumePoint: resumePoint, highWater: highWater)
+    }
+
     /// `MacAVPlayerRepresentable`: Picture in Picture started / ended.
     func pictureInPictureChanged(_ active: Bool) {
         isPictureInPictureActive = active
     }
 
     func stop() {
+        saveProgressIfNeeded()
         stopped = true
         statsTimer?.invalidate()
         statsTimer = nil

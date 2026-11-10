@@ -213,7 +213,9 @@ class PCTPlayerViewController: UIViewController, VLCMediaPlayerDelegate, UIGestu
         idleWorkItem?.cancel()
         imageGenerator = nil
         
-        streamer.cancelStreamingAndDeleteData(UserDefaults.standard.bool(forKey: "removeCacheOnPlayerExit"))
+        // Always delete the stream's partial: the Apple TV sandbox is small
+        // and a kept partial can't be resumed anyway (see Media.play).
+        streamer.cancelStreamingAndDeleteData(true)
         
         NotificationCenter.default.removeObserver(self, name: .PTTorrentStatusDidChange, object: nil)
         

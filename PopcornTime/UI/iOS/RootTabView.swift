@@ -3,6 +3,9 @@
 import SwiftUI
 
 struct RootTabView: View {
+    /// Release notes, shown once per version (not on a fresh install).
+    @State private var showWhatsNew = false
+
     var body: some View {
         TabView {
             NavigationStack {
@@ -28,6 +31,13 @@ struct RootTabView: View {
                     .navigationTitle("Réglages")
             }
             .tabItem { Label("Réglages", systemImage: "gear") }
+        }
+        .task {
+            showWhatsNew = WhatsNewGate.checkAtLaunch(isFreshInstall: WhatsNewGate.looksLikeFreshInstall(),
+                                                      launchedFromURL: false)
+        }
+        .sheet(isPresented: $showWhatsNew) {
+            WhatsNewView { showWhatsNew = false }
         }
     }
 }

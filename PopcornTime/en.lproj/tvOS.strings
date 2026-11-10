@@ -88,4 +88,12 @@
 
 // MARK: - CheckForUpdatesViewController title
 
-"ou1-vf-UfF.text" = "Checking for updates...";
+
+/* Class = "UINavigationItem"; title = "Movies"; ObjectID = "jvN-d2-mze"; */
+"jvN-d2-mze.title" = "Movies";
+
+/* Class = "UINavigationItem"; title = "Shows"; ObjectID = "DvR-v2-5Xm"; */
+"DvR-v2-5Xm.title" = "Shows";
+
+/* Class = "UINavigationItem"; title = "Watchlist"; ObjectID = "5WB-pT-Oa2"; */
+"5WB-pT-Oa2.title" = "Watchlist";

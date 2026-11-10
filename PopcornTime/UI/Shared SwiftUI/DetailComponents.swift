@@ -87,7 +87,7 @@ struct CastScroller: View {
     }
 }
 
-/// "Vus aussi" / related titles — a horizontal poster strip. Each poster is a
+/// "Vous aimerez aussi" / related titles — a horizontal poster strip. Each poster is a
 /// NavigationLink so it pushes another detail screen (the destination is
 /// registered on the enclosing NavigationStack in each app).
 struct RelatedRow<Item: Media & Hashable>: View {

@@ -7,41 +7,131 @@ import PopcornKit
 enum MacSection: String, CaseIterable, Identifiable {
     case movies = "Films"
     case shows = "Séries"
+    case watchlist = "Watchlist"
     case search = "Recherche"
     var id: String { rawValue }
     var symbol: String {
         switch self {
         case .movies: return "film"
         case .shows: return "play.tv"
+        case .watchlist: return "bookmark"
         case .search: return "magnifyingglass"
+        }
+    }
+    /// Sidebar label, through Localizable.strings ("Movies" = "Films",
+    /// "Watchlist" = "Ma liste"…); `rawValue` is only the id.
+    var title: Text {
+        switch self {
+        case .movies: return Text("Movies")
+        case .shows: return Text("Shows")
+        case .watchlist: return Text("Watchlist")
+        case .search: return Text("Search")
         }
     }
 }
 
 /// NavigationSplitView shell: sidebar → grid → detail (pushed on a stack so
-/// posters behave like links, same flow as the iOS app).
+/// posters behave like links, same flow as the iOS app). The detail is the
+/// Liquid Glass page (MacGlassDetailScreen), as on tvOS.
 struct MacRootView: View {
     @State private var section: MacSection = .movies
+    /// The detail pages pushed over the section's grid (emptied when the
+    /// section changes).
+    @State private var path = NavigationPath()
+    /// Release notes, shown once per version (not on a fresh install).
+    @State private var showWhatsNew = false
 
     var body: some View {
+        // Read here, so that the destinations below get the current depth
+        // (a value read only inside their closures can be stale).
+        let depth = path.count
         NavigationSplitView {
             List(MacSection.allCases, selection: $section) { item in
-                Label(item.rawValue, systemImage: item.symbol).tag(item)
+                Label { item.title } icon: { Image(systemName: item.symbol) }
+                    .tag(item)
             }
             .navigationSplitViewColumnWidth(min: 170, ideal: 190)
         } detail: {
-            NavigationStack {
+            NavigationStack(path: $path) {
                 Group {
                     switch section {
                     case .movies: MacMoviesGridView()
                     case .shows: MacShowsGridView()
+                    case .watchlist: MacWatchlistView()
                     case .search: MacSearchView()
                     }
                 }
-                .navigationDestination(for: Movie.self) { MacMediaDetailView(media: $0) }
-                .navigationDestination(for: Show.self) { MacMediaDetailView(media: $0) }
+                // A page covered by a pushed one gets no onDisappear, nor
+                // onAppear when it is on top again (Back) — the grid neither
+                // when the stack is popped to it: they follow the stack's
+                // depth instead. Set on each destination: an environment
+                // value set around the NavigationStack (or on its root)
+                // does not reach the pushed pages.
+                .environment(\.macStackDepth, depth)
+                .navigationDestination(for: Movie.self) {
+                    MacGlassDetailScreen(media: $0).environment(\.macStackDepth, depth)
+                }
+                .navigationDestination(for: Show.self) {
+                    MacGlassDetailScreen(media: $0).environment(\.macStackDepth, depth)
+                }
             }
         }
+        .onChange(of: section) { _, _ in path = NavigationPath() }
+        .task {
+            #if DEBUG
+            // Verification runs (-PTDebug… launch arguments): no release
+            // notes over the page, and the requested section / page.
+            if MacDebugHooks.isActive {
+                await runDebugHooks()
+                return
+            }
+            #endif
+            showWhatsNew = WhatsNewGate.checkAtLaunch(isFreshInstall: WhatsNewGate.looksLikeFreshInstall(),
+                                                      launchedFromURL: false)
+        }
+        .sheet(isPresented: $showWhatsNew) {
+            WhatsNewView { showWhatsNew = false }
+        }
+    }
+
+    #if DEBUG
+    /// `-PTDebugSection`, then `-PTDebugOpenMovie` / `-PTDebugOpenShow` (pushed
+    /// once the section change has emptied the stack; never plays), then the
+    /// window size and snapshot hooks (MacDebugHooks).
+    @MainActor
+    private func runDebugHooks() async {
+        await MacDebugHooks.prepareWindow()
+        if let requested = MacDebugHooks.section { section = requested }
+        if let media = MacDebugHooks.media {
+            try? await Task.sleep(nanoseconds: 600_000_000)
+            if let movie = media as? Movie {
+                path.append(movie)
+            } else if let show = media as? Show {
+                path.append(show)
+            }
+        }
+        MacDebugHooks.scheduleSnapshot()
+    }
+    #endif
+}
+
+// MARK: - Stack depth
+
+private struct MacStackDepthKey: EnvironmentKey {
+    static let defaultValue = 0
+}
+
+extension EnvironmentValues {
+    /// How many pages are pushed over the section's grid (0 = the grid is
+    /// on top). In a NavigationSplitView's NavigationStack (seen on macOS
+    /// 27), pushing a page over another does not call the covered page's
+    /// onDisappear, and popping back does not call its onAppear (nor the
+    /// grid's, popped back to it): a view that must know whether it is on
+    /// top compares this with its own depth. MacRootView sets it on the
+    /// grid and on each pushed page.
+    var macStackDepth: Int {
+        get { self[MacStackDepthKey.self] }
+        set { self[MacStackDepthKey.self] = newValue }
     }
 }
 

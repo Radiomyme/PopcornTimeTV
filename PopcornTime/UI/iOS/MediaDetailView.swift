@@ -73,19 +73,82 @@ final class MediaDetailViewModel: ObservableObject {
         if media is Movie {
             PopcornKit.getMovieInfo(media.id) { [weak self] movie, error in
                 DispatchQueue.main.async {
-                    self?.loading = false
-                    self?.enrichedMovie = movie
-                    self?.errorMessage = error?.localizedDescription
+                    guard let self else { return }
+                    self.loading = false
+                    self.errorMessage = error?.localizedDescription
+                    guard var movie = movie else {
+                        // A failed reload keeps the page already shown.
+                        if self.enrichedMovie?.id == media.id { self.errorMessage = nil } else { self.enrichedMovie = nil }
+                        return
+                    }
+                    // The page reloads when it comes back (after a related
+                    // title or the player): keep what the first load found.
+                    if let old = self.enrichedMovie, old.id == movie.id, !old.related.isEmpty || !old.crew.isEmpty {
+                        movie.related = old.related
+                        movie.actors = old.actors
+                        movie.crew = old.crew
+                        self.enrichedMovie = movie
+                    } else {
+                        self.enrichedMovie = movie
+                        self.loadRelatedAndPeople(of: movie)
+                    }
                 }
             }
         } else if media is Show {
             PopcornKit.getShowInfo(media.id) { [weak self] show, error in
                 DispatchQueue.main.async {
-                    self?.loading = false
-                    self?.enrichedShow = show
-                    self?.errorMessage = error?.localizedDescription
-                    if let show = show { self?.augmentEpisodeTorrents(for: show) }
+                    guard let self else { return }
+                    self.loading = false
+                    self.errorMessage = error?.localizedDescription
+                    guard var show = show else {
+                        if self.enrichedShow?.id == media.id { self.errorMessage = nil } else { self.enrichedShow = nil }
+                        return
+                    }
+                    // Same as movies: keep the first load's related and cast.
+                    let kept = self.enrichedShow.map { $0.id == show.id && (!$0.related.isEmpty || !$0.actors.isEmpty) } ?? false
+                    if kept, let old = self.enrichedShow {
+                        show.related = old.related
+                        show.actors = old.actors
+                        show.crew = old.crew
+                    }
+                    self.enrichedShow = show
+                    self.augmentEpisodeTorrents(for: show)
+                    if !kept { self.loadRelatedAndPeople(of: show) }
                 }
+            }
+        }
+    }
+
+    /// Fills the "Vous aimerez aussi" and cast rows. TraktManager falls back to keyless
+    /// sources (YTS, Cinemeta, TVMaze) since Trakt refuses the app's key.
+    private func loadRelatedAndPeople(of movie: Movie) {
+        TraktManager.shared.getRelated(movie) { [weak self] related, _ in
+            DispatchQueue.main.async {
+                guard let self, self.enrichedMovie?.id == movie.id else { return }
+                self.enrichedMovie?.related = related
+            }
+        }
+        TraktManager.shared.getPeople(forMediaOfType: .movies, id: movie.id) { [weak self] actors, crew, _ in
+            DispatchQueue.main.async {
+                guard let self, self.enrichedMovie?.id == movie.id else { return }
+                if !actors.isEmpty { self.enrichedMovie?.actors = actors }
+                self.enrichedMovie?.crew = crew
+            }
+        }
+    }
+
+    private func loadRelatedAndPeople(of show: Show) {
+        TraktManager.shared.getRelated(show) { [weak self] related, _ in
+            DispatchQueue.main.async {
+                guard let self, self.enrichedShow?.id == show.id else { return }
+                self.enrichedShow?.related = related
+            }
+        }
+        TraktManager.shared.getPeople(forMediaOfType: .shows, id: show.id) { [weak self] actors, crew, _ in
+            DispatchQueue.main.async {
+                guard let self, self.enrichedShow?.id == show.id else { return }
+                if !actors.isEmpty { self.enrichedShow?.actors = actors }
+                self.enrichedShow?.crew = crew
             }
         }
     }
@@ -642,9 +705,9 @@ struct MediaDetailView: View {
     @ViewBuilder
     private var relatedSection: some View {
         if let movie = viewModel.enrichedMovie, !movie.related.isEmpty {
-            RelatedRow(title: "Vus aussi", items: movie.related)
+            RelatedRow(title: "Vous aimerez aussi", items: movie.related)
         } else if let show = viewModel.enrichedShow, !show.related.isEmpty {
-            RelatedRow(title: "Vus aussi", items: show.related)
+            RelatedRow(title: "Vous aimerez aussi", items: show.related)
         }
     }
 

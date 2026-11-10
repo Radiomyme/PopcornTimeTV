@@ -556,3 +556,99 @@
 /* (No Commment) */
 "You're Offline" = "Você está desconectado";
 
+
+/* 5.1: Settings, detail pages and What's New (5.1.0) */
+"A - Z" = "A - Z";
+"Audio Language" = "Idioma do áudio";
+"Balanced" = "Equilibrada";
+"Choose a preferred audio language. When the file carries a matching audio track, it will be selected automatically." = "Escolha um idioma de áudio preferido. Se o arquivo tiver uma faixa nesse idioma, ela será selecionada automaticamente.";
+"No audio tracks available." = "Nenhuma faixa de áudio disponível.";
+"Settings" = "Ajustes";
+"Sort" = "Ordenar";
+"Time remaining" = "Tempo restante";
+"Always Ask" = "Sempre perguntar";
+"Playback" = "Reprodução";
+"Audio and subtitles in these languages are picked automatically when the file or OpenSubtitles offers them." = "O áudio e as legendas nesses idiomas são escolhidos automaticamente quando o arquivo ou o OpenSubtitles os oferecem.";
+"Choose the source every time; the recommended one is starred." = "Você escolhe a fonte toda vez; a recomendada tem uma estrela.";
+"The best quality that starts quickly." = "A melhor qualidade com início rápido.";
+"Always the best picture, even if it takes longer to start." = "Sempre a melhor imagem, mesmo que demore mais para começar.";
+"The smallest file, for the quickest start." = "O menor arquivo, para começar o mais rápido possível.";
+"Detail Pages" = "Páginas de detalhes";
+"Plays the soundtrack of the movie or the theme of the show on its page." = "Toca a trilha sonora do filme ou o tema do seriado na página de detalhes.";
+"Theme Songs" = "Músicas tema";
+"Storage" = "Armazenamento";
+"Temporary video files, posters and network caches." = "Arquivos de vídeo temporários, pôsteres e caches de rede.";
+"Clear Cache" = "Limpar cache";
+"About %@ will be freed." = "Isso liberará cerca de %@.";
+"A download is in progress. Clear the cache once it has finished." = "Há um download em andamento. Limpe o cache quando ele terminar.";
+"Cache Cleared" = "Cache limpo";
+"%@ reclaimed." = "Espaço liberado: %@.";
+"Account" = "Conta";
+"Sign Out of Trakt" = "Sair do Trakt";
+"About" = "Sobre";
+"Version" = "Versão";
+"What's New" = "Novidades";
+"Popcorn Time is free and open-source software." = "O Popcorn Time é um software livre e de código aberto.";
+"In Watchlist" = "Nos Favoritos";
+"Add to Watchlist" = "Adicionar aos Favoritos";
+"Mark as Watched" = "Marcar como assistido";
+"Mark as Unwatched" = "Marcar como não assistido";
+"Download" = "Baixar";
+"Downloaded" = "Baixado";
+"Pause" = "Pausar";
+"Resume" = "Retomar";
+"Season %lld" = "Temporada %lld";
+"1 Season" = "1 temporada";
+"%lld Seasons" = "%lld temporadas";
+"Episode %lld" = "Episódio %lld";
+"1 Episode" = "1 episódio";
+"%lld Episodes" = "%lld episódios";
+"S%lld · E%lld" = "T%1$lld · E%2$lld";
+"Viewers Also Watched" = "Você também pode gostar";
+"Cast & Crew" = "Elenco e equipe";
+
+/* Crew roles shown under cast & crew headshots (TVMaze / Cinemeta credits). */
+"Writer" = "Roteirista";
+"Creator" = "Criador";
+
+/* Mac: Play / episode right-click menu item (always shows the quality sheet), and the sidebar section. */
+"Choose Quality…" = "Escolher qualidade…";
+"Search" = "Buscar";
+
+/* Mac: Movies / Shows grids (sort menu) and Search (MacGridViews). */
+"Filter" = "Filtro";
+"Movie or show title" = "Título do filme ou seriado";
+
+/* Mac: Settings window (MacSettingsView). "%@ (+ mirrors)": %@ is the shows API host. */
+"Balanced (quick start)" = "Equilibrada (início rápido)";
+"Languages" = "Idiomas";
+"Trakt Account" = "Conta do Trakt";
+"Signed In to Trakt" = "Conectado ao Trakt";
+"Sign In to Trakt (Browser)" = "Entrar no Trakt (navegador)";
+"Sources" = "Fontes";
+"Movies API" = "API de filmes";
+"Shows API" = "API de seriados";
+"%@ (+ mirrors)" = "%@ (+ espelhos)";
+"Torrents" = "Torrents";
+"Engine" = "Motor";
+"Source Code" = "Código-fonte";
+
+/* Mac: Popcorn Time menu item opening the release notes window. */
+"What's New…" = "Novidades…";
+
+/* Mac: native player status (MacPlayerView). "Buffering %.0f%% · %d seeds · %d KB/s": buffered percentage, seeds, download speed. "Failed: %@" / "Cannot play: %@": the reason. */
+"Buffering…" = "Carregando o buffer…";
+"The download is slower than playback" = "O download está mais lento que a reprodução";
+"Connecting to sources…" = "Conectando às fontes…";
+"Buffering %.0f%% · %d seeds · %d KB/s" = "Carregando %.0f%% · %d seeds · %d KB/s";
+"Failed: %@" = "Falha: %@";
+"Remuxing MKV → HLS…" = "Remuxando MKV → HLS…";
+"Opening the file…" = "Abrindo o arquivo…";
+"Cannot play: %@" = "Não é possível reproduzir: %@";
+"Playing with VLC…" = "Reproduzindo com VLC…";
+
+/* Mac: VLC fallback player menus (MacVLCPlayerView). */
+"Tracks in the File" = "Faixas do arquivo";
+"Searching for subtitles…" = "Procurando legendas…";
+"Subtitles" = "Legendas";
+"Audio" = "Áudio";

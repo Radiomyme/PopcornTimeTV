@@ -1,6 +1,17 @@
 
 
+import Foundation
 import PopcornKit
+
+extension Episode {
+
+    /// Aired (an unknown date counts as aired) or already offered by a
+    /// torrent. The episode guide also lists announced episodes, with a future
+    /// air date and no torrent: they can't be played yet.
+    var isAvailableToPlay: Bool {
+        firstAirDate <= Date() || !torrents.isEmpty
+    }
+}
 
 extension Show {
     

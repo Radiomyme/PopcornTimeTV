@@ -65,7 +65,7 @@
 "QCl-Ll-Afb.title" = "Informazioni";
 
 /* Class = "UINavigationItem"; title = "Terms Of Service"; ObjectID = "Rhk-vo-XmQ"; */
-"Rhk-vo-XmQ.title" = "Termini Di Servizio";
+"Rhk-vo-XmQ.title" = "Termini di servizio";
 
 /* Class = "UILabel"; text = "Shows"; ObjectID = "S8B-Ge-Ngl"; */
 "S8B-Ge-Ngl.text" = "Serie TV";
@@ -100,8 +100,6 @@
 /* Class = "UITabBarItem"; title = "Settings"; ObjectID = "oLg-DL-tTH"; */
 "oLg-DL-tTH.title" = "Impostazioni";
 
-/* Class = "UILabel"; text = "Checking for updates..."; ObjectID = "ou1-vf-UfF"; */
-"ou1-vf-UfF.text" = "Verificando gli aggiornamenti...";
 
 /* Class = "UITabBarItem"; title = "Shows"; ObjectID = "p8l-oH-6Vs"; */
 "p8l-oH-6Vs.title" = "Serie TV";
@@ -122,7 +120,19 @@
 "vP2-pF-jYW.text" = "Volume Tema Musicale";
 
 /* Class = "UILabel"; text = "Cast & Crew"; ObjectID = "vje-gU-hwQ"; */
-"vje-gU-hwQ.text" = "Cast & Crew";
+"vje-gU-hwQ.text" = "Cast e troupe";
 
 /* Class = "UIButton"; normalTitle = "Play Next"; ObjectID = "wUm-fX-3pb"; */
 "wUm-fX-3pb.normalTitle" = "Riproduci il Prossimo";
+
+/* Class = "UINavigationItem"; title = "Movies"; ObjectID = "jvN-d2-mze"; */
+"jvN-d2-mze.title" = "Film";
+
+/* Class = "UINavigationItem"; title = "Shows"; ObjectID = "DvR-v2-5Xm"; */
+"DvR-v2-5Xm.title" = "Serie TV";
+
+/* Class = "UINavigationItem"; title = "Watchlist"; ObjectID = "5WB-pT-Oa2"; */
+"5WB-pT-Oa2.title" = "Watchlist";
+
+/* Class = "UITextView"; text = "Your Acceptance…" (Terms of Service); ObjectID = "mCv-nM-JOY"; */
+"mCv-nM-JOY.text" = "Accettazione dei termini\n\nUtilizzando l'app «Popcorn Time» dichiari di accettare (1) i presenti termini e condizioni (i «Termini di servizio»).\n\nInformativa sulla privacy\n\nSei consapevole che, utilizzando «Popcorn Time», potresti imbatterti in materiale che potresti ritenere offensivo, indecente o discutibile, e che tale contenuto potrebbe essere o non essere segnalato come esplicito. «Popcorn Time» non avrà alcuna responsabilità nei tuoi confronti per tale materiale: accetti che l'uso di «Popcorn Time» avviene a tuo esclusivo rischio.\n\nEsclusione di garanzie\n\nACCETTI ESPRESSAMENTE CHE L'USO DI «POPCORN TIME» AVVIENE A TUO ESCLUSIVO RISCHIO. «POPCORN TIME» E TUTTI I PRODOTTI TI VENGONO FORNITI «COSÌ COME SONO», SENZA GARANZIE DI ALCUN TIPO, ESPRESSE O IMPLICITE. NELLA MASSIMA MISURA CONSENTITA DALLE LEGGI APPLICABILI, YIFY DECLINA OGNI GARANZIA, ESPRESSA O IMPLICITA, INCLUSE, A TITOLO ESEMPLIFICATIVO, LE GARANZIE IMPLICITE DI COMMERCIABILITÀ, IDONEITÀ A UNO SCOPO PARTICOLARE, NON VIOLAZIONE O ALTRE VIOLAZIONI DI DIRITTI.\n\nLimitazione di responsabilità\n\n«POPCORN TIME» NON È RESPONSABILE DI ALCUN PROBLEMA O MALFUNZIONAMENTO TECNICO DI SITI WEB, RETI, SISTEMI INFORMATICI, SERVER, FORNITORI, APPARECCHIATURE INFORMATICHE O SOFTWARE, NÉ DI ALCUN DISSERVIZIO DOVUTO A PROBLEMI TECNICI O ALLA CONGESTIONE DEL TRAFFICO SU INTERNET, INCLUSI LESIONI O DANNI AGLI UTENTI O A QUALSIASI COMPUTER O ALTRO DISPOSITIVO SUL QUALE O TRAMITE IL QUALE «POPCORN TIME» VIENE FORNITO. IN NESSUN CASO «POPCORN TIME» SARÀ RESPONSABILE DI PERDITE O DANNI, INCLUSI LESIONI PERSONALI O MORTE, DERIVANTI DALL'USO DI «POPCORN TIME».\n\nMateriale di origine\n\nI FILM E LE SERIE TV NON SONO OSPITATI SU ALCUN SERVER E VENGONO TRASMESSI IN STREAMING TRAMITE IL PROTOCOLLO P2P BITTORRENT. TUTTI I FILM E LE SERIE TV PROVENGONO DA API PUBBLICHE APERTE. GUARDARE UN FILM O UNA SERIE CON QUESTA APPLICAZIONE POTREBBE COSTITUIRE UNA VIOLAZIONE DEL DIRITTO D'AUTORE, A SECONDA DELLE LEGGI DEL TUO PAESE. DECLINIAMO OGNI RESPONSABILITÀ.\n\nCapacità di accettare i Termini di servizio\n\nUtilizzando «Popcorn Time» o accedendo a questo sito dichiari di avere più di 18 anni, di essere un minore emancipato o di disporre del consenso legale di un genitore o tutore, e di essere pienamente in grado di accettare i termini, le condizioni, gli obblighi, le affermazioni, le dichiarazioni e le garanzie stabiliti nei presenti Termini di servizio, nonché di rispettarli. In ogni caso, dichiari di avere più di 13 anni, poiché il Servizio non è destinato ai minori di 13 anni. Se hai meno di 13 anni, ti invitiamo a non utilizzare il Servizio. Ci sono tanti altri ottimi siti web per te. Chiedi ai tuoi genitori quali siti sono adatti a te.";

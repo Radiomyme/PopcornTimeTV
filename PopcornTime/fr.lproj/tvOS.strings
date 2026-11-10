@@ -1,0 +1,99 @@
+
+// MARK: - UITabBarButton titles
+
+"2de-Lb-s4s.title" = "Films";
+"p8l-oH-6Vs.title" = "Séries";
+"Ela-lA-GbS.title" = "Ma liste";
+"oLg-DL-tTH.title" = "Réglages";
+
+// MARK: - UINavigationBar titles
+
+"UzE-4G-slw.text" = "Films";
+"S8B-Ge-Ngl.text" = "Séries";
+"3WI-KN-P6d.text" = "Ma liste";
+"3WO-vh-yHp.text" = "Téléchargements";
+"4Ma-4t-EQB.text" = "Réglages";
+
+// MARK: - UINavigationBarButton titles
+
+"rTI-it-IkT.normalTitle" = "Trier";
+"ggv-4q-HNn.normalTitle" = "Genre";
+
+"L77-QY-cXM.normalTitle" = "Trier";
+"lOV-1D-qH8.normalTitle" = "Genre";
+
+// MARK: - DownloadViewController titles
+
+"DgU-ac-a4I.segmentTitles[0]" = "En cours";
+"DgU-ac-a4I.segmentTitles[1]" = "Téléchargés";
+
+
+// MARK: - SettingsViewController titles
+
+/* Video player settings header title */
+"Lno-U0-R7L.headerTitle" = "Lecteur";
+
+"vP2-pF-jYW.text" = "Volume de la musique des fiches";
+"qRt-mL-qc9.text" = "Vider le cache en quittant";
+"qcw-2B-T1z.text" = "Qualité automatique";
+
+"1es-d4-hBQ.headerTitle" = "Sous-titres";
+
+"c2l-2i-xKF.text" = "Langue";
+"Lf2-sK-Ppa.text" = "Taille";
+"Dgb-6z-3Uj.text" = "Couleur";
+"gPE-3j-CJL.text" = "Police";
+"5WO-YN-RUa.text" = "Style";
+"f8x-Ym-rQl.text" = "Encodage";
+
+/* Services the user can connect with. Eg. Trakt.tv */
+"Oi2-SE-DcW.headerTitle" = "Services";
+
+/* Information */
+"8bN-Fj-ZwM.headerTitle" = "Infos";
+
+"rrQ-1r-aq3.text" = "Vider tout le cache";
+"fpb-Vv-rCp.text" = "Rechercher des mises à jour";
+/* The version of the app */
+"3rl-cy-Kkl.text" = "Version";
+
+// MARK: - Terms of service
+
+"Rhk-vo-XmQ.title" = "Conditions d'utilisation";
+
+"mCv-nM-JOY.text" = "Votre acceptation\n\nEn utilisant l'app « Popcorn Time », vous signifiez votre accord avec (1) les présentes conditions générales (les « Conditions d'utilisation »).\n\nPolitique de confidentialité\n\nVous comprenez qu'en utilisant « Popcorn Time », vous pouvez rencontrer des contenus que vous jugerez choquants, indécents ou répréhensibles, et que ces contenus peuvent être signalés ou non comme explicites. « Popcorn Time » n'a aucune responsabilité envers vous pour ces contenus : vous reconnaissez que vous utilisez « Popcorn Time » à vos seuls risques.\n\nAvertissements\n\nVOUS RECONNAISSEZ EXPRESSÉMENT QUE VOUS UTILISEZ « POPCORN TIME » À VOS SEULS RISQUES. « POPCORN TIME » ET TOUS LES PRODUITS VOUS SONT FOURNIS « EN L'ÉTAT », SANS GARANTIE D'AUCUNE SORTE, EXPRESSE OU IMPLICITE. DANS TOUTE LA MESURE PERMISE PAR LA LOI APPLICABLE, YIFY EXCLUT TOUTE GARANTIE, EXPRESSE OU IMPLICITE, Y COMPRIS, SANS S'Y LIMITER : LES GARANTIES IMPLICITES DE QUALITÉ MARCHANDE, D'ADÉQUATION À UN USAGE PARTICULIER, D'ABSENCE DE CONTREFAÇON OU D'AUTRES ATTEINTES AUX DROITS.\n\nLimitation de responsabilité\n\n« POPCORN TIME » N'EST RESPONSABLE D'AUCUN PROBLÈME NI D'AUCUN DYSFONCTIONNEMENT TECHNIQUE D'UN SITE WEB, D'UN RÉSEAU, D'UN SYSTÈME INFORMATIQUE, D'UN SERVEUR, D'UN FOURNISSEUR, D'UN MATÉRIEL OU D'UN LOGICIEL, NI D'AUCUNE DÉFAILLANCE DUE À DES PROBLÈMES TECHNIQUES OU À LA SATURATION D'INTERNET, Y COMPRIS TOUT PRÉJUDICE OU DOMMAGE CAUSÉ AUX UTILISATEURS OU À TOUT ORDINATEUR OU AUTRE APPAREIL SUR LEQUEL OU PAR LEQUEL « POPCORN TIME » EST FOURNI. EN AUCUN CAS « POPCORN TIME » NE SAURAIT ÊTRE TENU RESPONSABLE D'UNE PERTE OU D'UN DOMMAGE, Y COMPRIS UN DOMMAGE CORPOREL OU LE DÉCÈS, RÉSULTANT DE VOTRE UTILISATION DE « POPCORN TIME ».\n\nOrigine des contenus\n\nLES FILMS ET LES SÉRIES NE SONT HÉBERGÉS SUR AUCUN SERVEUR ET SONT DIFFUSÉS EN STREAMING PAR LE PROTOCOLE P2P BITTORRENT. TOUS LES FILMS ET TOUTES LES SÉRIES PROVIENNENT D'API PUBLIQUES OUVERTES. REGARDER UN FILM OU UNE SÉRIE AVEC CETTE APPLICATION PEUT CONSTITUER UNE VIOLATION DU DROIT D'AUTEUR SELON LES LOIS DE VOTRE PAYS. NOUS DÉCLINONS TOUTE RESPONSABILITÉ.\n\nCapacité à accepter les Conditions d'utilisation\n\nEn utilisant « Popcorn Time » ou en accédant à ce site, vous affirmez avoir plus de 18 ans, ou être un mineur émancipé, ou disposer du consentement légal d'un parent ou d'un tuteur, et être pleinement capable et compétent pour accepter les conditions, obligations, affirmations, déclarations et garanties énoncées dans les présentes Conditions d'utilisation, et pour vous y conformer. Dans tous les cas, vous affirmez avoir plus de 13 ans, le Service n'étant pas destiné aux enfants de moins de 13 ans. Si vous avez moins de 13 ans, merci de ne pas utiliser le Service. Il existe beaucoup d'autres sites formidables pour vous. Parlez avec vos parents des sites qui vous conviennent.";
+
+/* Accept the Terms of Service */
+"Gtp-dd-iDN.normalTitle" = "Accepter";
+/* Deny the Terms of Service and quit the app */
+"bEK-Im-j6y.normalTitle" = "Quitter";
+
+// MARK: - DetailViewController header titles
+
+"ADl-a2-7DG.text" = "Les spectateurs ont aussi regardé";
+"vje-gU-hwQ.text" = "Distribution et équipe";
+
+// MARK: - OptionsViewController titles
+
+/* Information */
+"QCl-Ll-Afb.title" = "Infos";
+"0nt-qt-AiS.title" = "Sous-titres";
+"NBE-SA-c48.title" = "Audio";
+"YZA-Sl-zhk.text" = "Aucune information disponible.";
+
+// MARK: - UpNextViewController titles
+
+"wUm-fX-3pb.normalTitle" = "Épisode suivant";
+"1P4-1O-ZA3.normalTitle" = "Revenir à la vidéo";
+
+// MARK: - CheckForUpdatesViewController title
+
+
+/* Class = "UINavigationItem"; title = "Movies"; ObjectID = "jvN-d2-mze"; */
+"jvN-d2-mze.title" = "Films";
+
+/* Class = "UINavigationItem"; title = "Shows"; ObjectID = "DvR-v2-5Xm"; */
+"DvR-v2-5Xm.title" = "Séries";
+
+/* Class = "UINavigationItem"; title = "Watchlist"; ObjectID = "5WB-pT-Oa2"; */
+"5WB-pT-Oa2.title" = "Ma liste";

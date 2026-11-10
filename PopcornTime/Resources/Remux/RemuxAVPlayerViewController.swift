@@ -1220,13 +1220,14 @@ final class RemuxAVPlayerViewController: AVPlayerViewController {
         stopNativePlayback()
         pendingFallback = nil
         if !isHandingOff {
-            // Same rule as the VLC player: tvOS "Clear Cache Upon Exit" (on
-            // by default — the app sandbox is small) deletes the stream's
-            // partial right away. A completed download is never deleted.
-            // (iOS doesn't register the key: the partial is kept until the
-            // next stream's purge.)
-            let isDownload = keepAliveStreamer is PTTorrentDownload
-            let wipe = !isDownload && UserDefaults.standard.bool(forKey: "removeCacheOnPlayerExit")
+            // tvOS deletes the stream's partial right away, as the VLC player
+            // does (the app sandbox is small); iOS keeps it until the next
+            // stream's purge. A completed download is never deleted.
+#if os(tvOS)
+            let wipe = !(keepAliveStreamer is PTTorrentDownload)
+#else
+            let wipe = false
+#endif
             keepAliveStreamer?.cancelStreamingAndDeleteData(wipe)
         }
         keepAliveStreamer = nil

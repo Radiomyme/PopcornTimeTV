@@ -43,8 +43,14 @@ public struct Actor: Person, Equatable {
     }
     
     public init(name: String = "Unknown", imdbId: String = "nm0000000", tmdbId: Int = 0000000, largeImage: String? = nil) {
+        self.init(name: name, characterName: "", imdbId: imdbId, tmdbId: tmdbId, largeImage: largeImage)
+    }
+
+    /// An actor from a source other than Trakt (YTS, TVMaze, Cinemeta).
+    /// `imdbId` is any id unique to the person ("nm…" when known).
+    public init(name: String, characterName: String, imdbId: String, tmdbId: Int = 0, largeImage: String? = nil) {
         self.name = name
-        self.characterName = ""
+        self.characterName = characterName
         self.largeImage = largeImage
         self.imdbId = imdbId
         self.tmdbId = tmdbId

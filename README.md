@@ -4,7 +4,7 @@
 
 # PopcornTimeTV — modernized fork
 
-[![Version](https://img.shields.io/badge/version-5.0.0-blue.svg?style=flat)](https://github.com/Radiomyme/PopcornTimeTV/releases)
+[![Version](https://img.shields.io/badge/version-5.1.0-blue.svg?style=flat)](https://github.com/Radiomyme/PopcornTimeTV/releases)
 [![Platform](http://img.shields.io/badge/platform-tvOS%2026%20%7C%20iOS%2026%20%7C%20macOS-lightgrey.svg?style=flat)](https://github.com/Radiomyme/PopcornTimeTV)
 [![Swift](https://img.shields.io/badge/swift-5-orange.svg?style=flat)](https://swift.org)
 [![License](https://img.shields.io/badge/license-GPL_v3-373737.svg?style=flat)](LICENSE.md)
@@ -14,9 +14,65 @@ This fork brings the project up to date for **Xcode 26**, **tvOS 26** and **iOS 
 data layer around pluggable content providers, adds a native SwiftUI app for iPhone / iPad /
 Mac (Designed for iPad), and — new in **5.0.0** — ships a zero-dependency, pure-Swift
 **MKV → fMP4/HLS remux engine** that unlocks true **Dolby Atmos** (and HDR) through Apple's
-native `AVPlayer`.
+native `AVPlayer`. **5.1.0** redesigns the Apple TV pages in Liquid Glass and makes the remux
+engine play far more files natively.
 
-## New in 5.0.0 — the remux engine (true Dolby Atmos)
+## New in 5.1.0
+
+The same notes are shown once in the app after the update (`WhatsNewRelease.current` in
+`PopcornTime/UI/Shared SwiftUI/WhatsNew.swift`; keep the two in step).
+
+**Apple TV**
+- **Liquid Glass movie and show pages** (SwiftUI): full-bleed artwork, Play that names
+  the episode it starts ("Play S2 · E5") with a progress bar, Trailer, Watchlist, Watched and
+  Download buttons, season pills, an episode shelf with a summary panel, "Viewers Also Watched",
+  cast & crew, information and accessibility cards. Real Liquid Glass on tvOS 26 and later,
+  materials on tvOS 17–25. The page opens as soon as the movie or show info is known; related
+  titles and cast fill in as they arrive.
+- **Cast and similar titles are back**, without a Trakt account: Trakt now refuses the app's
+  API key (HTTP 403) and the TMDB key is dead, so `OpenMetadata` (PopcornKit) uses keyless
+  sources instead: cast with photos from YTS (movies) and TVMaze (shows), directors and
+  writers from Cinemeta, "You Might Also Like" from YTS suggestions and Cinemeta's same-genre
+  titles, logos and landscape backdrops from metahub.
+- **Simpler Settings**: Auto Select Quality ("Always Ask" by default), audio and subtitle
+  languages, theme songs on/off, Clear Cache, Trakt sign-out and the version with its release
+  notes. Gone: the update check, Trakt sign-in, the VLC-only subtitle style rows and the
+  "clear cache on exit" switch (now always on).
+- **French**: the Apple TV app is now fully translated into French.
+- **What's New**: the release notes appear once after an update (never on a fresh install),
+  and again from Settings › Version.
+
+**Playback (Apple TV, iPhone / iPad, Mac)** — the remux engine described below now covers:
+- **Dolby Vision** profiles 5, 8.1 and 8.4 signalled natively, profile 7 as its HDR10 base
+  layer; HDR10, HDR10+ and HLG as encoded.
+- **Every compatible audio track** as its own selectable rendition (E-AC-3 / AC-3, AAC, MP3,
+  MP2, FLAC, Opus, ALAC; PCM converted to FLAC). TrueHD, DTS and Vorbis go to VLC unless the
+  file also has a compatible track.
+- **The file's own text subtitles** (SRT, SSA/ASS, WebVTT) in `AVPlayer`'s picker; a slow
+  OpenSubtitles download delays the start by about 15 seconds at most.
+- **Exact seeks** from the file's keyframe index, **download-aware playback** (waits for the
+  data instead of falling back) and far jumps that stay native when the data will arrive in
+  time; played segments are kept behind the playhead as far as the disk allows.
+- **A clearer quality picker** on every platform: quality, seeds and size per source, the
+  recommended one starred.
+
+**Shows (every platform)**
+- **Mislabelled torrents left out**: EZTV files releases of other shows under a show's IMDb id
+  (every "Breaking Bad" entry is in fact "Breaking Brad", which added seasons 6–9 and wrong
+  files to seasons 1–5). Releases whose name doesn't match the show's title or one of its
+  alternate titles (TVMaze akas: "Money Heist" for "La Casa de Papel") are dropped.
+
+**iPhone / iPad**
+- Detail pages with cast, star rating and related titles (Apple TV parity).
+
+**Mac**
+- **Native Mac app** (macOS 14+) with the same remux engine: Dolby Atmos rendered spatially on
+  the Mac and AirPods.
+- **Liquid Glass movie and show pages** with the Apple TV layout (full-size artwork, logo,
+  season pills and an episode shelf, cast, similar titles, information cards), hover effects,
+  and a Watchlist section in the sidebar. The Mac app is now localized like the Apple TV one.
+
+## The remux engine (true Dolby Atmos) — new in 5.0.0, extended in 5.1.0
 
 MKV releases used to fall back to VLC, whose bundled build can't bitstream Dolby and tone-maps
 HDR to SDR. 5.0.0 adds a **pure-Swift, dependency-free Matroska demuxer + fragmented-MP4 (CMAF)

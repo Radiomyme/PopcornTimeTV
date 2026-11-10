@@ -230,7 +230,10 @@ extension AppDelegate {
                 episodesLeftInShow.removeFirst(index + 1)
             }
             
-            nextEpisode = !episodesLeftInShow.isEmpty ? episodesLeftInShow.removeFirst() : nil
+            // Up Next proposes the following episode only once it can be
+            // played: the guide also lists announced episodes (future air
+            // date, no torrent), which would end on "No torrents found".
+            nextEpisode = episodesLeftInShow.first.flatMap { $0.isAvailableToPlay ? $0 : nil }
             nextEpisode?.show = episode.show
         } else {
             backgroundImage = media.largeBackgroundImage
@@ -241,6 +244,9 @@ extension AppDelegate {
         }
         loadingViewController.titleLabel.text = media.title
         
+        // The detail page's theme song must not play over the buffering
+        // screen and the movie (the page also stops it when it disappears).
+        ThemeSongManager.shared.stopTheme()
         present(loadingViewController, animated: true)
         
         let error: (String) -> Void = { [weak self] (errorMessage) in
@@ -460,7 +466,17 @@ extension AppDelegate {
     }
     
     func downloadButton(_ button: DownloadButton, wasPressedWith download: PTTorrentDownload, didDeleteHandler: (() -> Void)? = nil) {
-        switch button.downloadState {
+        downloadControl(wasPressedIn: button.downloadState, with: download, sourceView: button, stateDidChange: { state in
+            button.downloadState = state
+        }, didDeleteHandler: didDeleteHandler)
+    }
+
+    /// A download control showing `state` was pressed (a `DownloadButton`, or
+    /// the glass detail page's Download buttons): downloaded → Play / Delete
+    /// Download sheet, downloading → pause, paused → resume. `stateDidChange`
+    /// receives the control's new state.
+    func downloadControl(wasPressedIn state: DownloadButton.State, with download: PTTorrentDownload, sourceView: UIView?, stateDidChange: @escaping (DownloadButton.State) -> Void, didDeleteHandler: (() -> Void)? = nil) {
+        switch state {
         case .downloaded:
             let alertController = UIAlertController(title: nil, message: nil, preferredStyle: .actionSheet, blurStyle: .dark)
             
@@ -469,19 +485,19 @@ extension AppDelegate {
             })
             alertController.addAction(UIAlertAction(title: "Delete Download".localized, style: .destructive) { _ in
                 PTTorrentDownloadManager.shared().delete(download)
-                button.downloadState = .normal
+                stateDidChange(.normal)
                 didDeleteHandler?()
             })
             alertController.addAction(UIAlertAction(title: "Cancel".localized, style: .cancel, handler: nil))
             
-            alertController.popoverPresentationController?.sourceView = button
+            alertController.popoverPresentationController?.sourceView = sourceView
             alertController.show(animated: true)
         case .downloading:
             download.pause()
-            button.downloadState = .paused
+            stateDidChange(.paused)
         case .paused:
             download.resume()
-            button.downloadState = .downloading
+            stateDidChange(.downloading)
         default:
             break
         }
@@ -532,7 +548,7 @@ extension AppDelegate {
     }
     
     func animationController(forPresented presented: UIViewController, presenting: UIViewController, source: UIViewController) -> UIViewControllerAnimatedTransitioning? {
-        if presented is PreloadTorrentViewController && activeViewController is DetailViewController {
+        if presented is PreloadTorrentViewController && activeViewController is GlassDetailHostingController {
             return PreloadTorrentViewControllerAnimatedTransitioning(isPresenting: true)
         }
         return nil
@@ -540,7 +556,7 @@ extension AppDelegate {
     }
     
     func animationController(forDismissed dismissed: UIViewController) -> UIViewControllerAnimatedTransitioning? {
-        if dismissed is PreloadTorrentViewController && activeViewController is DetailViewController {
+        if dismissed is PreloadTorrentViewController && activeViewController is GlassDetailHostingController {
             return PreloadTorrentViewControllerAnimatedTransitioning(isPresenting: false)
         }
         return nil

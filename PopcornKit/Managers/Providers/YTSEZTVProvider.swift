@@ -63,9 +63,15 @@ public final class YTSEZTVProvider: MediaProvider {
     private struct Path {
         static let listMovies = "/api/v2/list_movies.json"
         static let movieInfo  = "/api/v2/movie_details.json"
+        static let movieSuggestions = "/api/v2/movie_suggestions.json"
     }
 
     public init() {}
+
+    /// YTS `movie_details` objects by IMDb id (with the cast): filled by
+    /// `getMovieInfo`, read by `ytsMovieDetails`, so a movie page doesn't ask
+    /// YTS for the same details three times (info, cast, suggestions).
+    private let detailsCache = NSCache<NSString, NSDictionary>()
 
     /// Last batch of shows assembled by `loadShows`, keyed by imdb id, so
     /// `getShowInfo` can return the same instance with its episode list.
@@ -252,10 +258,12 @@ public final class YTSEZTVProvider: MediaProvider {
     }
 
     public func getMovieInfo(imdbId: String, completion: @escaping (Movie?, NSError?) -> Void) {
+        // Strings, not Bool: Alamofire sends `true` as "1", which YTS ignores
+        // (no cast came back).
         let params: [String: Any] = [
             "imdb_id":     imdbId,
-            "with_images": true,
-            "with_cast":   true,
+            "with_images": "true",
+            "with_cast":   "true",
         ]
 
         // Query YTS (curated qualities, rich metadata), the Torrentio
@@ -280,6 +288,9 @@ public final class YTSEZTVProvider: MediaProvider {
                 let movie   = payload["movie"] as? [String: Any]
             else { return }
             ytsMovie = Movie(yts: movie)
+            if (movie["id"] as? Int ?? 0) > 0 {   // 0 = a title YTS doesn't have
+                self.detailsCache.setObject(movie as NSDictionary, forKey: imdbId as NSString)
+            }
         }
 
         group.enter()
@@ -497,11 +508,23 @@ public final class YTSEZTVProvider: MediaProvider {
             let group = DispatchGroup()
             var guide: [[String: Any]] = []
             var torrentEntries: [[String: Any]] = []
+            // EZTV may name the releases after an alternate title ("The
+            // Doll" for "Lalka"): those count as the show's too.
+            var titles = [show.title]
+            var akasKnown = false
 
             if let tvmazeId = tvmaze["id"] as? Int {
                 group.enter()
                 self.fetchTVMazeEpisodes(tvmazeId: tvmazeId) { episodes in
                     guide = episodes
+                    group.leave()
+                }
+                group.enter()
+                self.fetchTVMazeAkas(tvmazeId: tvmazeId) { akas in
+                    if let akas {
+                        titles += akas
+                        akasKnown = true
+                    }
                     group.leave()
                 }
             }
@@ -513,8 +536,14 @@ public final class YTSEZTVProvider: MediaProvider {
             }
 
             group.notify(queue: .main) {
-                show.episodes = self.mergedEpisodes(guide: guide, eztvEntries: torrentEntries, show: show)
-                self.cacheQueue.sync { self.showCache[imdbId] = show }
+                // Alternate titles unknown (request failed) while the title
+                // alone would drop releases: they may be named after one of
+                // them ("Money Heist"), so keep them all this time and don't
+                // cache the show: the next opening asks again.
+                let complete = akasKnown || YTSEZTVProvider.releases(torrentEntries, of: titles).count == torrentEntries.count
+                show.episodes = self.mergedEpisodes(guide: guide, eztvEntries: torrentEntries, show: show,
+                                                    titles: complete ? titles : [])
+                if complete { self.cacheQueue.sync { self.showCache[imdbId] = show } }
                 print("[EZTV] getShowInfo \(imdbId): guide=\(guide.count) torrents=\(torrentEntries.count) episodes=\(show.episodes.count)")
                 completion(show, nil)
             }
@@ -549,11 +578,31 @@ public final class YTSEZTVProvider: MediaProvider {
             let padded = String(imdbNumeric).leftPadded(to: 7, with: "0")
             let imdbId = "tt\(padded)"
             self.fetchTVMaze(imdbId: imdbId) { tvmaze in
-                if let tvmaze = tvmaze, var show = Show(tvmaze: tvmaze, imdbId: imdbId, episodes: []) {
-                    show.episodes = self.mergedEpisodes(guide: [], eztvEntries: entries, show: show)
-                    lock.lock(); shows.append(show); lock.unlock()
+                guard let tvmaze = tvmaze, let show = Show(tvmaze: tvmaze, imdbId: imdbId, episodes: []) else {
+                    group.leave()
+                    return
                 }
-                group.leave()
+                let add: ([String]) -> Void = { titles in
+                    // Only another show's releases filed under this IMDb id:
+                    // not this show's latest torrents, keep it out of the list.
+                    let own = YTSEZTVProvider.releases(entries, of: titles)
+                    if !own.isEmpty {
+                        var built = show
+                        built.episodes = self.mergedEpisodes(guide: [], eztvEntries: own, show: show, titles: titles)
+                        lock.lock(); shows.append(built); lock.unlock()
+                    }
+                    group.leave()
+                }
+                // Releases not named after the TVMaze title: its alternate
+                // titles too ("Ye Gou Gu Tou" for "Love For You") — asked
+                // only then, one call per such show.
+                let titles = [show.title]
+                if YTSEZTVProvider.releases(entries, of: titles).count < entries.count, let tvmazeId = tvmaze["id"] as? Int {
+                    // Unknown alternate titles (request failed): no filter.
+                    self.fetchTVMazeAkas(tvmazeId: tvmazeId) { akas in add(akas.map { titles + $0 } ?? []) }
+                } else {
+                    add(titles)
+                }
             }
         }
 
@@ -601,13 +650,18 @@ public final class YTSEZTVProvider: MediaProvider {
     /// single Episode instead of surfacing as duplicate cells.
     private func mergedEpisodes(guide: [[String: Any]],
                                 eztvEntries: [[String: Any]],
-                                show: Show) -> [Episode] {
+                                show: Show,
+                                titles: [String]) -> [Episode] {
         struct Key: Hashable { let season: Int; let episode: Int }
 
         var torrentsByKey: [Key: [Torrent]] = [:]
         var titleByKey: [Key: String] = [:]
         var dateByKey: [Key: Date] = [:]
-        for entry in eztvEntries {
+        let ownEntries = YTSEZTVProvider.releases(eztvEntries, of: titles)
+        if ownEntries.count < eztvEntries.count {
+            print("[EZTV] \(show.id) '\(show.title)': dropped \(eztvEntries.count - ownEntries.count)/\(eztvEntries.count) releases of another show")
+        }
+        for entry in ownEntries {
             let season  = Int((entry["season"]  as? String) ?? "0") ?? 0
             let episode = Int((entry["episode"] as? String) ?? "0") ?? 0
             // episode 0 == season packs / specials without numbering; the
@@ -660,7 +714,9 @@ public final class YTSEZTVProvider: MediaProvider {
         }
 
         // Torrents for episodes the guide doesn't know (brand-new airings,
-        // guide gaps) still deserve a row.
+        // guide gaps, specials, revivals, soaps the guide numbers by year)
+        // still deserve a row. Another show's releases filed under this
+        // IMDb id were already dropped by name (`releases(_:of:)`).
         for (key, torrents) in torrentsByKey where !seenKeys.contains(key) {
             var episode = Episode(
                 title: titleByKey[key] ?? "Episode \(key.episode)",
@@ -707,6 +763,122 @@ public final class YTSEZTVProvider: MediaProvider {
         return torrent
     }
 
+    // MARK: Release names
+
+    /// The entries whose release name names the show, under any of `titles`
+    /// (its TVMaze title, then its alternate titles: `fetchTVMazeAkas`).
+    /// EZTV files some releases of other shows under a show's IMDb id:
+    /// every "Breaking Bad" (tt0903747) entry is in fact "Breaking Brad
+    /// S09E02 …", a different show, which added seasons 6–9 and attached
+    /// wrong torrents to S1–S5. Entries without a title are kept.
+    static func releases(_ entries: [[String: Any]], of titles: [String]) -> [[String: Any]] {
+        let forms = titles.flatMap(nameFormVariants)
+        guard !forms.isEmpty else { return entries }
+        return entries.filter { entry in
+            guard let title = (entry["title"] as? String) ?? (entry["filename"] as? String), !title.isEmpty else { return true }
+            let release = releaseName(title)
+            return release.isEmpty || forms.contains { releaseMatches(release, forms: $0) }
+        }
+    }
+
+    /// True when the release name, up to its SxxEyy / NxNN marker or its
+    /// air date (daily shows), names the show: the same words (case,
+    /// accents, punctuation, "&" / "and", a leading "The", a trailing year
+    /// or country code ignored), or the title with a leading brand
+    /// ("Marvel's …" / "Late Night with …") or a trailing subtitle or host
+    /// dropped, or an acronym of its last words ("Law and Order SVU").
+    /// Accented letters are also matched dropped ("Shgun" for "Shōgun"),
+    /// as EZTV writes them.
+    static func releaseMatches(_ releaseTitle: String, show showTitle: String) -> Bool {
+        let forms = nameFormVariants(showTitle)
+        let release = releaseName(releaseTitle)
+        return forms.isEmpty || release.isEmpty || forms.contains { releaseMatches(release, forms: $0) }
+    }
+
+    /// The show part of a release name, as joined name words: cut at its
+    /// SxxEyy / NxNN marker or at a "2026 11 09" air date.
+    private static func releaseName(_ releaseTitle: String) -> String {
+        var name = releaseTitle
+        let marker = #"(?i)(^|[^a-z0-9])(s\d{1,2}\s?e\d{1,3}|\d{1,2}x\d{1,3}|(19|20)\d{2}[ ._-]\d{2}[ ._-]\d{2})([^0-9]|$)"#
+        if let range = name.range(of: marker, options: .regularExpression) {
+            name = String(name[..<range.lowerBound])
+        }
+        return nameWords(name).joined()
+    }
+
+    private static func releaseMatches(_ release: String, forms: NameForms) -> Bool {
+        if forms.acronyms.contains(release) { return true }
+        let full = forms.full
+        if release == full || release.hasPrefix(full) { return true }
+        if release.count >= 4, full.hasSuffix(release) { return true }
+        // No "release is the start of the title" rule: it kept Netflix's
+        // "Daredevil S01E03" under "Daredevil: Born Again".
+        return false
+    }
+
+    struct NameForms {
+        let full: String
+        let acronyms: Set<String>
+        var isEmpty: Bool { full.isEmpty }
+    }
+
+    /// `title`'s name forms, plus those of:
+    /// - the title with its non-ASCII letters dropped rather than folded:
+    ///   EZTV names "Shōgun" releases "Shgun 2024 S01E10 …";
+    /// - a talk show's title without its host ("The Daily Show with Trevor
+    ///   Noah" → "The Daily Show"): the tail after " with " is a name of
+    ///   two or three capitalized words ("Dancing with the Stars" is kept whole);
+    /// - a title of three words or more without a trailing "Live" ("Jimmy
+    ///   Kimmel Live" → "Jimmy Kimmel 2026 11 09 …").
+    private static func nameFormVariants(_ title: String) -> [NameForms] {
+        var titles = [title]
+        let ascii = String(String.UnicodeScalarView(title.unicodeScalars.filter(\.isASCII)))
+        if ascii != title { titles.append(ascii) }
+        let words = title.split(separator: " ")
+        if words.count >= 3, let last = words.last,
+           last.trimmingCharacters(in: .punctuationCharacters).lowercased() == "live" {
+            titles.append(words.dropLast().joined(separator: " "))
+        }
+        if let with = title.range(of: " with ", options: .caseInsensitive) {
+            let host = title[with.upperBound...].split(separator: " ")
+            if (2...3).contains(host.count), host.allSatisfy({ $0.first?.isUppercase == true }) {
+                titles.append(String(title[..<with.lowerBound]))
+            }
+        }
+        return titles.map(nameForms).filter { !$0.isEmpty }
+    }
+
+    private static func nameForms(_ title: String) -> NameForms {
+        let words = nameWords(title)
+        var acronyms = Set<String>()
+        if words.count >= 2 {
+            for start in 0..<(words.count - 1) {
+                let tail = words[start...].compactMap(\.first).map(String.init).joined()
+                acronyms.insert(words[..<start].joined() + tail)
+            }
+        }
+        return NameForms(full: words.joined(), acronyms: acronyms)
+    }
+
+    /// Lowercased ASCII-folded words, "&" read as "and", apostrophes removed,
+    /// without a leading "the" or trailing years / country codes.
+    private static func nameWords(_ raw: String) -> [String] {
+        let folded = raw.folding(options: [.diacriticInsensitive, .caseInsensitive, .widthInsensitive],
+                                 locale: Locale(identifier: "en_US_POSIX"))
+            .lowercased()
+            .replacingOccurrences(of: "&", with: " and ")
+            .replacingOccurrences(of: "'", with: "")
+            .replacingOccurrences(of: "\u{2019}", with: "")
+        var words = folded.split { !($0.isLetter || $0.isNumber) }.map(String.init)
+        if words.count > 1, words.first == "the" { words.removeFirst() }
+        let countries: Set<String> = ["us", "uk", "au", "nz", "ca"]
+        while words.count > 1, let last = words.last,
+              countries.contains(last) || (last.count == 4 && (last.hasPrefix("19") || last.hasPrefix("20")) && Int(last) != nil) {
+            words.removeLast()
+        }
+        return words
+    }
+
     private static func normalizedGenre(_ raw: String) -> String {
         return raw.lowercased()
             .replacingOccurrences(of: "-", with: "")
@@ -725,6 +897,37 @@ public final class YTSEZTVProvider: MediaProvider {
                 completion(nil)
             }
         }
+    }
+
+    /// TVMaze's alternate titles of a show (`/shows/{id}/akas`) that EZTV
+    /// may name its releases after: the international one (no country), the
+    /// English-speaking countries' ("The Doll" for "Lalka", "Ye Gou Gu Tou"
+    /// for "Love For You"), and any other written in Latin letters
+    /// (romanizations: "Sousou no Frieren", "Shingeki no Kyojin"). Nil when
+    /// the request fails (unknown, not "none").
+    private func fetchTVMazeAkas(tvmazeId: Int, completion: @escaping ([String]?) -> Void) {
+        let url = "https://api.tvmaze.com/shows/\(tvmazeId)/akas"
+        let english: Set<String> = ["US", "GB", "CA", "AU", "NZ", "IE"]
+        session.request(url).validate().responseData { response in
+            guard case .success(let data) = response.result,
+                  let akas = (try? JSONSerialization.jsonObject(with: data)) as? [[String: Any]] else {
+                completion(nil)
+                return
+            }
+            completion(akas.compactMap { aka in
+                guard let name = aka["name"] as? String, !name.isEmpty else { return nil }
+                guard let code = (aka["country"] as? [String: Any])?["code"] as? String else { return name }
+                return english.contains(code) || YTSEZTVProvider.isLatinScript(name) ? name : nil
+            })
+        }
+    }
+
+    /// Every letter is Latin once accents are folded ("Sousou no Frieren"
+    /// yes, "葬送のフリーレン" no).
+    private static func isLatinScript(_ name: String) -> Bool {
+        let folded = name.folding(options: [.diacriticInsensitive, .widthInsensitive], locale: Locale(identifier: "en_US_POSIX"))
+        let letters = folded.unicodeScalars.filter { CharacterSet.letters.contains($0) }
+        return !letters.isEmpty && letters.allSatisfy(\.isASCII)
     }
 
     private func fetchTVMazeEpisodes(tvmazeId: Int, completion: @escaping ([[String: Any]]) -> Void) {
@@ -778,5 +981,40 @@ private extension String {
     func leftPadded(to width: Int, with pad: Character) -> String {
         if count >= width { return self }
         return String(repeating: pad, count: width - count) + self
+    }
+}
+
+// MARK: - Details & suggestions (OpenMetadata)
+
+extension YTSEZTVProvider {
+    /// YTS `movie_details` (with the cast) for an IMDb id: the raw movie
+    /// object, on the main queue, or nil (unknown title, every mirror down).
+    func ytsMovieDetails(imdbId: String, completion: @escaping ([String: Any]?) -> Void) {
+        if let cached = detailsCache.object(forKey: imdbId as NSString) as? [String: Any] {
+            return DispatchQueue.main.async { completion(cached) }
+        }
+        attempt(hosts: orderedHosts, path: Path.movieInfo, params: ["imdb_id": imdbId, "with_cast": "true"]) { [weak self] data, _ in
+            let root = data.flatMap { (try? JSONSerialization.jsonObject(with: $0)) as? [String: Any] }
+            let movie = (root?["data"] as? [String: Any])?["movie"] as? [String: Any]
+            let known = (movie?["id"] as? Int ?? 0) > 0
+            if known, let movie { self?.detailsCache.setObject(movie as NSDictionary, forKey: imdbId as NSString) }
+            DispatchQueue.main.async { completion(known ? movie : nil) }
+        }
+    }
+
+    /// YTS's "suggested" movies for a title (4, from its own catalog):
+    /// movie_details gives YTS's numeric id, movie_suggestions the list.
+    /// Calls back on the main queue, with [] on any failure.
+    func movieSuggestions(imdbId: String, completion: @escaping ([Movie]) -> Void) {
+        ytsMovieDetails(imdbId: imdbId) { [weak self] movie in
+            guard let self, let ytsId = movie?["id"] as? Int else { return completion([]) }
+            self.attempt(hosts: self.orderedHosts, path: Path.movieSuggestions, params: ["movie_id": ytsId]) { data, _ in
+                let root = data.flatMap { (try? JSONSerialization.jsonObject(with: $0)) as? [String: Any] }
+                let movies = ((root?["data"] as? [String: Any])?["movies"] as? [[String: Any]] ?? [])
+                    .compactMap(Movie.init(yts:))
+                    .filter { $0.id != imdbId }
+                DispatchQueue.main.async { completion(movies) }
+            }
+        }
     }
 }

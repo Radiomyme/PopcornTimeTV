@@ -78,14 +78,14 @@ struct MacMoviesGridView: View {
                 Text(message).foregroundStyle(.secondary).padding()
             }
         }
-        .navigationTitle("Films")
+        .navigationTitle(Text("Movies"))
         .toolbar {
-            Picker("Filtre", selection: Binding(get: { viewModel.filter },
+            Picker("Filter", selection: Binding(get: { viewModel.filter },
                                                 set: { viewModel.setFilter($0) })) {
-                Text("Tendances").tag(MovieManager.Filters.trending)
-                Text("Populaires").tag(MovieManager.Filters.popularity)
-                Text("Mieux notés").tag(MovieManager.Filters.rating)
-                Text("Récents").tag(MovieManager.Filters.date)
+                Text("Trending").tag(MovieManager.Filters.trending)
+                Text("Popular").tag(MovieManager.Filters.popularity)
+                Text("Top Rated").tag(MovieManager.Filters.rating)
+                Text("Recently Added").tag(MovieManager.Filters.date)
             }
             .pickerStyle(.menu)
             Picker("Genre", selection: Binding(get: { viewModel.genre },
@@ -175,15 +175,15 @@ struct MacShowsGridView: View {
                 Text(message).foregroundStyle(.secondary).padding()
             }
         }
-        .navigationTitle("Séries")
+        .navigationTitle(Text("Shows"))
         .toolbar {
-            Picker("Filtre", selection: Binding(get: { viewModel.filter },
+            Picker("Filter", selection: Binding(get: { viewModel.filter },
                                                 set: { viewModel.setFilter($0) })) {
-                Text("Tendances").tag(ShowManager.Filters.trending)
-                Text("Populaires").tag(ShowManager.Filters.popularity)
-                Text("Mieux notées").tag(ShowManager.Filters.rating)
-                Text("Récentes").tag(ShowManager.Filters.date)
-                Text("A–Z").tag(ShowManager.Filters.name)
+                Text("Trending").tag(ShowManager.Filters.trending)
+                Text("Popular").tag(ShowManager.Filters.popularity)
+                Text("Top Rated").tag(ShowManager.Filters.rating)
+                Text("Recently Added").tag(ShowManager.Filters.date)
+                Text("A - Z").tag(ShowManager.Filters.name)
             }
             .pickerStyle(.menu)
             Picker("Genre", selection: Binding(get: { viewModel.genre },
@@ -210,7 +210,7 @@ struct MacSearchView: View {
         ScrollView {
             if searching { ProgressView().padding() }
             if !movies.isEmpty {
-                sectionHeader("Films")
+                sectionHeader(Text("Movies"))
                 LazyVGrid(columns: MacPosterGrid.columns, spacing: 22) {
                     ForEach(movies, id: \.id) { movie in
                         NavigationLink(value: movie) {
@@ -220,7 +220,7 @@ struct MacSearchView: View {
                 }.padding(.horizontal, 20)
             }
             if !shows.isEmpty {
-                sectionHeader("Séries")
+                sectionHeader(Text("Shows"))
                 LazyVGrid(columns: MacPosterGrid.columns, spacing: 22) {
                     ForEach(shows, id: \.id) { show in
                         NavigationLink(value: show) {
@@ -230,14 +230,14 @@ struct MacSearchView: View {
                 }.padding(.horizontal, 20)
             }
         }
-        .navigationTitle("Recherche")
-        .searchable(text: $query, prompt: "Titre du film ou de la série")
+        .navigationTitle(Text("Search"))
+        .searchable(text: $query, prompt: Text("Movie or show title"))
         .onSubmit(of: .search) { performSearch() }
     }
 
-    private func sectionHeader(_ title: String) -> some View {
+    private func sectionHeader(_ title: Text) -> some View {
         HStack {
-            Text(title).font(.title3.weight(.semibold))
+            title.font(.title3.weight(.semibold))
             Spacer()
         }.padding(.horizontal, 20).padding(.top, 14)
     }
@@ -257,5 +257,88 @@ struct MacSearchView: View {
             DispatchQueue.main.async { shows = results ?? []; group.leave() }
         }
         group.notify(queue: .main) { searching = false }
+    }
+}
+
+// MARK: - Watchlist
+
+/// Movies and shows saved with the detail page's Watchlist button
+/// (WatchlistManager, synced with Trakt when signed in). Read again every
+/// time the section shows, e.g. back from a page where one was removed.
+struct MacWatchlistView: View {
+    @State private var movies: [Movie] = []
+    @State private var shows: [Show] = []
+    /// Pages pushed over the grid (MacRootView's stack).
+    @Environment(\.macStackDepth) private var stackDepth
+
+    var body: some View {
+        Group {
+            if movies.isEmpty && shows.isEmpty {
+                ContentUnavailableView {
+                    Label { Text("Watchlist Empty") } icon: { Image(systemName: "bookmark") }
+                } description: {
+                    Text("Try adding movies or shows to your watchlist.")
+                }
+            } else {
+                ScrollView {
+                    if !movies.isEmpty {
+                        sectionHeader(Text("Movies"))
+                        LazyVGrid(columns: MacPosterGrid.columns, spacing: 22) {
+                            ForEach(movies, id: \.id) { movie in
+                                NavigationLink(value: movie) {
+                                    MacPosterCard(title: movie.title, subtitle: movie.year, imageURL: movie.smallCoverImage)
+                                }
+                                .buttonStyle(.plain)
+                            }
+                        }
+                        .padding(.horizontal, 20)
+                    }
+                    if !shows.isEmpty {
+                        sectionHeader(Text("Shows"))
+                        LazyVGrid(columns: MacPosterGrid.columns, spacing: 22) {
+                            ForEach(shows, id: \.id) { show in
+                                NavigationLink(value: show) {
+                                    MacPosterCard(title: show.title, subtitle: show.year, imageURL: show.smallCoverImage)
+                                }
+                                .buttonStyle(.plain)
+                            }
+                        }
+                        .padding(.horizontal, 20)
+                    }
+                }
+                .padding(.bottom, 20)
+            }
+        }
+        .navigationTitle(Text("Watchlist"))
+        .onAppear(perform: reload)
+        // Back to the grid: no onAppear then (the stack keeps it in place).
+        .onChange(of: stackDepth) { _, depth in
+            if depth == 0 { reload() }
+        }
+    }
+
+    private func sectionHeader(_ title: Text) -> some View {
+        HStack {
+            title.font(.title3.weight(.semibold))
+            Spacer()
+        }
+        .padding(.horizontal, 20)
+        .padding(.top, 14)
+    }
+
+    /// The local lists now; Trakt's when it answers (signed in only).
+    private func reload() {
+        movies = unique(WatchlistManager<Movie>.movie.getWatchlist { updated in
+            DispatchQueue.main.async { movies = unique(updated) }
+        })
+        shows = unique(WatchlistManager<Show>.show.getWatchlist { updated in
+            DispatchQueue.main.async { shows = unique(updated) }
+        })
+    }
+
+    /// One entry per id (the list is append-only JSON).
+    private func unique<T: Media>(_ items: [T]) -> [T] {
+        var seen = Set<String>()
+        return items.filter { seen.insert($0.id).inserted }
     }
 }

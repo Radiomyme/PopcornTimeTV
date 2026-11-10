@@ -184,6 +184,17 @@ public struct Movie: Media, Equatable {
         self.tmdbId = nil
         self.largeCoverImage      = ImageProxy.proxied((dict["large_cover_image"] as? String) ?? (dict["medium_cover_image"] as? String))
         self.largeBackgroundImage = ImageProxy.proxied((dict["background_image_original"] as? String) ?? (dict["background_image"] as? String))
+        // movie_details?with_cast=true: the top-billed actors with headshots.
+        if let cast = dict["cast"] as? [[String: Any]] {
+            self.actors = cast.compactMap { entry in
+                guard let name = (entry["name"] as? String)?.removingHtmlEncoding, !name.isEmpty else { return nil }
+                let code = (entry["imdb_code"] as? String) ?? ""
+                return Actor(name: name,
+                             characterName: (entry["character_name"] as? String)?.removingHtmlEncoding ?? "",
+                             imdbId: code.isEmpty ? "yts:\(name)" : (code.hasPrefix("nm") ? code : "nm\(code)"),
+                             largeImage: ImageProxy.proxied(entry["url_small_image"] as? String))
+            }
+        }
         if let ytsTorrents = dict["torrents"] as? [[String: Any]] {
             for entry in ytsTorrents {
                 guard let hash = entry["hash"] as? String else { continue }
@@ -239,6 +250,26 @@ public struct Movie: Media, Equatable {
         if let items = dict["items"] as? [[String: Any]] {
             self.torrents = items.compactMap { Time4PopcornClient.torrent(fromItem: $0) }.sorted(by: <)
         }
+    }
+
+    /// A Cinemeta (Stremio's public catalog) item: `id` is the IMDb id. Used
+    /// for related titles; the detail page loads the full movie by id.
+    public init?(cinemeta dict: [String: Any]) {
+        guard let imdb = dict["imdb_id"] as? String ?? dict["id"] as? String, imdb.hasPrefix("tt"),
+              let name = dict["name"] as? String, !name.isEmpty else { return nil }
+        self.id    = imdb
+        self.title = name.removingHtmlEncoding
+        self.slug  = name.slugged
+        self.year  = String(((dict["releaseInfo"] as? String) ?? (dict["year"] as? String) ?? "").prefix(4))
+        let imdbRating = Double((dict["imdbRating"] as? String) ?? "") ?? 0
+        self.rating  = Float(imdbRating * 10.0)
+        self.runtime = Int(((dict["runtime"] as? String) ?? "").prefix { $0.isNumber }) ?? 0
+        self.summary = ((dict["description"] as? String) ?? "No summary available.".localized).strippedOfHtml
+        self.certification = "Unrated"
+        self.genres = (dict["genres"] as? [String]) ?? (dict["genre"] as? [String]) ?? []
+        self.tmdbId = nil
+        self.largeCoverImage      = (dict["poster"] as? String).map { OpenMetadata.largerPoster($0) }
+        self.largeBackgroundImage = dict["background"] as? String
     }
 
     /// YTS only exposes torrent hashes; build a standard magnet link with the

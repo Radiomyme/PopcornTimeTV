@@ -3,28 +3,18 @@
 import Foundation
 import UIKit
 
+/// Subtitle appearance and encoding for the VLC player (tvOS). Not editable in
+/// Settings any more; the in-player subtitle panel still changes `encoding`.
+/// The preferred subtitle language is not stored here but under
+/// `PlaybackLanguagePreferences.subtitleLanguageDefaultsKey`.
 class SubtitleSettings: NSObject, NSCoding {
     
+    /// VLC text-renderer size (an inverted scale: larger value, smaller text).
     enum Size: Float {
         case small = 20.0
         case medium = 16.0
         case mediumLarge = 12.0
         case large = 6.0
-        
-        static let array = [small, medium, mediumLarge, large]
-        
-        var localizedString: String {
-            switch self {
-            case .small:
-                return "Small".localized
-            case .medium:
-                return "Medium".localized
-            case .mediumLarge:
-                return "Medium Large".localized
-            case .large:
-                return "Large".localized
-            }
-        }
     }
     
     static var encodings: [String: String] {
@@ -76,7 +66,6 @@ class SubtitleSettings: NSObject, NSCoding {
     var size: Size = .medium
     var color: UIColor = .white
     var encoding: String = "UTF-8"
-    var language: String? = nil
     var font: UIFont = UIFont.systemFont(ofSize: CGFloat(Size.medium.rawValue))
     var style: UIFont.Style = .normal
     
@@ -90,9 +79,41 @@ class SubtitleSettings: NSObject, NSCoding {
         self.size = settings.size
         self.color = settings.color
         self.encoding = settings.encoding
-        self.language = settings.language
         self.font = settings.font
         self.style = settings.style
+    }
+
+    /// One-time move (5.1) of the subtitle language that the old tvOS Settings
+    /// page archived in this object to the "preferredSubtitleLanguage" key that
+    /// the players read. The archive could never be read back (`init` asks for
+    /// secure coding, which this class does not adopt), so the choice was lost
+    /// at every launch. Reads only "language" with a non-secure unarchiver, then
+    /// drops the archive so a later "None" is not overwritten again.
+    static func migrateLegacyLanguage(defaults: UserDefaults = .standard) {
+        guard let data = defaults.data(forKey: "subtitleSettings") else { return }
+        defaults.removeObject(forKey: "subtitleSettings")
+        let key = PlaybackLanguagePreferences.subtitleLanguageDefaultsKey
+        guard defaults.object(forKey: key) == nil,
+              let unarchiver = try? NSKeyedUnarchiver(forReadingFrom: data) else { return }
+        unarchiver.requiresSecureCoding = false
+        unarchiver.setClass(LegacyLanguage.self, forClassName: NSStringFromClass(SubtitleSettings.self))
+        let legacy = unarchiver.decodeObject(forKey: NSKeyedArchiveRootObjectKey) as? LegacyLanguage
+        unarchiver.finishDecoding()
+        if let name = legacy?.language, !name.isEmpty {
+            defaults.set(name, forKey: key)
+        }
+    }
+
+    /// Stand-in for the archived object that decodes its "language" field only.
+    /// (Never archived itself; the @objc name just keeps NSCoding's naming rule.)
+    @objc(PTLegacySubtitleLanguage)
+    private final class LegacyLanguage: NSObject, NSCoding {
+        let language: String?
+        required init?(coder: NSCoder) {
+            language = coder.decodeObject(of: NSString.self, forKey: "language") as String?
+            super.init()
+        }
+        func encode(with coder: NSCoder) {}
     }
 
     func save() {
@@ -113,7 +134,6 @@ class SubtitleSettings: NSObject, NSCoding {
         self.size = size
         self.color = color
         self.encoding = encoding
-        self.language = aDecoder.decodeObject(of: NSString.self, forKey: "language") as String?
         self.font = UIFont(descriptor: descriptor, size: CGFloat(size.rawValue))
         self.style = style
     }
@@ -122,7 +142,6 @@ class SubtitleSettings: NSObject, NSCoding {
         aCoder.encode(CGFloat(size.rawValue), forKey: "size")
         aCoder.encode(color, forKey: "color")
         aCoder.encode(encoding, forKey: "encoding")
-        aCoder.encode(language, forKey: "language")
         aCoder.encode(font.fontDescriptor, forKey: "font")
         aCoder.encode(style.rawValue, forKey: "style")
     }

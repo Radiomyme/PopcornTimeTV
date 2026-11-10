@@ -205,72 +205,105 @@ class MainViewController: UIViewController, CollectionViewControllerDelegate {
             collectionViewController.delegate = self
         } else if let segue = segue as? AutoPlayStoryboardSegue,
             segue.identifier == "showMovie" || segue.identifier == "showShow",
-            let media: Media = sender as? Movie ?? sender as? Show,
-            let vc = storyboard?.instantiateViewController(withIdentifier: String(describing: DetailViewController.self)) as? DetailViewController {
-            
-#if os(tvOS)
-
-                if let destination = segue.destination as? TVLoadingViewController {
-                    destination.loadView() // Initialize the @IBOutlets
-                    
-                    if let image = media.smallCoverImage, let url = URL(string: image) {
-                        destination.backgroundImageView.af.setImage(withURL: url)
-                    }
-                    
-                    destination.titleLabel.text = media.title
-                }
-            
-#endif
-            
-            // Exact same storyboard UI is being used for both classes. This will enable subclass-specific functions however, stored instance variables have to be set using `object_setIvar` otherwise there will be weird malloc crashes.
-            object_setClass(vc, media is Movie ? MovieDetailViewController.self : ShowDetailViewController.self)
-            
-            
-            vc.loadMedia(id: media.id) { (media, error) in
-                guard let navigationController = segue.destination.navigationController,
-                    navigationController.visibleViewController === segue.destination // Make sure we're still loading and the user hasn't dismissed the view.
-                    else { return }
-                
-                
-                let transition = CATransition()
-                transition.duration = 0.5
-                transition.timingFunction = CAMediaTimingFunction(name: CAMediaTimingFunctionName.easeInEaseOut)
-                transition.type = CATransitionType.fade
-                navigationController.view.layer.add(transition, forKey: nil)
-                
-                defer {
-                    DispatchQueue.main.asyncAfter(deadline: .now() + transition.duration) {
-                        var viewControllers = navigationController.viewControllers
-                        if let index = viewControllers.firstIndex(where: {$0 === segue.destination}) {
-                            viewControllers.remove(at: index)
-                            navigationController.setViewControllers(viewControllers, animated: false)
-                        }
-                        
-                        if let media = (media as? Show)?.latestUnwatchedEpisode() ?? media, segue.shouldAutoPlay {
-                            AppDelegate.shared.chooseQuality(nil, media: media) { torrent in
-                                AppDelegate.shared.play(media, torrent: torrent)
-                            }
-                        }
-                    }
-                }
-                
-                if let error = error {
-                    let vc = UIViewController()
-                    let view: ErrorBackgroundView? = .fromNib()
-                    
-                    view?.setUpView(error: error)
-                    vc.view = view
-                    
-                    navigationController.pushViewController(vc, animated: false)
-                } else if let currentItem = media {
-                    vc.currentItem = currentItem
-                    navigationController.pushViewController(vc, animated: false)
-                }
-            }
+            let media: Media = sender as? Movie ?? sender as? Show {
+            MainViewController.loadDetail(of: media, behind: segue.destination, autoPlay: segue.shouldAutoPlay)
         } else if segue.identifier == "showPerson",
             let vc = segue.destination as? PersonViewController,
             let person: Person = sender as? Crew ?? sender as? Actor {
             vc.currentItem = person
+        }
+    }
+}
+
+// MARK: - Detail pages
+
+extension MainViewController {
+
+    /// Opens the page of a movie or show from code (e.g. a related title on a
+    /// detail page): pushes the loading screen, which is then replaced by the
+    /// page, exactly like a poster's `showMovie` / `showShow` segue.
+    static func showDetail(of media: Media, on navigationController: UINavigationController, autoPlay: Bool = false) {
+        let loadingViewController = UIStoryboard.main.instantiateViewController(withIdentifier: "LoadingViewController")
+        loadDetail(of: media, behind: loadingViewController, autoPlay: autoPlay)
+        navigationController.push(loadingViewController, animated: true)
+    }
+
+    /// Fills `loadingViewController` (the TVLoadingViewController a
+    /// `showMovie` / `showShow` segue pushes) with the poster and title,
+    /// loads the movie or show info, then swaps the loading screen for the
+    /// detail page (`GlassDetailHostingController`) with a fade, or for an
+    /// error page. Nothing happens if the user left the loading screen
+    /// meanwhile. `autoPlay` (a Continue Watching item) then plays what
+    /// the page's Play button would.
+    static func loadDetail(of media: Media, behind loadingViewController: UIViewController, autoPlay: Bool) {
+#if os(tvOS)
+        if let destination = loadingViewController as? TVLoadingViewController {
+            destination.loadView() // Initialize the @IBOutlets
+
+            if let image = media.smallCoverImage, let url = URL(string: image) {
+                destination.backgroundImageView.af.setImage(withURL: url)
+            }
+
+            destination.titleLabel.text = media.title
+        }
+#endif
+
+        /// Replaces the loading screen with the page (or an error page).
+        func replaceLoadingScreen(with media: Media?, error: NSError?) {
+            guard let navigationController = loadingViewController.navigationController,
+                navigationController.visibleViewController === loadingViewController // Make sure we're still loading and the user hasn't dismissed the view.
+                else { return }
+
+            let transition = CATransition()
+            transition.duration = 0.5
+            transition.timingFunction = CAMediaTimingFunction(name: CAMediaTimingFunctionName.easeInEaseOut)
+            transition.type = CATransitionType.fade
+            navigationController.view.layer.add(transition, forKey: nil)
+
+            var detailViewController: GlassDetailHostingController?
+
+            defer {
+                DispatchQueue.main.asyncAfter(deadline: .now() + transition.duration) {
+                    var viewControllers = navigationController.viewControllers
+                    if let index = viewControllers.firstIndex(where: {$0 === loadingViewController}) {
+                        viewControllers.remove(at: index)
+                        navigationController.setViewControllers(viewControllers, animated: false)
+                    }
+
+                    if autoPlay {
+                        detailViewController?.startAutoPlay()
+                    }
+                }
+            }
+
+            if let error = error {
+                let vc = UIViewController()
+                let view: ErrorBackgroundView? = .fromNib()
+
+                view?.setUpView(error: error)
+                vc.view = view
+
+                navigationController.pushViewController(vc, animated: false)
+            } else if let media = media {
+                let vc = GlassDetailHostingController(media: media, autoPlay: autoPlay)
+                detailViewController = vc
+                navigationController.pushViewController(vc, animated: false)
+            }
+        }
+
+        GlassDetailHostingController.loadCore(of: media) { (media, error) in
+            // A cached show answers within a few milliseconds, while the
+            // loading screen's own push (TVNavigationController's 0.6 s
+            // animation) is still running. UIKit drops navigation changes made
+            // during a transition (the page would never open), so the swap
+            // waits for that push to end.
+            if let coordinator = loadingViewController.navigationController?.transitionCoordinator {
+                coordinator.animate(alongsideTransition: nil) { _ in
+                    replaceLoadingScreen(with: media, error: error)
+                }
+            } else {
+                replaceLoadingScreen(with: media, error: error)
+            }
         }
     }
 }
