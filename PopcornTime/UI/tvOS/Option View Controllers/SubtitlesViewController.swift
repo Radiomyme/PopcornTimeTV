@@ -5,7 +5,17 @@ import struct PopcornKit.Subtitle
 
 class SubtitlesViewController: OptionsStackViewController, UITableViewDataSource {
     
+    /// OpenSubtitles entries.
     var subtitles = [Subtitle]()
+    /// The file's own text tracks (VLC track id + name), listed before the
+    /// OpenSubtitles entries so the release's subtitles can be picked — or
+    /// picked again after an OpenSubtitles file replaced them.
+    var embeddedTracks: [(id: String, name: String)] = []
+    /// The embedded track on screen; nil when an OpenSubtitles file or
+    /// nothing is on.
+    var currentEmbeddedTrackId: String?
+    /// The user picked an embedded track (its id) or turned it off (nil).
+    var didSelectEmbeddedTrack: ((String?) -> Void)?
     let encodings = SubtitleSettings.encodings
     let delays = [Int](-60...60)
     
@@ -25,9 +35,15 @@ class SubtitlesViewController: OptionsStackViewController, UITableViewDataSource
     func tableView(_ tableView: UITableView, cellForRowAt indexPath: IndexPath) -> UITableViewCell {
         let cell = tableView.dequeueReusableCell(withIdentifier: "cell", for: indexPath)
         switch tableView {
+        case firstTableView where indexPath.row < embeddedTracks.count:
+            let track = embeddedTracks[indexPath.row]
+            cell.textLabel?.text = track.name
+            cell.accessoryType = currentEmbeddedTrackId == track.id ? .checkmark : .none
         case firstTableView:
-            cell.textLabel?.text = subtitles[indexPath.row].language
-            cell.accessoryType = currentSubtitle == subtitles[indexPath.row] ? .checkmark : .none
+            let subtitle = subtitles[indexPath.row - embeddedTracks.count]
+            // Told apart from the file's own tracks when both are listed.
+            cell.textLabel?.text = embeddedTracks.isEmpty ? subtitle.language : "\(subtitle.language) (OpenSubtitles)"
+            cell.accessoryType = currentSubtitle == subtitle ? .checkmark : .none
         case secondTableView:
             let delay = delays[indexPath.row]
             cell.textLabel?.text = (delay > 0 ? "+" : "") + NumberFormatter.localizedString(from: NSNumber(value: delay), number: .decimal)
@@ -62,7 +78,7 @@ class SubtitlesViewController: OptionsStackViewController, UITableViewDataSource
     
     func numberOfSections(in tableView: UITableView) -> Int {
         tableView.backgroundView = nil
-        if tableView == firstTableView && subtitles.isEmpty {
+        if tableView == firstTableView && subtitles.isEmpty && embeddedTracks.isEmpty {
             let label = UILabel(frame: CGRect(origin: .zero, size: CGSize(width: 200.0, height: 20)))
             tableView.backgroundView = label
             label.text = "No subtitles available.".localized
@@ -78,7 +94,7 @@ class SubtitlesViewController: OptionsStackViewController, UITableViewDataSource
     func tableView(_ tableView: UITableView, numberOfRowsInSection section: Int) -> Int {
         switch tableView {
         case firstTableView:
-            return subtitles.count
+            return embeddedTracks.count + subtitles.count
         case secondTableView:
             return delays.count
         case thirdTableView:
@@ -90,12 +106,20 @@ class SubtitlesViewController: OptionsStackViewController, UITableViewDataSource
     
     func tableView(_ tableView: UITableView, didSelectRowAt indexPath: IndexPath) {
         switch tableView {
+        case firstTableView where indexPath.row < embeddedTracks.count:
+            let id = embeddedTracks[indexPath.row].id
+            // The checked row again turns it off.
+            currentEmbeddedTrackId = currentEmbeddedTrackId == id ? nil : id
+            currentSubtitle = nil
+            didSelectEmbeddedTrack?(currentEmbeddedTrackId)
         case firstTableView:
-            if currentSubtitle == subtitles[indexPath.row] { // If row was already selected, user wants to remove the selection.
+            let subtitle = subtitles[indexPath.row - embeddedTracks.count]
+            if currentSubtitle == subtitle { // If row was already selected, user wants to remove the selection.
                 currentSubtitle = nil
             } else {
-                currentSubtitle = subtitles[indexPath.row]
+                currentSubtitle = subtitle
             }
+            currentEmbeddedTrackId = nil
             delegate?.didSelectSubtitle(currentSubtitle)
         case secondTableView:
             currentDelay = delays[indexPath.row]

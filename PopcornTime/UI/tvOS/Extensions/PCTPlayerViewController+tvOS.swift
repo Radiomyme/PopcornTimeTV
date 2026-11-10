@@ -62,6 +62,17 @@ extension PCTPlayerViewController: UIViewControllerTransitioningDelegate {
 
         destinationController.subtitlesViewController.subtitles = subtitles
         destinationController.subtitlesViewController.currentSubtitle = currentSubtitle
+        // The file's own text tracks are listed too, so the release's
+        // subtitles can be picked — or picked again after an OpenSubtitles
+        // file replaced them. Checked: the one VLC shows, unless an
+        // OpenSubtitles file is the current choice.
+        let embeddedTracks = embeddedTextTracks()
+        destinationController.subtitlesViewController.embeddedTracks = embeddedTracks.map { (id: $0.trackId, name: $0.trackName) }
+        destinationController.subtitlesViewController.currentEmbeddedTrackId = currentSubtitle == nil
+            ? embeddedTracks.first(where: { $0.isSelected })?.trackId : nil
+        destinationController.subtitlesViewController.didSelectEmbeddedTrack = { [weak self] trackId in
+            self?.didSelectEmbeddedSubtitleTrack(trackId)
+        }
         destinationController.subtitlesViewController.currentDelay = mediaplayer.currentVideoSubTitleDelay/Int(1e6)
         destinationController.audioViewController.currentDelay = mediaplayer.currentAudioPlaybackDelay/Int(1e6)
         // VLCKit 4 track API: feed the picker each track's name and its
@@ -76,6 +87,22 @@ extension PCTPlayerViewController: UIViewControllerTransitioningDelegate {
         present(destinationController, animated: true)
     }
     
+    /// The options panel takes the subtitle choice when it opens
+    /// (`presentOptionsViewController`), then changes it only on its own
+    /// clicks. When the player drops the choice by itself while the panel is
+    /// up — an OpenSubtitles file whose download failed or whose track VLC
+    /// never registered (`dropFailedSubtitle`) — the panel takes it again,
+    /// by the same rule: the choice, else the file's own track VLC shows. It
+    /// then shows what is on screen, and one click on the failed entry tries
+    /// it again instead of turning off the track on screen.
+    func refreshSubtitlesPanelIfPresented() {
+        guard let panel = (presentedViewController as? OptionsViewController)?.subtitlesViewController else { return }
+        panel.currentSubtitle = currentSubtitle
+        panel.currentEmbeddedTrackId = currentSubtitle == nil
+            ? embeddedTextTracks().first(where: { $0.isSelected })?.trackId : nil
+        panel.firstTableView?.reloadData()
+    }
+
     @objc func touchLocationDidChange(_ gesture: SiriRemoteGestureRecognizer) {
         if gesture.state == .ended { hideInfoLabel() } else if gesture.isLongTap { showInfoLabel() }
         
@@ -106,6 +133,7 @@ extension PCTPlayerViewController: UIViewControllerTransitioningDelegate {
             if mediaplayer.isSeekable {
                 let time = NSNumber(value: progressBar.scrubbingProgress * streamDuration)
                 mediaplayer.time = VLCTime(number: time)
+                noteUserMovedPlayhead()
                 // Force a progress change rather than waiting for VLCKit's delegate call to.
                 progressBar.progress = progressBar.scrubbingProgress
                 progressBar.elapsedTimeLabel.text = progressBar.scrubbingTimeLabel.text

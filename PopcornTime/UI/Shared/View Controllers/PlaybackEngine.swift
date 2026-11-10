@@ -29,18 +29,20 @@ public protocol PlaybackEngine: AnyObject {
     func seek(to seconds: TimeInterval)
 }
 
-/// Heuristic that picks an engine for a stream URL. AVPlayer is preferred for
-/// `.mp4` / `.m4v` / `.mov` (HDR/DV/Atmos native on tvOS 17+); VLC handles
-/// `.mkv` / `.avi` / `.flv` and anything we can't pre-classify.
+/// Picks an engine for a stream URL with the shared `PlaybackRouting` table.
+/// AVPlayer for `.mp4` / `.m4v` / `.mov` (HDR/DV/Atmos native on tvOS 17+).
+/// This engine abstraction plays a URL as-is, so Matroska (which the real
+/// players remux to HLS through `RemuxAVPlayerViewController`) and every
+/// other container go to VLC here.
 public enum PlaybackEngineSelector {
     public static func makeEngine(for url: URL,
                                   vlcMediaPlayer: VLCMediaPlayer? = nil) -> PlaybackEngine {
-        let path = url.path.lowercased()
-        let avPlayerNative = path.hasSuffix(".mp4") || path.hasSuffix(".m4v") || path.hasSuffix(".mov")
-        if avPlayerNative {
+        switch PlaybackRouting.route(forFileName: url.lastPathComponent, fallbackToRemux: false) {
+        case .avPlayer:
             return AVPlayerEngine()
+        case .remux, .vlc:
+            return VLCEngine(player: vlcMediaPlayer ?? VLCMediaPlayer())
         }
-        return VLCEngine(player: vlcMediaPlayer ?? VLCMediaPlayer())
     }
 }
 
@@ -95,7 +97,9 @@ public final class VLCEngine: PlaybackEngine {
     public func stop()  { player.stop() }
 
     public func seek(to seconds: TimeInterval) {
-        player.time = VLCTime(int: Int32(seconds * 1000.0))
+        // NaN / ∞ (unknown duration) would trap in the Int32 conversion.
+        guard seconds.isFinite else { return }
+        player.time = VLCTime(int: Int32(clamping: Int64(max(0, min(seconds, Double(Int32.max) / 1000)) * 1000)))
     }
 }
 
@@ -156,7 +160,8 @@ public final class AVPlayerEngine: PlaybackEngine {
     }
 
     public func seek(to seconds: TimeInterval) {
-        let time = CMTime(seconds: seconds, preferredTimescale: 1000)
+        guard seconds.isFinite else { return }
+        let time = CMTime(seconds: max(0, seconds), preferredTimescale: 1000)
         player.seek(to: time, toleranceBefore: .zero, toleranceAfter: .zero)
     }
 }

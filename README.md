@@ -27,13 +27,39 @@ serves it to `AVPlayer` as a complete VOD HLS presentation over a localhost serv
   decoder untouched. The audio is exposed as its own HLS rendition tagged `CHANNELS="16/JOC"`
   and the player session is put in `.moviePlayback`, so an Apple TV lights the receiver's
   **Dolby Atmos** badge and renders true object audio.
-- **HDR / Dolby Vision** preserved (HEVC `hvc1` + `hvcC` copied verbatim — no tone-mapping).
-- **Native subtitles** — OpenSubtitles tracks converted SRT → WebVTT on demand and offered in
-  `AVPlayer`'s own picker (with CRLF/encoding handling for real-world files).
-- **Full VOD timeline from t=0** — dynamic playlist with the real total duration, scrubbing and
-  seeking, no "live" badge; segments are long-polled until remuxed.
-- **Bounded disk use** — already-played segments are pruned behind the playhead, and torrent /
-  remux caches are reclaimed at launch and before each stream on **all** platforms.
+- **HDR / Dolby Vision preserved** — the video bitstream is copied verbatim (no tone-mapping):
+  HDR10, HDR10+ and HLG as encoded; Dolby Vision profiles 5, 8.1 and 8.4 signalled natively
+  (`dvh1` + `dvvC`); profile 7 (UHD Blu-ray) plays its HDR10 base layer. `hev1`-style HEVC
+  streams are rebuilt as `hvc1`.
+- **Every audio track, natively** — each compatible track becomes its own selectable HLS
+  rendition (language, channel layout, default flag): E-AC-3 / AC-3, AAC (LC, HE), MP3, MP2,
+  FLAC, Opus and ALAC are passed through; PCM is converted losslessly to FLAC on the fly.
+- **Native subtitles** — the file's own text subtitles (SRT, SSA/ASS, WebVTT, compressed or
+  not) become WebVTT tracks in `AVPlayer`'s picker, with their *forced* and *SDH* flags;
+  OpenSubtitles files (SRT, SSA/ASS, MicroDVD, SubViewer, WebVTT, in any common encoding) are
+  added on demand. A subtitle download that fails never interrupts native playback, and a
+  slow one delays the start by about 15 seconds at most: the movie then starts without it.
+  Where the system offers machine-translated subtitles (OS 27), they are used only as a last
+  resort.
+- **Full VOD timeline from t=0** — the whole movie is listed from the first second with its real
+  total duration: scrubbing and seeking, no "live" badge; segments are long-polled until
+  remuxed. Segment boundaries come from the file's keyframe index (Matroska Cues) when it has
+  one, so a seek lands where you aim even on long-GOP encodes. Files that don't declare a
+  duration play from a growing playlist until the remux completes.
+- **Download-aware playback** — when playback catches up with the download, the player waits
+  for the data and resumes natively at the same position; a damaged or incomplete region of the
+  torrent is waited for, never played as garbage. A jump just past the downloaded part also
+  stays native: the player measures the download's pace and waits when the data will arrive
+  within about 45 seconds. VLC only takes over when native playback is impossible or would keep
+  you waiting: a codec Apple can't decode, a rewind past the segments still on disk, a full
+  disk, or a jump so far ahead that the player can't prepare it within about 45 seconds — a
+  part not downloaded yet (the torrent downloads in order; VLC fetches that part directly), or
+  one so far into the downloaded part that the remux can't reach it in time. It continues at the
+  current or chosen position.
+- **Bounded disk use** — played segments are kept behind the playhead as far as the free disk
+  space allows (at least 3 minutes), so rewinds stay native; only on a tight disk are the oldest
+  ones pruned. Torrent / remux caches are reclaimed at launch and before each stream on **all**
+  platforms.
 
 > Note: macOS decodes Dolby to PCM and can't bitstream Atmos, so the Atmos badge is an **Apple
 > TV** capability; on Mac the remux still gives you the untouched HDR video and the full-quality
@@ -45,6 +71,8 @@ serves it to `AVPlayer` as a complete VOD HLS presentation over a localhost serv
 - Swift 5, tvOS 17+ (built and run on tvOS 26), iOS deployment target 26
 - Builds cleanly on Xcode 26 (pods pinned/patched, third-party warnings silenced)
 - New SwiftUI app for iPhone / iPad / Mac (Designed for iPad) sharing the `PopcornKit` core
+- Native macOS app (macOS 14+) with the same remux engine, so Atmos is rendered spatially on
+  the Mac instead of being downmixed
 
 **Content & sources**
 - Pluggable `MediaProvider` layer (no more hardcoded, dead `api-fetch` host)
@@ -65,18 +93,26 @@ serves it to `AVPlayer` as a complete VOD HLS presentation over a localhost serv
 - **Audio-language** track picker in the player + a preferred-audio-language setting that
   auto-selects a matching track
 - Quality system rewrite (2160p → 1080p → 720p → 480p, HDR/Dolby Vision/Atmos preferred)
-- Three-way playback routing: **remux → AVPlayer** for DD+/E-AC-3 MKV (true Atmos, see above),
-  **AVPlayer** for mp4/m4v/mov, **VLC** as the universal fallback
+- Three-way playback routing on the real file name: **remux → AVPlayer** for every Matroska /
+  WebM file (the remuxer checks the codecs within seconds and hands anything Apple can't decode
+  to VLC), **AVPlayer** for mp4/m4v/mov, **VLC** for AVI, MPEG-TS/M2TS, WMV, FLV, MPEG-PS/VOB,
+  Ogg… and as the universal fallback
+- On Apple TV, iPhone and iPad, playback resumes where you left off on every engine; a far
+  resume on a still-downloading file asks whether to resume through VLC or restart natively
 
 ## Supported formats
 
-| Kind | Supported |
-|------|-----------|
-| **Containers** | `.mkv` (remuxed to fMP4/HLS), `.mp4`, `.m4v`, `.mov` (native), anything else via VLC fallback |
-| **Video** | HEVC / H.265 (`hvc1`, incl. 10-bit), H.264 / AVC; **HDR10** and **Dolby Vision** preserved through the remux path (no tone-mapping) |
-| **Audio** | **Dolby Digital Plus (E-AC-3) with Dolby Atmos (JOC)** — true object audio on Apple TV; Dolby Digital (AC-3); AAC; others decoded via VLC |
-| **Resolution** | up to **2160p (4K)**; auto-picks 2160p → 1080p → 720p → 480p by preference |
-| **Subtitles** | OpenSubtitles (SRT → WebVTT), native `AVPlayer` picker, per-language preference; VLC subtitles on the fallback path |
+| Kind | Native (`AVPlayer`: HDR, Dolby Vision, Atmos) | Through VLC |
+|------|-----------------------------------------------|-------------|
+| **Containers** | Matroska `.mkv` / `.mk3d` and WebM (remuxed to fMP4/HLS); `.mp4`, `.m4v`, `.mov` (direct) | AVI, MPEG-TS / M2TS, WMV / ASF, FLV, MPEG-PS / VOB, Ogg, 3GP, RealMedia… |
+| **Video** | HEVC / H.265 Main & Main 10; H.264 / AVC 8-bit 4:2:0; HDR10, HDR10+, HLG and Dolby Vision 5 / 8.1 / 8.4 kept as encoded; Dolby Vision 7 as its HDR10 base layer; AV1 where the chip decodes it in hardware (A17 Pro / M3 and later) | H.264 Hi10P / 4:2:2 / 4:4:4, HEVC 4:2:2 / 4:4:4 / 12-bit, VP8 / VP9, AV1 without hardware decoding, MPEG-1 / 2, MPEG-4 Part 2 (DivX / Xvid), VC-1, VVC, Theora |
+| **Audio** | **Dolby Digital Plus (E-AC-3) with Dolby Atmos (JOC)** — true object audio on Apple TV; Dolby Digital (AC-3); AAC LC / HE-AAC; MP3; MP2; FLAC; Opus; ALAC; PCM (converted losslessly to FLAC) | TrueHD / MLP, DTS (all variants), Vorbis, AAC Main / SSR / LTP, TTA, WavPack |
+| **Subtitles** | Embedded SRT, SSA/ASS and WebVTT tracks (forced / SDH flags kept); OpenSubtitles (SRT, SSA/ASS, MicroDVD, SubViewer, WebVTT); per-language preference | Bitmap PGS / VobSub tracks, plus OpenSubtitles |
+| **Resolution** | up to **2160p (4K)**; auto-picks 2160p → 1080p → 720p → 480p by preference | same |
+
+> A file that pairs an unsupported track with a supported one stays native: for example a
+> TrueHD Atmos + AC-3 release plays in HDR / Dolby Vision with the AC-3 track. Apple's decoders
+> don't handle TrueHD or DTS, so files carrying only those go to VLC.
 
 > Atmos and Dolby Vision passthrough require an **Apple TV 4K** connected to a compatible
 > display / receiver. On iPhone / iPad / Mac the same files play with full-quality decoded audio
@@ -96,6 +132,8 @@ open PopcornTime.xcworkspace
 Then pick a scheme:
 - **PopcornTimetvOS** → run on an Apple TV simulator or device
 - **PopcornTimeiOS** → run on iPhone / iPad, or "My Mac (Designed for iPad)"
+- **PopcornTimeMac** → the native macOS app (torrent engine from the PopcornTorrent Swift
+  package, resolved by Xcode)
 
 > Tip: keep the checkout **outside** an iCloud-synced folder (e.g. `~/Developer`). iCloud
 > creates `<file> 2.ext` conflict copies inside `Pods/` and can rewrite tracked project files,

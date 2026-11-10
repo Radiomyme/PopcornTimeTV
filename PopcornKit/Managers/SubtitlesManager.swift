@@ -14,8 +14,10 @@ import Alamofire
 ///   episodes: /search/episode-2/imdbid-0944947/season-1
 ///
 /// Each result row carries a direct `SubDownloadLink` (gzip); dropping the
-/// `.gz` suffix makes the server return the plain .srt, which VLC's
-/// `addPlaybackSlave` consumes directly.
+/// `.gz` suffix makes the server return the plain file, in its original
+/// code page (`SubEncoding`) and format (`SubFormat`) — both are kept on the
+/// `Subtitle` so the players can decode/convert it (VLC's
+/// `addPlaybackSlave` reads it directly).
 open class SubtitlesManager: NetworkManager {
 
     /// Creates new instance of SubtitlesManager class
@@ -76,33 +78,117 @@ open class SubtitlesManager: NetworkManager {
                 DispatchQueue.main.async { completion([], error.underlyingError as NSError? ?? error as NSError) }
             case .success(let data):
                 let rows = (try? JSONSerialization.jsonObject(with: data)) as? [[String: Any]] ?? []
-                var subtitles = [Subtitle]()
-                for info in rows {
-                    guard
-                        let link = (info["SubDownloadLink"] as? String)?.replacingOccurrences(of: ".gz", with: ""),
-                        let ISO639 = info["ISO639"] as? String,
-                        let localizedLanguageName = Locale.current.localizedString(forLanguageCode: ISO639)?.localizedCapitalized
-                    else { continue }
-                    let rating = Double(info["SubRating"] as? String ?? "") ?? 0
-                    let downloads = Double(info["SubDownloadsCnt"] as? String ?? "") ?? 0
-                    // Rating is sparse (most rows are 0.0); weight it with the
-                    // download count so "the one everyone uses" wins per language.
-                    let score = rating * 10_000 + downloads
-                    let subtitle = Subtitle(language: localizedLanguageName, link: link, ISO639: ISO639, rating: score)
-
-                    if let index = subtitles.firstIndex(where: { $0.ISO639 == ISO639 }) {
-                        if score > subtitles[index].rating {
-                            subtitles[index] = subtitle
-                        }
-                    } else {
-                        subtitles.append(subtitle)
-                    }
-                }
-                subtitles.sort(by: { $0.language < $1.language })
+                let subtitles = SubtitlesManager.bestSubtitles(from: rows)
                 print("[Subtitles] \(url) -> \(rows.count) rows, \(subtitles.count) languages")
                 DispatchQueue.main.async { completion(subtitles, nil) }
             }
         }
+    }
+
+    /// Best subtitle per language (`ISO639`), sorted by language name.
+    ///
+    /// Rows split over several CDs (`SubSumCD` > 1) are dropped: one file only
+    /// covers part of the movie. The others are ranked by, in order:
+    /// 1. format — SubRip / WebVTT / ASS-SSA first; MicroDVD / SubViewer
+    ///    (.sub), .txt, MPL2, TMPlayer, SAMI next (converted on the fly, but
+    ///    frame-based or lossy); anything else last;
+    /// 2. not hearing-impaired before hearing-impaired (kept when it's all
+    ///    there is);
+    /// 3. not flagged bad (`SubBad`) before flagged;
+    /// 4. rating × 10 000 + download count (rating is sparse — most rows are
+    ///    0.0 — so "the one everyone uses" wins within a tier).
+    static func bestSubtitles(from rows: [[String: Any]]) -> [Subtitle] {
+        var subtitles = [Subtitle]()
+        for info in rows {
+            guard
+                let rawLink = field(info["SubDownloadLink"]),
+                let ISO639 = field(info["ISO639"]),
+                let localizedLanguageName = languageName(ISO639: ISO639, englishName: field(info["LanguageName"]))
+            else { continue }
+            if let parts = Int(field(info["SubSumCD"]) ?? ""), parts > 1 { continue }
+            // Without ".gz" the server returns the plain file.
+            let link = rawLink.hasSuffix(".gz") ? String(rawLink.dropLast(3)) : rawLink
+            let format = field(info["SubFormat"])?.lowercased()
+            let hearingImpaired = field(info["SubHearingImpaired"]) == "1"
+            let score = SubtitlesManager.score(format: format,
+                                               hearingImpaired: hearingImpaired,
+                                               flaggedBad: field(info["SubBad"]) == "1",
+                                               rating: Double(field(info["SubRating"]) ?? "") ?? 0,
+                                               downloads: Double(field(info["SubDownloadsCnt"]) ?? "") ?? 0)
+            let subtitle = Subtitle(language: localizedLanguageName,
+                                    link: link,
+                                    ISO639: ISO639,
+                                    rating: score,
+                                    format: format,
+                                    encoding: field(info["SubEncoding"]),
+                                    releaseName: field(info["MovieReleaseName"]),
+                                    hearingImpaired: hearingImpaired,
+                                    frameRate: Double(field(info["MovieFPS"]) ?? ""))
+
+            if let index = subtitles.firstIndex(where: { $0.ISO639 == ISO639 }) {
+                if score > subtitles[index].rating {
+                    subtitles[index] = subtitle
+                }
+            } else {
+                subtitles.append(subtitle)
+            }
+        }
+        subtitles.sort(by: { $0.language < $1.language })
+        return subtitles
+    }
+
+    /// Lexicographic score: each criterion outweighs everything after it
+    /// (rating × 10 000 ≤ 100 000; downloads are capped below 10^10).
+    static func score(format: String?, hearingImpaired: Bool, flaggedBad: Bool, rating: Double, downloads: Double) -> Double {
+        let formatRank: Double
+        switch format ?? "" {
+        case "srt", "vtt", "webvtt", "ass", "ssa":
+            formatRank = 3
+        case "":
+            formatRank = 2.5        // not reported; almost always SubRip
+        case "sub", "txt", "mpl", "mpl2", "smi", "sami", "tmp":
+            formatRank = 2
+        default:
+            formatRank = 1          // psb, jss, dks…: only VLC may read them
+        }
+        let popularity = max(0, min(rating * 10_000 + downloads, 9e9))
+        return formatRank * 1e12
+            + (hearingImpaired ? 0 : 1e11)
+            + (flaggedBad ? 0 : 1e10)
+            + popularity
+    }
+
+    /// Localized, capitalized language name — including OpenSubtitles' own
+    /// codes (pb = Brazilian Portuguese, zt = Traditional Chinese, …) that
+    /// `Locale` doesn't know, which used to drop those rows.
+    private static func languageName(ISO639: String, englishName: String?) -> String? {
+        let locale = Locale.current
+        let name: String?
+        switch ISO639.lowercased() {
+        case "pb": name = locale.localizedString(forIdentifier: "pt_BR")
+        case "zt": name = locale.localizedString(forIdentifier: "zh_Hant")
+        case "ze": name = locale.localizedString(forLanguageCode: "zh").map { "\($0) (bilingue)" }
+        case "sp": name = locale.localizedString(forIdentifier: "es_ES")
+        case "ea": name = locale.localizedString(forIdentifier: "es_419")
+        case "me": name = locale.localizedString(forLanguageCode: "cnr")
+        default:   name = locale.localizedString(forLanguageCode: ISO639)
+        }
+        return (name ?? englishName)?.localizedCapitalized
+    }
+
+    /// OpenSubtitles sends every value as a string; tolerate numbers, and
+    /// treat empty strings as missing.
+    private static func field(_ value: Any?) -> String? {
+        let text: String?
+        if let string = value as? String {
+            text = string
+        } else if let number = value as? NSNumber {
+            text = number.stringValue
+        } else {
+            text = nil
+        }
+        guard let trimmed = text?.trimmingCharacters(in: .whitespacesAndNewlines), !trimmed.isEmpty else { return nil }
+        return trimmed
     }
 
     /// Legacy XML-RPC session no-ops, kept so existing call sites build.
