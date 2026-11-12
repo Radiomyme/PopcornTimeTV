@@ -7,9 +7,12 @@ import PopcornKit
 /// platforms present the same information for judging the quality/seeds
 /// tradeoff: resolution + codec/HDR/Atmos tags, a health-colored seed
 /// indicator with the source (TPB, Knaben · 1337x, a Torrentio indexer…),
-/// seed/peer counts and size, and a "Recommandé" badge on the best
-/// quality-vs-seeds pick (`Torrent.balancedPick`). The source sits on the
-/// second line: appended to a long quality label it was cut off.
+/// seed/peer counts, size and estimated bitrate ("≈ 72 Mb/s", when the
+/// torrent carries its media runtime: `Torrent.withMediaRuntime`), a
+/// "Recommandé" badge on the best quality-vs-seeds-vs-connection pick
+/// (`Torrent.balancedPick`), and an orange warning on a release likely too
+/// heavy for the connection (`Torrent.bandwidthWarning`). The source sits on
+/// the second line: appended to a long quality label it was cut off.
 struct TorrentPickerRow: View {
     let torrent: Torrent
     /// Whether this is the recommended (best ratio) torrent in its set.
@@ -29,27 +32,29 @@ struct TorrentPickerRow: View {
                         .lineLimit(1)
                         .truncationMode(.middle)
                     if recommended {
-                        Text("Recommandé")
+                        Text(verbatim: NSLocalizedString("Picker.Recommended", value: "Recommended",
+                                                         comment: "Quality picker: badge of the recommended release"))
                             .font(.caption2.weight(.bold))
                             .padding(.horizontal, 6).padding(.vertical, 2)
                             .background(.tint, in: Capsule())
                             .foregroundStyle(.white)
                     }
                 }
-                HStack(spacing: 0) {
-                    if let source = torrent.sourceLabel {
-                        Text(verbatim: source)
-                            .fontWeight(.semibold)
-                            .lineLimit(1)
-                            .layoutPriority(-1)
-                        Text(verbatim: " · ")
-                    }
-                    Text(verbatim: detailLine)
-                        .lineLimit(1)
-                        .layoutPriority(1)
+                // One text that wraps (two lines at most) rather than two
+                // that truncate: on an iPhone in portrait the source used to
+                // vanish and the bitrate to be cut.
+                Text(detailText)
+                    .lineLimit(2)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .font(.caption.monospacedDigit())
+                    .foregroundStyle(.secondary)
+                if let warning = torrent.bandwidthWarning() {
+                    Label(warning, systemImage: "exclamationmark.triangle.fill")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.orange)
+                        .lineLimit(2)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
-                .font(.caption.monospacedDigit())
-                .foregroundStyle(.secondary)
             }
 
             Spacer(minLength: 8)
@@ -62,18 +67,35 @@ struct TorrentPickerRow: View {
         .contentShape(Rectangle())
     }
 
+    /// "Knaben · 1337x · 120 seeds · 9.52 GB · ≈ 23 Mb/s", the source in semibold.
+    private var detailText: AttributedString {
+        var text = AttributedString()
+        if let source = torrent.sourceLabel {
+            var bold = AttributedString(source)
+            bold.inlinePresentationIntent = .stronglyEmphasized
+            text += bold
+            text += AttributedString(" · ")
+        }
+        text += AttributedString(detailLine)
+        return text
+    }
+
     private var detailLine: String {
         var parts = ["\(torrent.seeds) seeds"]
         if torrent.peers > 0 { parts.append("\(torrent.peers) peers") }
         if let size = torrent.size, !size.isEmpty { parts.append(size) }
+        if let bitrate = torrent.bitrateLabel { parts.append(bitrate) }
         return parts.joined(separator: " · ")
     }
 }
 
 extension Torrent {
-    /// The recommended (best quality/seeds ratio) URL in a set — used to badge
-    /// a row. Nil-safe: returns nil when there's no clear pick.
+    /// The recommended (best quality/seeds ratio the connection can carry)
+    /// URL in a set — used to badge a row. Nil-safe: returns nil when there's
+    /// no clear pick. Also starts measuring the connection
+    /// (`ConnectionSpeed.start`, idempotent): a stream follows a pick.
     static func recommendedURL(in torrents: [Torrent]) -> String? {
-        balancedPick(from: torrents)?.url
+        ConnectionSpeed.shared.start()
+        return balancedPick(from: torrents)?.url
     }
 }

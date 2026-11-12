@@ -29,12 +29,16 @@ struct MacVLCPlayerView: View {
     /// tracks and what is on disk to pick VLC's demuxer
     /// (`BoundedStorageUX.vlcMediaOptions`).
     let streamer: PTTorrentStreamer?
+    /// The stream's deficit watch (nil: none): VLC's position and state feed
+    /// it once VLC plays (the sheet shows the offer).
+    let deficitMonitor: BandwidthDeficitMonitor?
     @StateObject private var controller = MacVLCController()
 
     init(url: URL, subtitles: [Subtitle] = [], media: Media? = nil, startPosition: Float = 0,
          resumePoint: Float? = nil, nativeHighWater: Float = 0, boundedStorage: BoundedStorageSession? = nil,
-         streamer: PTTorrentStreamer? = nil) {
+         streamer: PTTorrentStreamer? = nil, deficitMonitor: BandwidthDeficitMonitor? = nil) {
         self.streamer = streamer
+        self.deficitMonitor = deficitMonitor
         self.url = url
         self.subtitles = subtitles
         self.media = media
@@ -91,6 +95,7 @@ struct MacVLCPlayerView: View {
                                                                            startPosition: startPosition,
                                                                            streamer: streamer))
             controller.attachBoundedStorage(boundedStorage)
+            controller.attachDeficitMonitor(deficitMonitor)
         }
         .onDisappear { controller.stop() }
     }
@@ -198,7 +203,16 @@ final class MacVLCController: NSObject, ObservableObject, VLCMediaPlayerDelegate
     /// it goes first; the OpenGL output stays the fallback for what it
     /// refuses (360° projections). One libVLC instance for every Mac VLC
     /// player (the default options plus this one).
-    static let library = VLCLibrary(options: ["--vout=samplebufferdisplay,macosx"])
+    /// Its log: libvlc's errors only — its default output (clock drift,
+    /// late pictures, buffering, deferred starts…) printed ~1,500 lines in
+    /// two minutes of a stream handed over to VLC.
+    static let library: VLCLibrary = {
+        let library = VLCLibrary(options: ["--vout=samplebufferdisplay,macosx"])
+        let console = VLCConsoleLogger()
+        console.level = .error
+        library.loggers = [console]
+        return library
+    }()
     let player = VLCMediaPlayer(library: MacVLCController.library)
     private var timer: Timer?
     /// `stop()` ran (a pending start then does nothing).
@@ -517,6 +531,8 @@ final class MacVLCController: NSObject, ObservableObject, VLCMediaPlayerDelegate
         }
         media = nil
         isStopped = true
+        deficitMonitor?.detach(self)
+        deficitMonitor = nil
         timer?.invalidate()
         timer = nil
         player.delegate = nil
@@ -528,6 +544,25 @@ final class MacVLCController: NSObject, ObservableObject, VLCMediaPlayerDelegate
 
     /// The stream's bounded storage, if any (see `BoundedStorageSession`).
     private var boundedStorage: BoundedStorageSession?
+
+    /// The stream's deficit watch (`BandwidthDeficitMonitor`), if any.
+    private var deficitMonitor: BandwidthDeficitMonitor?
+
+    /// VLC reports to the stream's deficit watch from now on (it replaces
+    /// the native player there). A stall is inferred from a time that does
+    /// not move while VLC plays (VLCKit 4 has no buffering state).
+    func attachDeficitMonitor(_ monitor: BandwidthDeficitMonitor?) {
+        deficitMonitor = monitor
+        monitor?.attach(self) { [weak self] in
+            MainActor.assumeIsolated {
+                guard let self, !self.isStopped else { return nil }
+                return BandwidthDeficitMonitor.PlaybackState(playhead: self.playheadSeconds, duration: self.durationSeconds,
+                                                             hasStarted: self.didReachPlayingWithTracks,
+                                                             wantsPlayback: self.player.state == .playing,
+                                                             isStalled: nil)
+            }
+        }
+    }
 
     /// Reports VLC's playhead to the stream's bounded storage (it reads
     /// through PopcornTorrent's server, which moves the window itself).

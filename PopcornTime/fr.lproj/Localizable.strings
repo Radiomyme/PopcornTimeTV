@@ -365,3 +365,32 @@
 "BoundedStorage.NotEnoughSpace.Generic" = "Pas assez d'espace libre pour lire cette vidéo, même en mode stockage limité. Libérez de l'espace et réessayez.";
 "BoundedStorage.FileError.Message" = "Impossible d'enregistrer la vidéo sur l'appareil (%@).";
 "BoundedStorage.TryLowerQuality" = "Essayer une qualité inférieure ?";
+
+/* Quality pickers: estimated bitrate of a release and its warning when recent downloads (the connection, or its swarms) are slower (ConnectionSpeed.swift) */
+"Bandwidth.Bitrate" = "≈ %d Mb/s";
+"Bandwidth.Warning.Connection" = "Risque de saccades : vos téléchargements atteignent environ %d Mb/s";
+"Bandwidth.Warning.Heavy" = "Très lourd : risque de saccades";
+
+/* Loading screen phases (LoadingPhase.swift) */
+"LoadingPhase.LookingForPeers" = "Recherche de pairs…";
+"LoadingPhase.GettingDetails" = "Récupération des informations du torrent…";
+"LoadingPhase.GettingDetails.Connected" = "Récupération des informations du torrent… (pairs connectés : %d)";
+"LoadingPhase.NotResponding.NoPeers" = "Cette source ne répond pas (0 pair). Essayez-en une autre.";
+"LoadingPhase.NotResponding.NoDetails" = "Cette source n'envoie pas les informations du torrent. Essayez-en une autre.";
+"LoadingPhase.NotResponding.NoData" = "Cette source n'envoie aucune donnée. Essayez-en une autre.";
+"LoadingPhase.ChooseAnotherSource" = "Choisir une autre source";
+"LoadingPhase.KeepWaiting" = "Continuer d'attendre";
+
+/* Over the video when the download is slower than the release (BandwidthDeficit.swift): %1$@ = the release's bitrate, %2$@ = the download rate, both in megabits per second ("72", "5.5"); the buttons switch to a lighter release at the same time, or keep this one. */
+"BandwidthDeficit.Message" = "Cette version demande ~%1$@ Mb/s, le téléchargement n'en fournit que ~%2$@ : la lecture va s'interrompre.";
+"BandwidthDeficit.Lighter" = "Version plus légère";
+"BandwidthDeficit.Continue" = "Continuer";
+
+/* Player loading screen while buffering (Mac): connected seeds and download speed in kilobytes per second. */
+"PlayerLoading.Swarm" = "Seeds : %1$d · %2$d Ko/s";
+
+/* Loading screen (tvOS): connected seeds, a count-neutral form. Busy card while an episode's sources load (tvOS). Quality pickers (iOS, macOS): badge of the recommended release. Spinner (macOS), for VoiceOver. */
+"PlayerLoading.Seeds" = "Seeds : %d";
+"Sources.Loading" = "Recherche des sources…";
+"Picker.Recommended" = "Recommandé";
+"Spinner.Loading" = "Chargement…";

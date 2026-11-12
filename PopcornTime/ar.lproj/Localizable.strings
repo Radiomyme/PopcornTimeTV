@@ -666,3 +666,32 @@
 "BoundedStorage.NotEnoughSpace.Generic" = "لا توجد مساحة فارغة كافية لتشغيل هذا الفيديو حتى مع مساحة التخزين المحدودة. حرّر بعض المساحة ثم أعد المحاولة.";
 "BoundedStorage.FileError.Message" = "تعذّر حفظ الفيديو في وحدة التخزين (%@).";
 "BoundedStorage.TryLowerQuality" = "هل تريد تجربة جودة أقل؟";
+
+/* Quality pickers: estimated bitrate of a release and its warning when recent downloads (the connection, or its swarms) are slower (ConnectionSpeed.swift) */
+"Bandwidth.Bitrate" = "≈ %d ميغابت/ث";
+"Bandwidth.Warning.Connection" = "قد يتقطع التشغيل: تصل تنزيلاتك إلى نحو %d ميغابت/ث";
+"Bandwidth.Warning.Heavy" = "ثقيل جدًا: قد يتقطع التشغيل";
+
+/* Loading screen phases (LoadingPhase.swift) */
+"LoadingPhase.LookingForPeers" = "جارٍ البحث عن أقران…";
+"LoadingPhase.GettingDetails" = "جارٍ جلب معلومات التورنت…";
+"LoadingPhase.GettingDetails.Connected" = "جارٍ جلب معلومات التورنت… (المتصلون: %d)";
+"LoadingPhase.NotResponding.NoPeers" = "هذا المصدر لا يستجيب (عدد الأقران: 0). جرّب مصدرًا آخر.";
+"LoadingPhase.NotResponding.NoDetails" = "هذا المصدر لا يرسل معلومات التورنت. جرّب مصدرًا آخر.";
+"LoadingPhase.NotResponding.NoData" = "هذا المصدر لا يرسل أي بيانات. جرّب مصدرًا آخر.";
+"LoadingPhase.ChooseAnotherSource" = "اختيار مصدر آخر";
+"LoadingPhase.KeepWaiting" = "مواصلة الانتظار";
+
+/* Over the video when the download is slower than the release (BandwidthDeficit.swift): %1$@ = the release's bitrate, %2$@ = the download rate, both in megabits per second ("72", "5.5"); the buttons switch to a lighter release at the same time, or keep this one. */
+"BandwidthDeficit.Message" = "تتطلب هذه النسخة نحو %1$@ ميغابت/ث، بينما لا يوفّر التنزيل سوى نحو %2$@: سيتوقف التشغيل.";
+"BandwidthDeficit.Lighter" = "نسخة أخف";
+"BandwidthDeficit.Continue" = "متابعة";
+
+/* Player loading screen while buffering (Mac): connected seeds and download speed in kilobytes per second. */
+"PlayerLoading.Swarm" = "المشاركون: %1$d · %2$d ك.ب/ث";
+
+/* Loading screen (tvOS): connected seeds, a count-neutral form. Busy card while an episode's sources load (tvOS). Quality pickers (iOS, macOS): badge of the recommended release. Spinner (macOS), for VoiceOver. */
+"PlayerLoading.Seeds" = "المشاركون: %d";
+"Sources.Loading" = "جارٍ البحث عن مصادر…";
+"Picker.Recommended" = "موصى به";
+"Spinner.Loading" = "جارٍ التحميل…";

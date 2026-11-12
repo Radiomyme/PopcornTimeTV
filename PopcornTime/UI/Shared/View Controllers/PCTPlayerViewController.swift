@@ -1,6 +1,7 @@
 
 
 import UIKit
+import Combine
 import MediaPlayer
 import PopcornTorrent
 import PopcornKit
@@ -29,8 +30,8 @@ final class VLCAudioLogFilter: NSObject, VLCLogging {
     func handleMessage(_ message: String, logLevel: VLCLogLevel, context: VLCLogContext?) {
         let module = context?.module ?? ""
         let haystack = (module + " " + message).lowercased()
-        guard keywords.contains(where: { haystack.contains($0) }) else { return }
-        print("[VLC \(module)] \(message)")
+        guard logLevel == .error || keywords.contains(where: { haystack.contains($0) }) else { return }
+        print("[VLC \(module)\(logLevel == .error ? " ERROR" : "")] \(message)")
     }
 }
 #endif
@@ -224,8 +225,13 @@ class PCTPlayerViewController: UIViewController, VLCMediaPlayerDelegate, UIGestu
         streamer.cancelStreamingAndDeleteData(!(streamer is PTTorrentDownload))
         
         NotificationCenter.default.removeObserver(self, name: .PTTorrentStatusDidChange, object: nil)
+        PlaybackStreamContext.of(streamer)?.deficit.detach(self)
+        deficitSubscription = nil
         
-        dismiss(animated: true)
+        // « Lighter version »: the next stream starts once this player is gone.
+        let next = afterClose
+        afterClose = nil
+        dismiss(animated: true, completion: next)
     }
     
     // MARK: - Public vars
@@ -624,6 +630,11 @@ class PCTPlayerViewController: UIViewController, VLCMediaPlayerDelegate, UIGestu
     private var didReceiveTimeTick = false
     /// The player is closing (`didFinishPlaying`): its final save is done.
     private(set) var isClosing = false
+    /// Runs once the player is dismissed (« Lighter version »: the next stream).
+    private var afterClose: (() -> Void)?
+    /// The deficit offer (`BandwidthDeficitMonitor`) and its toast.
+    private var deficitSubscription: AnyCancellable?
+    private weak var deficitToast: BandwidthDeficitToastController?
     internal var streamDuration: Float {
         guard let remaining = (mediaplayer.remainingTime ?? VLCTime(int: 0)).value?.floatValue, let elapsed = mediaplayer.time.value?.floatValue else {
             return imageGenerator.map { Float(CMTimeGetSeconds($0.asset.duration) * 1000) } ?? 0
@@ -645,6 +656,12 @@ class PCTPlayerViewController: UIViewController, VLCMediaPlayerDelegate, UIGestu
         self.localPathToMedia = local
         self.media = media
         self.startPosition = fromPosition
+        // A switch to a lighter release whose first player is VLC: the user
+        // chose where to resume — no question (taken once per stream).
+        if let decided = PlaybackStreamContext.of(streamer)?.takeDecidedStart() {
+            self.startPosition = ResumePolicy.handOffFraction(reached: decided)
+            resumesWithoutPrompt = true
+        }
         self.nextEpisode = nextEpisode
         self.directory = directory
         self.imageGenerator = AVAssetImageGenerator(asset: AVAsset(url: local))
@@ -868,10 +885,17 @@ class PCTPlayerViewController: UIViewController, VLCMediaPlayerDelegate, UIGestu
         // Audio-pipeline lines only — a handful of lines per playback, not
         // libvlc's full debug flood.
         mediaplayer.libraryInstance.loggers = [VLCAudioLogFilter()]
+#else
+        // libvlc's errors only, not its default output (clock drift, late
+        // pictures, buffering: hundreds of lines a minute).
+        let console = VLCConsoleLogger()
+        console.level = .error
+        mediaplayer.libraryInstance.loggers = [console]
 #endif
 #endif
 
         NotificationCenter.default.addObserver(self, selector: #selector(torrentStatusDidChange(_:)), name: .PTTorrentStatusDidChange, object: streamer)
+        attachDeficitMonitor()
         // Bounded storage (a film larger than the free space): VLC reads
         // through PopcornTorrent's server, which moves the window; its
         // playhead tells the torrent what it may delete behind it.
@@ -1135,6 +1159,68 @@ class PCTPlayerViewController: UIViewController, VLCMediaPlayerDelegate, UIGestu
         playheadWatch.noteOwnSeek()
         mediaplayer.time = VLCTime(number: NSNumber(value: Float(landing * 1000)))
         BoundedStorageToastView.show(BoundedStorageUX.rewindLimitedMessage(for: boundedStorage), in: view)
+    }
+
+    // MARK: - Download slower than the release (BandwidthDeficitMonitor)
+
+    /// The stream's deficit watch hears from VLC once a second (a stall is
+    /// inferred from a time that does not move while VLC plays: VLCKit 4
+    /// has no buffering state); its offer shows as a toast over the video.
+    private func attachDeficitMonitor() {
+        guard let monitor = PlaybackStreamContext.of(streamer)?.deficit else { return }
+        monitor.attach(self, switchTo: { [weak self] torrent, fraction in
+            self?.leave(for: torrent, at: fraction)
+        }, state: { [weak self] in
+            guard let self = self, !self.isClosing else { return nil }
+            let milliseconds = self.mediaplayer.time.value?.doubleValue ?? 0
+            let duration = Double(self.streamDuration) / 1000
+            return BandwidthDeficitMonitor.PlaybackState(playhead: milliseconds > 0 ? milliseconds / 1000 : nil,
+                                                         duration: duration > 0 ? duration : nil,
+                                                         hasStarted: self.didReceiveTimeTick,
+                                                         wantsPlayback: self.mediaplayer.state == .playing,
+                                                         isStalled: nil)
+        })
+        deficitSubscription = monitor.$offer.receive(on: DispatchQueue.main).sink { [weak self] offer in
+            self?.showDeficitOffer(offer)
+        }
+    }
+
+    /// The offer as a toast at the top of the video (the toast takes the
+    /// remote while it shows; the video plays on). Not over another panel
+    /// (options, Up Next): it times out then, and may come back later.
+    private func showDeficitOffer(_ offer: BandwidthDeficitMonitor.Offer?) {
+        if let toast = deficitToast, toast.offerID != offer?.id {
+            deficitToast = nil
+            if toast.presentingViewController != nil, !toast.isBeingDismissed { toast.dismiss(animated: true) }
+        }
+        guard let offer = offer, !isClosing, deficitToast == nil, presentedViewController == nil,
+              let monitor = PlaybackStreamContext.of(streamer)?.deficit else { return }
+        let toast = BandwidthDeficitToastController(offer: offer,
+                                                    onLighter: { [weak monitor] in monitor?.acceptLighter() },
+                                                    onContinue: { [weak monitor] in monitor?.continueWatching() },
+                                                    // Play/Pause still reaches VLC under the toast.
+                                                    onPlayPause: { [weak self] in self?.playandPause() })
+        deficitToast = toast
+        present(toast, animated: true)
+    }
+
+    /// « Lighter version »: this player closes like Menu does (progress
+    /// saved, stream cancelled), then the app plays `torrent` from
+    /// `fraction` (`PlaybackStreamContext.onSwitch`).
+    private func leave(for torrent: Torrent, at fraction: Float) {
+        guard !isClosing, let context = PlaybackStreamContext.of(streamer) else { return }
+        print("[Player] VLC: leaving for a lighter release (\(torrent.quality ?? "?")) at \(Int(fraction * 100)) %")
+        let close = { [weak self] in
+            guard let self = self else { return }
+            self.afterClose = { context.onSwitch?(torrent, fraction) }
+            self.didFinishPlaying()
+        }
+        if let presented = presentedViewController {
+            deficitToast = nil
+            presented.dismiss(animated: false, completion: close)
+        } else {
+            close()
+        }
     }
 
     // MARK: - Watched progress

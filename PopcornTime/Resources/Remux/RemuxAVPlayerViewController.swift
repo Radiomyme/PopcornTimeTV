@@ -227,6 +227,14 @@ final class RemuxAVPlayerViewController: AVPlayerViewController {
     /// The player's rate changes (`playerRateDidChange`) and its current
     /// item's time jumps (`reportPlaybackPositions` at once).
     private var playerObservers: [NSObjectProtocol] = []
+    /// The stream's context (the release, the title's other releases, the
+    /// switch to a lighter one); nil for a plain local file.
+    private var streamContext: PlaybackStreamContext?
+#if os(tvOS)
+    /// The deficit offer and its toast over the video.
+    private var deficitSubscription: AnyCancellable?
+    private weak var deficitToast: BandwidthDeficitToastController?
+#endif
 
     /// - Parameters:
     ///   - localFile: the payload on disk (still downloading) — remux input
@@ -252,10 +260,17 @@ final class RemuxAVPlayerViewController: AVPlayerViewController {
         self.title = title
         self.nextEpisode = nextEpisode
         self.onPlayNext = onPlayNext
+        // A switch to a lighter release starts where the other one was,
+        // decided by the user (taken once: a later hand-off to VLC on this
+        // stream passes its own position).
+        streamContext = PlaybackStreamContext.of(streamer)
+        let decidedStart = streamContext?.takeDecidedStart()
         // A finished (or nearly finished) title restarts from the beginning.
-        self.startPosition = ResumePolicy.startPosition(forSavedProgress: startPosition)
+        self.startPosition = decidedStart.map { ResumePolicy.handOffFraction(reached: $0) }
+            ?? ResumePolicy.startPosition(forSavedProgress: startPosition)
         resumePoint = self.startPosition
         isPayloadLocal = Self.isPayloadComplete(streamer)
+        attachDeficitMonitor()
         let fileName = localFile.lastPathComponent
         route = PlaybackRouting.route(forFileName: fileName)
         print("[Player] \(fileName) → \(route)")
@@ -264,6 +279,15 @@ final class RemuxAVPlayerViewController: AVPlayerViewController {
             // Sequential remux + still-downloading payload: a far resume
             // can't be served natively in reasonable time — ask first.
             resumeChoicePending = self.startPosition > 0 && !isPayloadLocal
+            if resumeChoicePending, decidedStart != nil {
+                // The user chose where to resume (a lighter release): the
+                // quick resume through VLC, without the question.
+                resumeChoicePending = false
+                userChoseQuickResume = true
+                print("[Player] decided start at \(Int(self.startPosition * 100)) % on a file still downloading — VLC there")
+                requestFallback("Reprise rapide")
+                return
+            }
             startRemux(localFile: localFile, streamer: streamer, isAtmos: isAtmos, releaseHintsHDR: releaseHintsHDR)
         case .avPlayer:
             startDirect(url: PlaybackRouting.playableLocalURL(remoteURL, fileName: fileName))
@@ -1327,6 +1351,100 @@ final class RemuxAVPlayerViewController: AVPlayerViewController {
         }
     }
 
+    // MARK: - Download slower than the release (BandwidthDeficitMonitor)
+
+    /// The stream's deficit watch hears from this player once a second; on
+    /// tvOS the offer shows over the video, its buttons as AVKit's
+    /// contextual actions (iOS: the SwiftUI cover shows it).
+    private func attachDeficitMonitor() {
+        guard let monitor = streamContext?.deficit else { return }
+        monitor.attach(self, switchTo: { [weak self] torrent, fraction in
+            self?.leave(for: torrent, at: fraction)
+        }, state: { [weak self] in
+            self?.deficitPlaybackState()
+        })
+#if os(tvOS)
+        deficitSubscription = monitor.$offer.receive(on: DispatchQueue.main).sink { [weak self] offer in
+            self?.showDeficitOffer(offer)
+        }
+#endif
+    }
+
+    private func detachDeficitMonitor() {
+        streamContext?.deficit.detach(self)
+#if os(tvOS)
+        deficitSubscription = nil
+        showDeficitOffer(nil)
+#endif
+    }
+
+    /// The native player as the deficit watch sees it (nil once VLC took over).
+    private func deficitPlaybackState() -> BandwidthDeficitMonitor.PlaybackState? {
+        guard !isTornDown, !fallbackRequested, let player = player else { return nil }
+        let recovering = starvation.isRecovering
+        let time = recovering ? starvation.resumeTime : player.currentTime().seconds
+        var duration = player.currentItem?.duration.seconds ?? .nan
+        if !duration.isFinite || duration <= 0 { duration = lastKnownDuration ?? .nan }
+        if !duration.isFinite || duration <= 0, let length = remux?.session?.playlistDurationSeconds, length > 0 {
+            duration = length
+        }
+        let waiting = player.timeControlStatus == .waitingToPlayAtSpecifiedRate && playIntent.wantsPlayback
+        return BandwidthDeficitMonitor.PlaybackState(playhead: time, duration: duration.isFinite ? duration : nil,
+                                                     hasStarted: didStartPlayback && playedPosition.lastPlayedTime != nil,
+                                                     wantsPlayback: playIntent.wantsPlayback,
+                                                     isStalled: (recovering && !starvation.isRebuildingStuckItem) || waiting)
+    }
+
+    /// « Lighter version »: this player closes (progress saved, stream
+    /// cancelled), then the platform plays `torrent` from `fraction` — the
+    /// iOS cover's owner closes it itself.
+    private func leave(for torrent: Torrent, at fraction: Float) {
+        guard !isTornDown, let context = streamContext else { return }
+        print("[Player] leaving for a lighter release (\(torrent.quality ?? "?")) at \(Int(fraction * 100)) %")
+        if onCloseRequest != nil {
+            context.onSwitch?(torrent, fraction)
+            return
+        }
+        dismissPlayer(animated: true) { [weak self] in
+            self?.tearDown()
+            context.onSwitch?(torrent, fraction)
+        }
+    }
+
+#if os(tvOS)
+    /// The offer as a toast at the top of the video, « Lighter version »
+    /// focused (the video plays on under it; Menu = « Continue »). Not
+    /// AVKit's contextual actions: AVKit hides them while the player waits
+    /// for data — when this offer matters most. Not over another
+    /// presentation (resume question, Up Next): the offer then times out
+    /// and may come back later.
+    private func showDeficitOffer(_ offer: BandwidthDeficitMonitor.Offer?) {
+        if let toast = deficitToast, toast.offerID != offer?.id {
+            deficitToast = nil
+            if toast.presentingViewController != nil, !toast.isBeingDismissed { toast.dismiss(animated: true) }
+        }
+        guard let offer = offer, !isTornDown, !fallbackRequested, deficitToast == nil, presentedViewController == nil,
+              hasAppeared, let monitor = streamContext?.deficit else { return }
+        let toast = BandwidthDeficitToastController(offer: offer,
+                                                    onLighter: { [weak monitor] in monitor?.acceptLighter() },
+                                                    onContinue: { [weak monitor] in monitor?.continueWatching() },
+                                                    onPlayPause: { [weak self] in self?.togglePlaybackUnderToast() })
+        deficitToast = toast
+        present(toast, animated: true)
+    }
+
+    /// Play/Pause pressed while the offer's toast holds the remote: the
+    /// player toggles as it would (the intent follows: through the rate
+    /// observer, or directly while a starvation recovery waits).
+    private func togglePlaybackUnderToast() {
+        guard let player = player, !isTornDown, !fallbackRequested else { return }
+        let playing = playIntent.wantsPlayback
+        print("[Player] play/pause under the deficit toast: \(playing ? "pause" : "play")")
+        if playing { player.pause() } else { player.play() }
+        if starvation.isRecovering { playIntent.noteUserPlayback(playing: !playing) }
+    }
+#endif
+
     // MARK: - Fallback
 
     /// - Parameter resumeTime: where VLC continues (player timeline, s);
@@ -1410,6 +1528,7 @@ final class RemuxAVPlayerViewController: AVPlayerViewController {
 
     /// Stops AVPlayer, the remux and the observers — never the torrent stream.
     private func stopNativePlayback() {
+        detachDeficitMonitor()
         starvation.cancel()
         failureObserver?.invalidate()
         failureObserver = nil
@@ -1466,6 +1585,7 @@ final class RemuxAVPlayerViewController: AVPlayerViewController {
         statsTimer = nil
         stopNativePlayback()
         pendingFallback = nil
+        streamContext = nil
         if !isHandingOff {
             // tvOS deletes the stream's partial right away, as the VLC player
             // does (the app sandbox is small); iOS keeps it until the next

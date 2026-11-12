@@ -171,7 +171,11 @@ public final class Time4PopcornClient {
             seeds:   seeds,
             peers:   peers,
             size:    size,
-            tags:    VideoTags.parse(parseSource))
+            tags:    VideoTags.parse(parseSource),
+            // `size_bytes` is this file's (an episode's in a season pack,
+            // whose magnet `dn` names the pack): judged by its name, it
+            // gives the release's bitrate.
+            fileName: file)
         var label = torrent.qualityValue.displayLabel + torrent.tags.displaySuffix
         if label.isEmpty { label = apiQuality.isEmpty ? "Unknown".localized : apiQuality }
         torrent.quality = label + " — T4P"

@@ -47,8 +47,8 @@ final class VLCAudioLogFilter: NSObject, VLCLogging {
     func handleMessage(_ message: String, logLevel: VLCLogLevel, context: VLCLogContext?) {
         let module = context?.module ?? ""
         let haystack = (module + " " + message).lowercased()
-        guard keywords.contains(where: { haystack.contains($0) }) else { return }
-        print("[VLC \(module)] \(message)")
+        guard logLevel == .error || keywords.contains(where: { haystack.contains($0) }) else { return }
+        print("[VLC \(module)\(logLevel == .error ? " ERROR" : "")] \(message)")
     }
 }
 #endif
@@ -183,6 +183,12 @@ final class VLCPlayerViewController: UIViewController, VLCMediaPlayerDelegate, U
         player.drawable = movieView
 #if DEBUG
         player.libraryInstance.loggers = [VLCAudioLogFilter()]
+#else
+        // libvlc's errors only, not its default output (clock drift, late
+        // pictures, buffering: hundreds of lines a minute).
+        let console = VLCConsoleLogger()
+        console.level = .error
+        player.libraryInstance.loggers = [console]
 #endif
         guard let media = VLCMedia(url: url) else { return } // VLCKit 4: failable init
         media.addOptions([
@@ -206,6 +212,16 @@ final class VLCPlayerViewController: UIViewController, VLCMediaPlayerDelegate, U
             guard let self = self, !self.isClosing, let milliseconds = self.player.time.value?.doubleValue,
                   milliseconds > 0 else { return nil }
             return BoundedPlayerSample(time: milliseconds / 1000, isPlaying: self.player.isPlaying)
+        }
+        // The stream's deficit watch (download slower than the release)
+        // hears from VLC once a second; the cover shows its offer. A stall
+        // is inferred from a time that does not move while VLC plays.
+        PlaybackStreamContext.of(streamer)?.deficit.attach(self) { [weak self] in
+            guard let self = self, !self.isClosing else { return nil }
+            return BandwidthDeficitMonitor.PlaybackState(playhead: self.playheadSeconds, duration: self.durationSeconds,
+                                                         hasStarted: self.didReachPlayingWithTracks,
+                                                         wantsPlayback: self.player.state == .playing,
+                                                         isStalled: nil)
         }
 
         // Tap anywhere toggles controls. Attached to the ROOT view, not the
@@ -276,6 +292,7 @@ final class VLCPlayerViewController: UIViewController, VLCMediaPlayerDelegate, U
         nerdStatsTimer = nil
         player.stop()
         BoundedStorageSession.session(for: streamer)?.detachHTTPPlayer(self)
+        PlaybackStreamContext.of(streamer)?.deficit.detach(self)
         streamer?.cancelStreamingAndDeleteData(false)
         streamer = nil
         try? FileManager.default.removeItem(at: subtitleDirectory)

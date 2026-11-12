@@ -11,8 +11,78 @@ import PopcornTorrent
 /// Mac app (not iOS-on-Mac), macOS spatializes the E-AC-3/JOC audio itself —
 /// Dolby Atmos renders on built-in speakers and AirPods, which the
 /// "Designed for iPad" build never could.
+///
+/// One sheet, possibly several streams: « Choose another source » (a source
+/// that does not answer) shows the title's other releases in the sheet
+/// itself, and « Lighter version » (a download slower than the video)
+/// replaces the stream by a lighter release at the same position — each
+/// time a new `MacPlayerSession` (a new controller and stream) takes over.
 struct MacPlayerView: View {
     let playback: MacPendingPlayback
+    @Environment(\.dismiss) private var dismiss
+    /// The stream playing now: `playback`, then the release the user switched to.
+    @State private var current: MacPendingPlayback?
+    /// « Choose another source »: the releases offered (the dead one left out).
+    @State private var choosing: [Torrent]?
+    /// The sources that did not answer in this sheet (`MagnetLink.sourceKey`):
+    /// never offered again here.
+    @State private var unanswered: Set<String> = []
+
+    var body: some View {
+        let active = current ?? playback
+        Group {
+            if let torrents = choosing {
+                MacQualityPickerSheet(title: active.title, torrents: torrents) { torrent in
+                    choosing = nil
+                    guard let torrent else { return dismiss() }
+                    print("[Player] another source chosen: \(torrent.quality ?? "?")")
+                    current = MacPendingPlayback(torrent: torrent, media: active.media, title: active.title,
+                                                 sources: active.knownSources)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                #if DEBUG
+                .onAppear { MacDebugHooks.snapshotPlayerWindow(named: "choose-source", after: 1) }
+                #endif
+            } else {
+                MacPlayerSession(playback: active,
+                                 alternatives: alternatives(to: active),
+                                 onChooseAnotherSource: { failed in
+                                     print("[Player] choose another source (instead of \(failed.quality ?? "?"))")
+                                     unanswered.insert(MagnetLink.sourceKey(of: failed.url))
+                                     choosing = alternatives(to: active)
+                                 },
+                                 onSwitch: { torrent, fraction in
+                                     current = MacPendingPlayback(torrent: torrent, media: active.media, title: active.title,
+                                                                  sources: active.knownSources, startFraction: fraction)
+                                 })
+                    // A new stream for each release: a new controller.
+                    .id(active.id)
+            }
+        }
+    }
+
+    /// The other releases of the title, best first: not the one playing,
+    /// nor one that did not answer in this sheet. Runtimes attached
+    /// (`knownSources`): the picker shows bitrates and warnings, and its
+    /// recommendation weighs them.
+    private func alternatives(to playback: MacPendingPlayback) -> [Torrent] {
+        let playing = MagnetLink.sourceKey(of: playback.torrent.url)
+        return playback.knownSources.filter {
+            let key = MagnetLink.sourceKey(of: $0.url)
+            return key != playing && !unanswered.contains(key)
+        }.sorted(by: >)
+    }
+}
+
+/// One stream in the player sheet.
+private struct MacPlayerSession: View {
+    let playback: MacPendingPlayback
+    /// The title's other releases (« Choose another source » shows only
+    /// when there is one).
+    let alternatives: [Torrent]
+    let onChooseAnotherSource: (Torrent) -> Void
+    /// Plays a lighter release from a position (0…1) instead of this stream.
+    let onSwitch: (Torrent, Float) -> Void
     @Environment(\.dismiss) private var dismiss
 
     @StateObject private var controller = MacPlayerController()
@@ -25,12 +95,17 @@ struct MacPlayerView: View {
                                  startPosition: controller.vlcStartPosition,
                                  resumePoint: controller.resumePoint, nativeHighWater: controller.highWater,
                                  boundedStorage: BoundedStorageSession.session(for: controller.streamer),
-                                 streamer: controller.streamer)
+                                 streamer: controller.streamer,
+                                 deficitMonitor: controller.deficitMonitor)
                     .ignoresSafeArea()
             } else if let player = controller.player {
                 MacAVPlayerRepresentable(player: player, onPictureInPictureChanged: { active in
                     controller.pictureInPictureChanged(active)
                 })
+                    // Never laid out at zero size (sheet appearing, VLC swap):
+                    // AVKit's content view would get width / height == 0
+                    // constraints it can't satisfy.
+                    .frame(minWidth: 320, minHeight: 180)
                     .ignoresSafeArea()
                 // Direct MP4: OpenSubtitles drawn over the video (the remux
                 // path exposes them as native HLS tracks instead).
@@ -60,19 +135,7 @@ struct MacPlayerView: View {
                     .allowsHitTesting(false)
                 }
             } else {
-                VStack(spacing: 14) {
-                    ProgressView(value: controller.buffering, total: 1.0)
-                        .frame(width: 320)
-                    Text(controller.statusLine).font(.callout).foregroundStyle(.secondary)
-                    // Bounded storage: the film is larger than the free space.
-                    if let note = controller.boundedNote {
-                        Label(note, systemImage: BoundedStorageUX.symbolName)
-                            .font(.callout)
-                            .foregroundStyle(.secondary)
-                    }
-                }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .background(Color.black)
+                loadingView
             }
 
             if controller.showStats && controller.vlcURL == nil {
@@ -82,6 +145,12 @@ struct MacPlayerView: View {
                     .padding(8)
                     .background(Color.black.opacity(0.6), in: RoundedRectangle(cornerRadius: 6))
                     .padding(16)
+            }
+
+            // The download can't keep up with this release: a lighter one
+            // at the same position, or carry on (native and VLC alike).
+            if let monitor = controller.deficitMonitor {
+                BandwidthDeficitBanner(monitor: monitor)
             }
 
             // Subtitle menu (direct path) + close; Escape closes too.
@@ -107,8 +176,72 @@ struct MacPlayerView: View {
         // Bounded storage: a rewind stopped at the earliest point still on disk.
         .boundedStorageToast(controller.boundedToast)
         .background(Color.black)
-        .onAppear { controller.start(playback) }
+        .onAppear {
+            controller.onSwitch = onSwitch
+            controller.start(playback)
+        }
         .onDisappear { controller.stop() }
+        #if DEBUG
+        .onChange(of: controller.deficitOfferID) { _, id in
+            if id != nil { MacDebugHooks.snapshotPlayerWindow(named: "deficit-offer", after: 1) }
+        }
+        .onChange(of: controller.loadingPhase.isNotResponding) { _, stalled in
+            guard stalled else { return }
+            MacDebugHooks.snapshotPlayerWindow(named: "loading-stall", after: 1)
+            BandwidthDebugHooks.loadingStalled(choose: alternatives.isEmpty ? nil : { onChooseAnotherSource(playback.torrent) },
+                                               keepWaiting: { controller.keepWaiting() })
+        }
+        #endif
+    }
+
+    /// Until the stream is ready: what the torrent is doing (from the first
+    /// second: looking for peers, getting the torrent's details, buffering),
+    /// and when the source does not answer, another source or more time.
+    private var loadingView: some View {
+        VStack(spacing: 14) {
+            if controller.loadingPhase.isBuffering {
+                ProgressView(value: controller.buffering, total: 1.0)
+                    .frame(width: 320)
+            } else if controller.showsLoadingSpinner && !controller.loadingPhase.isNotResponding {
+                // Fixed size, in a container that never scales: AppKit's
+                // indicator has fixed lengths (no min <= max warnings).
+                ProgressView()
+                    .controlSize(.large)
+                    .frame(width: 40, height: 40)
+            }
+            Text(controller.statusLine)
+                .font(.callout)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+                .frame(maxWidth: 560)
+            // Bounded storage: the film is larger than the free space.
+            if let note = controller.boundedNote {
+                Label(note, systemImage: BoundedStorageUX.symbolName)
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+            }
+            if controller.loadingPhase.isNotResponding {
+                HStack(spacing: 12) {
+                    if !alternatives.isEmpty {
+                        Button(LoadingPhase.chooseAnotherSourceTitle) { onChooseAnotherSource(playback.torrent) }
+                            .buttonStyle(.borderedProminent)
+                            .keyboardShortcut(.defaultAction)
+                    }
+                    Button(LoadingPhase.keepWaitingTitle) { controller.keepWaiting() }
+                        .buttonStyle(.bordered)
+                }
+                .padding(.top, 4)
+            } else if controller.loadingIsSlow && !alternatives.isEmpty {
+                // Alive but minutes from playing: another source, beside
+                // the progress.
+                Button(LoadingPhase.chooseAnotherSourceTitle) { onChooseAnotherSource(playback.torrent) }
+                    .buttonStyle(.bordered)
+                    .padding(.top, 4)
+            }
+        }
+        .padding(.horizontal, 24)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(Color.black)
     }
 }
 
@@ -118,7 +251,22 @@ struct MacPlayerView: View {
 final class MacPlayerController: ObservableObject {
     @Published var player: AVPlayer?
     @Published var buffering: Double = 0
-    @Published var statusLine = "Connecting to sources…".localized
+    @Published var statusLine = LoadingPhase.starting.line
+    /// Where the stream's preparation is (`LoadingPhaseTracker`): the
+    /// loading screen's line from the first second, and the « source not
+    /// answering » state.
+    @Published private(set) var loadingPhase: LoadingPhase = .starting
+    /// The loading screen's spinner (not once the stream failed or stopped).
+    @Published private(set) var showsLoadingSpinner = true
+    /// Buffering, but minutes from playing (`LoadingPhaseTracker.isSlow`).
+    @Published private(set) var loadingIsSlow = false
+    /// The download against the release's bitrate (`BandwidthDeficitBanner`).
+    @Published private(set) var deficitMonitor: BandwidthDeficitMonitor?
+    /// The offer shown now (DEBUG snapshots).
+    @Published private(set) var deficitOfferID: UUID?
+    /// Plays a lighter release from a position (0…1) instead of this
+    /// stream (the sheet: `MacPlayerView`). Set before `start`.
+    var onSwitch: ((Torrent, Float) -> Void)?
     @Published var showStats = true
     @Published var statsText = ""
     /// Set when the native path gives up (DTS / TrueHD-only audio, VP9,
@@ -205,6 +353,15 @@ final class MacPlayerController: ObservableObject {
     private var playerObservers: [NSObjectProtocol] = []
     /// alextud's PopcornTorrent has no singleton — each stream owns an instance.
     let streamer = PTTorrentStreamer()
+    /// Follows the stream's preparation (phase line, stall rules).
+    private var loadingTracker = LoadingPhaseTracker()
+    /// The stream is ready (or failed): the loading phase no longer moves.
+    private var loadingDone = false
+    /// 0…1 position this stream starts at (a switch to a lighter release).
+    private var startFraction: Float = 0
+    /// Direct path: the start seek waits for the item to be ready.
+    private var startSeekObservation: NSKeyValueObservation?
+    private var deficitSubscription: AnyCancellable?
     #if DEBUG
     /// BoundedStorageDebugHooks' seek / pause observers.
     private var debugObservers: [NSObjectProtocol] = []
@@ -259,6 +416,23 @@ final class MacPlayerController: ObservableObject {
         media = playback.media
         resumePoint = MacPlaybackProgress.resumePoint(for: playback.media)
         subtitles = playback.media.subtitles
+        startFraction = playback.startFraction > 0.001 ? playback.startFraction : 0
+        loadingTracker = LoadingPhaseTracker()
+        // The release, the title's other releases and how to switch: the
+        // deficit watch (native and VLC) reads them from the stream.
+        let context = PlaybackStreamContext.attach(to: streamer, media: playback.media, sourceURL: magnet,
+                                                   torrent: playback.torrent,
+                                                   sources: playback.sources.isEmpty ? nil : playback.sources,
+                                                   decidedStart: startFraction > 0 ? startFraction : nil)
+        context.onSwitch = onSwitch
+        let monitor = context.deficit
+        monitor.attach(self) { [weak self] in
+            MainActor.assumeIsolated { self?.deficitPlaybackState() }
+        }
+        deficitSubscription = monitor.$offer.receive(on: DispatchQueue.main).sink { [weak self] offer in
+            MainActor.assumeIsolated { self?.deficitOfferID = offer?.id }
+        }
+        deficitMonitor = monitor
         let isAtmos = playback.torrent.tags.contains(.atmos)
         let hintsHDR = !playback.torrent.tags.isDisjoint(with: [.hdr10, .hdr10Plus, .dolbyVision])
         // BEP 53 `so=` (Torrentio season packs): stream THAT file.
@@ -267,18 +441,21 @@ final class MacPlayerController: ObservableObject {
         // (every route below drives the torrent's window).
         BoundedStorageSession.prepare(streamer, durationSeconds: BoundedStorageSession.durationHint(for: playback.media))
 
-        streamer.startStreaming(fromMultiTorrentFileOrMagnetLink: magnet, progress: { [weak self] status in
+        streamer.startStreaming(fromMultiTorrentFileOrMagnetLink: magnet, progress: { [weak self] _ in
             DispatchQueue.main.async {
-                guard let self = self, self.player == nil, self.vlcURL == nil, !self.boundedPlaybackEnded else { return }
-                self.buffering = Double(status.bufferingProgress)
-                self.statusLine = String(format: "Buffering %.0f%% · %d seeds · %d KB/s".localized,
-                                         status.bufferingProgress * 100, status.seeds,
-                                         status.downloadSpeed / 1024)
+                guard let self = self, self.player == nil, self.vlcURL == nil, !self.boundedPlaybackEnded,
+                      !self.stopped, !self.loadingDone else { return }
+                // From the first second (PopcornTorrent reports before the
+                // metadata too): peers, the torrent's details, buffering.
+                self.applyLoadingPhase(self.loadingTracker.update(streamer: self.streamer, fromCallback: true))
                 self.refreshBoundedNote()
             }
         }, readyToPlay: { [weak self] videoFileURL, videoFilePath in
             DispatchQueue.main.async {
                 guard let self = self, !self.stopped else { return }
+                self.loadingDone = true
+                self.buffering = 1
+                self.loadingPhase = .buffering(progress: 1, eta: nil)
                 let fileName = videoFilePath.lastPathComponent
                 // alextud's GCDWebServer reports its URL as 0.0.0.0 — rewrite
                 // to 127.0.0.1 (routable local endpoint) and name the file
@@ -291,10 +468,21 @@ final class MacPlayerController: ObservableObject {
                 print("[Player] \(fileName) → \(route)")
                 switch route {
                 case .remux:
+                    // A start part-way (a switch to a lighter release) on a
+                    // file still downloading: the in-order remux would take
+                    // minutes to get there — VLC at once, at that position
+                    // (its byte ranges fetch it first), as the tvOS / iOS
+                    // quick resume does.
+                    if self.startFraction > 0, !self.streamer.isWholeFileOnDisk {
+                        self.vlcStartPosition = self.startFraction
+                        self.fallBackToVLC("Reprise rapide")
+                        return
+                    }
                     self.startRemux(localFile: videoFilePath, isAtmos: isAtmos, releaseHintsHDR: hintsHDR)
                 case .avPlayer:
                     self.startDirect()
                 case .vlc:
+                    self.vlcStartPosition = self.startFraction
                     self.fallBackToVLC(PlaybackRouting.vlcReason(forFileName: fileName))
                 }
             }
@@ -304,6 +492,9 @@ final class MacPlayerController: ObservableObject {
                 // Not enough space even for bounded storage (-5: how much to
                 // free), another file error (-6), or the error's own text.
                 let message = StreamFailure(error, streamer: self.streamer).message(underlying: error) ?? error.localizedDescription
+                self.loadingDone = true
+                self.showsLoadingSpinner = false
+                self.loadingPhase = .starting
                 self.statusLine = String(format: "Failed: %@".localized, message)
             }
         }, selectFileToStream: { @Sendable (fileNames: [String], fileSizes: [NSNumber]) -> Int32 in
@@ -320,6 +511,53 @@ final class MacPlayerController: ObservableObject {
         statsTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
             Task { @MainActor in self?.refreshStats() }
         }
+    }
+
+    // MARK: - Loading
+
+    /// The phase on the loading screen: its line (the swarm added while
+    /// buffering) and the buffering bar.
+    private func applyLoadingPhase(_ phase: LoadingPhase) {
+        guard !loadingDone, !boundedPlaybackEnded else { return }
+        loadingPhase = phase
+        let slow = loadingTracker.isSlow
+        if slow != loadingIsSlow { loadingIsSlow = slow }
+        if case .buffering(let progress, _) = phase { buffering = Double(progress) }
+        var line = loadingTracker.line
+        if phase.isBuffering {
+            let status = streamer.torrentStatus
+            line += " · " + String(format: NSLocalizedString("PlayerLoading.Swarm", value: "Seeds: %1$d · %2$d KB/s",
+                                                             comment: "Loading screen while buffering: connected seeds and download speed in kilobytes per second"),
+                                   Int(status.seeds), Int(status.downloadSpeed / 1024))
+        }
+        statusLine = line
+    }
+
+    /// « Keep waiting » (the source does not answer): the message goes,
+    /// every stall rule counts again from now.
+    func keepWaiting() {
+        guard !loadingDone else { return }
+        print("[Player] keep waiting")
+        loadingTracker.keepWaiting()
+        applyLoadingPhase(loadingTracker.phase)
+    }
+
+    /// The deficit watch's view of the native player (nil while VLC plays:
+    /// its own controller reports then).
+    private func deficitPlaybackState() -> BandwidthDeficitMonitor.PlaybackState? {
+        guard !stopped, vlcURL == nil, let player = player else { return nil }
+        let recovering = starvation.isRecovering
+        let time = recovering ? starvation.resumeTime : player.currentTime().seconds
+        var duration = player.currentItem?.duration.seconds ?? .nan
+        if !duration.isFinite || duration <= 0 { duration = lastKnownDuration ?? .nan }
+        if !duration.isFinite || duration <= 0, let length = remux?.session?.playlistDurationSeconds, length > 0 {
+            duration = length
+        }
+        let waiting = player.timeControlStatus == .waitingToPlayAtSpecifiedRate && playIntent.wantsPlayback
+        return BandwidthDeficitMonitor.PlaybackState(playhead: time, duration: duration.isFinite ? duration : nil,
+                                                     hasStarted: playedPosition.lastPlayedTime != nil,
+                                                     wantsPlayback: playIntent.wantsPlayback,
+                                                     isStalled: (recovering && !starvation.isRebuildingStuckItem) || waiting)
     }
 
     // MARK: - Remux path (MKV / WebM)
@@ -461,11 +699,45 @@ final class MacPlayerController: ObservableObject {
         cueController?.attach(to: player)
         self.player = player
         observePlayer(player)
-        player.play()
+        if direct, startFraction > 0 {
+            seekToStartFraction(item: item, player: player)
+        } else {
+            player.play()
+        }
         // Auto-hide the stats after the proof-of-Atmos glance.
         DispatchQueue.main.asyncAfter(deadline: .now() + 10) { [weak self] in
             self?.showStats = false
         }
+    }
+
+    /// Direct path, a start part-way (a switch to a lighter release): once
+    /// the item is ready with its duration, a seek there (byte ranges make
+    /// the torrent fetch that part first), then play. Never blocks
+    /// playback: after 45 s it plays from where it is.
+    private func seekToStartFraction(item: AVPlayerItem, player: AVPlayer) {
+        let fraction = Double(startFraction)
+        startFraction = 0
+        var done = false
+        let finish: (String) -> Void = { [weak self, weak player] how in
+            guard !done else { return }
+            done = true
+            self?.startSeekObservation?.invalidate()
+            self?.startSeekObservation = nil
+            print("[Player] start part-way: \(how)")
+            player?.play()
+        }
+        startSeekObservation = item.observe(\.status, options: [.initial, .new]) { observed, _ in
+            DispatchQueue.main.async {
+                guard !done, observed.status == .readyToPlay else { return }
+                let duration = observed.duration.seconds
+                guard duration.isFinite, duration > 0 else { return finish("duration unknown, from the start") }
+                let target = CMTime(seconds: fraction * duration, preferredTimescale: 600)
+                player.seek(to: target, toleranceBefore: .zero, toleranceAfter: .zero) { _ in
+                    DispatchQueue.main.async { finish("at \(Int(fraction * duration)) s (\(Int(fraction * 100)) %)") }
+                }
+            }
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 45) { finish("not ready after 45 s, from where it is") }
     }
 
     /// The item for `url` — also how the starvation recovery rebuilds it.
@@ -794,6 +1066,7 @@ final class MacPlayerController: ObservableObject {
             return
         }
         guard let url = directURL else {
+            showsLoadingSpinner = false
             statusLine = String(format: "Cannot play: %@".localized, reason)
             return
         }
@@ -842,6 +1115,10 @@ final class MacPlayerController: ObservableObject {
     /// safety net, the one-time replacement of an item started on live EVENT
     /// playlists, stats.
     private func refreshStats() {
+        // Loading: the stall rules need the clock even when no status comes.
+        if player == nil, vlcURL == nil, !stopped, !loadingDone {
+            applyLoadingPhase(loadingTracker.update(streamer: streamer, fromCallback: false))
+        }
         // The last position playback actually reached — playing through it,
         // item ready, not recovering (`PlayedPositionTracker`): a seek target
         // AVPlayer still waits for (held past the remux frontier) never
@@ -1209,6 +1486,9 @@ final class MacPlayerController: ObservableObject {
         BoundedStorageSession.session(for: streamer)?.detachHTTPPlayer(self)
         isWaitingForData = false
         buffering = 0
+        loadingDone = true
+        showsLoadingSpinner = false
+        loadingPhase = .starting
         // Title on the status line, the reason under it (one sentence each).
         statusLine = BoundedStorageUX.cannotContinueTitle
         boundedNote = BoundedStorageUX.cannotContinueMessage
@@ -1226,6 +1506,10 @@ final class MacPlayerController: ObservableObject {
         stopped = true
         statsTimer?.invalidate()
         statsTimer = nil
+        startSeekObservation?.invalidate()
+        startSeekObservation = nil
+        deficitSubscription = nil
+        deficitMonitor?.detach(self)
         starvation.cancel()
         failureObserver?.invalidate()
         failureObserver = nil
@@ -1252,8 +1536,12 @@ struct MacAVPlayerRepresentable: NSViewRepresentable {
         Coordinator()
     }
 
+    /// The sheet's minimum size: AVKit's content view never starts at zero
+    /// (its width / height == 0 constraints conflicted with its own).
+    static let initialSize = CGSize(width: 1024, height: 576)
+
     func makeNSView(context: Context) -> AVPlayerView {
-        let view = AVPlayerView()
+        let view = AVPlayerView(frame: NSRect(origin: .zero, size: Self.initialSize))
         view.player = player
         view.controlsStyle = .floating
         view.showsFullScreenToggleButton = true
@@ -1266,6 +1554,12 @@ struct MacAVPlayerRepresentable: NSViewRepresentable {
     func updateNSView(_ view: AVPlayerView, context: Context) {
         view.player = player
         context.coordinator.onChange = onPictureInPictureChanged
+    }
+
+    /// A proposal without a size (sheet appearing, view swap) gets the
+    /// sheet's minimum, never zero.
+    func sizeThatFits(_ proposal: ProposedViewSize, nsView: AVPlayerView, context: Context) -> CGSize? {
+        proposal.replacingUnspecifiedDimensions(by: Self.initialSize)
     }
 
     /// Reports the view's Picture in Picture state.

@@ -43,6 +43,14 @@ extension Media {
         streamFailureBlock: ((StreamFailure, String) -> Void)? = nil,
         finishedLoadingBlock: @escaping (PreloadTorrentViewController, UIViewController) -> Void)
     {
+        // The loading screen's « Choose another source » (a source that does
+        // not answer) goes back to the quality picker for this movie or
+        // episode, without this source (`AppDelegate.chooseAnotherSource`).
+        // The first call only: a .torrent URL comes back here as a local file.
+        if loadingViewController.media == nil {
+            loadingViewController.media = self
+            loadingViewController.sourceURL = url
+        }
         if let download = completedDownload {
             return download.play { (videoFileURL, videoFilePath) in
                 // The SPM PopcornTorrent answers a finished download at once,
@@ -78,6 +86,18 @@ extension Media {
             // singleton); it is the current one until the next stream.
             let streamer = PTTorrentStreamer.startNew()
             loadingViewController.streamer = streamer
+            // The release, this title's other releases (an episode's are the
+            // augmented list `chooseQuality` merged) and how to switch: the
+            // players offer a lighter release when the download can't keep
+            // up (`BandwidthDeficitMonitor`). The switch closes the player,
+            // then plays the release through the normal flow, starting where
+            // the other one was (taken by the new stream's context).
+            let context = PlaybackStreamContext.attach(to: streamer, media: self,
+                                                       sourceURL: loadingViewController.sourceURL ?? url)
+            context.onSwitch = { [media = self] torrent, fraction in
+                PlaybackStreamContext.requestStart(fraction, forURL: torrent.url)
+                AppDelegate.shared.play(media, torrent: torrent)
+            }
             // A film larger than the free space streams in bounded storage
             // (every player route drives the torrent's window).
             BoundedStorageSession.prepare(streamer, durationSeconds: BoundedStorageSession.durationHint(for: self))

@@ -494,6 +494,70 @@ public enum ReleaseName {
             || t.contains(where: { seasonWords.contains($0) || packWords.contains($0) })
         return isPack ? .pack : .unknown
     }
+
+    /// True when a release or file name covers more than one episode: a
+    /// season / series pack ("Show.S03", "Season 3", "Complete", "S01-S05",
+    /// "Temporada 1") or an episode range / double episode ("S03E01-E10",
+    /// "S03E05E06", "3x05-06", "[Cap.301_310]"). A single episode, a name
+    /// without any marker (movies, "[Group] Show - 05") and "Season 3
+    /// Episode 5" are false. Judged against the name's own first episode
+    /// marker (`episodeScope`), so it needs no requested episode.
+    public static func coversSeveralEpisodes(_ name: String) -> Bool {
+        let text = name.lowercased()
+        let ns = text as NSString
+        let all = NSRange(location: 0, length: ns.length)
+        var first: (location: Int, season: Int, episode: Int)?
+        func consider(_ pattern: NSRegularExpression, decode: (Int, Int) -> (Int, Int)?) {
+            guard let match = pattern.firstMatch(in: text, range: all),
+                  first == nil || match.range.location < first!.location else { return }
+            func number(_ group: Int) -> Int? {
+                guard group < match.numberOfRanges else { return nil }
+                let range = match.range(at: group)
+                return range.location == NSNotFound ? nil : Int(ns.substring(with: range))
+            }
+            guard let a = number(1), let decoded = decode(a, number(2) ?? -1) else { return }
+            first = (match.range.location, decoded.0, decoded.1)
+        }
+        consider(sxxEyyMarker) { s, e in e >= 0 ? (s, e) : nil }
+        consider(nxNNMarker) { s, e in e >= 0 && e != 264 && e != 265 ? (s, e) : nil }
+        consider(capMarker) { code, _ in (code / 100, code % 100) }
+        if let first = first {
+            switch episodeScope(of: name, season: first.season, episode: first.episode) {
+            case .pack, .multiEpisode: return true
+            case .requestedEpisode, .otherEpisode, .unknown: return false
+            }
+        }
+        return episodeScope(of: name, season: -1, episode: -1) == .pack || isMovieCollection(name)
+    }
+
+    /// Several films in one torrent: "Trilogy", "Trilogie", "Quadrilogy",
+    /// "Anthology", "Collection" (not "Criterion Collection", a single film's
+    /// edition), "Box Set", or a numbered range ("Harry Potter 1-8",
+    /// "Saw 1 - 7"). Not "Saga" alone ("The Twilight Saga: New Moon" is one
+    /// film). Only judged where no episode marker decided (see
+    /// `coversSeveralEpisodes`); a miss only leaves a bitrate unknown.
+    static func isMovieCollection(_ name: String) -> Bool {
+        let t = tokens(name.lowercased())
+        for (i, token) in t.enumerated() {
+            if collectionWords.contains(token) { return true }
+            if token == "collection", i == 0 || t[i - 1] != "criterion" { return true }
+            if token == "boxset" || (token == "box" && i + 1 < t.count && t[i + 1] == "set") { return true }
+        }
+        let text = name as NSString
+        for match in movieRange.matches(in: name, range: NSRange(location: 0, length: text.length)) {
+            if let a = Int(text.substring(with: match.range(at: 1))), let b = Int(text.substring(with: match.range(at: 2))),
+               a >= 1, b > a, b <= 30 { return true }
+        }
+        return false
+    }
+
+    private static let collectionWords: Set<String> = [
+        "duology", "dilogy", "trilogy", "trilogie", "trilogia", "trilogía", "quadrilogy", "quadrilogie",
+        "tetralogy", "tetralogia", "pentalogy", "hexalogy", "anthology", "anthologie", "antologia", "antología",
+    ]
+    /// "1-8", "1 - 7", "1~3": a range of film numbers between non-alphanumerics
+    /// ("DDP5.1-FGT", "H.264-2HD", "2019-2020" never match).
+    private static let movieRange = regex("(?<![\\p{L}\\p{N}.])(\\d{1,2}) ?[-~] ?(\\d{1,2})(?![\\p{L}\\p{N}])")
 }
 
 /// Magnet-link helpers (BEP 9 `dn`, BEP 53 `so`).
@@ -512,6 +576,15 @@ public enum MagnetLink {
                       pair[..<equals].lowercased() == wanted else { return nil }
                 return pair[pair.index(after: equals)...]
             }
+    }
+
+    /// A source's identity across providers (their magnets name the torrent
+    /// and list trackers their own way): the info-hash (`xt=urn:btih:`),
+    /// lower-cased; the link itself when it has none (a .torrent URL).
+    public static func sourceKey(of link: String) -> String {
+        guard let range = link.range(of: "btih:", options: .caseInsensitive) else { return link }
+        let hash = link[range.upperBound...].prefix { $0 != "&" }.lowercased()
+        return hash.isEmpty ? link : hash
     }
 
     /// The display name (`dn=`), with "+" read as a space and percent-decoded.
@@ -970,6 +1043,136 @@ public struct PlayabilityAssessment: Equatable, CustomStringConvertible {
     }
 }
 
+// MARK: - Bandwidth
+
+/// Whether a release's bitrate fits what this device's connection delivers.
+/// Rates are in BYTES per second throughout (libtorrent's unit); the UI
+/// converts with `megabitsPerSecond`.
+///
+/// The bitrate of a release is estimated as the streamed file's size over
+/// the media runtime (`Torrent.estimatedBitrate`); the connection estimate
+/// is measured by the app (`ConnectionSpeed`: a high percentile of the
+/// sustained download rates of recent streams) and kept under
+/// `connectionEstimateDefaultsKey`.
+public enum StreamBandwidth {
+
+    /// How a release compares with the connection.
+    public enum Fit: Equatable {
+        /// No estimate: size or runtime unknown, or the size is a whole pack's.
+        case unknown
+        /// Within `connectionHeadroom` of the measured connection, or not
+        /// heavy (`heavyBitrate`) while the connection is unknown.
+        case fits
+        /// Above `connectionHeadroom` of the measured connection: playback
+        /// will keep stalling while the download catches up.
+        case exceedsConnection
+        /// The connection is unknown and the release is above `heavyBitrate`
+        /// (4K remux class), which few connections + swarms sustain.
+        case heavy
+
+        /// `exceedsConnection` or `heavy`: avoided by the recommendation
+        /// whenever a lighter healthy release exists, flagged in the pickers.
+        public var isTooHeavy: Bool {
+            return self == .exceedsConnection || self == .heavy
+        }
+    }
+
+    /// Share of the measured connection a release may use: the rest absorbs
+    /// swarm fluctuations, protocol overhead and the variable bitrate of the
+    /// video (action scenes run well above the average).
+    public static var connectionHeadroom = 0.85
+
+    /// 40 Mbit/s in bytes/s: without a connection estimate, releases above it
+    /// (UHD Blu-ray remuxes run 50–100 Mbit/s) count as heavy.
+    public static var heavyBitrate: Double = 40_000_000 / 8
+
+    /// Estimates outside this range (bytes/s) are discarded as implausible: a
+    /// wrong runtime, or a size that covers more than the streamed file
+    /// (UHD Blu-ray peaks at 144 Mbit/s with audio).
+    public static let plausibleBitrates: ClosedRange<Double> = 20_000...20_000_000
+
+    /// UserDefaults key of the connection estimate in bytes/s (a Double),
+    /// written by the app's `ConnectionSpeed`. Absent or 0 = unknown. (A
+    /// launch argument `-PTConnectionSpeedEstimate <bytes/s>` overrides it.)
+    public static let connectionEstimateDefaultsKey = "PTConnectionSpeedEstimate"
+
+    /// The connection estimate (bytes/s), nil when no stream measured it yet.
+    public static var connectionEstimate: Double? {
+        let value = UserDefaults.standard.double(forKey: connectionEstimateDefaultsKey)
+        return value.isFinite && value > 0 ? value : nil
+    }
+
+    /// Bytes per second → megabits per second.
+    public static func megabitsPerSecond(_ bytesPerSecond: Double) -> Double {
+        return bytesPerSecond * 8 / 1_000_000
+    }
+
+    /// How a release of `bitrate` bytes/s fits a connection of `connection`
+    /// bytes/s (nil = unknown).
+    public static func fit(bitrate: Double?, connection: Double?) -> Fit {
+        guard let bitrate = bitrate else { return .unknown }
+        if let connection = connection, connection > 0 {
+            return bitrate > connection * connectionHeadroom ? .exceedsConnection : .fits
+        }
+        return bitrate > heavyBitrate ? .heavy : .fits
+    }
+
+    /// Bytes of a size label as the providers write it: Torrentio's
+    /// "31.07 GB" / "984.22 MB", `ByteCountFormatter`'s in any locale of the
+    /// app ("31,07 Go", "1 000 MB", "1.000 MB", Arabic-Indic digits with
+    /// "غ.ب."), TPB / Knaben's "%.2f GB". Units are binary (every producer
+    /// divides by 1024); a bare number is bytes. Nil when there is no number.
+    public static func bytes(fromSizeLabel raw: String?) -> Int64? {
+        guard let raw = raw else { return nil }
+        let scalars = Array(raw.unicodeScalars)
+        func digit(_ scalar: Unicode.Scalar) -> Character? {
+            switch scalar.value {
+            case 0x30...0x39: return Character(scalar)
+            case 0x0660...0x0669: return Character(Unicode.Scalar(scalar.value - 0x0660 + 0x30)!)   // Arabic-Indic
+            case 0x06F0...0x06F9: return Character(Unicode.Scalar(scalar.value - 0x06F0 + 0x30)!)   // Extended Arabic-Indic
+            default: return nil
+            }
+        }
+        let separators: Set<UInt32> = [0x2E, 0x2C, 0x066B, 0x066C, 0x27, 0x2019, 0x20, 0xA0, 0x202F, 0x2009]
+        guard let start = scalars.firstIndex(where: { digit($0) != nil }) else { return nil }
+        // Digit runs and the separators between them ("1", " ", "000"; "31", ",", "07").
+        var runs = [""], joins: [UInt32] = []
+        var i = start
+        while i < scalars.count {
+            if let d = digit(scalars[i]) {
+                runs[runs.count - 1].append(d)
+            } else if separators.contains(scalars[i].value), i + 1 < scalars.count, digit(scalars[i + 1]) != nil {
+                joins.append(scalars[i].value)
+                runs.append("")
+            } else {
+                break
+            }
+            i += 1
+        }
+        // The last separator is the decimal one unless three digits follow
+        // it (a grouping: "1,000", "1.000", "1 000"); "٫" is always decimal.
+        var integer = runs.joined(), fraction = ""
+        if let last = joins.last, last == 0x066B || ((last == 0x2E || last == 0x2C) && runs.last!.count != 3) {
+            integer = runs.dropLast().joined()
+            fraction = runs.last!
+        }
+        guard let value = Double(integer + (fraction.isEmpty ? "" : "." + fraction)), value > 0 else { return nil }
+        // Unit: the first letter after the number (bidi marks and spaces skipped).
+        let unit = scalars[i...].first(where: { CharacterSet.letters.contains($0) })
+            .map { String($0).lowercased() } ?? ""
+        let multiplier: Double
+        switch unit {
+        case "t", "т", "ت": multiplier = 1_099_511_627_776
+        case "g", "г", "غ", "ج": multiplier = 1_073_741_824
+        case "m", "м", "م": multiplier = 1_048_576
+        case "k", "к", "ك": multiplier = 1024
+        default: multiplier = 1                                  // "B", "o", "bytes", none
+        }
+        let bytes = value * multiplier
+        return bytes.isFinite && bytes < 9e18 ? Int64(bytes) : nil
+    }
+}
+
 // MARK: - Torrent
 
 public struct Torrent: Mappable, Equatable, Comparable {
@@ -1012,6 +1215,22 @@ public struct Torrent: Mappable, Equatable, Comparable {
     public let peers: Int
     public let size: String?
 
+    /// Bytes of `size` when it is the streamed file's (see
+    /// `streamedFileBytes`), parsed once: the ranking reads it on every
+    /// comparison.
+    private let streamedBytes: Int64?
+
+    /// The streamed file's name when the provider gives it apart from the
+    /// magnet (Time4Popcorn's `file`: its magnets name the whole season
+    /// pack, its sizes are the episode file's). Judged instead of the
+    /// magnet's `dn` by `streamedFileBytes`.
+    private let releaseFileName: String?
+
+    /// Runtime in seconds of the movie / episode this torrent plays, when
+    /// the caller attached it (`withMediaRuntime`, `Torrent.mediaRuntime(of:)`):
+    /// with the size it gives `estimatedBitrate`. Nil = unknown.
+    public var mediaRuntime: TimeInterval?
+
     public init?(map: Map) {
         do { self = try Torrent(map) }
         catch { return nil }
@@ -1023,6 +1242,8 @@ public struct Torrent: Mappable, Equatable, Comparable {
         self.peers = (try? (try? map.value("peers")) ?? map.value(("peer"))) ?? 0
         self.size  = try? map.value("filesize")
         self.payloadContainer = Torrent.payloadContainerExtension(ofMagnet: url)
+        self.releaseFileName = nil
+        self.streamedBytes = Torrent.streamedFileBytes(size: size, url: url)
 
         // Quality may be supplied as a JSON field, or set later by Movie/Episode mapping.
         let qualityString: String? = try? map.value("quality")
@@ -1060,13 +1281,17 @@ public struct Torrent: Mappable, Equatable, Comparable {
                 seeds: Int = 0,
                 peers: Int = 0,
                 size: String? = nil,
-                tags: VideoTags = []) {
+                tags: VideoTags = [],
+                fileName: String? = nil) {
         self.health = health
         self.url    = url
         self.seeds  = seeds
         self.peers  = peers
         self.size   = size
         self.payloadContainer = Torrent.payloadContainerExtension(ofMagnet: url)
+        let fileName = fileName.flatMap { $0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : $0 }
+        self.releaseFileName = fileName
+        self.streamedBytes = Torrent.streamedFileBytes(size: size, url: url, fileName: fileName)
         self._qualityOverride = quality.isEmpty ? nil : quality
         self.qualityValue     = VideoQuality.parse(quality)
         self.tags             = tags.isEmpty ? VideoTags.parse(quality) : tags
@@ -1092,12 +1317,35 @@ public struct Torrent: Mappable, Equatable, Comparable {
         return MagnetLink.displayName(of: url).flatMap(ReleaseName.videoContainerExtension(of:))
     }
 
-    /// Copy pointing at another URL (same label, tags and swarm figures).
+    /// Bytes of the file a stream of `url` plays, from the `size` label —
+    /// nil when unknown or when the size is likely a whole pack's.
+    ///
+    /// Torrentio's size is the stream's FILE whenever it knows the torrent's
+    /// files (it then sets `fileIdx` and `behaviorHints.filename`, which the
+    /// magnet's `dn` carries: "Game.of.Thrones.S01E01….mkv", 31.07 GB in a
+    /// season pack); without file information it is the whole torrent and
+    /// `dn` is the torrent name ("Juego de Tronos - 1ª Temporada", 24.8 GB).
+    /// Time4Popcorn's size is the episode file's, its magnet names the pack:
+    /// its `file` name (`fileName`) is judged instead. The other providers
+    /// give the whole torrent. So the size counts as the file's unless the
+    /// name (`fileName`, else `dn`) covers several episodes or films
+    /// (`ReleaseName.coversSeveralEpisodes`); a magnet without `dn` or a
+    /// `.torrent` URL gives nothing to judge by: unknown.
+    static func streamedFileBytes(size: String?, url: String, fileName: String? = nil) -> Int64? {
+        guard let bytes = StreamBandwidth.bytes(fromSizeLabel: size), bytes > 0,
+              let name = fileName ?? MagnetLink.displayName(of: url),
+              !ReleaseName.coversSeveralEpisodes(name) else { return nil }
+        return bytes
+    }
+
+    /// Copy pointing at another URL (same label, tags, swarm figures and runtime).
     func replacingURL(_ newURL: String) -> Torrent {
-        var copy = Torrent(health: health, url: newURL, quality: "", seeds: seeds, peers: peers, size: size, tags: tags)
+        var copy = Torrent(health: health, url: newURL, quality: "", seeds: seeds, peers: peers, size: size, tags: tags,
+                           fileName: releaseFileName)
         copy._qualityOverride = _qualityOverride
         copy.qualityValue = qualityValue
         copy.tags = tags
+        copy.mediaRuntime = mediaRuntime
         return copy
     }
 }
@@ -1205,7 +1453,8 @@ public extension Torrent {
     }
 
     /// Pick the highest resolution whose swarm is large enough to start
-    /// streaming quickly, rather than the absolute highest.
+    /// streaming quickly, and whose bitrate the connection can carry, rather
+    /// than the absolute highest.
     ///
     /// Higher resolutions carry far more bitrate, so they need a bigger swarm
     /// before playback can begin. A brand-new 4K release with ~20 seeds can
@@ -1214,33 +1463,52 @@ public extension Torrent {
     /// high → low and takes the first that has a torrent clearing the
     /// resolution's seed floor (`minimumSeedsForQuickStart`); among those it
     /// picks the best `playabilityScore` (then seeds), consistent with the
-    /// list order. Releases with a playback penalty (software-only codec,
-    /// Dolby Vision the display can't show, CAM) are only picked when no
-    /// clean release clears its floor. If nothing clears its bar it returns
-    /// the most-seeded torrent (clean first) — the best shot at a quick start.
+    /// list order.
+    ///
+    /// A release too heavy for the connection (`bandwidthFit`: its estimated
+    /// bitrate above 85 % of the measured `connection`, or above 40 Mbit/s
+    /// while the connection is unknown) only wins when no lighter release
+    /// clears its floor: a 72 Mbit/s UHD remux on a 27 Mbit/s connection
+    /// stalls every few seconds, a healthy 1080p plays. A playback penalty
+    /// (software-only codec, Dolby Vision the display can't show, CAM)
+    /// weighs more than the weight: pools are tried in the order clean and
+    /// light, clean, light, all. Releases without an estimate (size or
+    /// runtime unknown) count as light, so without estimates nothing
+    /// changes. If nothing clears its bar it returns, as before the
+    /// bandwidth rule, the most-seeded clean torrent (any torrent when none
+    /// is clean) — the best shot at a quick start, never a dead light one
+    /// over a seeded heavy one; lightness only breaks a tie of seeds.
     static func balancedPick(from torrents: [Torrent],
-                             capabilities: PlaybackCapabilities.Snapshot = PlaybackCapabilities.current) -> Torrent? {
+                             capabilities: PlaybackCapabilities.Snapshot = PlaybackCapabilities.current,
+                             connection: Double? = StreamBandwidth.connectionEstimate) -> Torrent? {
         guard !torrents.isEmpty else { return nil }
-        let assessed = torrents.map { (torrent: $0, playability: $0.playability(for: capabilities)) }
+        typealias Assessed = (torrent: Torrent, playability: PlayabilityAssessment, tooHeavy: Bool)
+        let assessed: [Assessed] = torrents.map {
+            ($0, $0.playability(for: capabilities), $0.bandwidthFit(connection: connection).isTooHeavy)
+        }
         let clean = assessed.filter { !$0.playability.isPenalized }
+        let light = assessed.filter { !$0.tooHeavy }
+        let cleanLight = clean.filter { !$0.tooHeavy }
+        let pools = [cleanLight, clean, light, assessed].filter { !$0.isEmpty }
 
-        func better(_ a: (torrent: Torrent, playability: PlayabilityAssessment),
-                    _ b: (torrent: Torrent, playability: PlayabilityAssessment)) -> Bool {
+        func better(_ a: Assessed, _ b: Assessed) -> Bool {
             if a.playability.score != b.playability.score { return a.playability.score < b.playability.score }
             if a.torrent.seeds != b.torrent.seeds { return a.torrent.seeds < b.torrent.seeds }
             return a.torrent.url < b.torrent.url
         }
 
-        for pool in [clean, assessed] where !pool.isEmpty {
+        for pool in pools {
             for quality in [VideoQuality.uhd2160, .hd1080, .hd720, .sd480] {
                 let floor = minimumSeedsForQuickStart(quality)
                 let healthy = pool.filter { $0.torrent.qualityValue == quality && $0.torrent.seeds >= floor }
                 if let best = healthy.max(by: better) { return best.torrent }
             }
         }
-        let pool = clean.isEmpty ? assessed : clean
-        return pool.max(by: { a, b in
-            a.torrent.seeds != b.torrent.seeds ? a.torrent.seeds < b.torrent.seeds : better(a, b)
+        let fallback = clean.isEmpty ? assessed : clean
+        return fallback.max(by: { a, b in
+            if a.torrent.seeds != b.torrent.seeds { return a.torrent.seeds < b.torrent.seeds }
+            if a.tooHeavy != b.tooHeavy { return a.tooHeavy }
+            return better(a, b)
         })?.torrent
     }
 
@@ -1248,20 +1516,103 @@ public extension Torrent {
     /// aggregated list (`TorrentioClient.merge`, after its fast-start slot
     /// for the best-seeded clean release): releases without a playback
     /// penalty first; among them, those whose swarm clears
-    /// `minimumSeedsForQuickStart` by playability score (best experience
-    /// first), the others by seeds (the swarm is the bottleneck there); then
-    /// seeds, then url. Returns true when `a` should come before `b`.
+    /// `minimumSeedsForQuickStart` and whose bitrate the connection carries
+    /// (`bandwidthFit`, as in `balancedPick`), then the other healthy ones,
+    /// by playability score (best experience first), the rest by seeds (the
+    /// swarm is the bottleneck there); then seeds, then url. Returns true
+    /// when `a` should come before `b`.
     static func precedesInListing(_ a: Torrent, _ b: Torrent,
-                                  capabilities: PlaybackCapabilities.Snapshot = PlaybackCapabilities.current) -> Bool {
+                                  capabilities: PlaybackCapabilities.Snapshot = PlaybackCapabilities.current,
+                                  connection: Double? = StreamBandwidth.connectionEstimate) -> Bool {
         let pa = a.playability(for: capabilities), pb = b.playability(for: capabilities)
         if pa.isPenalized != pb.isPenalized { return !pa.isPenalized }
         let healthyA = a.seeds >= minimumSeedsForQuickStart(a.qualityValue)
         let healthyB = b.seeds >= minimumSeedsForQuickStart(b.qualityValue)
+        let fastA = healthyA && !a.bandwidthFit(connection: connection).isTooHeavy
+        let fastB = healthyB && !b.bandwidthFit(connection: connection).isTooHeavy
+        if fastA != fastB { return fastA }
         if healthyA != healthyB { return healthyA }
         if healthyA && pa.score != pb.score { return pa.score > pb.score }
         if a.seeds != b.seeds { return a.seeds > b.seeds }
         if pa.score != pb.score { return pa.score > pb.score }
         return a.url < b.url
+    }
+}
+
+// MARK: - Bitrate
+
+public extension Torrent {
+
+    /// Bytes of the `size` label (whatever it covers), nil when unknown.
+    var sizeInBytes: Int64? {
+        return StreamBandwidth.bytes(fromSizeLabel: size)
+    }
+
+    /// Bytes of the file a stream plays, nil when unknown — also when the
+    /// size is likely a whole season / series pack's (see
+    /// `Torrent.streamedFileBytes(size:url:)`).
+    var streamedFileBytes: Int64? {
+        return streamedBytes
+    }
+
+    /// Average bitrate in BYTES per second of the streamed file over a media
+    /// runtime of `runtimeSeconds`: what the download has to sustain for a
+    /// smooth playback. Nil when the file size or the runtime is unknown, or
+    /// the result is implausible (`StreamBandwidth.plausibleBitrates`: a
+    /// wrong runtime, a pack's size).
+    func estimatedBitrate(runtimeSeconds: TimeInterval?) -> Double? {
+        guard let bytes = streamedBytes, let runtime = runtimeSeconds, runtime.isFinite, runtime >= 60 else { return nil }
+        let rate = Double(bytes) / runtime
+        return StreamBandwidth.plausibleBitrates.contains(rate) ? rate : nil
+    }
+
+    /// `estimatedBitrate(runtimeSeconds:)` over the attached `mediaRuntime`.
+    var estimatedBitrate: Double? {
+        return estimatedBitrate(runtimeSeconds: mediaRuntime)
+    }
+
+    /// How this release's estimated bitrate fits a connection of
+    /// `connection` bytes/s (default: the measured estimate; nil = unknown).
+    func bandwidthFit(connection: Double? = StreamBandwidth.connectionEstimate) -> StreamBandwidth.Fit {
+        return StreamBandwidth.fit(bitrate: estimatedBitrate, connection: connection)
+    }
+
+    /// Copy with `mediaRuntime` set (seconds; nil or ≤ 0 = unknown).
+    func withMediaRuntime(_ seconds: TimeInterval?) -> Torrent {
+        var copy = self
+        copy.mediaRuntime = seconds.flatMap { $0 > 0 && $0.isFinite ? $0 : nil }
+        return copy
+    }
+
+    /// Runtime in seconds of what `media` plays, nil when unknown: a
+    /// movie's `runtime`; an episode's show's typical runtime (`show`, else
+    /// `episode.show`). Minutes in the models, 0 = unknown.
+    static func mediaRuntime(of media: Media, show: Show? = nil) -> TimeInterval? {
+        let minutes: Int?
+        if let movie = media as? Movie {
+            minutes = movie.runtime
+        } else if let episode = media as? Episode {
+            minutes = (show ?? episode.show)?.runtime
+        } else if let show = media as? Show {
+            minutes = show.runtime
+        } else {
+            minutes = nil
+        }
+        guard let value = minutes, value > 0 else { return nil }
+        return TimeInterval(value) * 60
+    }
+}
+
+public extension Array where Element == Torrent {
+
+    /// Every torrent with `mediaRuntime` set (see `Torrent.withMediaRuntime`).
+    func withMediaRuntime(_ seconds: TimeInterval?) -> [Torrent] {
+        return map { $0.withMediaRuntime(seconds) }
+    }
+
+    /// Every torrent with the runtime of `media` (`Torrent.mediaRuntime(of:show:)`).
+    func withMediaRuntime(of media: Media, show: Show? = nil) -> [Torrent] {
+        return withMediaRuntime(Torrent.mediaRuntime(of: media, show: show))
     }
 }
 

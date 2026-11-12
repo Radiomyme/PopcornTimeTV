@@ -256,8 +256,9 @@ enum BoundedStorageDebugHooks {
     /// A stream started by the app (`BoundedStorageSession.prepare`).
     static func noteStreamer(_ streamer: PTTorrentStreamer) {
         streamers.add(streamer)
-        // The apps set GCDWebServer's level to warnings at launch (after
-        // prepareAtLaunch on the Mac): verbose again once a stream starts.
+        // `-PTDebugHTTPTrace`: verbose again once a stream starts, in case
+        // something lowered GCDWebServer's level since launch (the apps call
+        // `GCDWebServerLogging.configure()` before `prepareAtLaunch`).
         if defaults.bool(forKey: "PTDebugHTTPTrace") { HTTPTrace.applyVerboseLevel() }
     }
 

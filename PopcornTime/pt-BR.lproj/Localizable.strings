@@ -670,3 +670,32 @@
 "BoundedStorage.NotEnoughSpace.Generic" = "Não há espaço livre suficiente para reproduzir este vídeo, nem com armazenamento limitado. Libere espaço e tente novamente.";
 "BoundedStorage.FileError.Message" = "Não foi possível gravar o vídeo no armazenamento (%@).";
 "BoundedStorage.TryLowerQuality" = "Tentar uma qualidade inferior?";
+
+/* Quality pickers: estimated bitrate of a release and its warning when recent downloads (the connection, or its swarms) are slower (ConnectionSpeed.swift) */
+"Bandwidth.Bitrate" = "≈ %d Mb/s";
+"Bandwidth.Warning.Connection" = "Pode travar: seus downloads chegam a cerca de %d Mb/s";
+"Bandwidth.Warning.Heavy" = "Muito pesado: pode travar";
+
+/* Loading screen phases (LoadingPhase.swift) */
+"LoadingPhase.LookingForPeers" = "Procurando peers…";
+"LoadingPhase.GettingDetails" = "Obtendo as informações do torrent…";
+"LoadingPhase.GettingDetails.Connected" = "Obtendo as informações do torrent… (conectados: %d)";
+"LoadingPhase.NotResponding.NoPeers" = "Esta fonte não está respondendo (0 peers). Tente outra.";
+"LoadingPhase.NotResponding.NoDetails" = "Esta fonte não está enviando as informações do torrent. Tente outra.";
+"LoadingPhase.NotResponding.NoData" = "Esta fonte não está enviando nenhum dado. Tente outra.";
+"LoadingPhase.ChooseAnotherSource" = "Escolher outra fonte";
+"LoadingPhase.KeepWaiting" = "Continuar esperando";
+
+/* Over the video when the download is slower than the release (BandwidthDeficit.swift): %1$@ = the release's bitrate, %2$@ = the download rate, both in megabits per second ("72", "5.5"); the buttons switch to a lighter release at the same time, or keep this one. */
+"BandwidthDeficit.Message" = "Esta versão precisa de ~%1$@ Mb/s, mas o download só fornece ~%2$@: a reprodução vai travar.";
+"BandwidthDeficit.Lighter" = "Versão mais leve";
+"BandwidthDeficit.Continue" = "Continuar";
+
+/* Player loading screen while buffering (Mac): connected seeds and download speed in kilobytes per second. */
+"PlayerLoading.Swarm" = "Seeds: %1$d · %2$d KB/s";
+
+/* Loading screen (tvOS): connected seeds, a count-neutral form. Busy card while an episode's sources load (tvOS). Quality pickers (iOS, macOS): badge of the recommended release. Spinner (macOS), for VoiceOver. */
+"PlayerLoading.Seeds" = "Seeds: %d";
+"Sources.Loading" = "Procurando fontes…";
+"Picker.Recommended" = "Recomendado";
+"Spinner.Loading" = "Carregando…";

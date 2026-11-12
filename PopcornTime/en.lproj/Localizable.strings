@@ -365,3 +365,32 @@
 "BoundedStorage.NotEnoughSpace.Generic" = "Not enough free space to stream this video, even with limited storage. Free some space and try again.";
 "BoundedStorage.FileError.Message" = "The video could not be written to storage (%@).";
 "BoundedStorage.TryLowerQuality" = "Try a lower quality?";
+
+/* Quality pickers: estimated bitrate of a release and its warning when recent downloads (the connection, or its swarms) are slower (ConnectionSpeed.swift) */
+"Bandwidth.Bitrate" = "≈ %d Mb/s";
+"Bandwidth.Warning.Connection" = "May stutter: your downloads reach about %d Mb/s";
+"Bandwidth.Warning.Heavy" = "Very heavy: may stutter";
+
+/* Loading screen phases (LoadingPhase.swift) */
+"LoadingPhase.LookingForPeers" = "Looking for peers…";
+"LoadingPhase.GettingDetails" = "Getting the torrent's details…";
+"LoadingPhase.GettingDetails.Connected" = "Getting the torrent's details… (%d connected)";
+"LoadingPhase.NotResponding.NoPeers" = "This source isn't responding (0 peers). Try another source.";
+"LoadingPhase.NotResponding.NoDetails" = "This source isn't sending the torrent's details. Try another source.";
+"LoadingPhase.NotResponding.NoData" = "This source isn't sending any data. Try another source.";
+"LoadingPhase.ChooseAnotherSource" = "Choose another source";
+"LoadingPhase.KeepWaiting" = "Keep waiting";
+
+/* Over the video when the download is slower than the release (BandwidthDeficit.swift): %1$@ = the release's bitrate, %2$@ = the download rate, both in megabits per second ("72", "5.5"); the buttons switch to a lighter release at the same time, or keep this one. */
+"BandwidthDeficit.Message" = "This version needs ~%1$@ Mb/s, the download only gives ~%2$@: playback will stall.";
+"BandwidthDeficit.Lighter" = "Lighter version";
+"BandwidthDeficit.Continue" = "Continue";
+
+/* Player loading screen while buffering (Mac): connected seeds and download speed in kilobytes per second. */
+"PlayerLoading.Swarm" = "Seeds: %1$d · %2$d KB/s";
+
+/* Loading screen (tvOS): connected seeds, a count-neutral form. Busy card while an episode's sources load (tvOS). Quality pickers (iOS, macOS): badge of the recommended release. Spinner (macOS), for VoiceOver. */
+"PlayerLoading.Seeds" = "Seeds: %d";
+"Sources.Loading" = "Looking for sources…";
+"Picker.Recommended" = "Recommended";
+"Spinner.Loading" = "Loading…";

@@ -391,9 +391,13 @@ public final class YTSEZTVProvider: MediaProvider {
                 func deliver(_ extra: [Torrent]) {
                     var movie = base
                     let before = movie.torrents.count
-                    let legacy = aggregated + t4p
-                    let added = ExtraTorrentSources.novel(extra, beside: movie.torrents + legacy)
-                    movie.torrents = TorrentioClient.merge(movie.torrents, with: legacy + added)
+                    // The runtime on every candidate first: with their sizes
+                    // it gives the bitrates, so the merge's slots go to the
+                    // releases the connection carries (`precedesInListing`).
+                    let runtime = Torrent.mediaRuntime(of: base) ?? t4pMovie.flatMap { Torrent.mediaRuntime(of: $0) }
+                    let legacy = (aggregated + t4p).withMediaRuntime(runtime)
+                    let added = ExtraTorrentSources.novel(extra.withMediaRuntime(runtime), beside: movie.torrents + legacy)
+                    movie.torrents = TorrentioClient.merge(movie.torrents.withMediaRuntime(runtime), with: legacy + added)
                     print("[YTS+Torrentio+T4P+TPB/Knaben] \(imdbId): \(before) base + \(aggregated.count) aggregated + \(t4p.count) t4p + \(added.count)/\(extra.count) new extra -> \(movie.torrents.count) torrents")
                     completion(movie, nil)
                 }

@@ -62,15 +62,49 @@ extension AppDelegate: PCTPlayerViewControllerDelegate, UIViewControllerTransiti
 }
 
 extension AppDelegate {
-    
-    func chooseQuality(_ sender: UIView?, media: Media, completion: @escaping (Torrent) -> Void) {
+
+    /// Sources that did not answer, per movie / episode id (the loading
+    /// screen's « Choose another source »), as `sourceKey`s: left out of
+    /// that title's pickers and automatic picks for this session — an
+    /// episode's aggregators would list them again.
+    static var unansweredSources: [String: Set<String>] = [:]
+
+    /// A source's identity across providers: the magnet's info-hash
+    /// (lower-cased), else the URL (a .torrent).
+    static func sourceKey(_ url: String) -> String {
+        return MagnetLink.sourceKey(of: url)
+    }
+
+    /// The episode whose sources are being fetched: a second request
+    /// meanwhile (a second press) is dropped.
+    private static var fetchingSourcesFor: String?
+
+    /// - Parameter excluding: `sourceKey`s left out of the choice (sources
+    ///   that did not answer), on top of `unansweredSources` for the media.
+    func chooseQuality(_ sender: UIView?, media: Media, excluding: Set<String> = [], completion: @escaping (Torrent) -> Void) {
+        let excluded = excluding.union(AppDelegate.unansweredSources[media.id] ?? [])
         // Episodes: EZTV only carries what its uploaders pushed, so before
         // picking a quality, ask the Torrentio aggregator (YTS/RARBG-archive/
         // 1337x/TorrentGalaxy/…) AND the Time4Popcorn backend for that exact
         // episode and merge both. This fills gaps (old seasons EZTV lacks)
         // and adds extra releases. Movies are already merged at detail-load
-        // time by the provider.
+        // time by the provider. The requests take up to 10 s: a busy card
+        // says so meanwhile (and takes the remote: no second press; Menu
+        // cancels).
         if let episode = media as? Episode, let showId = episode.show?.id, showId.hasPrefix("tt") {
+            guard AppDelegate.fetchingSourcesFor == nil else {
+                print("[chooseQuality] sources of \(AppDelegate.fetchingSourcesFor ?? "?") still loading: request for \(episode.id) dropped")
+                return
+            }
+            AppDelegate.fetchingSourcesFor = episode.id
+            var cancelled = false
+            let busy = SourcesBusyViewController()
+            busy.onCancel = {
+                cancelled = true
+                AppDelegate.fetchingSourcesFor = nil
+                print("[chooseQuality] sources of \(episode.id): cancelled")
+            }
+            busy.showSoon()
             let group = DispatchGroup()
             var aggregated: [Torrent] = []
             var t4p: [Torrent] = []
@@ -94,16 +128,45 @@ extension AppDelegate {
                 group.leave()
             }
 
+            // DEBUG `-PTDebugSourcesDelay <s>`: the sources answer that much
+            // later (the busy card on screen, Menu to cancel it).
+            #if DEBUG
+            let answerDelay = UserDefaults.standard.string(forKey: "PTDebugSourcesDelay").flatMap(Double.init) ?? 0
+            #else
+            let answerDelay: TimeInterval = 0
+            #endif
             group.notify(queue: .main) { [weak self] in
-                var augmented = episode
-                // T4P primary, EZTV + Torrentio + TPB / Knaben as fallback (a
-                // TPB / Knaben copy of a listed torrent keeps the listed row).
-                let legacy = episode.torrents + aggregated
-                augmented.torrents = TorrentioClient.merge(t4p, with: legacy + ExtraTorrentSources.novel(extra, beside: t4p + legacy))
-                print("[chooseQuality] episode S\(episode.season)E\(episode.episode): \(t4p.count) t4p + \(episode.torrents.count) EZTV + \(aggregated.count) aggregated + \(extra.count) TPB/Knaben -> \(augmented.torrents.count)")
-                self?.presentQualityChoice(sender, media: augmented, completion: completion)
+                DispatchQueue.main.asyncAfter(deadline: .now() + answerDelay) {
+                    guard !cancelled else { return }
+                    AppDelegate.fetchingSourcesFor = nil
+                    var augmented = episode
+                    // The show's runtime on every candidate before the merge: with
+                    // their sizes it gives the bitrates, so the merge keeps the
+                    // releases the connection can carry (`precedesInListing`).
+                    let runtime = Torrent.mediaRuntime(of: episode)
+                    t4p = t4p.withMediaRuntime(runtime)
+                    extra = extra.withMediaRuntime(runtime)
+                    // T4P primary, EZTV + Torrentio + TPB / Knaben as fallback (a
+                    // TPB / Knaben copy of a listed torrent keeps the listed row).
+                    let legacy = (episode.torrents + aggregated).withMediaRuntime(runtime)
+                    augmented.torrents = TorrentioClient.merge(t4p, with: legacy + ExtraTorrentSources.novel(extra, beside: t4p + legacy))
+                        .filter { !excluded.contains(AppDelegate.sourceKey($0.url)) }
+                    print("[chooseQuality] episode S\(episode.season)E\(episode.episode): \(t4p.count) t4p + \(episode.torrents.count) EZTV + \(aggregated.count) aggregated + \(extra.count) TPB/Knaben -> \(augmented.torrents.count)"
+                          + (excluded.isEmpty ? "" : " (\(excluded.count) source(s) that did not answer left out)"))
+                    // The callers play the bare episode (its own list is EZTV's):
+                    // its stream learns the merged list from here — another
+                    // source, a lighter release (`BandwidthDeficitMonitor`).
+                    PlaybackStreamContext.noteSources(augmented.torrents, forMediaID: episode.id)
+                    busy.finish {
+                        self?.presentQualityChoice(sender, media: augmented, completion: completion)
+                    }
+                }
             }
             return
+        }
+        var media = media
+        if !excluded.isEmpty {
+            media.torrents.removeAll { excluded.contains(AppDelegate.sourceKey($0.url)) }
         }
         presentQualityChoice(sender, media: media, completion: completion)
     }
@@ -113,8 +176,10 @@ extension AppDelegate {
         //   Highest (default on the Apple TV) — always the top resolution
         //     (2160p + HDR/DV/Atmos) for the best picture on a 4K TV, accepting
         //     that a lightly-seeded 4K release takes longer to buffer;
-        //   Balanced — highest resolution the swarm can stream fast (skips a
-        //     lightly-seeded 4K for a well-seeded 1080p);
+        //   Balanced — highest resolution the swarm can stream fast and the
+        //     connection can carry (skips a lightly-seeded 4K for a
+        //     well-seeded 1080p, and a 4K remux heavier than the measured
+        //     connection: `Torrent.balancedPick`);
         //   Lowest   — smallest/fastest;
         //   Off      — always ask.
         // Default to "Off" (always show the picker) so the user can weigh
@@ -123,7 +188,12 @@ extension AppDelegate {
         // is still one click. Set Highest/Balanced/Lowest in Settings to
         // auto-pick instead.
         let preference = UserDefaults.standard.string(forKey: "autoSelectQuality") ?? "Off".localized
-        var sorted     = media.torrents.sorted(by: <)
+        // Runtime attached so each release has an estimated bitrate (size /
+        // runtime) for the recommendation and the labels; the connection is
+        // measured from now on (idempotent).
+        ConnectionSpeed.shared.start()
+        let torrents   = media.torrents.withMediaRuntime(of: media)
+        var sorted     = torrents.sorted(by: <)
 
         #if targetEnvironment(simulator)
         // The tvOS Simulator runs on the Mac with no HEVC HW decoder, so 4K
@@ -132,18 +202,19 @@ extension AppDelegate {
         // 2160p stream.
         let simulatorCap: VideoQuality = .hd1080
         sorted = sorted.filter { $0.qualityValue <= simulatorCap }
-        if sorted.isEmpty { sorted = media.torrents.sorted(by: <) }
+        if sorted.isEmpty { sorted = torrents.sorted(by: <) }
         print("[chooseQuality] simulator cap applied: max=\(simulatorCap)")
         #endif
 
-        print("[chooseQuality] media=\(media.title) preference=\(preference) candidates=\(sorted.map { "\($0.quality ?? "?")(\($0.qualityValue)) s\($0.seeds)" })")
+        let connection = StreamBandwidth.connectionEstimate
+        print("[chooseQuality] media=\(media.title) preference=\(preference) connection=\(connection.map { String(format: "%.1f Mb/s", StreamBandwidth.megabitsPerSecond($0)) } ?? "unknown") candidates=\(sorted.map { "\($0.quality ?? "?")(\($0.qualityValue)) s\($0.seeds)\($0.estimatedBitrate.map { String(format: " %.0fMb/s", StreamBandwidth.megabitsPerSecond($0)) } ?? "")" })")
 
         if preference == "Highest".localized, let best = sorted.last {
             print("[chooseQuality] picked HIGHEST: quality=\(best.quality ?? "?") seeds=\(best.seeds) url=\(best.url.prefix(120))")
             return completion(best)
         }
-        if preference == "Balanced".localized, let best = balancedPick(from: sorted) {
-            print("[chooseQuality] picked BALANCED: quality=\(best.quality ?? "?") seeds=\(best.seeds)")
+        if preference == "Balanced".localized, let best = Torrent.balancedPick(from: sorted, connection: connection) {
+            print("[chooseQuality] picked BALANCED: quality=\(best.quality ?? "?") seeds=\(best.seeds) fit=\(best.bandwidthFit(connection: connection))")
             return completion(best)
         }
         // Lowest = the smallest resolution bucket, but the BEST-playing
@@ -171,23 +242,35 @@ extension AppDelegate {
         let blurStyle: UIBlurEffect.Style  = style == .alert ? .extraLight : .dark
         let alertController = UIAlertController(title: "Choose Quality".localized, message: nil, preferredStyle: style, blurStyle: blurStyle)
 
-        // Enrich each row with seeds + size so the best quality/seeds ratio is
-        // visible at a glance (like the iOS/macOS pickers), and star the
-        // recommended `balancedPick`. Best resolution first. The source (TPB,
-        // Knaben · 1337x, a Torrentio indexer…) comes last, and the separators
-        // are narrow: tvOS shrinks a row too long for the sheet, then cuts its
-        // middle (the seeds); the focused row scrolls to show it all.
-        let recommendedURL = Torrent.balancedPick(from: sorted)?.url
+        // Enrich each row with seeds + size + estimated bitrate so the best
+        // quality/seeds ratio is visible at a glance (like the iOS/macOS
+        // pickers), and star the recommended `balancedPick`. A release likely
+        // too heavy for the connection starts with "⚠︎", explained once in
+        // the alert's message (a "(may stutter)" in each row made them too
+        // long). Best resolution first. The source (TPB, Knaben · 1337x, a
+        // Torrentio indexer…) comes last, and the separators are narrow:
+        // tvOS shrinks a row too long for the sheet, then cuts its middle
+        // (the seeds); the focused row scrolls to show it all.
+        let recommendedURL = Torrent.balancedPick(from: sorted, connection: connection)?.url
         var recommendedAction: UIAlertAction?
+        var flagged = false
         for torrent in sorted.reversed() {
             var label = torrent.qualityLabel.isEmpty ? "—" : torrent.qualityLabel
             label += "  ·  \(torrent.seeds) seeds"
             if let size = torrent.size, !size.isEmpty { label += "  ·  \(size)" }
+            if let bitrate = torrent.bitrateLabel { label += "  ·  \(bitrate)" }
             if let source = torrent.sourceLabel { label += "  ·  \(source)" }
+            if torrent.bandwidthFit(connection: connection).isTooHeavy {
+                label = "⚠︎ " + label
+                flagged = true
+            }
             if torrent.url == recommendedURL { label = "⭐︎ " + label }
             let action = UIAlertAction(title: label, style: .default) { _ in completion(torrent) }
             alertController.addAction(action)
             if torrent.url == recommendedURL { recommendedAction = action }
+        }
+        if flagged {
+            alertController.message = "⚠︎ " + BandwidthText.warning(connection: connection)
         }
 
         alertController.addAction(UIAlertAction(title: "Cancel".localized, style: .cancel, handler: nil))
@@ -195,10 +278,6 @@ extension AppDelegate {
         if let recommendedAction = recommendedAction { alertController.preferredAction = recommendedAction }
         alertController.popoverPresentationController?.sourceView = sender
         alertController.show(animated: true)
-    }
-
-    private func balancedPick(from torrents: [Torrent]) -> Torrent? {
-        return Torrent.balancedPick(from: torrents)
     }
 
     func play(_ media: Media, torrent: Torrent) {
@@ -599,5 +678,141 @@ extension AppDelegate {
             return PreloadTorrentViewControllerAnimatedTransitioning(isPresenting: false)
         }
         return nil
+    }
+}
+
+/// « Looking for sources… » over the page while an episode's sources load
+/// (`chooseQuality`: Torrentio, Time4Popcorn, TPB / Knaben, up to 10 s).
+/// Before, nothing showed for those seconds and the page stayed live: a
+/// second press started a second request (two pickers, or two streams).
+/// Modal (the remote goes to it), shown only if the wait passes
+/// `delay` (no flash for a quick answer); Menu cancels the request.
+final class SourcesBusyViewController: UIViewController {
+    /// Menu pressed: the request is dropped (its answer ignored).
+    var onCancel: (() -> Void)?
+
+    private enum State { case idle, presenting, shown, finished }
+    private var state = State.idle
+    private var pendingFinish: (() -> Void)?
+    private static let delay: TimeInterval = 0.4
+
+    init() {
+        super.init(nibName: nil, bundle: nil)
+        modalPresentationStyle = .overFullScreen
+        modalTransitionStyle = .crossDissolve
+    }
+
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+    override func viewDidLoad() {
+        super.viewDidLoad()
+        view.backgroundColor = UIColor.black.withAlphaComponent(0.35)
+        let card = UIVisualEffectView(effect: UIBlurEffect(style: .dark))
+        card.layer.cornerRadius = 28
+        card.clipsToBounds = true
+        card.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(card)
+        let spinner = UIActivityIndicatorView(style: .large)
+        spinner.color = .white
+        spinner.startAnimating()
+        let label = UILabel()
+        label.text = SourcesBusyViewController.text
+        label.textColor = .white
+        label.font = .systemFont(ofSize: 32, weight: .medium)
+        label.textAlignment = .center
+        label.numberOfLines = 0
+        let stack = UIStackView(arrangedSubviews: [spinner, label])
+        stack.axis = .vertical
+        stack.alignment = .center
+        stack.spacing = 28
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        card.contentView.addSubview(stack)
+        NSLayoutConstraint.activate([
+            card.centerXAnchor.constraint(equalTo: view.centerXAnchor),
+            card.centerYAnchor.constraint(equalTo: view.centerYAnchor),
+            card.widthAnchor.constraint(lessThanOrEqualToConstant: 900),
+            stack.topAnchor.constraint(equalTo: card.contentView.topAnchor, constant: 48),
+            stack.bottomAnchor.constraint(equalTo: card.contentView.bottomAnchor, constant: -48),
+            stack.leadingAnchor.constraint(equalTo: card.contentView.leadingAnchor, constant: 72),
+            stack.trailingAnchor.constraint(equalTo: card.contentView.trailingAnchor, constant: -72),
+        ])
+        view.accessibilityViewIsModal = true
+    }
+
+    override func viewDidAppear(_ animated: Bool) {
+        super.viewDidAppear(animated)
+        UIAccessibility.post(notification: .screenChanged, argument: SourcesBusyViewController.text)
+    }
+
+    static var text: String {
+        NSLocalizedString("Sources.Loading", value: "Looking for sources…",
+                          comment: "Busy card while an episode's sources (torrents) are fetched before the quality choice")
+    }
+
+    /// Presents the card over the top-most screen after `delay`, unless
+    /// `finish` came first.
+    func showSoon() {
+        DispatchQueue.main.asyncAfter(deadline: .now() + SourcesBusyViewController.delay) { [self] in
+            guard state == .idle else { return }
+            // Not over a screen still leaving (a player closing for Up
+            // Next): UIKit would drop the presentation.
+            guard let presenter = SourcesBusyViewController.topMostViewController(),
+                  presenter.presentedViewController == nil, presenter.viewIfLoaded?.window != nil else {
+                state = .finished
+                return
+            }
+            state = .presenting
+            presenter.present(self, animated: true) { [self] in
+                guard state == .presenting else { return }
+                state = .shown
+                if let next = pendingFinish {
+                    pendingFinish = nil
+                    finish(then: next)
+                }
+            }
+            // A presentation UIKit refused never calls back: the request
+            // must not wait for it.
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [self] in
+                guard state == .presenting, presentingViewController == nil else { return }
+                state = .finished
+                if let next = pendingFinish {
+                    pendingFinish = nil
+                    next()
+                }
+            }
+        }
+    }
+
+    /// The sources are in: the card goes (if it came), then `next`.
+    func finish(then next: @escaping () -> Void) {
+        switch state {
+        case .idle:
+            state = .finished
+            next()
+        case .presenting:
+            pendingFinish = next
+        case .shown:
+            state = .finished
+            dismiss(animated: true, completion: next)
+        case .finished:
+            next()
+        }
+    }
+
+    override func pressesBegan(_ presses: Set<UIPress>, with event: UIPressesEvent?) {
+        guard presses.contains(where: { $0.type == .menu }) else { return super.pressesBegan(presses, with: event) }
+        guard state == .shown else { return }
+        state = .finished
+        onCancel?()
+        dismiss(animated: true)
+    }
+
+    /// The foreground scene's key window's top-most presented controller.
+    static func topMostViewController() -> UIViewController? {
+        let scenes = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
+        let scene = scenes.first(where: { $0.activationState == .foregroundActive }) ?? scenes.first
+        var top = (scene?.windows.first(where: { $0.isKeyWindow }) ?? scene?.windows.first)?.rootViewController
+        while let presented = top?.presentedViewController, !presented.isBeingDismissed { top = presented }
+        return top
     }
 }

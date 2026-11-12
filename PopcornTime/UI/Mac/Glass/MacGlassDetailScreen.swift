@@ -205,7 +205,7 @@ final class MacGlassDetailController {
         if UserDefaults.standard.bool(forKey: "PTDebugQualitySheet"), !movie.torrents.isEmpty {
             DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in
                 self?.qualityChoices = MacEpisodeSources(title: movie.title, media: movie,
-                                                         torrents: movie.torrents.sorted(by: >))
+                                                         torrents: movie.torrents.withMediaRuntime(of: movie).sorted(by: >))
             }
         }
         #endif
@@ -223,6 +223,23 @@ final class MacGlassDetailController {
         loadRelated()
         loadPeople()
         if let season { loadMissingStills(of: season) }
+        #if DEBUG
+        // `-PTDebugQualitySheet YES` on a show: Play's "Choose Quality…" —
+        // the next episode's sources load (spinners on its still and in
+        // Play), then the quality sheet (never plays: only a pick would).
+        if UserDefaults.standard.bool(forKey: "PTDebugQualitySheet") {
+            let episodeID = GlassDetailAdapter.nextEpisode(in: show)?.id
+            DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in
+                print("[MacGlass] debug: Choose Quality… for \(episodeID ?? "?")")
+                self?.page.chooseQuality()
+                let anchors = (episodeID.map { ["episode-" + $0] } ?? []) + ["play"]
+                Task { @MainActor in
+                    MacGlassDebugPointer.wiggleIfRequested(over: anchors) { [weak self] in self?.page.busyEpisodeID != nil }
+                    await self?.runDebugKeyScenario(episodeAnchor: anchors.first ?? "play")
+                }
+            }
+        }
+        #endif
     }
 
     /// "Viewers Also Watched": Trakt, else YTS / Cinemeta (OpenMetadata).
@@ -409,7 +426,9 @@ final class MacGlassDetailController {
 
     private func playMovie(_ movie: Movie, alwaysAsk: Bool) {
         guard !isBusy else { return }
-        let torrents = movie.torrents.sorted(by: >)
+        // The runtime gives each release its bitrate (size / runtime): the
+        // automatic pick and the sheet weigh it against the connection.
+        let torrents = movie.torrents.withMediaRuntime(of: movie).sorted(by: >)
         guard !torrents.isEmpty else {
             isShowingNoSources = true
             return
@@ -436,7 +455,7 @@ final class MacGlassDetailController {
         resolveSources(of: episode, in: show) { [weak self] torrents in
             // Dropped once the page has gone (its busy state was ended then).
             guard let self, self.isCurrent(token) else { return }
-            let sorted = torrents.sorted(by: >)
+            let sorted = torrents.withMediaRuntime(of: episode, show: show).sorted(by: >)
             guard !sorted.isEmpty else {
                 self.endBusy()
                 self.isShowingNoSources = true
@@ -453,7 +472,12 @@ final class MacGlassDetailController {
 
     /// Time4Popcorn first, then EZTV / Torrentio — the iOS / tvOS play flow.
     /// Calls back on the main queue.
-    private func resolveSources(of episode: Episode, in show: Show, completion: @escaping ([Torrent]) -> Void) {
+    private func resolveSources(of episode: Episode, in show: Show, completion answer: @escaping ([Torrent]) -> Void) {
+        #if DEBUG
+        let completion = MacGlassDebugPointer.delayedSources(answer)
+        #else
+        let completion = answer
+        #endif
         if let cached = episodeTorrents[episode.id] { return completion(cached) }
         guard show.id.hasPrefix("tt") else { return completion(episode.torrents) }
         let base = episode.torrents
@@ -502,6 +526,14 @@ final class MacGlassDetailController {
     /// Subtitles first (the player offers them), then the player sheet —
     /// unless the page has gone in the meantime (`pageDisappeared`).
     func start(_ torrent: Torrent, media: Media, title: String) {
+        #if DEBUG
+        // The spinner hooks click the page: nothing may play in those runs.
+        if MacGlassDebugPointer.isRequested {
+            print("[MacGlass] debug: start(\(torrent.quality ?? "?")) refused (spinner / key-window hooks)")
+            endBusy()
+            return
+        }
+        #endif
         let token = flow
         if let episode = media as? Episode { page.busyEpisodeID = episode.id }
         if playFromPlayButton { page.isPreparingPlay = true }
@@ -511,7 +543,14 @@ final class MacGlassDetailController {
                 guard let self, self.isCurrent(token) else { return }
                 target.subtitles = subtitles
                 self.endBusy()
-                self.playback = MacPendingPlayback(torrent: torrent, media: target, title: title)
+                // The title's releases go with it: the player offers another
+                // source (one that does not answer) or a lighter release
+                // (a download slower than the video) from them.
+                // Runtimes attached: bitrates for the lighter-release search
+                // and the « Choose another source » sheet.
+                let sources = ((media as? Episode).flatMap { self.episodeTorrents[$0.id] } ?? media.torrents)
+                    .withMediaRuntime(of: media, show: self.show)
+                self.playback = MacPendingPlayback(torrent: torrent, media: target, title: title, sources: sources)
             }
         }
         if let episode = media as? Episode {
@@ -560,3 +599,194 @@ final class MacGlassDetailController {
         refreshShowProgress(show)
     }
 }
+
+#if DEBUG
+// MARK: - DEBUG: spinners under the pointer
+
+/// Verification hooks of the page's spinners (with `-PTDebugOpenShow <id>
+/// -PTDebugQualitySheet YES`):
+/// - `-PTDebugSourcesDelay <seconds>`: an episode's sources answer that much
+///   later, so its still and Play keep their spinners up;
+/// - `-PTDebugHoverBusy YES`: meanwhile (the app is activated), synthetic
+///   pointer moves go in and out of the busy still, then Play, every 0.35 s
+///   (mouse events sent to the window: the real cursor does not move), as a
+///   user's pointer does right after the click — the lift and glass hover
+///   animations run around the spinners. The targets are found through
+///   `macGlassDebugAnchor`. `-PTDebugPressBusy YES` also clicks them while
+///   the episode is busy (a no-op then: a flow is running); nothing ever
+///   plays in these runs (`start` refuses).
+enum MacGlassDebugPointer {
+    static let isRequested = UserDefaults.standard.bool(forKey: "PTDebugHoverBusy")
+        || UserDefaults.standard.bool(forKey: "PTDebugKeyScenario")
+
+    /// Anchor views by name (`macGlassDebugAnchor`).
+    @MainActor static let anchors = NSMapTable<NSString, NSView>.strongToWeakObjects()
+
+    static func delayedSources(_ answer: @escaping ([Torrent]) -> Void) -> ([Torrent]) -> Void {
+        let delay = UserDefaults.standard.double(forKey: "PTDebugSourcesDelay")
+        guard delay > 0 else { return answer }
+        return { torrents in DispatchQueue.main.asyncAfter(deadline: .now() + delay) { answer(torrents) } }
+    }
+
+    /// `names`: anchors to hover in turn (`episode-<id>`, `play`).
+    @MainActor
+    static func wiggleIfRequested(over names: [String], isBusy: @escaping () -> Bool) {
+        guard UserDefaults.standard.bool(forKey: "PTDebugHoverBusy") else { return }
+        let press = UserDefaults.standard.bool(forKey: "PTDebugPressBusy")
+        let seconds = max(4, UserDefaults.standard.double(forKey: "PTDebugSourcesDelay") - 1.5)
+        NSApp.activate(ignoringOtherApps: true)
+        Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 300_000_000)
+            var clicks = 0
+            let end = Date().addingTimeInterval(seconds)
+            var step = 0
+            var outside: (NSWindow, NSPoint)?
+            while Date() < end {
+                let name = names[(step / 2) % names.count]
+                if step.isMultiple(of: 2) {
+                    // Looked up again at each step: the page may scroll meanwhile.
+                    if let anchor = anchors.object(forKey: name as NSString), let window = anchor.window {
+                        let rect = anchor.convert(anchor.bounds, to: nil)
+                        if step < 2 * names.count { print("[MacGlass] debug hover: \(name) @ \(NSStringFromRect(rect))") }
+                        let point = NSPoint(x: rect.midX, y: rect.midY)
+                        send(.mouseMoved, at: point, in: window)
+                        outside = (window, NSPoint(x: window.frame.width - 30, y: 30))
+                        if press, isBusy() {
+                            try? await Task.sleep(nanoseconds: 60_000_000)
+                            send(.leftMouseDown, at: point, in: window)
+                            try? await Task.sleep(nanoseconds: 120_000_000)
+                            send(.leftMouseUp, at: point, in: window)
+                            clicks += 1
+                        }
+                    } else if step < 2 * names.count {
+                        print("[MacGlass] debug hover: \(name) not found")
+                    }
+                } else if let (window, point) = outside {
+                    send(.mouseMoved, at: point, in: window)
+                }
+                step += 1
+                try? await Task.sleep(nanoseconds: 350_000_000)
+            }
+            if let (window, point) = outside { send(.mouseMoved, at: point, in: window) }
+            print("[MacGlass] debug hover: \(step) moves, \(clicks) clicks, key window: \(NSApp.keyWindow != nil)")
+        }
+    }
+
+    /// A mouse event at `point` (window coordinates).
+    @MainActor
+    static func send(_ type: NSEvent.EventType, at point: NSPoint, in window: NSWindow) {
+        guard let event = NSEvent.mouseEvent(with: type, location: point, modifierFlags: [],
+                                             timestamp: ProcessInfo.processInfo.systemUptime,
+                                             windowNumber: window.windowNumber, context: nil,
+                                             eventNumber: 0, clickCount: type == .mouseMoved ? 0 : 1,
+                                             pressure: type == .leftMouseDown || type == .rightMouseDown ? 1 : 0) else { return }
+        window.sendEvent(event)
+    }
+}
+
+extension MacGlassDetailController {
+    /// `-PTDebugKeyScenario YES` (with `-PTDebugQualitySheet YES`): once the
+    /// quality sheet is up, the page's other windows in turn — the sheet
+    /// closed (as Cancel does), the episode's tooltip (pointer resting on
+    /// the still), Play's and the episode's context menus (opened by a
+    /// synthetic right click, cancelled 1.5 s later) — for
+    /// `-PTDebugKeyWindowTrace` (PopcornTimeMacApp).
+    @MainActor
+    func runDebugKeyScenario(episodeAnchor: String) async {
+        guard UserDefaults.standard.bool(forKey: "PTDebugKeyScenario") else { return }
+        for _ in 0..<600 where qualityChoices == nil {
+            try? await Task.sleep(nanoseconds: 100_000_000)
+        }
+        print("[KeyTrace] scenario: quality sheet \(qualityChoices == nil ? "never shown" : "up")")
+        try? await Task.sleep(nanoseconds: 3_000_000_000)
+        print("[KeyTrace] scenario: closing the quality sheet")
+        qualityChoices = nil
+        try? await Task.sleep(nanoseconds: 2_500_000_000)
+        print("[KeyTrace] scenario: resting on \(episodeAnchor) (tooltip)")
+        await MacGlassDebugPointer.rest(on: episodeAnchor, seconds: 5)
+        for anchor in ["play", episodeAnchor] {
+            print("[KeyTrace] scenario: context menu of \(anchor): \(MacGlassDebugPointer.rightClick(anchor))")
+            try? await Task.sleep(nanoseconds: 3_000_000_000)
+        }
+        print("[KeyTrace] scenario: done")
+    }
+}
+
+extension MacGlassDebugPointer {
+    /// A right click on the anchor (its context menu); the menu is cancelled
+    /// 1.5 s after it opens.
+    @MainActor
+    static func rightClick(_ name: String) -> String {
+        guard let (window, point) = visibleCenter(of: name) else { return "anchor not visible" }
+        menuObserver.map(NotificationCenter.default.removeObserver)
+        menuObserver = NotificationCenter.default.addObserver(forName: NSMenu.didBeginTrackingNotification, object: nil, queue: .main) { note in
+            guard let menu = note.object as? NSMenu else { return }
+            print("[KeyTrace] scenario: menu open (\(menu.items.map(\.title)))")
+            // The menu tracks in its own run loop mode: a common-modes timer.
+            let timer = Timer(timeInterval: 1.5, repeats: false) { _ in menu.cancelTracking() }
+            RunLoop.main.add(timer, forMode: .common)
+            RunLoop.main.add(timer, forMode: .eventTracking)
+        }
+        // No right-mouse-up: over the open menu, it would pick an item.
+        send(.mouseMoved, at: point, in: window)
+        send(.rightMouseDown, at: point, in: window)
+        return "clicked at \(NSStringFromPoint(point))"
+    }
+
+    @MainActor private static var menuObserver: NSObjectProtocol?
+
+    /// The pointer resting on the anchor (small moves every 0.25 s).
+    @MainActor
+    static func rest(on name: String, seconds: Double) async {
+        guard let (window, point) = visibleCenter(of: name) else {
+            print("[KeyTrace] scenario: \(name) not visible")
+            return
+        }
+        let end = Date().addingTimeInterval(seconds)
+        var nudge: CGFloat = 0
+        while Date() < end {
+            send(.mouseMoved, at: NSPoint(x: point.x + nudge, y: point.y), in: window)
+            nudge = nudge == 0 ? 1 : 0
+            try? await Task.sleep(nanoseconds: 250_000_000)
+        }
+    }
+
+    /// The anchor's center when it is inside its window's content.
+    @MainActor
+    private static func visibleCenter(of name: String) -> (NSWindow, NSPoint)? {
+        guard let anchor = anchors.object(forKey: name as NSString), let window = anchor.window else { return nil }
+        let rect = anchor.convert(anchor.bounds, to: nil)
+        let point = NSPoint(x: rect.midX, y: rect.midY)
+        guard window.contentLayoutRect.contains(point) || (window.contentView?.bounds.contains(point) ?? false) else { return nil }
+        return (window, point)
+    }
+}
+
+/// An empty view behind a hover target, registered by name.
+private struct MacGlassDebugAnchorView: NSViewRepresentable {
+    let name: String
+
+    func makeNSView(context: Context) -> NSView {
+        let view = NSView()
+        MacGlassDebugPointer.anchors.setObject(view, forKey: name as NSString)
+        return view
+    }
+
+    func updateNSView(_ nsView: NSView, context: Context) {
+        MacGlassDebugPointer.anchors.setObject(nsView, forKey: name as NSString)
+    }
+}
+
+extension View {
+    /// DEBUG, with `-PTDebugHoverBusy YES` only: a hover target of
+    /// MacGlassDebugPointer.
+    @ViewBuilder
+    func macGlassDebugAnchor(_ name: String) -> some View {
+        if MacGlassDebugPointer.isRequested {
+            background(MacGlassDebugAnchorView(name: name))
+        } else {
+            self
+        }
+    }
+}
+#endif
