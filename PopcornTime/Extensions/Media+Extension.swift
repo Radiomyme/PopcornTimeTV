@@ -90,11 +90,10 @@ extension Media {
             //
             // The streamed file: the magnet's BEP 53 `so=` file (Torrentio
             // `fileIdx`) when valid, else the largest video file, as on
-            // macOS (`PTTorrentStreamer.fileSelection`). Season packs stay
-            // filtered out of iOS/tvOS episode results
-            // (`TorrentioClient.dropsEpisodePacks`): once playback moves past
-            // the first pieces, the streamer wants every file of the torrent
-            // again, and a whole pack doesn't fit on these devices.
+            // macOS (`PTTorrentStreamer.fileSelection`); only that file's
+            // pieces are wanted. Season packs stay filtered out of iOS/tvOS
+            // episode results for now (`TorrentioClient.dropsEpisodePacks`
+            // says why).
             print("[Streamer] startStreaming magnet=\(url.prefix(80))…")
             var lastLoggedTenth: Float = -1
             streamer.startStreaming(fromMultiTorrentFileOrMagnetLink: url, progress: { (status) in

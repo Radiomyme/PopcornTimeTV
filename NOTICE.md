@@ -20,7 +20,9 @@ This product includes the following libraries:
 
 * [1PasswordExtension](https://github.com/AgileBits/onepassword-app-extension) - 1Password Extension for iOS Apps.
 
-* [PopcornTorrent](https://github.com/PopcornTimeTV/PopcornTorrent) - A GCDWebserver torrent streamer for iOS and tvOS.
+* [PopcornTorrent](https://github.com/Radiomyme/PopcornTorrent) - libtorrent torrent streamer for tvOS, iOS and macOS (Swift package, with bounded storage).
+
+* [GCDWebServer](https://github.com/alextud/GCDWebServer) - Lightweight embedded HTTP server, behind the local streams and the remux (Swift package fork of [swisspol/GCDWebServer](https://github.com/swisspol/GCDWebServer)).
 
 * [MobileVLCKit](https://code.videolan.org/videolan/VLCKit) - libvlc bindings for OS X, iOS and tvOS in Objective-C.
 

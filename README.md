@@ -14,8 +14,9 @@ This fork brings the project up to date for **Xcode 26**, **tvOS 26** and **iOS 
 data layer around pluggable content providers, adds a native SwiftUI app for iPhone / iPad /
 Mac (Designed for iPad), and — new in **5.0.0** — ships a zero-dependency, pure-Swift
 **MKV → fMP4/HLS remux engine** that unlocks true **Dolby Atmos** (and HDR) through Apple's
-native `AVPlayer`. **5.1.0** redesigns the Apple TV pages in Liquid Glass and makes the remux
-engine play far more files natively.
+native `AVPlayer`. **5.1.0** redesigns the Apple TV pages in Liquid Glass, makes the remux
+engine play far more files natively, adds The Pirate Bay and Knaben sources with a Top 100, and
+plays films larger than the free space.
 
 ## New in 5.1.0
 
@@ -55,6 +56,22 @@ The same notes are shown once in the app after the update (`WhatsNewRelease.curr
   time; played segments are kept behind the playhead as far as the disk allows.
 - **A clearer quality picker** on every platform: quality, seeds and size per source, the
   recommended one starred.
+
+**Small disks (Apple TV, Mac)**
+- **Films larger than the free space now play**: when a film doesn't fit (a 13 GB 4K film on an
+  Apple TV with 3 GB free, say), it streams in bounded storage: only a window around the
+  playhead stays on disk, and what has been watched is released as playback moves on, so the
+  device never fills up. The loading screen says about how far back a rewind can reach; a
+  rewind or a reverse scan past what is still stored stops at the earliest point still on disk,
+  with a message, and jumps ahead work as before. Only when even that can't fit does the app say
+  how much space to free (on Apple TV, with an offer to try a lower quality). Films that fit
+  play exactly as before. The iPhone / iPad app has the same code but hasn't run it yet.
+
+**Torrent engine (every platform)**
+- **One torrent engine everywhere**: Apple TV and iPhone / iPad now use the PopcornTorrent Swift
+  package the Mac already used (libtorrent 1.2.19 built from source; it streams the release's
+  main video file, or the file a Torrentio link names) instead of the CocoaPods PopcornTorrent
+  1.3.15 binary (libtorrent 1.2.1).
 
 **Catalog & sources (every platform)**
 - **Top 100**: a new sort for Movies and Shows with The Pirate Bay's most seeded titles of the
@@ -149,6 +166,8 @@ serves it to `AVPlayer` as a complete VOD HLS presentation over a localhost serv
 - New SwiftUI app for iPhone / iPad / Mac (Designed for iPad) sharing the `PopcornKit` core
 - Native macOS app (macOS 14+) with the same remux engine, so Atmos is rendered spatially on
   the Mac instead of being downmixed
+- One torrent engine on every platform: the PopcornTorrent Swift package (libtorrent 1.2.19) on
+  Apple TV, iPhone / iPad and Mac
 
 **Content & sources**
 - Pluggable `MediaProvider` layer (no more hardcoded, dead `api-fetch` host)
@@ -199,7 +218,9 @@ serves it to `AVPlayer` as a complete VOD HLS presentation over a localhost serv
 
 ## Build
 
-Requires Xcode 26 and [CocoaPods](https://cocoapods.org). See [NOTICE.md](NOTICE.md) for the pods used.
+Requires Xcode 26 and [CocoaPods](https://cocoapods.org); PopcornTorrent (the torrent engine of
+all three apps) and GCDWebServer are Swift packages that Xcode resolves. See
+[NOTICE.md](NOTICE.md) for the dependencies.
 
 ```bash
 git clone https://github.com/Radiomyme/PopcornTimeTV.git
@@ -211,8 +232,7 @@ open PopcornTime.xcworkspace
 Then pick a scheme:
 - **PopcornTimetvOS** → run on an Apple TV simulator or device
 - **PopcornTimeiOS** → run on iPhone / iPad, or "My Mac (Designed for iPad)"
-- **PopcornTimeMac** → the native macOS app (torrent engine from the PopcornTorrent Swift
-  package, resolved by Xcode)
+- **PopcornTimeMac** → the native macOS app
 
 > Tip: keep the checkout **outside** an iCloud-synced folder (e.g. `~/Developer`). iCloud
 > creates `<file> 2.ext` conflict copies inside `Pods/` and can rewrite tracked project files,

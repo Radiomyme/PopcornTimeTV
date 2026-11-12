@@ -100,12 +100,14 @@ public final class TorrentioClient {
 
     /// Drop multi-episode torrents (season packs, complete series, episode
     /// ranges) from EPISODE results on iOS / tvOS. Every app streams the
-    /// magnet's `so=` file (SPM PopcornTorrent), but once playback moves past
-    /// the first pieces the streamer wants every file of the torrent again,
-    /// so the whole pack is downloaded — fine on a Mac, not on an Apple TV or
-    /// a phone. (The CocoaPods PopcornTorrent these apps used before could
-    /// only play a pack's largest file.) Single-episode releases and movies
-    /// are never dropped.
+    /// magnet's `so=` file with the SPM PopcornTorrent, which since bounded
+    /// storage wants only that file's pieces (the other files stay at
+    /// priority 0; its BOUNDED_STORAGE.md), so a pack is no longer downloaded
+    /// whole. The filter predates that: it was set when the streamer wanted
+    /// every file again once playback moved past the first pieces, and stays
+    /// until packs have been tried on an Apple TV. (The CocoaPods
+    /// PopcornTorrent these apps used before could only play a pack's
+    /// largest file.) Single-episode releases and movies are never dropped.
     #if os(macOS)
     public static var dropsEpisodePacks = false
     #else
