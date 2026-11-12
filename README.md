@@ -238,6 +238,44 @@ Then pick a scheme:
 > creates `<file> 2.ext` conflict copies inside `Pods/` and can rewrite tracked project files,
 > which breaks clean builds.
 
+## Tests
+
+**⌘U**: pick the **PopcornTimeTests** scheme (or PopcornTimeMac), destination *My Mac*. The
+macOS unit-test target runs in about 8 seconds, offline, in English whatever the Mac's
+language: 30 tests, 3,228 checks of the extra sources (apibay, Knaben, Cinemeta, TVMaze, the
+Top 100), the season-pack file choice, the bandwidth estimate and the lighter-release offer,
+the loading phases, bounded storage, the remux eviction and `FarTargetWatch` rules, the
+GCDWebServer log filter. The
+recorded API answers are in `PopcornTimeTests/Fixtures` (slimmed to the fields the parsers
+read); the tests never call an API. The playback files under test are compiled into the test
+bundle: a new file they come to depend on must be added to the PopcornTimeTests target too.
+
+The torrent engine has its own tests: open PopcornTorrent's package and ⌘U. They run offline
+too (a generated season pack seeded on 127.0.0.1); the old tests that streamed public
+torrents are skipped unless `PT_INTERNET_TESTS=1` is set.
+
+From the terminal, one command runs everything:
+
+```bash
+tools/run-tests.sh          # quick: the app's and PopcornTorrent's unit tests, in parallel (~10 s, < 1 min after a change)
+tools/run-tests.sh full     # quick + the long benches, the independent ones in parallel
+tools/run-tests.sh clean    # forget the cached builds
+```
+
+| Suite | Mode | Time |
+|---|---|---|
+| PopcornTimeTests (macOS) | quick | ~8 s (+ ~20 s when it must be rebuilt) |
+| PopcornTorrentLogicTests, PopcornTorrent-Tests (offline, sandboxed) | quick | ~8 s |
+| PopcornTorrent SessionHarness: 6 modes and the network settings of the 3 profiles, in parallel (sandboxed) | full | ~3 min |
+| P10 / B6: a real AVPlayer on a 20 s clip (needs `format-coverage-wip`) | full | ~3 min |
+| Remux e2e engine, then the F3 bench (needs `PT_FORMAT_BENCH`, see `format-coverage-wip/REPRISE.md`) | full | ~17 min + ~90 min |
+| Bounded-storage disk-image runs (`PT_BOUNDED_RUNS=1`) | full | ~5 min |
+
+Builds, stamps and logs go to `~/Library/Caches/PopcornTimeTV-tests` (`PT_TEST_CACHE`): a test
+bundle is rebuilt only when its sources changed, a bench binary only when its sources did. The
+torrent tests and harnesses run under `sandbox-exec` with `tools/localhost-only.sb`: nothing
+can reach a tracker, the DHT or a peer outside 127.0.0.1.
+
 ## License
 
 If you distribute a copy or make a fork of the project, you have to credit this project as source.

@@ -1,0 +1,14 @@
+; sandbox-exec profile of the offline tests (tools/run-tests.sh; a copy of PopcornTorrent's
+; Tools/BoundedStorageHarness/localhost-only.sb): everything is allowed except network traffic
+; that is not on 127.0.0.1 / ::1 (no tracker, DHT or real peer can be reached).
+;   sandbox-exec -f localhost-only.sb <harness> ...
+; (swift build inside it needs --disable-sandbox: sandboxes do not nest.)
+(version 1)
+(allow default)
+(deny network-outbound)
+(allow network-outbound (remote ip "localhost:*"))
+(allow network-outbound (remote unix-socket))
+(deny network-inbound)
+(allow network-inbound (local ip "localhost:*"))
+(deny mach-lookup (global-name "com.apple.mDNSResponder"))
+(deny mach-lookup (global-name "com.apple.dnssd.service"))
