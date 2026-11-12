@@ -37,14 +37,22 @@ public final class TorrentioClient {
     /// Public trackers appended to reconstructed magnet links. Torrentio
     /// returns bare info-hashes; without trackers libtorrent would rely on
     /// DHT alone which is slow to bootstrap on Apple TV. Also used for the
-    /// magnets of the extra sources (`ExtraTorrentSources`).
+    /// magnets of the extra sources (`ExtraTorrentSources`) and of YTS.
+    /// PopcornTorrent announces to every one of them at once and adds the
+    /// same well-known list to every public torrent it plays (magnets from
+    /// the other providers included), so this list only needs to be good,
+    /// not long.
     static let trackers: [String] = [
         "udp://tracker.opentrackr.org:1337/announce",
+        "udp://open.demonii.com:1337/announce",
         "udp://open.stealth.si:80/announce",
         "udp://tracker.torrent.eu.org:451/announce",
         "udp://exodus.desync.com:6969/announce",
-        "udp://open.demonii.com:1337/announce",
+        "udp://explodie.org:6969/announce",
         "udp://tracker.dler.org:6969/announce",
+        "udp://tracker.qu.ax:6969/announce",
+        "udp://opentracker.io:6969/announce",
+        "udp://tracker.theoks.net:6969/announce",
     ]
 
     private let session: Session = {

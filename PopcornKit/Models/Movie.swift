@@ -273,18 +273,10 @@ public struct Movie: Media, Equatable {
     }
 
     /// YTS only exposes torrent hashes; build a standard magnet link with the
-    /// public trackers YTS recommends.
+    /// app's public trackers (the list YTS once recommended is mostly dead:
+    /// coppersurfer, leechers-paradise, gresille, glotorrents, openbittorrent).
     private static func ytsMagnet(hash: String, title: String) -> String {
-        let trackers = [
-            "udp://open.demonii.com:1337/announce",
-            "udp://tracker.openbittorrent.com:80",
-            "udp://tracker.coppersurfer.tk:6969",
-            "udp://glotorrents.pw:6969/announce",
-            "udp://tracker.opentrackr.org:1337/announce",
-            "udp://torrent.gresille.org:80/announce",
-            "udp://p4p.arenabg.com:1337",
-            "udp://tracker.leechers-paradise.org:6969",
-        ]
+        let trackers = TorrentioClient.trackers
         let encodedTitle = title.addingPercentEncoding(withAllowedCharacters: .urlHostAllowed) ?? title
         let trackersQS = trackers.map { "tr=" + ($0.addingPercentEncoding(withAllowedCharacters: .urlHostAllowed) ?? $0) }.joined(separator: "&")
         return "magnet:?xt=urn:btih:\(hash)&dn=\(encodedTitle)&\(trackersQS)"
