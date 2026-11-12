@@ -21,21 +21,27 @@ private func streams(_ name: String) -> [[String: Any]] {
     let data = try! Data(contentsOf: fixtures.appendingPathComponent(name))
     return (try! JSONSerialization.jsonObject(with: data) as! [String: Any])["streams"] as! [[String: Any]]
 }
-/// A defaults suite for one test, empty: a fixed name (not one per run: each left a plist in
-/// ~/Library/Preferences, removePersistentDomain keeps the file).
-private func throwawayDefaults(_ name: String) -> UserDefaults {
-    let suite = UserDefaults(suiteName: name)!
-    suite.removePersistentDomain(forName: name)
+/// A defaults domain for one test, as a file in a temporary folder (an absolute path is a
+/// file domain): a named suite left a plist in ~/Library/Preferences at every run (one name
+/// per run: 26 of them; removePersistentDomain keeps the file, cfprefsd writes it again).
+private func testDomain(_ name: String) -> String {
+    let folder = (NSTemporaryDirectory() as NSString).appendingPathComponent("PopcornTimeTests-defaults")
+    try? FileManager.default.createDirectory(atPath: folder, withIntermediateDirectories: true)
+    return (folder as NSString).appendingPathComponent(name)
+}
+
+/// An empty defaults suite for `testDomain(name)`.
+private func throwawayDefaults(_ domain: String) -> UserDefaults {
+    let suite = UserDefaults(suiteName: domain)!
+    suite.removePersistentDomain(forName: domain)
     return suite
 }
 
 /// Empties the suite and deletes its file.
-private func discardDefaults(_ suite: UserDefaults, _ name: String) {
-    suite.removePersistentDomain(forName: name)
+private func discardDefaults(_ suite: UserDefaults, _ domain: String) {
+    suite.removePersistentDomain(forName: domain)
     suite.synchronize()
-    let file = FileManager.default.homeDirectoryForCurrentUser
-        .appendingPathComponent("Library/Preferences/\(name).plist")
-    try? FileManager.default.removeItem(at: file)
+    try? FileManager.default.removeItem(atPath: domain + ".plist")
 }
 
 private func mbps(_ bytesPerSecond: Double?) -> Double { return bytesPerSecond.map(StreamBandwidth.megabitsPerSecond) ?? -1 }
@@ -342,7 +348,7 @@ final class BandwidthTests: CheckedTestCase {
         check(ConnectionSpeed.History().estimate(at: base, tuning: tuning) == nil, "empty: unknown")
 
         // The class, on a throwaway defaults suite.
-        let suiteName = "com.popcorntime.tests.bandwidth"
+        let suiteName = testDomain("com.popcorntime.tests.bandwidth")
         let suite = throwawayDefaults(suiteName)
         var clockNow: TimeInterval = 1_000
         let speed = ConnectionSpeed(defaults: suite, clock: { clockNow }, now: { base })
@@ -376,7 +382,7 @@ final class BandwidthTests: CheckedTestCase {
         check(ConnectionSpeed.History(propertyList: suite.array(forKey: ConnectionSpeed.historyDefaultsKey)).entries.count == 3,
               "well connected (25 peers): recorded")
         // Several recent thin swarms no longer drag the estimate down (review: 40/48 Mb/s then four 2–3 Mb/s swarms gave 3.2 Mb/s).
-        let mixedName = "com.popcorntime.tests.bandwidth-mixed"
+        let mixedName = testDomain("com.popcorntime.tests.bandwidth-mixed")
         let mixedSuite = throwawayDefaults(mixedName)
         var mixedNow: TimeInterval = 0
         let mixed = ConnectionSpeed(defaults: mixedSuite, clock: { mixedNow }, now: { base })
@@ -387,7 +393,7 @@ final class BandwidthTests: CheckedTestCase {
         check(near(mixed.estimate, 6.0e6, 0.005), "thin swarms ignored: estimate 48 Mb/s, got \(mbps(mixed.estimate))")
         discardDefaults(mixedSuite, mixedName)
         // DEBUG verification runs (loopback swarm): measured in memory, nothing written.
-        let quietName = "com.popcorntime.tests.bandwidth-quiet"
+        let quietName = testDomain("com.popcorntime.tests.bandwidth-quiet")
         let quietSuite = throwawayDefaults(quietName)
         var quietNow: TimeInterval = 0
         let quiet = ConnectionSpeed(defaults: quietSuite, persists: false, clock: { quietNow }, now: { base })
