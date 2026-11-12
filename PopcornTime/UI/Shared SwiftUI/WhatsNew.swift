@@ -58,8 +58,52 @@ struct WhatsNewRelease {
         items.filter { $0.platforms.contains(platform) }
     }
 
-    /// What is new since 5.0.0 (keep the README's release notes in step).
-    static let current = WhatsNewRelease(version: "5.1.0", items: [
+    /// The notes shown at launch and from Settings: the latest release's
+    /// (keep the README's "New in" section in step).
+    static let current = v5_2_0
+
+    /// What is new since 5.1.0.
+    static let v5_2_0 = WhatsNewRelease(version: "5.2.0", items: [
+        WhatsNewItem(id: "bitrate", symbol: "speedometer",
+                     titleFR: "Une qualité adaptée à votre connexion",
+                     bodyFR: "La version recommandée tient compte du débit de chaque fichier et de la vitesse réelle de vos téléchargements ; le choix de qualité affiche ce débit et signale les versions qui risquent de saccader.",
+                     titleEN: "Quality that suits your connection",
+                     bodyEN: "The recommended release weighs each file's bitrate against the speed your downloads actually reach; the quality picker shows that bitrate and flags releases that may stutter.",
+                     platforms: [.tvOS, .iOS, .macOS]),
+        WhatsNewItem(id: "loading", symbol: "hourglass",
+                     titleFR: "Un chargement qui dit ce qu'il fait",
+                     bodyFR: "L'écran de chargement indique s'il cherche des pairs, récupère les informations du torrent ou met la vidéo en mémoire tampon, avec le temps restant ; une source qui ne répond pas est signalée, et vous pouvez en choisir une autre.",
+                     titleEN: "Loading that says what it's doing",
+                     bodyEN: "The loading screen says whether it is looking for peers, fetching the torrent's details or buffering, with the time left; a source that doesn't respond is flagged, and you can pick another one.",
+                     platforms: [.tvOS, .iOS, .macOS]),
+        WhatsNewItem(id: "lighter", symbol: "arrow.triangle.2.circlepath",
+                     titleFR: "Une version plus légère si la lecture saccade",
+                     bodyFR: "Quand le téléchargement ne suit pas le débit de la vidéo, l'app propose une version plus légère et bien partagée, qui reprend au même endroit.",
+                     titleEN: "A lighter version when playback can't keep up",
+                     bodyEN: "When the download can't keep up with the video's bitrate, the app offers a lighter, well-seeded version that resumes at the same point.",
+                     platforms: [.tvOS, .iOS, .macOS]),
+        WhatsNewItem(id: "packs", symbol: "rectangle.stack",
+                     titleFR: "Le bon épisode dans les packs de saison",
+                     bodyFR: "Dans un torrent qui contient toute une saison, c'est bien l'épisode choisi qui est lu ; s'il n'y figure pas, l'app le dit au lieu de lancer un autre épisode.",
+                     titleEN: "The right episode from season packs",
+                     bodyEN: "When a torrent holds a whole season, the episode you picked is the one that plays; if it isn't there, the app says so instead of playing another episode.",
+                     platforms: [.tvOS, .iOS, .macOS]),
+        WhatsNewItem(id: "network", symbol: "arrow.down.circle",
+                     titleFR: "Des téléchargements plus rapides",
+                     bodyFR: "Le moteur torrent exploite tout le débit disponible : plus de pairs à la fois, tous les trackers interrogés, et un pair lent ne retient plus la lecture. La vidéo démarre plus tôt et le téléchargement va aussi vite que les pairs le permettent.",
+                     titleEN: "Faster downloads",
+                     bodyEN: "The torrent engine uses all the bandwidth available: more peers at once, every tracker asked, and a slow peer no longer holds playback back. Videos start sooner and downloads go as fast as the peers allow.",
+                     platforms: [.tvOS, .iOS, .macOS]),
+        WhatsNewItem(id: "tv-navigation", symbol: "appletvremote.gen4",
+                     titleFR: "Une navigation plus fluide sur Apple TV",
+                     bodyFR: "Le bouton Retour de la télécommande ramène toujours à l'écran précédent, même pendant un chargement, et le Top 100 comme les autres grilles réapparaissent sans à-coup, sur l'affiche que vous aviez quittée. Lecture/Pause lance un titre depuis son affiche, et un appui long ouvre ses raccourcis.",
+                     titleEN: "Smoother navigation on Apple TV",
+                     bodyEN: "The remote's Back button always takes you to the previous screen, even while something is loading, and the Top 100 and the other grids come back without a jolt, on the poster you left. Play/Pause starts a title from its poster, and a long press opens its shortcuts.",
+                     platforms: [.tvOS]),
+    ])
+
+    /// What was new in 5.1.0 (since 5.0.0), kept for the record.
+    static let v5_1_0 = WhatsNewRelease(version: "5.1.0", items: [
         WhatsNewItem(id: "liquid-glass", symbol: "sparkles.tv",
                      titleFR: "Nouveau design Liquid Glass sur Apple TV",
                      bodyFR: "Les fiches des films et des séries, épisodes compris, ont été redessinées en verre translucide.",
