@@ -314,7 +314,7 @@ Then pick a scheme:
 
 **⌘U**: pick the **PopcornTimeTests** scheme (or PopcornTimeMac), destination *My Mac*. The
 macOS unit-test target runs in about 8 seconds, offline, in English whatever the Mac's
-language: 30 tests, 3,228 checks of the extra sources (apibay, Knaben, Cinemeta, TVMaze, the
+language: 32 tests, 3,257 checks of the extra sources (apibay, Knaben, Cinemeta, TVMaze, the
 Top 100), the season-pack file choice, the bandwidth estimate and the lighter-release offer,
 the loading phases, bounded storage, the remux eviction and `FarTargetWatch` rules, the
 GCDWebServer log filter. The
