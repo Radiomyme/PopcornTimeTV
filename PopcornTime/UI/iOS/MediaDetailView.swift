@@ -40,6 +40,7 @@ final class MediaDetailViewModel: ObservableObject {
         let group = DispatchGroup()
         var t4p: [Torrent] = []
         var aggregated: [Torrent] = []
+        var extra: [Torrent] = []
 
         group.enter()
         Time4PopcornClient.shared.episodeTorrents(imdbId: showId, season: episode.season, episode: episode.episode) { torrents in
@@ -51,12 +52,19 @@ final class MediaDetailViewModel: ObservableObject {
             aggregated = torrents
             group.leave()
         }
+        group.enter()
+        ExtraTorrentSources.shared.episodeTorrents(imdbId: showId, showTitle: episode.show?.title,
+                                                   season: episode.season, episode: episode.episode) { torrents in
+            extra = torrents
+            group.leave()
+        }
         group.notify(queue: .main) { [weak self] in
             guard let self = self else { return }
             self.loadingSourcesFor = nil
-            // T4P primary (base of the merge), EZTV + Torrentio as fallback,
-            // then sorted best-quality-first for the picker.
-            let merged = TorrentioClient.merge(t4p, with: base + aggregated).sorted(by: >)
+            // T4P primary (base of the merge), EZTV + Torrentio + TPB / Knaben
+            // as fallback, then sorted best-quality-first for the picker.
+            let legacy = base + aggregated
+            let merged = TorrentioClient.merge(t4p, with: legacy + ExtraTorrentSources.novel(extra, beside: t4p + legacy)).sorted(by: >)
             let title = "S\(episode.season)E\(episode.episode)" + (episode.title.isEmpty ? "" : " · \(episode.title)")
             if merged.isEmpty {
                 self.noSourcesMessage = "Aucune source trouvée pour \(title)."
@@ -167,10 +175,17 @@ final class MediaDetailViewModel: ObservableObject {
         let group = DispatchGroup()
         var aggregated: [Torrent] = []
         var t4p: [Torrent] = []
+        var extra: [Torrent] = []
 
         group.enter()
         TorrentioClient.shared.streams(imdbId: show.id, season: episode.season, episode: episode.episode) { torrents in
             aggregated = torrents
+            group.leave()
+        }
+        group.enter()
+        ExtraTorrentSources.shared.episodeTorrents(imdbId: show.id, showTitle: show.title,
+                                                   season: episode.season, episode: episode.episode) { torrents in
+            extra = torrents
             group.leave()
         }
         group.enter()
@@ -179,8 +194,9 @@ final class MediaDetailViewModel: ObservableObject {
             group.leave()
         }
         group.notify(queue: .main) { [weak self] in
-            // T4P primary, EZTV + Torrentio as fallback.
-            self?.augmentedEpisodeTorrents = TorrentioClient.merge(t4p, with: base + aggregated)
+            // T4P primary, EZTV + Torrentio + TPB / Knaben as fallback.
+            let legacy = base + aggregated
+            self?.augmentedEpisodeTorrents = TorrentioClient.merge(t4p, with: legacy + ExtraTorrentSources.novel(extra, beside: t4p + legacy))
         }
     }
 

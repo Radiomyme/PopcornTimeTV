@@ -30,13 +30,21 @@ import PopcornKit
 ///   into `<directory>/bounded-loading.png` once the loading screen shows
 ///   the bounded-storage line, and `bounded-toast.png` once a rewind is
 ///   limited (MacPlayerView, `snapshotPlayerWindow`).
+/// - `-PTDebugFilter <raw value>` (e.g. top100): the Movies and Shows grids'
+///   filter at launch;
+/// - `-PTDebugQualitySheet YES`: a movie page opens its quality sheet once
+///   loaded (never plays); the snapshot then also writes the sheet into
+///   `<name>.sheet.png`;
+/// - `-PTDebugTop100Offline YES`: The Pirate Bay off and the cached Top 100
+///   lists deleted (the grids' error state).
 /// Any of them also skips the release notes sheet. Nothing happens without
 /// these arguments.
 enum MacDebugHooks {
     private static var defaults: UserDefaults { .standard }
     private static let keys = ["PTDebugSection", "PTDebugOpenMovie", "PTDebugOpenShow", "PTDebugScroll",
                                "PTDebugExpand", "PTDebugGlassFallback", "PTDebugAmbient", "PTDebugWindowSize",
-                               "PTDebugSnapshot", "PTDebugQuit"]
+                               "PTDebugSnapshot", "PTDebugQuit", "PTDebugFilter", "PTDebugQualitySheet",
+                               "PTDebugTop100Offline"]
 
     static var isActive: Bool {
         keys.contains { defaults.object(forKey: $0) != nil }
@@ -50,6 +58,30 @@ enum MacDebugHooks {
         case "watchlist"?: return .watchlist
         default: return nil
         }
+    }
+
+    /// `-PTDebugTop100Offline`: The Pirate Bay off, no cached Top 100. Once,
+    /// before the first grid loads.
+    static func applySourceSwitches() {
+        guard defaults.bool(forKey: "PTDebugTop100Offline"), PirateBayClient.isEnabled else { return }
+        PirateBayClient.isEnabled = false
+        let caches = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first
+        for kind in ["movie", "series"] {
+            if let url = caches?.appendingPathComponent("popcornkit-top100-\(kind).json") {
+                try? FileManager.default.removeItem(at: url)
+            }
+        }
+        print("[MacDebug] The Pirate Bay off, Top 100 cache deleted")
+    }
+
+    /// `-PTDebugFilter`: the Movies grid's filter at launch.
+    static var movieFilter: MovieManager.Filters? {
+        defaults.string(forKey: "PTDebugFilter").flatMap(MovieManager.Filters.init(rawValue:))
+    }
+
+    /// `-PTDebugFilter`: the Shows grid's filter at launch.
+    static var showFilter: ShowManager.Filters? {
+        defaults.string(forKey: "PTDebugFilter").flatMap(ShowManager.Filters.init(rawValue:))
     }
 
     /// A placeholder with the IMDb id: the page loads the real title.
@@ -260,6 +292,12 @@ enum MacDebugHooks {
         }
         write(image, to: url)
         print("[MacDebug] snapshot (\(method), \(image.width)×\(image.height)) → \(url.path)")
+        // A sheet is a window of its own: written beside the page.
+        if let sheet = window.attachedSheet, let image = windowServerImage(of: sheet) ?? layerImage(of: sheet) {
+            let sheetURL = url.deletingPathExtension().appendingPathExtension("sheet").appendingPathExtension("png")
+            write(image, to: sheetURL)
+            print("[MacDebug] sheet snapshot (\(image.width)×\(image.height)) → \(sheetURL.path)")
+        }
     }
 
     private static func write(_ image: CGImage, to url: URL) {

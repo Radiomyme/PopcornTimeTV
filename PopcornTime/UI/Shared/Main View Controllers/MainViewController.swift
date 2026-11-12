@@ -17,6 +17,10 @@ class MainViewController: UIViewController, CollectionViewControllerDelegate {
     
     
     var collectionViewController: CollectionViewController!
+
+    /// Bumped by `didRefresh`: a page load started for an older list (another
+    /// filter or genre, or the same one picked again) is ignored when it lands.
+    var loadGeneration = 0
     
     var collectionView: UICollectionView? {
         get {
@@ -194,7 +198,13 @@ class MainViewController: UIViewController, CollectionViewControllerDelegate {
     }
     
     func didRefresh(collectionView: UICollectionView) {
+        loadGeneration += 1
         collectionViewController.dataSources = [[]]
+        // A new list (another filter or genre): not the last one's error, and
+        // a load still running for the last one must not block it (Movies and
+        // Shows drop the results of a filter or genre no longer selected).
+        collectionViewController.error = nil
+        collectionViewController.isLoading = false
         collectionView.reloadData()
         load(page: 1)
     }

@@ -565,5 +565,14 @@ extension GlassDetailHostingController {
             break
         }
     }
+
+    /// DEBUG launch hook (`-PTDebugQualityPicker`, SceneDelegate): the
+    /// quality chooser Play shows, but a pick only logs: nothing plays.
+    func debugChooseQuality() {
+        guard let media = playTarget else { return }
+        AppDelegate.shared.chooseQuality(view, media: media) { torrent in
+            print("[Debug] quality picked, not played: \(torrent.quality ?? "?")")
+        }
+    }
 }
 #endif

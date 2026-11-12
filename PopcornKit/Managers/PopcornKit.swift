@@ -104,6 +104,18 @@ public func getMovieInfo(_ imdbId: String, completion: @escaping (Movie?, NSErro
 }
 
 /**
+ Get more movie information, without searching The Pirate Bay and Knaben for
+ more torrents when `extraSources` is false: for metadata only (posters of the
+ Continue Watching row), so a batch of movies doesn't fire a burst of searches.
+ */
+public func getMovieInfo(_ imdbId: String, extraSources: Bool, completion: @escaping (Movie?, NSError?) -> Void) {
+    guard !extraSources, let provider = MediaProviders.shared as? YTSEZTVProvider else {
+        return MovieManager.shared.getInfo(imdbId, completion: completion)
+    }
+    provider.getMovieInfo(imdbId: imdbId, extraSources: false, completion: completion)
+}
+
+/**
  Download torrent file from link.
  
  - Parameter path:          The path to the torrent file you would like to download.

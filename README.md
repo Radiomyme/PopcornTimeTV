@@ -56,6 +56,26 @@ The same notes are shown once in the app after the update (`WhatsNewRelease.curr
 - **A clearer quality picker** on every platform: quality, seeds and size per source, the
   recommended one starred.
 
+**Catalog & sources (every platform)**
+- **Top 100**: a new sort for Movies and Shows with The Pirate Bay's most seeded titles of the
+  moment (its precompiled top 100s: Movies + HD + UHD, TV + HD TV + UHD TV), each release mapped
+  to its IMDb title through Cinemeta (TPB's id only when Cinemeta confirms title and year, else
+  an exact title + year search; box sets and unreadable names left out), ranked by the seeders
+  of all its torrents. Cached 15 minutes on disk; an older list is shown at once if The Pirate
+  Bay is slow or blocked.
+- **More torrents per title** from **The Pirate Bay** (apibay) and the **Knaben** meta-index
+  (1337x, TorrentGalaxy, Nyaa, YTS, RARBG archives…: most of what link launchers such as xtorx
+  list), labelled with their source in the picker. Precision first: a release is kept only when
+  its name is the film's title (or a known alias) followed by its year, alone (no pack, box set,
+  bonus disc, 3D or RiffTrax version, not filed under another film of that name), or exactly the
+  episode asked (show name, alternate titles, year / country when another show has the name).
+  Both sources are optional and fail fast: a blocked host costs a few seconds once, then is
+  skipped.
+- **Search finds more titles**: Cinemeta's catalog (every IMDb title) is added after the
+  existing results, exact title matches first; a title only Cinemeta knows still opens, with
+  Torrentio, The Pirate Bay and Knaben torrents (a series TVMaze doesn't know uses Cinemeta's
+  episode list).
+
 **Shows (every platform)**
 - **Mislabelled torrents left out**: EZTV files releases of other shows under a show's IMDb id
   (every "Breaking Bad" entry is in fact "Breaking Brad", which added seasons 6–9 and wrong
@@ -136,10 +156,13 @@ serves it to `AVPlayer` as a complete VOD HLS presentation over a localhost serv
   merged per title for far more releases)
 - TV shows via **EZTV** (mirror chain) + **TVMaze** metadata, with the full episode guide
   merged with per-episode torrents
+- **The Pirate Bay** + **Knaben** as extra torrent sources, The Pirate Bay's **Top 100**, and
+  **Cinemeta** in search (see "New in 5.1.0")
 - Image proxy (weserv.nl) so posters load even when the source CDN is ISP-blocked
 
 **Series**
-- Shows tab sorts by Trending / Popular / Top Rated / New / **A–Z**, plus genre filtering
+- Shows tab sorts by Trending / **Top 100** / Popular / Top Rated / New / **A–Z**, plus genre
+  filtering
 - Show detail lists episodes ordered by **season then episode**, duplicate releases collapsed
   into quality choices
 

@@ -43,4 +43,13 @@ class MediaViewController: MainViewController {
         
         present(controller, animated: true)
     }
+
+    /// A list that came back empty: the Top 100 filtered by a genre none of
+    /// its titles has, say.
+    override func collectionView(isEmptyForUnknownReason collectionView: UICollectionView) {
+        if let background: ErrorBackgroundView = .fromNib() {
+            background.setUpView(title: "No results".localized, description: nil)
+            collectionView.backgroundView = background
+        }
+    }
 }

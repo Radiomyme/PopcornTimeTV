@@ -74,10 +74,18 @@ extension AppDelegate {
             let group = DispatchGroup()
             var aggregated: [Torrent] = []
             var t4p: [Torrent] = []
+            var extra: [Torrent] = []
 
             group.enter()
             TorrentioClient.shared.streams(imdbId: showId, season: episode.season, episode: episode.episode) { torrents in
                 aggregated = torrents
+                group.leave()
+            }
+            // The Pirate Bay + Knaben, exact episode only (`ExtraTorrentSources`).
+            group.enter()
+            ExtraTorrentSources.shared.episodeTorrents(imdbId: showId, showTitle: episode.show?.title,
+                                                       season: episode.season, episode: episode.episode) { torrents in
+                extra = torrents
                 group.leave()
             }
             group.enter()
@@ -88,9 +96,11 @@ extension AppDelegate {
 
             group.notify(queue: .main) { [weak self] in
                 var augmented = episode
-                // T4P primary, EZTV + Torrentio as fallback.
-                augmented.torrents = TorrentioClient.merge(t4p, with: episode.torrents + aggregated)
-                print("[chooseQuality] episode S\(episode.season)E\(episode.episode): \(t4p.count) t4p + \(episode.torrents.count) EZTV + \(aggregated.count) aggregated -> \(augmented.torrents.count)")
+                // T4P primary, EZTV + Torrentio + TPB / Knaben as fallback (a
+                // TPB / Knaben copy of a listed torrent keeps the listed row).
+                let legacy = episode.torrents + aggregated
+                augmented.torrents = TorrentioClient.merge(t4p, with: legacy + ExtraTorrentSources.novel(extra, beside: t4p + legacy))
+                print("[chooseQuality] episode S\(episode.season)E\(episode.episode): \(t4p.count) t4p + \(episode.torrents.count) EZTV + \(aggregated.count) aggregated + \(extra.count) TPB/Knaben -> \(augmented.torrents.count)")
                 self?.presentQualityChoice(sender, media: augmented, completion: completion)
             }
             return
@@ -163,13 +173,17 @@ extension AppDelegate {
 
         // Enrich each row with seeds + size so the best quality/seeds ratio is
         // visible at a glance (like the iOS/macOS pickers), and star the
-        // recommended `balancedPick`. Best resolution first.
+        // recommended `balancedPick`. Best resolution first. The source (TPB,
+        // Knaben · 1337x, a Torrentio indexer…) comes last, and the separators
+        // are narrow: tvOS shrinks a row too long for the sheet, then cuts its
+        // middle (the seeds); the focused row scrolls to show it all.
         let recommendedURL = Torrent.balancedPick(from: sorted)?.url
         var recommendedAction: UIAlertAction?
         for torrent in sorted.reversed() {
-            var label = torrent.quality ?? "—"
-            label += "   ·   \(torrent.seeds) seeds"
-            if let size = torrent.size, !size.isEmpty { label += "   ·   \(size)" }
+            var label = torrent.qualityLabel.isEmpty ? "—" : torrent.qualityLabel
+            label += "  ·  \(torrent.seeds) seeds"
+            if let size = torrent.size, !size.isEmpty { label += "  ·  \(size)" }
+            if let source = torrent.sourceLabel { label += "  ·  \(source)" }
             if torrent.url == recommendedURL { label = "⭐︎ " + label }
             let action = UIAlertAction(title: label, style: .default) { _ in completion(torrent) }
             alertController.addAction(action)

@@ -200,6 +200,14 @@ final class MacGlassDetailController {
             model.backdropURL = nil
             model.backdropFallbackURL = nil
         }
+        // `-PTDebugQualitySheet YES`: the quality sheet over the page (never
+        // plays: only a pick in the sheet would).
+        if UserDefaults.standard.bool(forKey: "PTDebugQualitySheet"), !movie.torrents.isEmpty {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in
+                self?.qualityChoices = MacEpisodeSources(title: movie.title, media: movie,
+                                                         torrents: movie.torrents.sorted(by: >))
+            }
+        }
         #endif
         self.model = model
         loadRelated()
@@ -449,17 +457,45 @@ final class MacGlassDetailController {
         if let cached = episodeTorrents[episode.id] { return completion(cached) }
         guard show.id.hasPrefix("tt") else { return completion(episode.torrents) }
         let base = episode.torrents
-        TorrentioClient.shared.streams(imdbId: show.id, season: episode.season, episode: episode.episode) { [weak self] aggregated in
-            Time4PopcornClient.shared.episodeTorrents(imdbId: show.id, season: episode.season, episode: episode.episode) { t4p in
-                var merged = t4p + base
-                for torrent in aggregated where !merged.contains(where: { $0.url == torrent.url }) {
-                    merged.append(torrent)
-                }
-                DispatchQueue.main.async {
-                    self?.episodeTorrents[episode.id] = merged
-                    completion(merged)
-                }
+        let group = DispatchGroup()
+        var aggregated: [Torrent] = []
+        var t4p: [Torrent] = []
+        var extra: [Torrent] = []
+        group.enter()
+        TorrentioClient.shared.streams(imdbId: show.id, season: episode.season, episode: episode.episode) { torrents in
+            aggregated = torrents
+            group.leave()
+        }
+        group.enter()
+        Time4PopcornClient.shared.episodeTorrents(imdbId: show.id, season: episode.season, episode: episode.episode) { torrents in
+            t4p = torrents
+            group.leave()
+        }
+        // The Pirate Bay + Knaben, exact episode only (`ExtraTorrentSources`).
+        group.enter()
+        ExtraTorrentSources.shared.episodeTorrents(imdbId: show.id, showTitle: show.title,
+                                                   season: episode.season, episode: episode.episode) { torrents in
+            extra = torrents
+            group.leave()
+        }
+        group.notify(queue: .main) { [weak self] in
+            var merged = t4p + base
+            for torrent in aggregated where !merged.contains(where: { $0.url == torrent.url }) {
+                merged.append(torrent)
             }
+            // TPB / Knaben (seeded, `ExtraTorrentSources.minSeeders`): only
+            // torrents no other source lists, one entry per info-hash (their
+            // magnets name the torrent and trackers their own way).
+            func infoHash(_ url: String) -> String {
+                guard let range = url.range(of: "btih:", options: .caseInsensitive) else { return url }
+                return url[range.upperBound...].prefix { $0 != "&" }.lowercased()
+            }
+            var seen = Set(merged.map { infoHash($0.url) })
+            for torrent in ExtraTorrentSources.novel(extra, beside: merged) where torrent.seeds > 0 && seen.insert(infoHash(torrent.url)).inserted {
+                merged.append(torrent)
+            }
+            self?.episodeTorrents[episode.id] = merged
+            completion(merged)
         }
     }
 

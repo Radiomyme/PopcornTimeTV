@@ -46,8 +46,12 @@ class MoviesViewController: MediaViewController {
         }
         collectionViewController.isLoading = true
         collectionViewController.hasNextPage = false
-        PopcornKit.loadMovies(page, filterBy: currentFilter, genre: currentGenre) { [unowned self] (movies, error) in
+        let filter = currentFilter, genre = currentGenre, generation = loadGeneration
+        PopcornKit.loadMovies(page, filterBy: filter, genre: genre) { [unowned self] (movies, error) in
             print("[Movies] callback movies=\(movies?.count ?? -1) error=\(error?.localizedDescription ?? "nil")")
+            // Another list was asked for meanwhile (a filter or genre, even the
+            // same one again): its own load (`didRefresh`) fills the grid.
+            guard generation == self.loadGeneration else { return }
             self.collectionViewController.isLoading = false
 
             guard let movies = movies else { self.collectionViewController.error = error; self.collectionView?.reloadData(); return }
