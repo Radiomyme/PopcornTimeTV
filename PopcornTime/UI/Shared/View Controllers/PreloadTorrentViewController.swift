@@ -31,6 +31,11 @@ class PreloadTorrentViewController: UIViewController {
     /// Menu (Back) closed this screen (`cancel`).
     private(set) var isCancelled = false
 
+    /// Presented without animation, the content fades in (tvOS: UIKit drops
+    /// the remote's presses while a presentation animates, so Back pressed
+    /// as the screen came in was lost).
+    var fadesInOnAppear = false
+
     /// The movie or episode being loaded, and the source (torrent URL) it
     /// plays: « Choose another source » goes back to the quality picker for
     /// it (`AppDelegate.chooseAnotherSource`). Set by
@@ -139,6 +144,14 @@ class PreloadTorrentViewController: UIViewController {
     override func viewDidLoad() {
         super.viewDidLoad()
         installETALabelIfNeeded()
+    }
+
+    override func viewWillAppear(_ animated: Bool) {
+        super.viewWillAppear(animated)
+        guard fadesInOnAppear else { return }
+        fadesInOnAppear = false
+        view.alpha = 0
+        UIView.animate(withDuration: 0.5, delay: 0, options: [.allowUserInteraction, .curveEaseIn]) { self.view.alpha = 1 }
     }
 
     override func viewDidAppear(_ animated: Bool) {

@@ -47,6 +47,14 @@ extension Media {
         // not answer) goes back to the quality picker for this movie or
         // episode, without this source (`AppDelegate.chooseAnotherSource`).
         // The first call only: a .torrent URL comes back here as a local file.
+        // Back closed the loading screen before this ran (the subtitles
+        // search, a .torrent file's download): nothing starts. It would stop
+        // the current stream first (`cancelCurrent`), which may already be
+        // the next title's.
+        guard !loadingViewController.isCancelled else {
+            print("[Play] \(title): Back before the stream started — not started")
+            return
+        }
         if loadingViewController.media == nil {
             loadingViewController.media = self
             loadingViewController.sourceURL = url
@@ -57,6 +65,7 @@ extension Media {
                 // with its file URL (no web server): keep the asynchronous
                 // hand-off the players were written for.
                 DispatchQueue.main.async {
+                    guard !loadingViewController.isCancelled else { return }
                     loadingViewController.streamer = download
                     playBlock(videoFileURL, videoFilePath, self, nextEpisode, progress, playViewController, download)
                     finishedLoadingBlock(loadingViewController, playViewController)
@@ -136,6 +145,8 @@ extension Media {
                     // macOS (VLC opens it directly).
                     let playableURL = PlaybackRouting.playableLocalURL(videoFileURL, fileName: videoFilePath.lastPathComponent)
                     DispatchQueue.main.async {
+                        // Ready as Back was pressed: no player (the stream is stopped by `cancel`).
+                        guard !loadingViewController.isCancelled else { return }
                         playBlock(playableURL, videoFilePath, self, nextEpisode, progress, playViewController, streamer)
                         finishedLoadingBlock(loadingViewController, playViewController)
                     }
@@ -147,6 +158,8 @@ extension Media {
                     let failure = StreamFailure(error, streamer: streamer)
                     let message = failure.message(underlying: error) ?? error.localizedDescription
                     DispatchQueue.main.async {
+                        // The user already left: no alert for a stream they stopped.
+                        guard !loadingViewController.isCancelled else { return }
                         if let streamFailureBlock = streamFailureBlock {
                             streamFailureBlock(failure, message)
                         } else {
@@ -158,6 +171,7 @@ extension Media {
             PopcornKit.downloadTorrentFile(url, completion: { (url, error) in
                 // Alamofire hands the response back on its own queue too.
                 DispatchQueue.main.async {
+                    guard !loadingViewController.isCancelled else { return }
                     guard let url = url, error == nil else { errorBlock(error!.localizedDescription); return }
                     self.play(fromFileOrMagnetLink: url, nextEpisodeInSeries: nextEpisode, loadingViewController: loadingViewController, playViewController: playViewController, progress: progress, loadingBlock: loadingBlock, playBlock: playBlock, errorBlock: errorBlock, streamFailureBlock: streamFailureBlock, finishedLoadingBlock: finishedLoadingBlock)
                 }

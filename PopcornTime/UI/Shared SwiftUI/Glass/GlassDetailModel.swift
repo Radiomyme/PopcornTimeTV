@@ -284,6 +284,8 @@ struct GlassDetailActions {
     /// Called after the view has set `model.selectedSeason`.
     var selectSeason: (_ season: Int) -> Void = { _ in }
     var openRelated: (_ itemID: String) -> Void = { _ in }
+    /// Play/Pause on a related title (tvOS): its page, then its playback.
+    var playRelated: (_ itemID: String) -> Void = { _ in }
     var openPerson: (_ personID: String) -> Void = { _ in }
 
     /// Every focus move (nil when focus leaves the page), e.g. to restore

@@ -100,10 +100,21 @@ extension AppDelegate {
             var cancelled = false
             let busy = SourcesBusyViewController()
             busy.onCancel = {
+                guard !cancelled else { return }
                 cancelled = true
                 AppDelegate.fetchingSourcesFor = nil
                 print("[chooseQuality] sources of \(episode.id): cancelled")
             }
+            // The screen the request came from (a show's page; under a player
+            // for Up Next). Back pressed before the card showed (its first
+            // 0.4 s) left it: the request is dropped then, instead of the card,
+            // then the chooser, coming over the grid for a page the user left.
+            let origin = activeViewController
+            let originLeft: () -> Bool = { [weak self, weak origin] in
+                guard let self = self, let origin = origin else { return true }
+                return origin !== self.activeViewController || origin.viewIfLoaded?.window == nil
+            }
+            busy.isStillWanted = { !originLeft() }
             busy.showSoon()
             let group = DispatchGroup()
             var aggregated: [Torrent] = []
@@ -138,6 +149,12 @@ extension AppDelegate {
             group.notify(queue: .main) { [weak self] in
                 DispatchQueue.main.asyncAfter(deadline: .now() + answerDelay) {
                     guard !cancelled else { return }
+                    if originLeft() {
+                        print("[chooseQuality] sources of \(episode.id): the page was left, no chooser")
+                        busy.onCancel?()
+                        busy.finish {}
+                        return
+                    }
                     AppDelegate.fetchingSourcesFor = nil
                     var augmented = episode
                     // The show's runtime on every candidate before the merge: with
@@ -346,7 +363,11 @@ extension AppDelegate {
         // The detail page's theme song must not play over the buffering
         // screen and the movie (the page also stops it when it disappears).
         ThemeSongManager.shared.stopTheme()
-        present(loadingViewController, animated: true)
+        // Presented at once, its content fading in (`fadesInOnAppear`): UIKit
+        // drops the remote's presses while a presentation animates (1 s from
+        // a page), so Back pressed as the screen came in was lost.
+        loadingViewController.fadesInOnAppear = true
+        present(loadingViewController, animated: false)
         
         // `failure`: what PopcornTorrent's error means (nil: another error,
         // judged by its text as before).
@@ -412,16 +433,25 @@ extension AppDelegate {
                 if isDiskFullError, let fallback = smaller {
                     // Second hit (or no auto-clean possible) — offer the
                     // user the next-lower quality.
-                    let title = "Espace insuffisant pour ce film en \(torrent.quality ?? "?")"
+                    let title = String(format: NSLocalizedString("DiskFull.Title", value: "Not enough space for this %@ release",
+                                                                 comment: "Alert title when a release does not fit; %@ = its quality (1080p, 2160p…)"),
+                                       torrent.quality ?? "?")
                     let body  = spaceToFree.map {
                         $0 + "\n\n" + NSLocalizedString("BoundedStorage.TryLowerQuality", value: "Try a lower quality?",
                                                         comment: "After the space to free, offers a smaller release")
-                    } ?? "L'Apple TV n'a pas assez de place dans le cache de l'app pour télécharger ce torrent. Essayer une qualité inférieure ?"
+                    } ?? NSLocalizedString("DiskFull.Message",
+                                           value: "The Apple TV does not have enough room in the app's cache to download this torrent. Try a lower quality?",
+                                           comment: "Alert message when a release does not fit the Apple TV's app cache")
                     let alert = UIAlertController(title: title, message: body, preferredStyle: .alert)
-                    alert.addAction(UIAlertAction(title: "Réessayer en \(fallback.quality ?? "qualité inférieure")", style: .default) { _ in
+                    let retryTitle = fallback.quality.map {
+                        String(format: NSLocalizedString("DiskFull.RetryIn", value: "Try again in %@",
+                                                         comment: "Button: play the smaller release; %@ = its quality (720p…)"), $0)
+                    } ?? NSLocalizedString("DiskFull.RetryLower", value: "Try a lower quality",
+                                           comment: "Button: play a smaller release (its quality unknown)")
+                    alert.addAction(UIAlertAction(title: retryTitle, style: .default) { _ in
                         self.play(media, torrent: fallback)
                     })
-                    alert.addAction(UIAlertAction(title: "Annuler", style: .cancel, handler: nil))
+                    alert.addAction(UIAlertAction(title: "Cancel".localized, style: .cancel, handler: nil))
                     alert.show(animated: true)
                 } else {
                     let alert = UIAlertController(title: "Error".localized, message: errorMessage, preferredStyle: .alert)
@@ -436,6 +466,11 @@ extension AppDelegate {
 
         let finishedLoading: (PreloadTorrentViewController, UIViewController) -> Void = { [weak self] (loadingVc, playerVc) in
             guard let self = self else { return }
+            // Back closed the loading screen: no player for a title the user left.
+            guard !loadingVc.isCancelled else {
+                print("[Play] finishedLoading after Back — no player")
+                return
+            }
             let flag = UIDevice.current.userInterfaceIdiom != .tv
             print("[Play] finishedLoading — presenting player VC")
             // If something is presented (loading VC), dismiss it then push
@@ -451,6 +486,11 @@ extension AppDelegate {
         }
         
         media.getSubtitles { [unowned self] subtitles in
+            // Back while the subtitles were searched: nothing starts.
+            guard !loadingViewController.isCancelled else {
+                print("[Play] Back before the stream started — \(media.title) not started")
+                return
+            }
             // The legacy guard was
             //   `presentedViewController === loadingViewController`
             // but with the modernized SubtitlesManager (stub returning
@@ -666,11 +706,10 @@ extension AppDelegate {
     }
     
     func animationController(forPresented presented: UIViewController, presenting: UIViewController, source: UIViewController) -> UIViewControllerAnimatedTransitioning? {
-        if presented is PreloadTorrentViewController && activeViewController is GlassDetailHostingController {
-            return PreloadTorrentViewControllerAnimatedTransitioning(isPresenting: true)
-        }
+        // The loading screen is presented without animation and fades its
+        // content in itself (`fadesInOnAppear`): no 1 s transition during
+        // which UIKit would drop Back.
         return nil
-        
     }
     
     func animationController(forDismissed dismissed: UIViewController) -> UIViewControllerAnimatedTransitioning? {
@@ -690,6 +729,9 @@ extension AppDelegate {
 final class SourcesBusyViewController: UIViewController {
     /// Menu pressed: the request is dropped (its answer ignored).
     var onCancel: (() -> Void)?
+    /// Whether the card should still come (false: the screen it was asked
+    /// from was left meanwhile; the request is then cancelled).
+    var isStillWanted: () -> Bool = { true }
 
     private enum State { case idle, presenting, shown, finished }
     private var state = State.idle
@@ -699,7 +741,6 @@ final class SourcesBusyViewController: UIViewController {
     init() {
         super.init(nibName: nil, bundle: nil)
         modalPresentationStyle = .overFullScreen
-        modalTransitionStyle = .crossDissolve
     }
 
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
@@ -739,6 +780,14 @@ final class SourcesBusyViewController: UIViewController {
         view.accessibilityViewIsModal = true
     }
 
+    override func viewWillAppear(_ animated: Bool) {
+        super.viewWillAppear(animated)
+        // Presented without animation (UIKit drops the remote's presses while
+        // a presentation animates: Menu then was lost): the card fades in here.
+        view.alpha = 0
+        UIView.animate(withDuration: 0.25, delay: 0, options: [.allowUserInteraction, .curveEaseOut]) { self.view.alpha = 1 }
+    }
+
     override func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)
         UIAccessibility.post(notification: .screenChanged, argument: SourcesBusyViewController.text)
@@ -754,6 +803,11 @@ final class SourcesBusyViewController: UIViewController {
     func showSoon() {
         DispatchQueue.main.asyncAfter(deadline: .now() + SourcesBusyViewController.delay) { [self] in
             guard state == .idle else { return }
+            guard isStillWanted() else {
+                state = .finished
+                onCancel?()
+                return
+            }
             // Not over a screen still leaving (a player closing for Up
             // Next): UIKit would drop the presentation.
             guard let presenter = SourcesBusyViewController.topMostViewController(),
@@ -762,9 +816,14 @@ final class SourcesBusyViewController: UIViewController {
                 return
             }
             state = .presenting
-            presenter.present(self, animated: true) { [self] in
+            presenter.present(self, animated: false) { [self] in
                 guard state == .presenting else { return }
                 state = .shown
+                if cancelRequested {
+                    cancelRequested = false
+                    cancelFromMenu()
+                    return
+                }
                 if let next = pendingFinish {
                     pendingFinish = nil
                     finish(then: next)
@@ -799,9 +858,29 @@ final class SourcesBusyViewController: UIViewController {
         }
     }
 
+    /// Menu came while the card was being presented: applied once it is.
+    private var cancelRequested = false
+
     override func pressesBegan(_ presses: Set<UIPress>, with event: UIPressesEvent?) {
         guard presses.contains(where: { $0.type == .menu }) else { return super.pressesBegan(presses, with: event) }
-        guard state == .shown else { return }
+        switch state {
+        case .shown: cancelFromMenu()
+        case .presenting: cancelRequested = true
+        case .idle, .finished: break
+        }
+    }
+
+    // Menu's other phases stay here too: passed on, they reached the screen
+    // under the card (its navigation controller pops on the press's end).
+    override func pressesEnded(_ presses: Set<UIPress>, with event: UIPressesEvent?) {
+        guard presses.contains(where: { $0.type == .menu }) else { return super.pressesEnded(presses, with: event) }
+    }
+
+    override func pressesCancelled(_ presses: Set<UIPress>, with event: UIPressesEvent?) {
+        guard presses.contains(where: { $0.type == .menu }) else { return super.pressesCancelled(presses, with: event) }
+    }
+
+    private func cancelFromMenu() {
         state = .finished
         onCancel?()
         dismiss(animated: true)

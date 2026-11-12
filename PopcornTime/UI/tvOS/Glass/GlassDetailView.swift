@@ -94,13 +94,21 @@ struct GlassDetailView: View {
     }
 
     /// The remote's Play/Pause, as in the TV app: plays the focused episode,
-    /// else what the Play button plays (never under the full summary).
+    /// a related title in focus (its page, then its playback, as on the
+    /// grid), else what the Play button plays — from the first screen, the
+    /// seasons and the episode summary; never from the cast or the
+    /// information, nor under the full summary.
     private func playPausePressed() {
         guard model.expandedText == nil else { return }
-        if case .episode(let id)? = focus {
+        switch focus {
+        case .episode(let id)?:
             actions.playEpisode(id)
-        } else if model.play != nil {
-            actions.play()
+        case .related(let id)?:
+            actions.playRelated(id)
+        case .person?, .information?, .accessibility?:
+            return
+        default:
+            if model.play != nil { actions.play() }
         }
     }
 

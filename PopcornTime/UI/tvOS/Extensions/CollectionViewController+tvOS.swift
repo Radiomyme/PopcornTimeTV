@@ -84,10 +84,20 @@ extension CollectionViewController {
     }
 
     @objc private func playFocusedPoster() {
-        guard let collectionView = collectionView,
-              let indexPath = collectionView.indexPathsForVisibleItems.first(where: { collectionView.cellForItem(at: $0)?.isFocused == true }),
-              let media = media(at: indexPath) else { return }
-        open(media, at: indexPath, autoPlay: true)
+        guard let collectionView = collectionView else { return }
+        if let indexPath = collectionView.indexPathsForVisibleItems.first(where: { collectionView.cellForItem(at: $0)?.isFocused == true }),
+           let media = media(at: indexPath) {
+            return open(media, at: indexPath, autoPlay: true)
+        }
+        // A Continue Watching card (the carousel in the grid's header gets no
+        // recognizer of its own): what Select does there, which plays.
+        for row in collectionView.subviews.compactMap({ $0 as? ContinueWatchingCollectionReusableView }) {
+            guard let carousel = row.collectionView,
+                  let indexPath = carousel.indexPathsForVisibleItems.first(where: { carousel.cellForItem(at: $0)?.isFocused == true })
+            else { continue }
+            row.collectionView(carousel, didSelectItemAt: indexPath)
+            return
+        }
     }
 
     /// A movie or show of the grid (not a person or a download).

@@ -281,6 +281,7 @@ final class GlassDetailHostingController: UIHostingController<GlassDetailView>, 
         actions.toggleEpisodeWatched = { [weak self] id in self?.toggleEpisodeWatched(id) }
         actions.selectSeason = { [weak self] season in self?.loadMissingStills(of: season) }
         actions.openRelated = { [weak self] id in self?.openRelated(id) }
+        actions.playRelated = { [weak self] id in self?.openRelated(id, autoPlay: true) }
         actions.openPerson = { [weak self] id in self?.openPerson(id) }
         return actions
     }
@@ -525,10 +526,11 @@ final class GlassDetailHostingController: UIHostingController<GlassDetailView>, 
 
     // MARK: Navigation
 
-    /// A "Viewers Also Watched" poster: the loading screen, then its page.
-    private func openRelated(_ id: String) {
+    /// A "Viewers Also Watched" poster: the loading screen, then its page
+    /// (`autoPlay`: then its playback, as Play/Pause on the grid).
+    private func openRelated(_ id: String, autoPlay: Bool = false) {
         guard let media = relatedItems[id], let navigationController else { return }
-        MainViewController.showDetail(of: media, on: navigationController)
+        MainViewController.showDetail(of: media, on: navigationController, autoPlay: autoPlay)
     }
 
     /// A cast or crew member: their filmography page. Only for a Trakt

@@ -166,7 +166,8 @@ class AppDelegate: UIResponder, UIApplicationDelegate, UITabBarControllerDelegat
                 let segue = AutoPlayStoryboardSegue(identifier: type, source: vc, destination: loadingViewController)
                 vc.prepare(for: segue, sender: media)
 
-                tabBarController.tabBar.isHidden = true
+                // The tab bar stays (tvOS hides it while the page has the
+                // focus): hidden here, nothing ever showed it again.
                 vc.navigationController?.push(loadingViewController, animated: true)
             }
         }

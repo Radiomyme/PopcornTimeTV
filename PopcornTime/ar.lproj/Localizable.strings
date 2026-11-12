@@ -696,3 +696,13 @@
 "Sources.Loading" = "جارٍ البحث عن مصادر…";
 "Picker.Recommended" = "موصى به";
 "Spinner.Loading" = "جارٍ التحميل…";
+
+/* Apple TV: a release that does not fit the app's cache (%@ = its quality, 1080p…; the smaller release's). Native player: resume question while the file still downloads (%@ = the position, 1:02:07). */
+"DiskFull.Title" = "لا توجد مساحة كافية لإصدار %@";
+"DiskFull.Message" = "لا يحتوي Apple TV على مساحة كافية في ذاكرة التخزين المؤقت للتطبيق لتنزيل هذا التورنت. هل تريد تجربة جودة أقل؟";
+"DiskFull.RetryIn" = "إعادة المحاولة بجودة %@";
+"DiskFull.RetryLower" = "تجربة جودة أقل";
+"Remux.Resume.Title" = "هل تريد استئناف التشغيل؟";
+"Remux.Resume.Message" = "لا يزال هذا الملف قيد التنزيل: يتم الاستئناف السريع عبر مشغل VLC. من البداية، يبقى التشغيل أصليًا (HDR وDolby Atmos).";
+"Remux.Resume.At" = "الاستئناف عند %@";
+"Remux.Resume.FromStart" = "البدء من البداية";

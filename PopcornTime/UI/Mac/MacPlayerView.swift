@@ -1164,23 +1164,23 @@ final class MacPlayerController: ObservableObject {
             }
         }
         if let remux = remux {
-            lines.append(contentsOf: remux.renditionSummary.map { "Piste   \($0)" })
+            lines.append(contentsOf: remux.renditionSummary.map { "Track   \($0)" })
             lines.append("Remux   \(remux.statsSummary)")
         }
         if let cues = cueController {
-            lines.append("Subs    \(cues.selected?.language ?? "désactivés") · \(cues.available.count) dispo.")
+            lines.append("Subs    \(cues.selected?.language ?? "off") · \(cues.available.count) available")
         }
         if starvation.isRecovering, let time = starvation.resumeTime {
             if starvation.isRebuildingStuckItem {
-                lines.append("Reprise lecture bloquée : nouvel élément à \(ResumePolicy.clockString(seconds: time))")
+                lines.append("Recovery stuck playback: new item at \(ResumePolicy.clockString(seconds: time))")
             } else if starvation.isWaitingForPlay {
-                lines.append("Reprise en pause : nouvel élément à la lecture, à \(ResumePolicy.clockString(seconds: time))")
+                lines.append("Recovery paused: new item on play, at \(ResumePolicy.clockString(seconds: time))")
             } else {
-                lines.append("Reprise attente des données à \(ResumePolicy.clockString(seconds: time)) · tentative "
+                lines.append("Recovery waiting for data at \(ResumePolicy.clockString(seconds: time)) · attempt "
                              + "\(starvation.attemptsWithoutProgress)/\(starvation.maxAttemptsWithoutProgress)")
             }
         } else if starvation.recoveryCount > 0 {
-            lines.append("Reprise \(starvation.recoveryCount) famine(s) surmontée(s) en natif")
+            lines.append("Recovery \(starvation.recoveryCount) starvation(s) overcome natively")
         }
         statsText = " " + lines.joined(separator: "\n ") + " "
     }

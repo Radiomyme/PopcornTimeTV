@@ -127,6 +127,19 @@ class CollectionViewController: ResponsiveCollectionViewController, UICollection
         }
     }
 
+    private static let superHasWillDisplay = UICollectionViewController.instancesRespond(
+        to: #selector(UICollectionViewDelegate.collectionView(_:willDisplay:forItemAt:)))
+
+    /// A poster prepared ahead of time (prefetched) shows the watched mark of
+    /// now: `refreshVisibleItemsInPlace` only reaches the visible ones.
+    override func collectionView(_ collectionView: UICollectionView, willDisplay cell: UICollectionViewCell, forItemAt indexPath: IndexPath) {
+        if CollectionViewController.superHasWillDisplay { super.collectionView(collectionView, willDisplay: cell, forItemAt: indexPath) }
+        guard collectionView === self.collectionView, let cover = cell as? CoverCollectionViewCell,
+              let media = dataSources[safe: indexPath.section]?[safe: indexPath.item] as? Media else { return }
+        let watched = media.isWatched
+        if cover.watched != watched { cover.watched = watched }
+    }
+
     override func collectionViewDidReloadData(_ collectionView: UICollectionView) {
         super.collectionViewDidReloadData(collectionView)
         

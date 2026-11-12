@@ -693,3 +693,13 @@
 "Sources.Loading" = "Ricerca delle fonti…";
 "Picker.Recommended" = "Consigliato";
 "Spinner.Loading" = "Caricamento…";
+
+/* Apple TV: a release that does not fit the app's cache (%@ = its quality, 1080p…; the smaller release's). Native player: resume question while the file still downloads (%@ = the position, 1:02:07). */
+"DiskFull.Title" = "Spazio insufficiente per la versione %@";
+"DiskFull.Message" = "L'Apple TV non ha abbastanza spazio nella cache dell'app per scaricare questo torrent. Provare una qualità inferiore?";
+"DiskFull.RetryIn" = "Riprova in %@";
+"DiskFull.RetryLower" = "Prova una qualità inferiore";
+"Remux.Resume.Title" = "Riprendere la riproduzione?";
+"Remux.Resume.Message" = "Questo file è ancora in download: la ripresa rapida passa dal lettore VLC. Dall'inizio, la riproduzione resta nativa (HDR, Dolby Atmos).";
+"Remux.Resume.At" = "Riprendi da %@";
+"Remux.Resume.FromStart" = "Ricomincia dall'inizio";

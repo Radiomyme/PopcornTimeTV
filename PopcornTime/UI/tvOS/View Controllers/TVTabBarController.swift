@@ -3,11 +3,23 @@ import Foundation
 
 class TVTabBarController: UITabBarController {
 
+    /// Where `moveFocus` sends the focus: kept until the focus lands outside
+    /// the tab bar (or 2 s), not dropped on the first read. UIKit reads
+    /// `preferredFocusEnvironments` more than once in one update: the second
+    /// read used to get the tab bar's own answer, its first tab, and the
+    /// focus on a tab selects it (the app switched to Movies).
     var environmentsToFocus: [UIFocusEnvironment] = []
 
     override var preferredFocusEnvironments: [UIFocusEnvironment] {
-        defer { environmentsToFocus.removeAll() }
-        return environmentsToFocus.isEmpty ? super.preferredFocusEnvironments : environmentsToFocus
+        guard !environmentsToFocus.isEmpty else { return super.preferredFocusEnvironments }
+        // The selected screen next, never the tab bar: a target with nothing
+        // focusable yet must not send the focus to a tab.
+        return environmentsToFocus + [selectedViewController].compactMap { $0 }
+    }
+
+    override func didUpdateFocus(in context: UIFocusUpdateContext, with coordinator: UIFocusAnimationCoordinator) {
+        super.didUpdateFocus(in: context, with: coordinator)
+        if let view = context.nextFocusedView, !view.isDescendant(of: tabBar) { environmentsToFocus.removeAll() }
     }
 
     override func viewDidLoad() {
@@ -33,10 +45,24 @@ class TVTabBarController: UITabBarController {
     }
 
     /// Gives the focus to `environment` (a screen of the selected tab).
-    func moveFocus(to environment: UIFocusEnvironment) {
+    /// A screen still loading may have nothing focusable yet: the move is
+    /// tried again twice a second (`attempts` in all) while the focus stays
+    /// in the tab bar.
+    func moveFocus(to environment: UIFocusEnvironment, attempts: Int = 5) {
         environmentsToFocus = [environment]
         setNeedsFocusUpdate()
         updateFocusIfNeeded()
+        let target = environment as AnyObject
+        let tab = selectedViewController
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
+            guard let self, self.environmentsToFocus.first.map({ ($0 as AnyObject) === target }) == true else { return }
+            guard attempts > 1, self.focusIsInTabBar, self.selectedViewController === tab,
+                  let environment = target as? UIFocusEnvironment else {
+                self.environmentsToFocus.removeAll()
+                return
+            }
+            self.moveFocus(to: environment, attempts: attempts - 1)
+        }
     }
 
     /// tvOS leaves the app when Menu is pressed in the tab bar. Over a pushed
@@ -89,6 +115,15 @@ class TVTabBarController: UITabBarController {
     }
 
     override func shouldUpdateFocus(in context: UIFocusUpdateContext) -> Bool {
+        // `moveFocus` (no heading: not the remote) never takes the focus from
+        // one tab to another: the focus on a tab selects it, and a target with
+        // nothing focusable yet made the focus engine fall back to the first
+        // tab (the app switched to Movies).
+        if !environmentsToFocus.isEmpty, context.focusHeading.isEmpty,
+           let next = context.nextFocusedView, next.isDescendant(of: tabBar),
+           let previous = context.previouslyFocusedView, previous.isDescendant(of: tabBar), previous !== next {
+            return false
+        }
         // Sort / Genre moved from custom-view UIButtons (legacy storyboard)
         // to native `UIBarButtonItem`s — see
         // `MainViewController.installModernRightBarButtonItems`. tvOS 17+

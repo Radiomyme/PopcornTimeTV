@@ -623,19 +623,25 @@ final class RemuxAVPlayerViewController: AVPlayerViewController {
         guard resumeChoicePending, !fallbackRequested, !isTornDown, resumeAlert == nil else { return }
         let duration = remux?.session?.totalDurationSeconds ?? 0
         let position = ResumePolicy.resumeLabel(fraction: startPosition, durationSeconds: duration)
-        let alert = UIAlertController(title: "Reprendre la lecture ?",
-                                      message: "Ce fichier est encore en téléchargement : la reprise rapide passe par le lecteur VLC. "
-                                        + "Depuis le début, la lecture reste native (HDR, Dolby Atmos).",
+        let alert = UIAlertController(title: NSLocalizedString("Remux.Resume.Title", value: "Resume playback?",
+                                                               comment: "Native player: resume question while the file still downloads"),
+                                      message: NSLocalizedString("Remux.Resume.Message",
+                                                                 value: "This file is still downloading: resuming quickly goes through the VLC player. From the beginning, playback stays native (HDR, Dolby Atmos).",
+                                                                 comment: "Native player: why resuming switches to VLC"),
                                       preferredStyle: .alert)
-        let resume = UIAlertAction(title: "Reprendre à \(position)", style: .default) { [weak self] _ in
+        let resumeTitle = String(format: NSLocalizedString("Remux.Resume.At", value: "Resume at %@",
+                                                           comment: "Native player: resume button; %@ = the position, e.g. 1:02:07"), position)
+        let resume = UIAlertAction(title: resumeTitle, style: .default) { [weak self] _ in
             DispatchQueue.main.async { self?.resolveResumeChoice(resume: true) }
         }
         alert.addAction(resume)
-        alert.addAction(UIAlertAction(title: "Reprendre du début", style: .default) { [weak self] _ in
+        alert.addAction(UIAlertAction(title: NSLocalizedString("Remux.Resume.FromStart", value: "Start from the beginning",
+                                                               comment: "Native player: play from the start, natively"),
+                                      style: .default) { [weak self] _ in
             DispatchQueue.main.async { self?.resolveResumeChoice(resume: false) }
         })
-        // Menu (tvOS) / Annuler: leave the player.
-        alert.addAction(UIAlertAction(title: "Annuler", style: .cancel) { [weak self] _ in
+        // Menu (tvOS) / Cancel: leave the player.
+        alert.addAction(UIAlertAction(title: "Cancel".localized, style: .cancel) { [weak self] _ in
             DispatchQueue.main.async { self?.cancelFromResumeQuestion() }
         })
         // Initial focus (tvOS) / emphasis (iOS) on « Reprendre ».
@@ -1952,23 +1958,23 @@ final class RemuxAVPlayerViewController: AVPlayerViewController {
             }
         }
         if let remux = remux {
-            lines.append(contentsOf: remux.renditionSummary.map { "Piste   \($0)" })
+            lines.append(contentsOf: remux.renditionSummary.map { "Track   \($0)" })
             lines.append("Remux   \(remux.statsSummary)")
         }
         if let subtitles = subtitleController {
-            lines.append("Subs    \(subtitles.selected?.language ?? "désactivés") · \(subtitles.available.count) dispo.")
+            lines.append("Subs    \(subtitles.selected?.language ?? "off") · \(subtitles.available.count) available")
         }
         if starvation.isRecovering, let time = starvation.resumeTime {
             if starvation.isRebuildingStuckItem {
-                lines.append("Reprise lecture bloquée : nouvel élément à \(ResumePolicy.clockString(seconds: time))")
+                lines.append("Recovery stuck playback: new item at \(ResumePolicy.clockString(seconds: time))")
             } else if starvation.isWaitingForPlay {
-                lines.append("Reprise en pause : nouvel élément à la lecture, à \(ResumePolicy.clockString(seconds: time))")
+                lines.append("Recovery paused: new item on play, at \(ResumePolicy.clockString(seconds: time))")
             } else {
-                lines.append("Reprise attente des données à \(ResumePolicy.clockString(seconds: time)) · tentative "
+                lines.append("Recovery waiting for data at \(ResumePolicy.clockString(seconds: time)) · attempt "
                              + "\(starvation.attemptsWithoutProgress)/\(starvation.maxAttemptsWithoutProgress)")
             }
         } else if starvation.recoveryCount > 0 {
-            lines.append("Reprise \(starvation.recoveryCount) famine(s) surmontée(s) en natif")
+            lines.append("Recovery \(starvation.recoveryCount) starvation(s) overcome natively")
         }
         statsLabel.text = " " + lines.joined(separator: "\n ") + " "
     }

@@ -802,6 +802,18 @@ final class BandwidthDeficitToastController: UIViewController {
         }
         super.pressesBegan(presses, with: event)
     }
+
+    // Menu's end (and Play/Pause's) stay here too: passed on, they reached
+    // the player under the toast, whose Menu handling acts on the press's end.
+    override func pressesEnded(_ presses: Set<UIPress>, with event: UIPressesEvent?) {
+        if presses.contains(where: { $0.type == .menu || ($0.type == .playPause && onPlayPause != nil) }) { return }
+        super.pressesEnded(presses, with: event)
+    }
+
+    override func pressesCancelled(_ presses: Set<UIPress>, with event: UIPressesEvent?) {
+        if presses.contains(where: { $0.type == .menu || ($0.type == .playPause && onPlayPause != nil) }) { return }
+        super.pressesCancelled(presses, with: event)
+    }
 }
 #endif
 
