@@ -63,13 +63,13 @@ fork_dir() {
   print -r -- $p
 }
 
-# A short hash of a git tree's inputs: HEAD, uncommitted changes, untracked files.
+# A short hash of the content of a git tree's inputs (the files as they are on disk, tracked or
+# not): a commit that leaves them as they are (a README) does not change it, so nothing is rebuilt.
 inputs_hash() {
   local dir=$1; shift
-  { git -C $dir rev-parse HEAD
-    git -C $dir diff HEAD -- "$@"
-    git -C $dir ls-files -o --exclude-standard -z -- "$@" | (cd $dir && xargs -0 shasum 2>/dev/null)
-  } | shasum | cut -c1-16
+  local files=$(git -C $dir ls-files --cached --others --exclude-standard -- "$@" |
+      while IFS= read -r file; do [[ -f $dir/$file ]] && print -r -- $file; done | sort -u)
+  { print -r -- $files; print -r -- $files | git -C $dir hash-object --stdin-paths } | shasum | cut -c1-16
 }
 
 # Pulls "Executed N tests, with F failures" out of an xctest log.

@@ -69,8 +69,14 @@ public enum PlaybackCapabilities {
     /// invalidate it immediately (AVPlayer HDR notifications).
     public static var snapshotLifetime: TimeInterval = 30
 
+    /// Tests: the answer of `current` whatever the display (nil: probed).
+    /// `AVPlayer.eligibleForHDRPlayback` follows the Mac's display (false
+    /// while it sleeps), which changed the merge a test checks.
+    static var pinnedForTesting: Snapshot?
+
     /// Cached snapshot of the capabilities (thread-safe).
     public static var current: Snapshot {
+        if let pinned = pinnedForTesting { return pinned }
         _ = displayObservers   // installs the invalidation observers once
         let now = ProcessInfo.processInfo.systemUptime
         lock.lock()

@@ -43,8 +43,11 @@ The same notes are shown once in the app after the update (`WhatsNewRelease.curr
   and bounded-storage pacing don't count.
 - **Season packs play the episode you chose**: in a multi-file torrent, a stream or a download
   takes the episode's own file: the file the source names (Time4Popcorn's file name), the
-  magnet's `so=`, else the video file named after the episode (S01E03, 1x03, Cap.103, "S1 -
-  03"…; E01 never taken for E10, samples left out). A pack without the episode now fails with
+  magnet's `so=`, else the video file named after the episode (S01E03, S01EP03, 1x03, Cap.103,
+  "S1 - 03", "Season 1 E03"…, a range such as S01E01-E03; E01 never taken for E10), else, in a
+  folder or torrent named after the season, the file numbered on its own ("Episode 03", "03 -
+  Title", "103"). Samples are left out when they are much smaller than the episodes (a show
+  called *Trailer Park Boys* is not a trailer). A pack without the episode now fails with
   "This torrent does not contain the requested episode. Please choose another source." instead
   of playing its largest file, another episode. Single-file torrents and movies play as before.
 - A quieter console (GCDWebServer and libvlc errors only).
@@ -56,8 +59,9 @@ The same notes are shown once in the app after the update (`WhatsNewRelease.curr
   high priority, a deadline is set only on a piece a reader waits for once it is late, peers no
   longer take whole pieces each, and requests held by peers far slower than the rest are
   cancelled when they would make a needed piece late.
-- **More of the swarm**: more peers and connections (Apple TV 100 per torrent / 300 in all,
-  iPhone / iPad 80 / 200, Mac 200 / 600), faster connection attempts and timeouts, every
+- **More of the swarm**: more peers and connections (Apple TV 100 per torrent / 200 in all,
+  iPhone / iPad 80 / 160, Mac 100 / 400; the app's limit of open files is raised so these apply),
+  faster connection attempts and timeouts (kept moderate for home routers), every
   tracker announced to at once, a list of reliable public trackers added to public torrents,
   a random listen port per install instead of 6881, UPnP / NAT-PMP port mapping on Apple TV and
   Mac. A download nobody plays fetches the rarest pieces first.
@@ -67,15 +71,19 @@ The same notes are shown once in the app after the update (`WhatsNewRelease.curr
   swarms and routers are not measured yet.
 
 **Apple TV**
-- **The remote's Back works everywhere**: Menu pressed right after opening a title no longer
+- **The remote's Back goes back**: Menu pressed right after opening a title no longer
   crashes the app (UIKit's back gesture during the push); Back on the loading screen or on a
   load error goes back a screen instead of leaving the app; Back on the playback loading screen
-  stops the stream even while the subtitles are fetched or the screen is still sliding in.
+  stops the stream even while the subtitles are fetched or the screen is just appearing (it
+  now appears without a transition, during which tvOS ignored the remote), and no player opens
+  afterwards; Back on "Looking for sources…", even before it shows, drops the request (no
+  chooser for a page you left).
 - **The Top 100 comes back in place**: coming back from a page no longer lays the grid out four
   posters wide before six, nor reloads every poster; the poster you opened keeps the focus, at
   the same place. The grids reload only when their content changed.
-- Play/Pause on a poster opens the title and plays it (on a page, the focused episode or what
-  Play plays); holding Select on a poster offers Play, Watchlist and Watched. Search shows its
+- Play/Pause on a poster opens the title and plays it, also on a Continue Watching card (on a
+  page: the focused episode, a related title, or what Play plays); holding Select on a poster
+  offers Play, Watchlist and Watched. Search shows its
   keyboard at once, and VoiceOver reads every poster's title.
 
 **Tests** (see [Tests](#tests))
@@ -328,7 +336,7 @@ tools/run-tests.sh clean    # forget the cached builds
 
 | Suite | Mode | Time |
 |---|---|---|
-| PopcornTimeTests (macOS) | quick | ~8 s (+ ~20 s when it must be rebuilt) |
+| PopcornTimeTests (macOS) | quick | ~8 s (+ ~20 s when a source changed, ~70 s from scratch) |
 | PopcornTorrentLogicTests, PopcornTorrent-Tests (offline, sandboxed) | quick | ~8 s |
 | PopcornTorrent SessionHarness: 6 modes and the network settings of the 3 profiles, in parallel (sandboxed) | full | ~3 min |
 | P10 / B6: a real AVPlayer on a 20 s clip (needs `format-coverage-wip`) | full | ~3 min |
@@ -336,7 +344,8 @@ tools/run-tests.sh clean    # forget the cached builds
 | Bounded-storage disk-image runs (`PT_BOUNDED_RUNS=1`) | full | ~5 min |
 
 Builds, stamps and logs go to `~/Library/Caches/PopcornTimeTV-tests` (`PT_TEST_CACHE`): a test
-bundle is rebuilt only when its sources changed, a bench binary only when its sources did. The
+bundle is rebuilt only when the content of its sources changed (a commit alone does not), a
+bench binary only when its sources did. The
 torrent tests and harnesses run under `sandbox-exec` with `tools/localhost-only.sb`: nothing
 can reach a tracker, the DHT or a peer outside 127.0.0.1.
 

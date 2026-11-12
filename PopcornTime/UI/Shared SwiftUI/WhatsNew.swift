@@ -84,9 +84,9 @@ struct WhatsNewRelease {
                      platforms: [.tvOS, .iOS, .macOS]),
         WhatsNewItem(id: "packs", symbol: "rectangle.stack",
                      titleFR: "Le bon épisode dans les packs de saison",
-                     bodyFR: "Dans un torrent qui contient toute une saison, c'est bien l'épisode choisi qui est lu ; s'il n'y figure pas, l'app le dit au lieu de lancer un autre épisode.",
+                     bodyFR: "Dans un torrent qui contient toute une saison, l'app retrouve l'épisode choisi par son nom ou son numéro ; s'il n'y figure pas, elle le dit au lieu de lancer un autre épisode.",
                      titleEN: "The right episode from season packs",
-                     bodyEN: "When a torrent holds a whole season, the episode you picked is the one that plays; if it isn't there, the app says so instead of playing another episode.",
+                     bodyEN: "When a torrent holds a whole season, the app finds the episode you picked by its name or number; if it isn't there, it says so instead of playing another episode.",
                      platforms: [.tvOS, .iOS, .macOS]),
         WhatsNewItem(id: "network", symbol: "arrow.down.circle",
                      titleFR: "Des téléchargements plus rapides",
@@ -96,9 +96,9 @@ struct WhatsNewRelease {
                      platforms: [.tvOS, .iOS, .macOS]),
         WhatsNewItem(id: "tv-navigation", symbol: "appletvremote.gen4",
                      titleFR: "Une navigation plus fluide sur Apple TV",
-                     bodyFR: "Le bouton Retour de la télécommande ramène toujours à l'écran précédent, même pendant un chargement, et le Top 100 comme les autres grilles réapparaissent sans à-coup, sur l'affiche que vous aviez quittée. Lecture/Pause lance un titre depuis son affiche, et un appui long ouvre ses raccourcis.",
+                     bodyFR: "Le bouton Retour de la télécommande ramène à l'écran précédent, y compris pendant un chargement ou la recherche des sources, et le Top 100 comme les autres grilles réapparaissent sans à-coup, sur l'affiche que vous aviez quittée. Lecture/Pause lance un titre depuis son affiche, et un appui long ouvre ses raccourcis.",
                      titleEN: "Smoother navigation on Apple TV",
-                     bodyEN: "The remote's Back button always takes you to the previous screen, even while something is loading, and the Top 100 and the other grids come back without a jolt, on the poster you left. Play/Pause starts a title from its poster, and a long press opens its shortcuts.",
+                     bodyEN: "The remote's Back button takes you to the previous screen, also while something loads or sources are being searched, and the Top 100 and the other grids come back without a jolt, on the poster you left. Play/Pause starts a title from its poster, and a long press opens its shortcuts.",
                      platforms: [.tvOS]),
     ])
 

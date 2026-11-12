@@ -12,6 +12,12 @@
 		<key>NSAllowsArbitraryLoads</key>
 		<true/>
 	</dict>
+	<!-- macOS 15+ asks once before the app reaches the local network: the
+	     torrent engine maps its listen port on the router (UPnP, NAT-PMP)
+	     and finds peers on the same network (LSD). Without a description
+	     macOS shows a generic text. -->
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>Popcorn Time asks your router to open its torrent port (UPnP, NAT-PMP) and looks for peers on your network, so that videos download faster.</string>
 	<!-- Trakt OAuth finishes by redirecting to popcorntime://trakt?code=… —
 	     the same scheme the iOS app registers. -->
 	<key>CFBundleURLTypes</key>

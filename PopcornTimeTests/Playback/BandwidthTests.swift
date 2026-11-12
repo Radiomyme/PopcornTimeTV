@@ -21,6 +21,23 @@ private func streams(_ name: String) -> [[String: Any]] {
     let data = try! Data(contentsOf: fixtures.appendingPathComponent(name))
     return (try! JSONSerialization.jsonObject(with: data) as! [String: Any])["streams"] as! [[String: Any]]
 }
+/// A defaults suite for one test, empty: a fixed name (not one per run: each left a plist in
+/// ~/Library/Preferences, removePersistentDomain keeps the file).
+private func throwawayDefaults(_ name: String) -> UserDefaults {
+    let suite = UserDefaults(suiteName: name)!
+    suite.removePersistentDomain(forName: name)
+    return suite
+}
+
+/// Empties the suite and deletes its file.
+private func discardDefaults(_ suite: UserDefaults, _ name: String) {
+    suite.removePersistentDomain(forName: name)
+    suite.synchronize()
+    let file = FileManager.default.homeDirectoryForCurrentUser
+        .appendingPathComponent("Library/Preferences/\(name).plist")
+    try? FileManager.default.removeItem(at: file)
+}
+
 private func mbps(_ bytesPerSecond: Double?) -> Double { return bytesPerSecond.map(StreamBandwidth.megabitsPerSecond) ?? -1 }
 private func near(_ a: Double?, _ b: Double, _ tolerance: Double = 0.01) -> Bool {
     guard let a = a else { return false }
@@ -251,7 +268,11 @@ final class BandwidthTests: CheckedTestCase {
         check(Torrent.precedesInListing(heavy1080.withMediaRuntime(3660), light1080.withMediaRuntime(3660), capabilities: caps, connection: 1_000 * mbit),
               "fast connection: score order")
 
-        // Merge keeps the light 2160p when the slots are contested by heavy remuxes.
+        // Merge keeps the light 2160p when the slots are contested by heavy remuxes. The merge
+        // reads the device's capabilities: those of an HDR, Dolby Vision display, whatever this
+        // Mac's display does (asleep, it is not HDR-eligible: the remuxes were penalized).
+        PlaybackCapabilities.pinnedForTesting = caps
+        defer { PlaybackCapabilities.pinnedForTesting = nil }
         UserDefaults.standard.register(defaults: [StreamBandwidth.connectionEstimateDefaultsKey: measured])
         check(StreamBandwidth.connectionEstimate == measured, "estimate read from the defaults key")
         var aggregated: [Torrent] = []
@@ -321,8 +342,8 @@ final class BandwidthTests: CheckedTestCase {
         check(ConnectionSpeed.History().estimate(at: base, tuning: tuning) == nil, "empty: unknown")
 
         // The class, on a throwaway defaults suite.
-        let suiteName = "bandwidth-tests-\(UUID().uuidString)"
-        let suite = UserDefaults(suiteName: suiteName)!
+        let suiteName = "com.popcorntime.tests.bandwidth"
+        let suite = throwawayDefaults(suiteName)
         var clockNow: TimeInterval = 1_000
         let speed = ConnectionSpeed(defaults: suite, clock: { clockNow }, now: { base })
         check(speed.estimate == nil && speed.currentSustainedRate == nil, "fresh: unknown")
@@ -355,8 +376,8 @@ final class BandwidthTests: CheckedTestCase {
         check(ConnectionSpeed.History(propertyList: suite.array(forKey: ConnectionSpeed.historyDefaultsKey)).entries.count == 3,
               "well connected (25 peers): recorded")
         // Several recent thin swarms no longer drag the estimate down (review: 40/48 Mb/s then four 2–3 Mb/s swarms gave 3.2 Mb/s).
-        let mixedName = "bandwidth-mixed-\(UUID().uuidString)"
-        let mixedSuite = UserDefaults(suiteName: mixedName)!
+        let mixedName = "com.popcorntime.tests.bandwidth-mixed"
+        let mixedSuite = throwawayDefaults(mixedName)
         var mixedNow: TimeInterval = 0
         let mixed = ConnectionSpeed(defaults: mixedSuite, clock: { mixedNow }, now: { base })
         for (k, (rate, peers)) in [(5.0e6, 30), (6.0e6, 30), (0.3e6, 3), (0.35e6, 2), (0.4e6, 4), (0.25e6, 1)].enumerated() {
@@ -364,10 +385,10 @@ final class BandwidthTests: CheckedTestCase {
             for i in 0..<120 { mixedNow = Double(k) * 1_000 + Double(i) * 0.5; mixed.record(rate: rate, from: stream, peers: peers) }
         }
         check(near(mixed.estimate, 6.0e6, 0.005), "thin swarms ignored: estimate 48 Mb/s, got \(mbps(mixed.estimate))")
-        mixedSuite.removePersistentDomain(forName: mixedName)
+        discardDefaults(mixedSuite, mixedName)
         // DEBUG verification runs (loopback swarm): measured in memory, nothing written.
-        let quietName = "bandwidth-quiet-\(UUID().uuidString)"
-        let quietSuite = UserDefaults(suiteName: quietName)!
+        let quietName = "com.popcorntime.tests.bandwidth-quiet"
+        let quietSuite = throwawayDefaults(quietName)
         var quietNow: TimeInterval = 0
         let quiet = ConnectionSpeed(defaults: quietSuite, persists: false, clock: { quietNow }, now: { base })
         let loopback = NSObject()
@@ -376,7 +397,7 @@ final class BandwidthTests: CheckedTestCase {
         // (The registration domain is process-wide: look at the suite's own domain.)
         check(near(quiet.sustainedRate(of: loopback), 11e6, 0.005) && (quietSuite.persistentDomain(forName: quietName) ?? [:]).isEmpty,
               "persists: false writes nothing: \(quietSuite.persistentDomain(forName: quietName) ?? [:])")
-        quietSuite.removePersistentDomain(forName: quietName)
+        discardDefaults(quietSuite, quietName)
         speed.forget()
         check(speed.estimate == nil && suite.double(forKey: StreamBandwidth.connectionEstimateDefaultsKey) == 0
               && suite.array(forKey: ConnectionSpeed.historyDefaultsKey) == nil, "forget")
@@ -388,7 +409,7 @@ final class BandwidthTests: CheckedTestCase {
             _ = speed.estimate
         }
         check(objects.allSatisfy { near(speed.sustainedRate(of: $0), 2e6, 0.005) }, "concurrent records")
-        suite.removePersistentDomain(forName: suiteName)
+        discardDefaults(suite, suiteName)
 
         // MARK: 8. Picker texts (development language)
 
