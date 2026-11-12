@@ -150,7 +150,8 @@ public final class Time4PopcornClient {
 
     static func torrent(fromItem item: [String: Any]) -> Torrent? {
         guard let magnet = item["torrent_magnet"] as? String, magnet.hasPrefix("magnet:") else { return nil }
-        let file = (item["file"] as? String) ?? ""
+        // Some names start with a no-break space.
+        let file = ((item["file"] as? String) ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
         let apiQuality = (item["quality"] as? String) ?? ""
         let seeds = (item["torrent_seeds"] as? Int) ?? Int((item["torrent_seeds"] as? String) ?? "") ?? 0
         let peers = (item["torrent_peers"] as? Int) ?? Int((item["torrent_peers"] as? String) ?? "") ?? 0
@@ -173,8 +174,9 @@ public final class Time4PopcornClient {
             size:    size,
             tags:    VideoTags.parse(parseSource),
             // `size_bytes` is this file's (an episode's in a season pack,
-            // whose magnet `dn` names the pack): judged by its name, it
-            // gives the release's bitrate.
+            // whose magnet `dn` names the pack, without `so=`): judged by its
+            // name, it gives the release's bitrate; and a stream of the pack
+            // plays that file (`WantedFile(media:torrent:)`).
             fileName: file)
         var label = torrent.qualityValue.displayLabel + torrent.tags.displaySuffix
         if label.isEmpty { label = apiQuality.isEmpty ? "Unknown".localized : apiQuality }

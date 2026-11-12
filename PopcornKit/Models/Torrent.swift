@@ -645,6 +645,124 @@ public enum MagnetLink {
     }
 }
 
+/// The file a stream wants from a multi-file torrent: for an episode, its
+/// season and number, and its file name when the source gives one apart
+/// from the magnet (Time4Popcorn's `file`: its episode magnets often name a
+/// whole season pack and carry no BEP 53 `so=`); for a movie, only such a
+/// file name. `choice` picks that file among the torrent's files.
+public struct WantedFile: Equatable, Sendable, CustomStringConvertible {
+    /// The episode's season (0 = specials) and number; nil for a movie.
+    public let season: Int?
+    public let episode: Int?
+    /// The file's own name as the source gives it (its last path component).
+    public let fileName: String?
+
+    /// Nil when there is nothing to pick a file by: no file name, and no
+    /// season ≥ 0 with an episode ≥ 1 (an `Episode` without numbers has -1).
+    public init?(season: Int? = nil, episode: Int? = nil, fileName: String? = nil) {
+        let name = fileName.map(WantedFile.leafName)?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let numbered = (season ?? -1) >= 0 && (episode ?? 0) > 0
+        guard numbered || !(name ?? "").isEmpty else { return nil }
+        self.season = numbered ? season : nil
+        self.episode = numbered ? episode : nil
+        self.fileName = (name ?? "").isEmpty ? nil : name
+    }
+
+    public var description: String {
+        let numbers = season.flatMap { s in episode.map { String(format: "S%02dE%02d", s, $0) } }
+        return [numbers, fileName.map { "«\($0)»" }].compactMap { $0 }.joined(separator: " ")
+    }
+
+    /// Which file of a torrent to stream.
+    public enum Choice: Equatable {
+        /// This file (index in torrent order).
+        case file(Int)
+        /// None: a pack without the wanted episode (never another episode).
+        case notInTorrent
+        /// No opinion: the usual rule (the magnet's `so=`, else the largest
+        /// video file).
+        case usualRule
+    }
+
+    /// The file to stream among a torrent's `fileNames` (and `fileSizes`
+    /// when known), given the magnet's `so=` (`preferredIndex`) and the
+    /// torrent's display name (`torrentName`, the magnet's `dn`). A
+    /// single-file torrent always follows the usual rule. Otherwise:
+    /// 1. the file the source names (`fileName`), compared on letters and
+    ///    digits only, without a video extension ("Show S02E03 1080p WEB-DL
+    ///    DDP5 1.mkv" is "Show.S02E03.1080p.WEB-DL.DDP5.1.mkv") — unless that
+    ///    file names another episode;
+    /// 2. for an episode, the `so=` file, unless it names another episode;
+    /// 3. the video file named after the episode (`ReleaseName.episodeScope`:
+    ///    "S03E05", "3x05", "Cap.305", "S3 - 05"…; samples left out), else a
+    ///    double episode holding it ("S03E04E05"); the largest of several;
+    /// 4. not found: with one video file at most, a single-episode torrent
+    ///    (its sample, subtitles…), the usual rule as before; with several,
+    ///    a pack when one of them names an episode or a season, or the
+    ///    torrent's name covers several episodes: `.notInTorrent`. Video
+    ///    files without any marker (absolute numbering "Show - 013") and a
+    ///    torrent name that doesn't say pack: the usual rule.
+    /// A movie (no numbers) stops after 1.
+    public func choice(fileNames: [String], fileSizes: [Int64]? = nil, preferredIndex: Int? = nil,
+                       torrentName: String? = nil) -> Choice {
+        guard fileNames.count > 1 else { return .usualRule }
+        let sizes = fileSizes.flatMap { $0.count == fileNames.count ? $0 : nil }
+        /// The largest of `indices` (the first one on a tie or without sizes).
+        func largest(_ indices: [Int]) -> Int {
+            guard let sizes = sizes else { return indices[0] }
+            return indices.max { sizes[$0] < sizes[$1] } ?? indices[0]
+        }
+        func scope(_ index: Int) -> ReleaseName.EpisodeScope? {
+            guard let season = season, let episode = episode else { return nil }
+            return ReleaseName.episodeScope(of: WantedFile.leafName(fileNames[index]), season: season, episode: episode)
+        }
+
+        if let fileName = fileName {
+            let key = WantedFile.comparableName(fileName)
+            let named = key.isEmpty ? [] : fileNames.indices.filter {
+                WantedFile.comparableName(fileNames[$0]) == key
+                    && !ReleaseName.isNonVideoFile(fileNames[$0]) && scope($0) != .otherEpisode
+            }
+            if !named.isEmpty { return .file(largest(named)) }
+        }
+        guard season != nil, episode != nil else { return .usualRule }
+
+        if let preferred = preferredIndex, fileNames.indices.contains(preferred),
+           !ReleaseName.isNonVideoFile(fileNames[preferred]), scope(preferred) != .otherEpisode {
+            return .file(preferred)
+        }
+
+        let videos = fileNames.indices.filter {
+            ReleaseName.isVideoFile(fileNames[$0]) && !ReleaseName.looksLikeSample(fileNames[$0])
+        }
+        let scopes = videos.map { scope($0) ?? .unknown }
+        for wanted in [ReleaseName.EpisodeScope.requestedEpisode, .multiEpisode] {
+            let matching = videos.indices.filter { scopes[$0] == wanted }.map { videos[$0] }
+            if !matching.isEmpty { return .file(largest(matching)) }
+        }
+
+        guard videos.count > 1 else { return .usualRule }
+        if scopes.contains(where: { $0 != .unknown }) { return .notInTorrent }
+        if let name = torrentName, ReleaseName.coversSeveralEpisodes(name) { return .notInTorrent }
+        return .usualRule
+    }
+
+    /// The last path component of a file name or torrent path.
+    static func leafName(_ name: String) -> String {
+        return name.split(whereSeparator: { $0 == "/" || $0 == "\\" }).last.map(String.init) ?? name
+    }
+
+    /// A file name as `choice` compares it: its last path component without
+    /// a video container extension, lower-cased letters and digits only.
+    static func comparableName(_ name: String) -> String {
+        var leaf = leafName(name).trimmingCharacters(in: .whitespacesAndNewlines)
+        if ReleaseName.videoContainerExtension(of: leaf) != nil, let dot = leaf.lastIndex(of: ".") {
+            leaf = String(leaf[..<dot])
+        }
+        return String(leaf.lowercased().unicodeScalars.filter { CharacterSet.alphanumerics.contains($0) })
+    }
+}
+
 /// Resolution buckets we care about. Raw value sorts naturally low → high.
 /// 3D is intentionally placed BELOW SD because Half-Side-By-Side / Top-and-
 /// Bottom variants render as a doubled image on a standard 4K TV — they're
@@ -1223,8 +1341,9 @@ public struct Torrent: Mappable, Equatable, Comparable {
     /// The streamed file's name when the provider gives it apart from the
     /// magnet (Time4Popcorn's `file`: its magnets name the whole season
     /// pack, its sizes are the episode file's). Judged instead of the
-    /// magnet's `dn` by `streamedFileBytes`.
-    private let releaseFileName: String?
+    /// magnet's `dn` by `streamedFileBytes`; the file a stream of a pack
+    /// plays (`WantedFile(media:torrent:)`).
+    public let releaseFileName: String?
 
     /// Runtime in seconds of the movie / episode this torrent plays, when
     /// the caller attached it (`withMediaRuntime`, `Torrent.mediaRuntime(of:)`):
@@ -1536,6 +1655,20 @@ public extension Torrent {
         if a.seeds != b.seeds { return a.seeds > b.seeds }
         if pa.score != pb.score { return pa.score > pb.score }
         return a.url < b.url
+    }
+}
+
+// MARK: - The file to stream
+
+public extension WantedFile {
+
+    /// What a stream of `torrent` played for `media` wants from a
+    /// multi-file torrent: an episode's season and number, and the
+    /// torrent's own file name (`Torrent.releaseFileName`); a movie, that
+    /// file name only. Nil when neither is known.
+    init?(media: Media?, torrent: Torrent?) {
+        let episode = media as? Episode
+        self.init(season: episode?.season, episode: episode?.episode, fileName: torrent?.releaseFileName)
     }
 }
 

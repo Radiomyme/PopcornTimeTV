@@ -1000,15 +1000,17 @@ struct MediaDetailView: View {
             print("[iOS Detail] streaming failure: \(error.localizedDescription)")
         }
 
-        // The streamed file: the magnet's BEP 53 `so=` file when valid, else
-        // the largest video file, as on tvOS and macOS
-        // (`PTTorrentStreamer.fileSelection`). Season packs stay filtered out
-        // of the iOS episode sources (`TorrentioClient.dropsEpisodePacks`).
+        // The streamed file, as on tvOS and macOS
+        // (`PTTorrentStreamer.fileSelection`): an episode's own file in a
+        // season pack (none when the pack lacks it: the stream fails), else
+        // the magnet's BEP 53 `so=` file when valid, else the largest video
+        // file. Torrentio's packs stay filtered out of the iOS episode
+        // sources (`TorrentioClient.dropsEpisodePacks`).
         streamer.startStreaming(fromMultiTorrentFileOrMagnetLink: magnet,
                                 progress: progress,
                                 readyToPlay: readyToPlay,
                                 failure: failure,
-                                selectFileToStream: PTTorrentStreamer.fileSelection(for: magnet))
+                                selectFileToStream: PTTorrentStreamer.fileSelection(for: magnet, media: playMedia, torrent: torrent))
     }
 
     /// A native engine gave up: continue on VLC with the SAME stream. The

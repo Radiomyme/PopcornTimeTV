@@ -108,12 +108,14 @@ extension Media {
             // to main inside each callback so the caller doesn't have to
             // care about the streamer's threading.
             //
-            // The streamed file: the magnet's BEP 53 `so=` file (Torrentio
-            // `fileIdx`) when valid, else the largest video file, as on
-            // macOS (`PTTorrentStreamer.fileSelection`); only that file's
-            // pieces are wanted. Season packs stay filtered out of iOS/tvOS
-            // episode results for now (`TorrentioClient.dropsEpisodePacks`
-            // says why).
+            // The streamed file, as on iOS and macOS
+            // (`PTTorrentStreamer.fileSelection`): an episode's own file in a
+            // season pack (Time4Popcorn's, EZTV's…; none when the pack lacks
+            // the episode: the stream fails), else the magnet's BEP 53 `so=`
+            // file (Torrentio `fileIdx`) when valid, else the largest video
+            // file; only that file's pieces are wanted. Torrentio's packs
+            // stay filtered out of iOS/tvOS episode results for now
+            // (`TorrentioClient.dropsEpisodePacks` says why).
             print("[Streamer] startStreaming magnet=\(url.prefix(80))…")
             var lastLoggedTenth: Float = -1
             streamer.startStreaming(fromMultiTorrentFileOrMagnetLink: url, progress: { (status) in
@@ -151,7 +153,7 @@ extension Media {
                             errorBlock(message)
                         }
                     }
-            }, selectFileToStream: PTTorrentStreamer.fileSelection(for: url))
+            }, selectFileToStream: PTTorrentStreamer.fileSelection(for: url, media: self, torrent: context.torrent))
         } else {
             PopcornKit.downloadTorrentFile(url, completion: { (url, error) in
                 // Alamofire hands the response back on its own queue too.

@@ -310,6 +310,7 @@
 		78992327B61164CF252CC0AC /* SubtitleConversion.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1EB39D111D2AFE3635EBEB23 /* SubtitleConversion.swift */; };
 		78DECA8E6E392EB719837DEC /* GlassArtwork.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1DB5B0E09BE64E1DD883E732 /* GlassArtwork.swift */; };
 		7C2982F74FE3F284D2A7CBD6 /* RemuxAudioTranscoder.swift in Sources */ = {isa = PBXBuildFile; fileRef = E07267B3D72BCBF52A5C33B0 /* RemuxAudioTranscoder.swift */; };
+		7F0E3DAD2DBEC4D0CB9933EB /* PTTorrentStreamer+Current.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2EE5B844F25564BDC0790767 /* PTTorrentStreamer+Current.swift */; };
 		7F572739E9F89545440943E6 /* PopcornKit macOS.framework in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = 45CDBF4716482AE9CE39BC5C /* PopcornKit macOS.framework */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
 		83401A1F3B17A97CC82FA52E /* WhatsNewView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B87CA952C39ECA080A5345DC /* WhatsNewView.swift */; };
 		84B69C80C51B2BC82713DA87 /* MacGridViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 55A3056F35D301366ACA3A2F /* MacGridViews.swift */; };
@@ -2458,6 +2459,7 @@
 				53963157F19427E3E9FDEA98 /* LoadingPhase.swift in Sources */,
 				B3B643020B585A2B6FED1A96 /* GCDWebServerLogging.swift in Sources */,
 				0E264CF6CCFCA154849A3AC1 /* BandwidthDeficit.swift in Sources */,
+				7F0E3DAD2DBEC4D0CB9933EB /* PTTorrentStreamer+Current.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

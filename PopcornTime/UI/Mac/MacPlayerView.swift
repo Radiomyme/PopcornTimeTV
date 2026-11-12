@@ -435,8 +435,6 @@ final class MacPlayerController: ObservableObject {
         deficitMonitor = monitor
         let isAtmos = playback.torrent.tags.contains(.atmos)
         let hintsHDR = !playback.torrent.tags.isDisjoint(with: [.hdr10, .hdr10Plus, .dolbyVision])
-        // BEP 53 `so=` (Torrentio season packs): stream THAT file.
-        let preferredIndex = Torrent.selectedFileIndex(fromMagnet: magnet)
         // A film larger than the free space streams in bounded storage
         // (every route below drives the torrent's window).
         BoundedStorageSession.prepare(streamer, durationSeconds: BoundedStorageSession.durationHint(for: playback.media))
@@ -497,16 +495,8 @@ final class MacPlayerController: ObservableObject {
                 self.loadingPhase = .starting
                 self.statusLine = String(format: "Failed: %@".localized, message)
             }
-        }, selectFileToStream: { @Sendable (fileNames: [String], fileSizes: [NSNumber]) -> Int32 in
-            // Runs on libtorrent's thread (pure helper only). Multi-file
-            // torrents: the magnet's `so=` file when valid, else the largest
-            // video file (the movie payload, not a sample).
-            let index = PlaybackRouting.fileIndexToStream(names: fileNames,
-                                                          sizes: fileSizes.map { $0.int64Value },
-                                                          preferredIndex: preferredIndex)
-            print("[Player] multi-file torrent: streaming #\(index) of \(fileNames.count)\(preferredIndex.map { " (so=\($0))" } ?? "")")
-            return Int32(index)
-        })
+        }, selectFileToStream: PTTorrentStreamer.fileSelection(for: magnet, media: playback.media, torrent: playback.torrent,
+                                                               log: "[Player]"))
 
         statsTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
             Task { @MainActor in self?.refreshStats() }
