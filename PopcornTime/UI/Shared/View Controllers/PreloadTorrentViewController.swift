@@ -15,7 +15,21 @@ class PreloadTorrentViewController: UIViewController {
 
     @IBOutlet var backgroundImageView: UIImageView?
 
-    var streamer: PTTorrentStreamer!
+    var streamer: PTTorrentStreamer! {
+        didSet {
+            // Back was pressed before the stream existed (the play flow
+            // fetches the subtitles first, then starts it): the stream it
+            // starts now is not wanted. It is stopped as soon as it started,
+            // with its callbacks, so no player opens after the user left.
+            guard isCancelled, let streamer = streamer, streamer !== oldValue,
+                  !(streamer is PTTorrentDownload) else { return }
+            print("[Loading] stream started after Back — stopping it")
+            DispatchQueue.main.async { streamer.cancelStreamingAndDeleteData(false) }
+        }
+    }
+
+    /// Menu (Back) closed this screen (`cancel`).
+    private(set) var isCancelled = false
 
     /// The movie or episode being loaded, and the source (torrent URL) it
     /// plays: « Choose another source » goes back to the quality picker for
@@ -362,10 +376,28 @@ class PreloadTorrentViewController: UIViewController {
         updateFocusIfNeeded()
     }
 
+    /// Menu (Back): the stream stops and the screen closes — also when the
+    /// press comes while the screen is still sliding in (UIKit would ignore
+    /// that dismissal and leave a spinner without a stream: it waits for the
+    /// presentation to end), and again on a later press if it did not close.
     @IBAction func cancel() {
-        stopPhaseUpdates()
-        // nil until a download's `play` answers (it is set in that handler).
-        streamer?.cancelStreamingAndDeleteData(false)
+        if !isCancelled {
+            isCancelled = true
+            stopPhaseUpdates()
+            // nil until a download's `play` answers (it is set in that handler).
+            streamer?.cancelStreamingAndDeleteData(false)
+        }
+        dismissWhenPossible()
+    }
+
+    private func dismissWhenPossible() {
+        guard presentingViewController != nil, !isBeingDismissed else { return }
+        if let coordinator = transitionCoordinator,
+           coordinator.animate(alongsideTransition: nil, completion: { [weak self] _ in
+               DispatchQueue.main.async { self?.dismissWhenPossible() }
+           }) {
+            return
+        }
         dismiss(animated: true)
     }
 

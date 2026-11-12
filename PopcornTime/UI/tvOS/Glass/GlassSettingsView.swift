@@ -315,6 +315,7 @@ struct GlassSettingsView: View {
             GlassSettingsRow(symbol: "sparkles.tv", tint: .orange, title: "Auto Select Quality",
                              value: glassSettingsLocalized(model.autoQuality.titleKey)) { picker = .quality }
                 .focused($focusedRow, equals: .quality)
+                .accessibilityIdentifier("Settings.Row.quality")
             GlassSettingsDivider()
             GlassSettingsRow(symbol: "speaker.wave.2.fill", tint: .blue, title: "Audio Language",
                              value: model.languageName(model.audioLanguage)) { picker = .audio }
@@ -634,6 +635,7 @@ struct GlassSettingsPickerSheet: View {
         .defaultFocus($focusedID, selectedID)
         .onExitCommand(perform: onCancel)
         .presentationBackground(.clear)
+        .accessibilityIdentifier("Settings.Picker")
     }
 
     private func optionRow(_ option: Option) -> some View {

@@ -72,6 +72,7 @@ struct GlassHeroView: View {
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(Text(verbatim: model.title))
         .accessibilityAddTraits(.isHeader)
+        .accessibilityIdentifier("Detail.Title")
         .animation(.easeOut(duration: 0.35), value: logoLoaded)
         .onChange(of: model.logoURL) { _, _ in logoLoaded = false }
     }
@@ -127,6 +128,7 @@ struct GlassHeroView: View {
             }
             .buttonStyle(GlassCardButtonStyle(focusScale: 1.025))
             .focused(focus, equals: .summary)
+            .accessibilityIdentifier("Detail.Summary")
         } else {
             summaryText
                 .foregroundStyle(GlassPalette.primaryText)

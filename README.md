@@ -276,6 +276,23 @@ bundle is rebuilt only when its sources changed, a bench binary only when its so
 torrent tests and harnesses run under `sandbox-exec` with `tools/localhost-only.sb`: nothing
 can reach a tracker, the DHT or a peer outside 127.0.0.1.
 
+**Apple TV UI tests** (slow, kept out of `run-tests.sh`): the **PopcornTimetvOSUITests** scheme
+drives the tvOS app on an Apple TV simulator with the remote (`XCUIRemote`): Back to the Top
+100, Trending and Shows grids (same poster, same place, no movement), Menu while a page slides
+in, on a slow loading screen and on a load error, a page's summary and shelves, a show's
+episodes, the quality chooser, the poster menu, Settings, Search, Downloads, the Watchlist and
+What's New. 17 tests, about 5 minutes. They read the public catalog APIs, never press Play, and
+set the app up with DEBUG launch arguments, so they are built with the DEBUG condition (the app
+for x86_64, the test runner for arm64):
+
+```bash
+xcodebuild -workspace PopcornTime.xcworkspace -scheme PopcornTimetvOSUITests \
+  -destination "generic/platform=tvOS Simulator" -derivedDataPath build/ui \
+  ONLY_ACTIVE_ARCH=NO SWIFT_ACTIVE_COMPILATION_CONDITIONS=DEBUG build-for-testing
+xcodebuild test-without-building -xctestrun build/ui/Build/Products/PopcornTimetvOSUITests_*.xctestrun \
+  -destination "platform=tvOS Simulator,name=<your Apple TV simulator>,arch=arm64"
+```
+
 ## License
 
 If you distribute a copy or make a fork of the project, you have to credit this project as source.

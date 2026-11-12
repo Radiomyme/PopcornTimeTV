@@ -100,13 +100,33 @@ class CollectionViewController: ResponsiveCollectionViewController, UICollection
     
     override func viewDidLoad() {
         super.viewDidLoad()
-        
+
+        installPlayPauseGesture()
+
         if let collectionView = collectionView,
             let nib = delegate?.collectionView(nibForHeaderInCollectionView: collectionView) {
             collectionView.register(nib, forSupplementaryViewOfKind: UICollectionView.elementKindSectionHeader, withReuseIdentifier: "stickyHeader")
         }
     }
     
+    /// Updates what can change on the visible posters while another screen
+    /// covers the grid (the watched mark) and the Continue Watching progress,
+    /// without reloading anything: the cells, their images and the focus stay.
+    func refreshVisibleItemsInPlace() {
+        guard let collectionView = collectionView else { return }
+        for indexPath in collectionView.indexPathsForVisibleItems {
+            guard let media = dataSources[safe: indexPath.section]?[safe: indexPath.item] as? Media,
+                  let cell = collectionView.cellForItem(at: indexPath) as? CoverCollectionViewCell else { continue }
+            let watched = media.isWatched
+            if cell.watched != watched { cell.watched = watched }
+        }
+        if let header = continueWatchingCollectionReusableView, header.window != nil, !header.onDeck.isEmpty,
+           let carousel = header.collectionView {
+            // Reconfigured, not reloaded: a focused card keeps the focus.
+            carousel.reconfigureItems(at: carousel.indexPathsForVisibleItems)
+        }
+    }
+
     override func collectionViewDidReloadData(_ collectionView: UICollectionView) {
         super.collectionViewDidReloadData(collectionView)
         
@@ -260,6 +280,10 @@ class CollectionViewController: ResponsiveCollectionViewController, UICollection
                 let cell = collectionView.dequeueReusableCell(withReuseIdentifier: identifier, for: indexPath) as! CoverCollectionViewCell
                 cell.titleLabel.text = media.title
                 cell.watched = media.isWatched
+                // VoiceOver reads the title of every poster, focused or not
+                // (tvOS hides the label of the unfocused ones).
+                cell.isAccessibilityElement = true
+                cell.accessibilityLabel = media.title
                 
                 
 #if os(tvOS)

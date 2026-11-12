@@ -172,24 +172,61 @@ class MainViewController: UIViewController, CollectionViewControllerDelegate {
         navigationController?.navigationBar.tintColor = .app
     }
     
+    /// What the grid showed when another screen covered it (a page pushed,
+    /// another tab): its items and the Continue Watching titles.
+    private var shownWhenLeft: (items: [[AnyHashable]], continueWatching: [String])?
+
+    /// The Continue Watching row's titles (Movies and Shows grids only).
+    private var continueWatchingIDs: [String] {
+        if self is MoviesViewController { return WatchedlistManager<Movie>.movie.getOnDeck() }
+        if self is ShowsViewController { return WatchedlistManager<Episode>.episode.getOnDeck() }
+        return []
+    }
+
+    override dynamic func viewWillDisappear(_ animated: Bool) {
+        super.viewWillDisappear(animated)
+        shownWhenLeft = (collectionViewController?.dataSources ?? [], continueWatchingIDs)
+    }
+
     override dynamic func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)
-        
+
         setNeedsFocusUpdate()
         updateFocusIfNeeded()
-        
+
         environmentsToFocus.removeAll()
-        
+
         collectionView?.setNeedsFocusUpdate()
         collectionView?.updateFocusIfNeeded()
-        
-        collectionView?.reloadData()
+
+        refreshShownContent()
+    }
+
+    /// Back on the grid (a page popped, a tab selected again): it comes back
+    /// exactly as it was left, focus included. Only when its items or the
+    /// Continue Watching titles changed meanwhile (the Watchlist reloaded, a
+    /// title started or finished) is it reloaded; otherwise the posters'
+    /// watched marks and the Continue Watching progress are updated in place.
+    /// (Reloading on every return redrew every poster, from the placeholder
+    /// for those not in memory, and moved the focus.)
+    private func refreshShownContent() {
+        guard let collectionView, let collectionViewController else { return }
+        let continueWatching = continueWatchingIDs
+        guard let left = shownWhenLeft,
+              left.items == collectionViewController.dataSources,
+              left.continueWatching == continueWatching else {
+            collectionView.reloadData()
+            return
+        }
+        collectionViewController.refreshVisibleItemsInPlace()
     }
 
     override dynamic func viewDidLoad() {
         super.viewDidLoad()
 
         collectionViewController.paginated = true
+        // The grid's name for VoiceOver tools and the tvOS UI tests.
+        collectionView?.accessibilityIdentifier = "MediaGrid.\(type(of: self))"
         load(page: 1)
 
         #if os(tvOS)
@@ -248,7 +285,7 @@ extension MainViewController {
     static func loadDetail(of media: Media, behind loadingViewController: UIViewController, autoPlay: Bool) {
 #if os(tvOS)
         if let destination = loadingViewController as? TVLoadingViewController {
-            destination.loadView() // Initialize the @IBOutlets
+            destination.loadViewIfNeeded() // Initialize the @IBOutlets
 
             if let image = media.smallCoverImage, let url = URL(string: image) {
                 destination.backgroundImageView.af.setImage(withURL: url)
@@ -258,11 +295,38 @@ extension MainViewController {
         }
 #endif
 
-        /// Replaces the loading screen with the page (or an error page).
+        /// Replaces the loading screen with the page (or an error page), in
+        /// one change of the navigation stack under a 0.5 s fade. (The page
+        /// used to be pushed over the loading screen, which was taken out of
+        /// the stack 0.5 s later: Back during that fade went to the loading
+        /// screen, then that removal ran in the middle of the pop and could
+        /// leave a spinner that never went away.)
         func replaceLoadingScreen(with media: Media?, error: NSError?) {
             guard let navigationController = loadingViewController.navigationController,
-                navigationController.visibleViewController === loadingViewController // Make sure we're still loading and the user hasn't dismissed the view.
+                navigationController.visibleViewController === loadingViewController, // Make sure we're still loading and the user hasn't dismissed the view.
+                (navigationController as? TVNavigationController)?.isGoingBack != true // nor pressed Back while the loading screen slid in
                 else { return }
+            // A transition still running (UIKit would drop this change): after it.
+            if let coordinator = navigationController.transitionCoordinator {
+                let retry = { DispatchQueue.main.async { replaceLoadingScreen(with: media, error: error) } }
+                if !coordinator.animate(alongsideTransition: nil, completion: { _ in retry() }) {
+                    retry()
+                }
+                return
+            }
+            guard let index = navigationController.viewControllers.firstIndex(where: { $0 === loadingViewController }) else { return }
+
+            let page: UIViewController
+            var detailViewController: GlassDetailHostingController?
+            if let error = error {
+                page = TVErrorPageViewController(error: error)
+            } else if let media = media {
+                let vc = GlassDetailHostingController(media: media, autoPlay: autoPlay)
+                detailViewController = vc
+                page = vc
+            } else {
+                return
+            }
 
             let transition = CATransition()
             transition.duration = 0.5
@@ -270,34 +334,16 @@ extension MainViewController {
             transition.type = CATransitionType.fade
             navigationController.view.layer.add(transition, forKey: nil)
 
-            var detailViewController: GlassDetailHostingController?
+            var viewControllers = navigationController.viewControllers
+            viewControllers[index] = page
+            navigationController.setViewControllers(viewControllers, animated: false)
 
-            defer {
+            if autoPlay, let detailViewController {
                 DispatchQueue.main.asyncAfter(deadline: .now() + transition.duration) {
-                    var viewControllers = navigationController.viewControllers
-                    if let index = viewControllers.firstIndex(where: {$0 === loadingViewController}) {
-                        viewControllers.remove(at: index)
-                        navigationController.setViewControllers(viewControllers, animated: false)
-                    }
-
-                    if autoPlay {
-                        detailViewController?.startAutoPlay()
-                    }
+                    // Not over another screen if the user left the page meanwhile.
+                    guard detailViewController.navigationController?.topViewController === detailViewController else { return }
+                    detailViewController.startAutoPlay()
                 }
-            }
-
-            if let error = error {
-                let vc = UIViewController()
-                let view: ErrorBackgroundView? = .fromNib()
-
-                view?.setUpView(error: error)
-                vc.view = view
-
-                navigationController.pushViewController(vc, animated: false)
-            } else if let media = media {
-                let vc = GlassDetailHostingController(media: media, autoPlay: autoPlay)
-                detailViewController = vc
-                navigationController.pushViewController(vc, animated: false)
             }
         }
 
@@ -306,14 +352,8 @@ extension MainViewController {
             // loading screen's own push (TVNavigationController's 0.6 s
             // animation) is still running. UIKit drops navigation changes made
             // during a transition (the page would never open), so the swap
-            // waits for that push to end.
-            if let coordinator = loadingViewController.navigationController?.transitionCoordinator {
-                coordinator.animate(alongsideTransition: nil) { _ in
-                    replaceLoadingScreen(with: media, error: error)
-                }
-            } else {
-                replaceLoadingScreen(with: media, error: error)
-            }
+            // waits for that push to end (`replaceLoadingScreen`).
+            replaceLoadingScreen(with: media, error: error)
         }
     }
 }

@@ -30,11 +30,21 @@ extension SearchViewController {
         searchBar.keyboardAppearance = .dark
         searchBar.searchBarStyle = .minimal
         searchBar.sizeToFit()
+
+        // The keyboard and the results are in place from the first frame the
+        // tab shows (they were added once the tab had appeared: the first
+        // visit to Search showed an empty screen, then the keyboard popped in).
+        installSearchContainerIfNeeded()
     }
     
     override func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)
 
+        installSearchContainerIfNeeded()
+        installResultsFocusGuide()
+    }
+
+    private func installSearchContainerIfNeeded() {
         searchContainerViewController = searchContainerViewController ?? {
             let container = UISearchContainerViewController(searchController: searchController)
 
@@ -57,8 +67,6 @@ extension SearchViewController {
 
             return container
         }()
-
-        installResultsFocusGuide()
     }
 
     /// tvOS focus engine picks the focusable view geometrically closest to

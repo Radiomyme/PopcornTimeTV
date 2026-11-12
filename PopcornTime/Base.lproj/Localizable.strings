@@ -292,6 +292,7 @@
 /* 5.1: Detail pages (GlassDetailView, tvOS) */
 "In Watchlist" = "In Watchlist";
 "Add to Watchlist" = "Add to Watchlist";
+"Remove from Watchlist" = "Remove from Watchlist";
 "Mark as Watched" = "Mark as Watched";
 "Mark as Unwatched" = "Mark as Unwatched";
 "Download" = "Download";
