@@ -480,6 +480,12 @@
 
 /* (No Commment) */
 "Trending" = "الأعلى مشاهدة";
+"Top 100" = "أفضل 100";
+"The Pirate Bay could not be reached." = "تعذّر الوصول إلى The Pirate Bay.";
+"The titles of the Top 100 could not be loaded. Try again later." = "تعذّر تحميل عناوين قائمة أفضل 100. حاول مرة أخرى لاحقًا.";
+"Top 100 Unavailable" = "قائمة أفضل 100 غير متاحة";
+"The site may be blocked on your network. Try again later." = "قد يكون الموقع محظورًا على شبكتك. حاول مرة أخرى لاحقًا.";
+"Try Again" = "إعادة المحاولة";
 
 /* (No Commment) */
 "Try adding movies or shows to your watchlist." = "حاول اضافة فيلم او مسلسل للمفضلة‫‬";

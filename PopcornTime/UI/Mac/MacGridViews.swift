@@ -11,10 +11,21 @@ final class MacMoviesViewModel: ObservableObject {
     @Published var isLoading = false
     @Published var hasMore = true
     @Published var errorMessage: String?
+    @Published var errorTitle: String?
 
     private var currentPage = 1
     private(set) var filter: MovieManager.Filters = .trending
     private(set) var genre: NetworkManager.Genres = .all
+    /// Bumped by `reload`: a load started for an older list is ignored when
+    /// it lands, and never keeps the grid "loading".
+    private var generation = 0
+
+    init() {
+        #if DEBUG
+        MacDebugHooks.applySourceSwitches()
+        if let filter = MacDebugHooks.movieFilter { self.filter = filter }
+        #endif
+    }
 
     func setFilter(_ newFilter: MovieManager.Filters) {
         filter = newFilter
@@ -27,10 +38,13 @@ final class MacMoviesViewModel: ObservableObject {
     }
 
     func reload() {
+        generation += 1
         currentPage = 1
         movies = []
         hasMore = true
         errorMessage = nil
+        errorTitle = nil
+        isLoading = false
         loadMore()
     }
 
@@ -39,11 +53,17 @@ final class MacMoviesViewModel: ObservableObject {
         isLoading = true
         let page = currentPage
         let captured = (filter, genre)
+        let generation = self.generation
         PopcornKit.loadMovies(page, filterBy: captured.0, genre: captured.1) { [weak self] results, error in
             DispatchQueue.main.async {
-                guard let self = self, self.filter == captured.0, self.genre == captured.1 else { return }
+                guard let self = self, self.generation == generation else { return }
                 self.isLoading = false
-                if let error = error { self.errorMessage = error.localizedDescription; self.hasMore = false; return }
+                if let error = error {
+                    self.errorTitle = MacGridError.title(for: error)
+                    self.errorMessage = MacGridError.message(for: error)
+                    self.hasMore = false
+                    return
+                }
                 let new = results ?? []
                 if new.isEmpty { self.hasMore = false } else {
                     self.movies.append(contentsOf: new.filter { incoming in
@@ -74,15 +94,16 @@ struct MacMoviesGridView: View {
             }
             .padding(20)
             if viewModel.isLoading { ProgressView().padding() }
-            if let message = viewModel.errorMessage {
-                Text(message).foregroundStyle(.secondary).padding()
-            }
+            MacGridStatus(isEmpty: viewModel.movies.isEmpty, isLoading: viewModel.isLoading,
+                          hasMore: viewModel.hasMore, errorTitle: viewModel.errorTitle,
+                          errorMessage: viewModel.errorMessage, systemImage: "film") { viewModel.reload() }
         }
         .navigationTitle(Text("Movies"))
         .toolbar {
             Picker("Filter", selection: Binding(get: { viewModel.filter },
                                                 set: { viewModel.setFilter($0) })) {
                 Text("Trending").tag(MovieManager.Filters.trending)
+                Text("Top 100").tag(MovieManager.Filters.top100)
                 Text("Popular").tag(MovieManager.Filters.popularity)
                 Text("Top Rated").tag(MovieManager.Filters.rating)
                 Text("Recently Added").tag(MovieManager.Filters.date)
@@ -108,10 +129,21 @@ final class MacShowsViewModel: ObservableObject {
     @Published var isLoading = false
     @Published var hasMore = true
     @Published var errorMessage: String?
+    @Published var errorTitle: String?
 
     private var currentPage = 1
     private(set) var filter: ShowManager.Filters = .trending
     private(set) var genre: ShowManager.Genres = .all
+    /// Bumped by `reload`: a load started for an older list is ignored when
+    /// it lands, and never keeps the grid "loading".
+    private var generation = 0
+
+    init() {
+        #if DEBUG
+        MacDebugHooks.applySourceSwitches()
+        if let filter = MacDebugHooks.showFilter { self.filter = filter }
+        #endif
+    }
 
     func setFilter(_ newFilter: ShowManager.Filters) {
         filter = newFilter
@@ -124,10 +156,13 @@ final class MacShowsViewModel: ObservableObject {
     }
 
     func reload() {
+        generation += 1
         currentPage = 1
         shows = []
         hasMore = true
         errorMessage = nil
+        errorTitle = nil
+        isLoading = false
         loadMore()
     }
 
@@ -136,16 +171,26 @@ final class MacShowsViewModel: ObservableObject {
         isLoading = true
         let page = currentPage
         let captured = (filter, genre)
+        let generation = self.generation
         PopcornKit.loadShows(page, filterBy: captured.0, genre: captured.1) { [weak self] results, error in
             DispatchQueue.main.async {
-                guard let self = self, self.filter == captured.0, self.genre == captured.1 else { return }
+                guard let self = self, self.generation == generation else { return }
                 self.isLoading = false
-                if let error = error { self.errorMessage = error.localizedDescription; self.hasMore = false; return }
+                if let error = error {
+                    self.errorTitle = MacGridError.title(for: error)
+                    self.errorMessage = MacGridError.message(for: error)
+                    self.hasMore = false
+                    return
+                }
                 let new = results ?? []
                 if new.isEmpty { self.hasMore = false } else {
                     self.shows.append(contentsOf: new.filter { incoming in
                         !self.shows.contains(where: { $0.id == incoming.id })
                     })
+                    // "A - Z": each page is an unordered batch, re-sort the list.
+                    if captured.0 == .name {
+                        self.shows.sort { $0.title.localizedCaseInsensitiveCompare($1.title) == .orderedAscending }
+                    }
                     self.currentPage = page + 1
                 }
             }
@@ -171,15 +216,16 @@ struct MacShowsGridView: View {
             }
             .padding(20)
             if viewModel.isLoading { ProgressView().padding() }
-            if let message = viewModel.errorMessage {
-                Text(message).foregroundStyle(.secondary).padding()
-            }
+            MacGridStatus(isEmpty: viewModel.shows.isEmpty, isLoading: viewModel.isLoading,
+                          hasMore: viewModel.hasMore, errorTitle: viewModel.errorTitle,
+                          errorMessage: viewModel.errorMessage, systemImage: "tv") { viewModel.reload() }
         }
         .navigationTitle(Text("Shows"))
         .toolbar {
             Picker("Filter", selection: Binding(get: { viewModel.filter },
                                                 set: { viewModel.setFilter($0) })) {
                 Text("Trending").tag(ShowManager.Filters.trending)
+                Text("Top 100").tag(ShowManager.Filters.top100)
                 Text("Popular").tag(ShowManager.Filters.popularity)
                 Text("Top Rated").tag(ShowManager.Filters.rating)
                 Text("Recently Added").tag(ShowManager.Filters.date)
@@ -195,6 +241,58 @@ struct MacShowsGridView: View {
             .pickerStyle(.menu)
         }
         .task { if viewModel.shows.isEmpty { viewModel.loadMore() } }
+    }
+}
+
+// MARK: - Grid status
+
+/// Load errors of the grids: The Pirate Bay's Top 100 (`PirateBayTop100`)
+/// gets its own title and a hint, as the site is blocked on some networks.
+enum MacGridError {
+    static func title(for error: NSError) -> String {
+        return error.domain == PirateBayTop100.errorDomain ? "Top 100 Unavailable".localized : "Error".localized
+    }
+
+    static func message(for error: NSError) -> String {
+        return PirateBayTop100.message(for: error)
+    }
+}
+
+/// Under a grid: the load error (a full message with Try Again while the
+/// grid is empty, a line under the posters otherwise), or "No results" for a
+/// list that came back empty (the Top 100 filtered by a genre none of its
+/// titles has, say).
+struct MacGridStatus: View {
+    let isEmpty: Bool
+    let isLoading: Bool
+    let hasMore: Bool
+    let errorTitle: String?
+    let errorMessage: String?
+    let systemImage: String
+    let retry: () -> Void
+
+    var body: some View {
+        if let errorMessage {
+            if isEmpty {
+                ContentUnavailableView {
+                    Label { Text(verbatim: errorTitle ?? "Error".localized) } icon: {
+                        Image(systemName: "exclamationmark.triangle")
+                    }
+                } description: {
+                    Text(verbatim: errorMessage)
+                } actions: {
+                    Button("Try Again", action: retry)
+                }
+                .padding(.top, 60)
+            } else {
+                Text(verbatim: errorMessage).foregroundStyle(.secondary).padding()
+            }
+        } else if isEmpty && !isLoading && !hasMore {
+            ContentUnavailableView {
+                Label { Text("No results") } icon: { Image(systemName: systemImage) }
+            }
+            .padding(.top, 60)
+        }
     }
 }
 

@@ -480,6 +480,12 @@
 
 /* (No Commment) */
 "Trending" = "In Tendenza";
+"Top 100" = "Top 100";
+"The Pirate Bay could not be reached." = "Impossibile raggiungere The Pirate Bay.";
+"The titles of the Top 100 could not be loaded. Try again later." = "Impossibile caricare i titoli della Top 100. Riprova più tardi.";
+"Top 100 Unavailable" = "Top 100 non disponibile";
+"The site may be blocked on your network. Try again later." = "Il sito potrebbe essere bloccato sulla tua rete. Riprova più tardi.";
+"Try Again" = "Riprova";
 
 /* (No Commment) */
 "Try adding movies or shows to your watchlist." = "Prova ad aggiungere Film o Serie TV alla tua watchlist.";

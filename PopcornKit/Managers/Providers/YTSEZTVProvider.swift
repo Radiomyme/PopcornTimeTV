@@ -114,9 +114,15 @@ public final class YTSEZTVProvider: MediaProvider {
                            order: NetworkManager.Orders,
                            completion: @escaping ([Movie]?, NSError?) -> Void) {
 
+        // Top 100: The Pirate Bay's most seeded movies, mapped to IMDb titles.
+        // A search typed while it is selected searches the catalog as usual.
+        if filter == .top100, (searchTerm ?? "").isEmpty {
+            return PirateBayTop100.shared.movies(page: page, genre: genre, completion: completion)
+        }
+
         let sortBy: String = {
             switch filter {
-            case .trending:   return "download_count"
+            case .trending, .top100: return "download_count"
             case .popularity: return "seeds"
             case .rating:     return "rating"
             case .date:       return "date_added"
@@ -172,6 +178,18 @@ public final class YTSEZTVProvider: MediaProvider {
             print("[YTS] parsed \(ytsMovies.count)/\(raw.count) movies")
         }
 
+        // Search: Cinemeta (every IMDb title) after T4P + YTS, so titles
+        // neither catalog has are found too. Not paginated: page 1 only; its
+        // results carry no genres: not with a genre filter.
+        var cinemetaMovies: [Movie] = []
+        if let term = searchTerm, !term.trimmingCharacters(in: .whitespaces).isEmpty, page <= 1, genre == .all {
+            group.enter()
+            CinemetaClient.searchTitles(.movie, query: term, limit: 40) { metas in
+                cinemetaMovies = YTSEZTVProvider.relevantCinemeta(metas, query: term).compactMap(Movie.init(cinemeta:))
+                group.leave()
+            }
+        }
+
         group.enter()
         Time4PopcornClient.shared.movies(page: page, searchTerm: searchTerm) { movies in
             var result = movies
@@ -190,18 +208,22 @@ public final class YTSEZTVProvider: MediaProvider {
         }
 
         group.notify(queue: .main) {
-            if ytsMovies.isEmpty && t4pMovies.isEmpty {
+            if ytsMovies.isEmpty && t4pMovies.isEmpty && cinemetaMovies.isEmpty {
                 completion(ytsError == nil ? [] : nil, ytsError)
                 return
             }
-            // T4P first (primary), YTS appended as fallback/supplement. If T4P
-            // has no answer, the grid is just the YTS results.
+            // T4P first (primary), YTS appended as fallback/supplement, then
+            // Cinemeta's search results. If T4P has no answer, the grid is
+            // just the YTS results.
             var seen = Set(t4pMovies.map { $0.id })
             var merged = t4pMovies
-            for movie in ytsMovies where seen.insert(movie.id).inserted {
+            for movie in ytsMovies + cinemetaMovies where seen.insert(movie.id).inserted {
                 merged.append(movie)
             }
-            print("[Movies] T4P \(t4pMovies.count) + YTS \(ytsMovies.count) -> \(merged.count) (page \(page))")
+            if let term = searchTerm, page <= 1 {
+                merged = YTSEZTVProvider.exactFirst(merged, query: term) { $0.title }
+            }
+            print("[Movies] T4P \(t4pMovies.count) + YTS \(ytsMovies.count) + Cinemeta \(cinemetaMovies.count) -> \(merged.count) (page \(page))")
             completion(merged, nil)
         }
     }
@@ -258,6 +280,13 @@ public final class YTSEZTVProvider: MediaProvider {
     }
 
     public func getMovieInfo(imdbId: String, completion: @escaping (Movie?, NSError?) -> Void) {
+        getMovieInfo(imdbId: imdbId, extraSources: true, completion: completion)
+    }
+
+    /// `extraSources` false: no The Pirate Bay / Knaben search (posters and
+    /// metadata only, e.g. the Continue Watching row: a burst of searches for
+    /// torrents nobody looks at).
+    public func getMovieInfo(imdbId: String, extraSources: Bool, completion: @escaping (Movie?, NSError?) -> Void) {
         // Strings, not Bool: Alamofire sends `true` as "1", which YTS ignores
         // (no cast came back).
         let params: [String: Any] = [
@@ -270,12 +299,40 @@ public final class YTSEZTVProvider: MediaProvider {
         // aggregator (a dozen extra indexers — REMUX, HDR, multi-audio) and
         // the Time4Popcorn backend (extra scraped releases) in parallel,
         // then merge every torrent list by info-hash.
+        //
+        // The Pirate Bay and Knaben (`ExtraTorrentSources`) are searched by
+        // "Title Year" for every distinct title + year YTS, T4P and Cinemeta
+        // give, as each answers; once YTS, Torrentio and T4P are in, the page
+        // waits at most `ExtraTorrentSources.grace` more for them, then
+        // filters what arrived with every source's titles and years. Cinemeta
+        // (fast, but optional) also stands in for the metadata of a title
+        // neither YTS nor T4P has (found by the Cinemeta search): only then
+        // does the page wait for it.
         let group = DispatchGroup()
         var ytsMovie: Movie?
+        var ytsTitles: [String] = []
         var ytsError: NSError?
         var aggregated: [Torrent] = []
         var t4pMovie: Movie?
         var t4p: [Torrent] = []
+        var cinemetaMeta: [String: Any]?
+        var cinemetaDone = false
+        var whenCinemetaDone: (() -> Void)?
+        // Main queue (Alamofire and T4P call back there; Cinemeta hops to it).
+        let search = extraSources ? ExtraTorrentSources.shared.movieSearch(imdbId: imdbId) : nil
+
+        CinemetaClient.meta(.movie, imdbId: imdbId) { meta in
+            DispatchQueue.main.async {
+                // A series asked as a movie comes back with a "2025–" range.
+                if let meta = meta, let info = meta["releaseInfo"] as? String, info.count == 4 {
+                    cinemetaMeta = meta
+                    search?.offer(title: meta["name"] as? String, year: Int(info), yearIsReliable: false)
+                }
+                cinemetaDone = true
+                whenCinemetaDone?()
+                whenCinemetaDone = nil
+            }
+        }
 
         group.enter()
         attempt(hosts: orderedHosts, path: Path.movieInfo, params: params) { data, error in
@@ -290,6 +347,8 @@ public final class YTSEZTVProvider: MediaProvider {
             ytsMovie = Movie(yts: movie)
             if (movie["id"] as? Int ?? 0) > 0 {   // 0 = a title YTS doesn't have
                 self.detailsCache.setObject(movie as NSDictionary, forKey: imdbId as NSString)
+                ytsTitles = [movie["title"], movie["title_english"]].compactMap { $0 as? String }
+                search?.offer(title: movie["title"] as? String, year: movie["year"] as? Int)
             }
         }
 
@@ -303,21 +362,91 @@ public final class YTSEZTVProvider: MediaProvider {
         Time4PopcornClient.shared.movieDetail(imdbId: imdbId) { movie, torrents in
             t4pMovie = movie
             t4p = torrents
+            search?.offer(title: movie?.title, year: movie.flatMap { Int($0.year) })
             group.leave()
         }
 
         group.notify(queue: .main) {
-            // Prefer YTS's richer metadata, but fall back to T4P's so a
-            // T4P-only title (absent from YTS) is still openable.
-            guard var movie = ytsMovie ?? t4pMovie else {
-                completion(nil, ytsError)
-                return
+            func finish() {
+                // Prefer YTS's richer metadata, but fall back to T4P's so a
+                // T4P-only title (absent from YTS) is still openable, then to
+                // Cinemeta's (a title only the Cinemeta search found).
+                guard let base = ytsMovie ?? t4pMovie ?? cinemetaMeta.flatMap(Movie.init(cinemeta:)) else {
+                    completion(nil, ytsError)
+                    return
+                }
+                // Every source's title and year count: they don't always agree
+                // (Amélie: 2001 on YTS, 2002 on Cinemeta). Read when the
+                // searches are in: Cinemeta may have answered meanwhile.
+                func identity() -> ReleaseMatch.MovieIdentity {
+                    var titles: [String] = []
+                    for title in [base.title] + ytsTitles + [t4pMovie?.title, cinemetaMeta?["name"] as? String].compactMap({ $0 })
+                        where !title.isEmpty && !titles.contains(title) {
+                        titles.append(title)
+                    }
+                    let years = Set([base.year, t4pMovie?.year ?? "", (cinemetaMeta?["releaseInfo"] as? String) ?? ""]
+                        .compactMap { Int($0.prefix(4)) }.filter { $0 > 0 })
+                    return ReleaseMatch.MovieIdentity(titles: titles, years: years, imdbId: imdbId)
+                }
+                func deliver(_ extra: [Torrent]) {
+                    var movie = base
+                    let before = movie.torrents.count
+                    let legacy = aggregated + t4p
+                    let added = ExtraTorrentSources.novel(extra, beside: movie.torrents + legacy)
+                    movie.torrents = TorrentioClient.merge(movie.torrents, with: legacy + added)
+                    print("[YTS+Torrentio+T4P+TPB/Knaben] \(imdbId): \(before) base + \(aggregated.count) aggregated + \(t4p.count) t4p + \(added.count)/\(extra.count) new extra -> \(movie.torrents.count) torrents")
+                    completion(movie, nil)
+                }
+                guard let search = search else { return deliver([]) }
+                search.finish(identity: identity, completion: deliver)
             }
-            let before = movie.torrents.count
-            movie.torrents = TorrentioClient.merge(movie.torrents, with: aggregated + t4p)
-            print("[YTS+Torrentio+T4P] \(imdbId): \(before) base + \(aggregated.count) aggregated + \(t4p.count) t4p -> \(movie.torrents.count) torrents")
-            completion(movie, nil)
+            if ytsMovie == nil && t4pMovie == nil && !cinemetaDone {
+                whenCinemetaDone = finish   // only Cinemeta can name it
+            } else {
+                finish()
+            }
         }
+    }
+
+    // MARK: - Search ranking
+
+    /// The Cinemeta search results worth adding to a search: real titles
+    /// only (a start year, at most next year: no bare stub, nothing merely
+    /// announced); Cinemeta's first three (its most popular matches, alternate
+    /// titles included: "l'odyssée" finds "The Odyssey"), then those whose
+    /// title holds every word searched (accents and punctuation ignored), in
+    /// Cinemeta's order; ten at most. Loosely related titles further down
+    /// ("la haine" → "The Hate U Give") are left out.
+    static func relevantCinemeta(_ metas: [[String: Any]], query: String) -> [[String: Any]] {
+        let wanted = Set(ReleaseMatch.words(query))
+        let nextYear = Calendar(identifier: .gregorian).component(.year, from: Date()) + 1
+        let real = metas.filter { meta in
+            guard let year = CinemetaMatching.startYear(meta), (1880...nextYear).contains(year) else { return false }
+            return meta["name"] is String
+        }
+        var result: [[String: Any]] = []
+        for (index, meta) in real.enumerated() where result.count < 10 {
+            let name = meta["name"] as? String ?? ""
+            if index < 3 || (!wanted.isEmpty && wanted.isSubset(of: ReleaseMatch.words(name))) { result.append(meta) }
+        }
+        return result
+    }
+
+    /// Search results with the titles that are exactly what was typed first,
+    /// then those that start with it, then the rest, each in their order:
+    /// "hope" lists "Hope" (2026) before "Hope Floats" and "Grace and Hope".
+    static func exactFirst<Item>(_ items: [Item], query: String, title: (Item) -> String) -> [Item] {
+        let wanted = ReleaseMatch.titleWords(query)
+        guard !wanted.isEmpty else { return items }
+        func tier(_ item: Item) -> Int {
+            let words = ReleaseMatch.titleWords(title(item))
+            if words == wanted { return 0 }
+            if words.starts(with: wanted) { return 1 }
+            return 2
+        }
+        return items.enumerated()
+            .sorted { tier($0.element) != tier($1.element) ? tier($0.element) < tier($1.element) : $0.offset < $1.offset }
+            .map(\.element)
     }
 
     // MARK: - Shows (EZTV + TVMaze)
@@ -336,6 +465,12 @@ public final class YTSEZTVProvider: MediaProvider {
                           searchTerm: String?,
                           order: NetworkManager.Orders,
                           completion: @escaping ([Show]?, NSError?) -> Void) {
+
+        // Top 100: The Pirate Bay's most seeded shows, mapped to IMDb titles.
+        // A search typed while it is selected searches the catalog as usual.
+        if filter == .top100, (searchTerm ?? "").isEmpty {
+            return PirateBayTop100.shared.shows(page: page, genre: genre, completion: completion)
+        }
 
         // Base source (TVMaze search or EZTV browse) and the Time4Popcorn
         // catalog run in parallel; results merge by imdb id so the shows grid
@@ -357,6 +492,17 @@ public final class YTSEZTVProvider: MediaProvider {
             }
             t4pShows = result
             group.leave()
+        }
+
+        // Search: Cinemeta's series (every IMDb title) beside TVMaze's.
+        // Page 1 only, and not with a genre filter (no genres in its results).
+        var cinemetaShows: [Show] = []
+        if let term = searchTerm, !term.trimmingCharacters(in: .whitespaces).isEmpty, page <= 1, genre == .all {
+            group.enter()
+            CinemetaClient.searchTitles(.series, query: term, limit: 40) { metas in
+                cinemetaShows = YTSEZTVProvider.relevantCinemeta(metas, query: term).compactMap(Show.init(cinemeta:))
+                group.leave()
+            }
         }
 
         group.enter()
@@ -396,17 +542,21 @@ public final class YTSEZTVProvider: MediaProvider {
         }
 
         group.notify(queue: .main) {
-            if baseShows.isEmpty && t4pShows.isEmpty {
+            if baseShows.isEmpty && t4pShows.isEmpty && cinemetaShows.isEmpty {
                 completion(baseError == nil ? [] : nil, baseError)
                 return
             }
-            // T4P first (primary), EZTV/TVMaze appended as fallback/supplement.
+            // T4P first (primary), EZTV/TVMaze appended as fallback/supplement,
+            // then Cinemeta's search results.
             var seen = Set(t4pShows.map { $0.id })
             var merged = t4pShows
-            for show in baseShows where seen.insert(show.id).inserted {
+            for show in baseShows + cinemetaShows where seen.insert(show.id).inserted {
                 merged.append(show)
             }
-            print("[Shows] T4P \(t4pShows.count) + base \(baseShows.count) -> \(merged.count) (page \(page))")
+            if let term = searchTerm, page <= 1 {
+                merged = YTSEZTVProvider.exactFirst(merged, query: term) { $0.title }
+            }
+            print("[Shows] T4P \(t4pShows.count) + base \(baseShows.count) + Cinemeta \(cinemetaShows.count) -> \(merged.count) (page \(page))")
             completion(merged, nil)
         }
     }
@@ -501,7 +651,12 @@ public final class YTSEZTVProvider: MediaProvider {
         fetchTVMaze(imdbId: imdbId) { [weak self] tvmaze in
             guard let self = self else { return }
             guard let tvmaze = tvmaze, var show = Show(tvmaze: tvmaze, imdbId: imdbId, episodes: []) else {
-                DispatchQueue.main.async { completion(nil, nil) }
+                // TVMaze doesn't know it (a series only the Cinemeta search
+                // found): Cinemeta's own episode list, torrents at play time.
+                self.cinemetaShow(imdbId: imdbId) { show in
+                    if let show = show { self.cacheQueue.sync { self.showCache[imdbId] = show } }
+                    completion(show, nil)
+                }
                 return
             }
 
@@ -547,6 +702,43 @@ public final class YTSEZTVProvider: MediaProvider {
                 print("[EZTV] getShowInfo \(imdbId): guide=\(guide.count) torrents=\(torrentEntries.count) episodes=\(show.episodes.count)")
                 completion(show, nil)
             }
+        }
+    }
+
+    /// A show TVMaze doesn't know, from Cinemeta: its meta and its episode
+    /// list (`videos`: season, episode, name, release date, overview,
+    /// thumbnail; specials left out). Main queue.
+    private func cinemetaShow(imdbId: String, completion: @escaping (Show?) -> Void) {
+        CinemetaClient.seriesWithEpisodes(imdbId: imdbId) { meta in
+            guard let meta = meta, var show = Show(cinemeta: meta) else { return completion(nil) }
+            let iso = ISO8601DateFormatter()
+            iso.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+            let isoPlain = ISO8601DateFormatter()
+            var episodes: [Episode] = []
+            var seen = Set<String>()
+            for video in (meta["videos"] as? [[String: Any]]) ?? [] {
+                guard let season = video["season"] as? Int, season > 0,
+                      let number = (video["episode"] as? Int) ?? (video["number"] as? Int), number > 0,
+                      seen.insert("\(season)x\(number)").inserted else { continue }
+                let name = ((video["name"] as? String) ?? (video["title"] as? String) ?? "Episode \(number)").removingHtmlEncoding
+                let released = (video["released"] as? String).flatMap { iso.date(from: $0) ?? isoPlain.date(from: $0) }
+                var episode = Episode(
+                    title: name,
+                    id: "\(show.id)-s\(season)e\(number)",
+                    slug: name.slugged,
+                    summary: ((video["overview"] as? String) ?? (video["description"] as? String) ?? "No summary available.".localized).strippedOfHtml,
+                    largeBackgroundImage: video["thumbnail"] as? String,
+                    show: show,
+                    episode: number,
+                    season: season,
+                    firstAirDate: released ?? .distantPast)
+                episode.show = show
+                episodes.append(episode)
+            }
+            episodes.sort { $0.season == $1.season ? $0.episode < $1.episode : $0.season < $1.season }
+            show.episodes = episodes
+            print("[Cinemeta] getShowInfo \(imdbId): TVMaze doesn't know it, \(episodes.count) episodes from Cinemeta")
+            completion(episodes.isEmpty ? nil : show)
         }
     }
 
@@ -623,7 +815,7 @@ public final class YTSEZTVProvider: MediaProvider {
                 result.sort { $0.rating > $1.rating }
             case .year:
                 result.sort { $0.year > $1.year }
-            case .popularity:
+            case .popularity, .top100:
                 // Best proxy EZTV gives us: total seeders across the page's
                 // torrents for that show.
                 let seeds: (Show) -> Int = { $0.episodes.flatMap(\.torrents).map(\.seeds).reduce(0, +) }

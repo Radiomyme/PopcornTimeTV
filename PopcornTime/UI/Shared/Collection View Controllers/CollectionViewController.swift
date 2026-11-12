@@ -147,7 +147,11 @@ class CollectionViewController: ResponsiveCollectionViewController, UICollection
     
     override func numberOfSections(in collectionView: UICollectionView) -> Int {
         collectionView.backgroundView = nil
-        guard dataSources.compactMap({$0}).isEmpty else {
+        // Every section empty: the error, loading or empty background. (The
+        // Swift 5 migration turned the flattening `flatMap` into
+        // `compactMap`, which never sees `[[]]` as empty: no grid showed its
+        // loading, error or empty state since.)
+        guard dataSources.allSatisfy({ $0.isEmpty }) else {
             error = nil
             return dataSources.count
         }

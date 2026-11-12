@@ -35,8 +35,9 @@ public final class TorrentioClient {
 
     /// Public trackers appended to reconstructed magnet links. Torrentio
     /// returns bare info-hashes; without trackers libtorrent would rely on
-    /// DHT alone which is slow to bootstrap on Apple TV.
-    private static let trackers: [String] = [
+    /// DHT alone which is slow to bootstrap on Apple TV. Also used for the
+    /// magnets of the extra sources (`ExtraTorrentSources`).
+    static let trackers: [String] = [
         "udp://tracker.opentrackr.org:1337/announce",
         "udp://open.stealth.si:80/announce",
         "udp://tracker.torrent.eu.org:451/announce",

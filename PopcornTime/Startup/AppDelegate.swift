@@ -7,6 +7,7 @@ import ObjectMapper
 import MarqueeLabel
 import VLCKit
 import GCDWebServer
+import AlamofireImage
 
 public let vlcSettingTextEncoding = "subsdec-encoding"
 
@@ -64,6 +65,11 @@ class AppDelegate: UIResponder, UIApplicationDelegate, UITabBarControllerDelegat
         // debug builds it logs "[DEBUG] Connection sent N bytes on socket X"
         // for every chunk, drowning the console. 3 = warnings and up.
         GCDWebServer.setLogLevel(3)
+
+        // metahub serves some posters as WebP (recent titles, often in the
+        // Top 100), which AlamofireImage refused by content type: the grids
+        // showed placeholders. UIImage decodes WebP since tvOS 14.
+        ImageResponseSerializer.addAcceptableImageContentTypes(["image/webp"])
 
         // Stored preferences written by older versions: subtitle language
         // moved to its own key, Auto Select Quality re-spelled in the current

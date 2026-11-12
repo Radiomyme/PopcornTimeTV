@@ -217,6 +217,12 @@
 "Recently Added" = "Ajouts récents";
 "Top Rated" = "Mieux notés";
 "Trending" = "Tendances";
+"Top 100" = "Top 100";
+"The Pirate Bay could not be reached." = "Impossible de joindre The Pirate Bay.";
+"The titles of the Top 100 could not be loaded. Try again later." = "Impossible de charger les titres du Top 100. Réessayez plus tard.";
+"Top 100 Unavailable" = "Top 100 indisponible";
+"The site may be blocked on your network. Try again later." = "Le site est peut-être bloqué sur votre réseau. Réessayez plus tard.";
+"Try Again" = "Réessayer";
 
 "All" = "Tous";
 "Action" = "Action";

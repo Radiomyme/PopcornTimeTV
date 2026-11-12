@@ -64,7 +64,9 @@ class ContinueWatchingCollectionReusableView: UICollectionReusableView, UICollec
                     .prefix(ContinueWatchingCollectionReusableView.onDeckPrefetchCap))
                 ids.forEach { (id) in
                     group.enter()
-                    PopcornKit.getMovieInfo(id) { (movie, error) in
+                    // Posters only (a pick opens the page, which loads every
+                    // source): no torrent-index search per on-deck movie.
+                    PopcornKit.getMovieInfo(id, extraSources: false) { (movie, error) in
                         if let movie = movie { media.append(movie) }
                         group.leave()
                     }

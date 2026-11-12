@@ -15,12 +15,16 @@ open class ShowManager: NetworkManager {
         case date = "updated"
         case rating = "rating"
         case trending = "trending"
+        /// The Pirate Bay's top 100 (`PirateBayTop100`): one page.
+        case top100 = "top100"
         case name = "name"
 
-        public static let array = [trending, popularity, rating, date, year, name]
+        public static let array = [trending, top100, popularity, rating, date, year, name]
 
         public var string: String {
             switch self {
+            case .top100:
+                return "Top 100".localized
             case .popularity:
                 return "Popular".localized
             case .year:

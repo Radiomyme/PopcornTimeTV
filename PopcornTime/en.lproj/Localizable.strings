@@ -217,6 +217,12 @@
 "Recently Added" = "Recently Added";
 "Top Rated" = "Top Rated";
 "Trending" = "Trending";
+"Top 100" = "Top 100";
+"The Pirate Bay could not be reached." = "The Pirate Bay could not be reached.";
+"The titles of the Top 100 could not be loaded. Try again later." = "The titles of the Top 100 could not be loaded. Try again later.";
+"Top 100 Unavailable" = "Top 100 Unavailable";
+"The site may be blocked on your network. Try again later." = "The site may be blocked on your network. Try again later.";
+"Try Again" = "Try Again";
 
 "All" = "All";
 "Action" = "Action";
