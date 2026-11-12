@@ -108,6 +108,14 @@ struct WhatsNewRelease {
                      titleEN: "More reliable resume and long jumps",
                      bodyEN: "Playback picks up where you left off, and a long jump ahead no longer gets stuck.",
                      platforms: [.tvOS, .iOS]),
+        // Not announced on iOS yet: the code ships there too, but the iOS app
+        // has never run it (tried on an Apple TV and in the Mac app).
+        WhatsNewItem(id: "storage", symbol: "internaldrive",
+                     titleFR: "Des films plus gros que l'espace libre",
+                     bodyFR: "Un film qui ne tient pas dans l'espace libre se lit quand même : seule la partie autour de la lecture reste sur l'appareil, et le retour en arrière s'arrête à ce qui est encore stocké.",
+                     titleEN: "Films larger than the free space",
+                     bodyEN: "A film that doesn't fit in the free space plays anyway: only the part around the playhead stays on the device, and rewinds stop at what is still stored.",
+                     platforms: [.tvOS, .macOS]),
         WhatsNewItem(id: "top100", symbol: "chart.line.uptrend.xyaxis",
                      titleFR: "Le Top 100",
                      bodyFR: "Un nouveau tri pour les films et les séries : les titres les plus partagés du moment sur The Pirate Bay.",

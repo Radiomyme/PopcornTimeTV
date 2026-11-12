@@ -6,8 +6,11 @@ import UIKit
 /// "What's new in version X": the release notes of `WhatsNewRelease.current`
 /// for this platform, as glass cards, with a single Continue button.
 ///
-/// tvOS: full screen, presented by `WhatsNewPresenter` over a blur of the app;
-/// the Continue button has the focus and the Menu button does the same as it.
+/// tvOS: full screen, presented by `WhatsNewPresenter` over a blur of the app.
+/// The title and the Continue button stay put and the cards scroll between
+/// them (more than 5 rows don't fit a 1080p screen): each card takes the
+/// focus, so the remote scrolls through them. Continue has the focus first,
+/// and the Menu button does the same as it.
 /// iOS / macOS: the content of a sheet (`RootTabView`, `MacRootView`).
 struct WhatsNewView: View {
     var release: WhatsNewRelease = .current
@@ -18,6 +21,10 @@ struct WhatsNewView: View {
     static let accent = Color(red: 0.949, green: 0.290, blue: 0.235)
 
     @FocusState private var continueFocused: Bool
+    #if os(tvOS)
+    /// The id of the card that has the focus.
+    @FocusState private var focusedCard: String?
+    #endif
 
     private var items: [WhatsNewItem] { release.items(for: .current) }
 
@@ -28,12 +35,19 @@ struct WhatsNewView: View {
 
     var body: some View {
         #if os(tvOS)
-        VStack(spacing: 30) {
+        VStack(spacing: 26) {
             header
-            grid
+                .padding(.horizontal, 40)
+            ScrollView {
+                grid
+                    // Room for a focused card's lift and shadow inside the
+                    // scroll view, which clips its content.
+                    .padding(.horizontal, 40)
+                    .padding(.vertical, Metrics.scrollInset)
+            }
+            .mask(scrollFade)
             continueButton
         }
-        .padding(.horizontal, 40)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .defaultFocus($continueFocused, true)
         .onExitCommand(perform: onContinue)   // Menu / Back = Continue
@@ -96,11 +110,36 @@ struct WhatsNewView: View {
         #endif
     }
 
+    @ViewBuilder
     private func card(_ item: WhatsNewItem) -> some View {
+        #if os(tvOS)
+        WhatsNewCard(symbol: item.symbol,
+                     title: item.title(french: french),
+                     text: item.body(french: french),
+                     isFocused: focusedCard == item.id)
+            .focusable()
+            .focused($focusedCard, equals: item.id)
+        #else
         WhatsNewCard(symbol: item.symbol,
                      title: item.title(french: french),
                      text: item.body(french: french))
+        #endif
     }
+
+    #if os(tvOS)
+    /// Fades the cards out at the scroll view's top and bottom edges. At rest
+    /// (scrolled to either end) the content's inset keeps every card clear of
+    /// the fades.
+    private var scrollFade: some View {
+        VStack(spacing: 0) {
+            LinearGradient(colors: [.clear, .black], startPoint: .top, endPoint: .bottom)
+                .frame(height: Metrics.scrollInset)
+            Color.black
+            LinearGradient(colors: [.black, .clear], startPoint: .top, endPoint: .bottom)
+                .frame(height: Metrics.scrollInset)
+        }
+    }
+    #endif
 
     private var continueButton: some View {
         SwiftUI.Button(action: onContinue) {
@@ -132,6 +171,9 @@ struct WhatsNewView: View {
         static let cardMinHeight: CGFloat = 140
         /// Cards stretch to the height of their grid row.
         static let cardMaxHeight: CGFloat = .infinity
+        /// The scroll view's content inset and edge fades.
+        static let scrollInset: CGFloat = 30
+        static let cardFocusScale: CGFloat = 1.02
         #else
         static let columns = [GridItem(.adaptive(minimum: 300), spacing: 16)]
         static let gridSpacing: CGFloat = 16
@@ -157,6 +199,8 @@ private struct WhatsNewCard: View {
     let symbol: String
     let title: String
     let text: String
+    /// tvOS: the card has the focus (custom glass gets no system focus effect).
+    var isFocused: Bool = false
 
     private typealias Metrics = WhatsNewView.Metrics
 
@@ -181,6 +225,15 @@ private struct WhatsNewCard: View {
         .padding(Metrics.cardPadding)
         .frame(maxWidth: .infinity, minHeight: Metrics.cardMinHeight, maxHeight: Metrics.cardMaxHeight, alignment: .topLeading)
         .modifier(WhatsNewGlassCard(cornerRadius: Metrics.cardRadius))
+        #if os(tvOS)
+        .overlay {
+            RoundedRectangle(cornerRadius: Metrics.cardRadius, style: .continuous)
+                .strokeBorder(Color.white.opacity(isFocused ? 0.6 : 0), lineWidth: 3)
+        }
+        .scaleEffect(isFocused ? Metrics.cardFocusScale : 1)
+        .shadow(color: .black.opacity(isFocused ? 0.35 : 0), radius: 16, y: 10)
+        .animation(.easeOut(duration: 0.18), value: isFocused)
+        #endif
     }
 }
 
