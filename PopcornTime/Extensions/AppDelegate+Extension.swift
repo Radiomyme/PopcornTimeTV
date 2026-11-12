@@ -298,14 +298,14 @@ extension AppDelegate {
             }()
 
             // Find a smaller candidate from the same media — strictly
-            // smaller `qualityValue` than what we just tried.
-            let smaller: Torrent? = {
-                let candidates = media.torrents.sorted(by: <)
-                guard let currentIdx = candidates.firstIndex(where: { $0.url == torrent.url }) else {
-                    return candidates.dropLast().last
-                }
-                return currentIdx == 0 ? nil : candidates[currentIdx - 1]
-            }()
+            // smaller `qualityValue` than what we just tried (a known
+            // resolution, never a 3D release), the best ranked of those.
+            // Not the next row of the ranking, which is usually the same
+            // resolution; and the failed torrent need not be in
+            // `media.torrents` (an episode's extra-source rows are not).
+            let smaller: Torrent? = media.torrents
+                .filter { $0.qualityValue < torrent.qualityValue && $0.qualityValue > .threeD }
+                .max(by: <)
 
             // Always tear down the half-started loading VC so we can
             // present the alert cleanly.
