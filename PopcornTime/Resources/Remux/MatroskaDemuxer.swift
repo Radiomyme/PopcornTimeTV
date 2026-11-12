@@ -206,6 +206,11 @@ struct MKVFrame {
     var duration: Int64? = nil
     /// `BlockAdditions` keyed by `BlockAddID` (WebVTT cue settings, …).
     var additions: [UInt64: Data] = [:]
+    /// File offset of the Cluster element the frame came from (its ID's
+    /// first byte): where a player seeking to this frame starts reading
+    /// (bounded storage keeps the file from there, see
+    /// `MKVToHLSRemuxSession.segmentSourceOffsets()`). 0 when unknown.
+    var clusterOffset: UInt64 = 0
 }
 
 // MARK: - Matroska demuxer
@@ -516,6 +521,9 @@ final class MatroskaDemuxer {
     /// cluster that hit the end of a growing file) continue that cluster.
     private var lastClusterEnd: UInt64?
     private var lastClusterTimestamp: Int64 = 0
+    /// Start of the last cluster returned: blocks continuing it
+    /// (`lastClusterEnd`) are tagged with it (`MKVFrame.clusterOffset`).
+    private var lastClusterStart: UInt64 = 0
 
     private func resetState() {
         docType = "matroska"
@@ -533,6 +541,7 @@ final class MatroskaDemuxer {
         resyncFrom = nil
         lastClusterEnd = nil
         lastClusterTimestamp = 0
+        lastClusterStart = 0
     }
 
     // MARK: - Headers
@@ -1513,7 +1522,7 @@ final class MatroskaDemuxer {
                     // size, or unknown size at the end of a growing file).
                     let outcome = readClusterChildByChild(start: start, bodyStart: start, declaredEnd: nil,
                                                           inheritedTimestamp: lastClusterTimestamp)
-                    return finish(outcome, start: start)
+                    return finish(outcome, start: start, clusterStart: lastClusterStart)
                 }
                 if id == ID.ebml || id == ID.segment {
                     // A chained segment / concatenated file: this stream ends here.
@@ -1541,9 +1550,14 @@ final class MatroskaDemuxer {
         }
     }
 
-    private func finish(_ outcome: ClusterOutcome, start: UInt64) -> [MKVFrame]? {
+    /// `clusterStart`: the Cluster the frames belong to (nil: the one at
+    /// `start`; a continuation passes the cluster it continues).
+    private func finish(_ outcome: ClusterOutcome, start: UInt64, clusterStart: UInt64? = nil) -> [MKVFrame]? {
         switch outcome {
-        case .complete(let frames):
+        case .complete(var frames):
+            let owner = clusterStart ?? start
+            lastClusterStart = owner
+            for index in frames.indices { frames[index].clusterOffset = owner }
             return frames
         case .incomplete(let region):
             reader.seek(to: start)

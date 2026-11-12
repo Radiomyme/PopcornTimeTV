@@ -80,6 +80,16 @@ class SceneDelegate: UIResponder, UIWindowSceneDelegate {
 private enum DebugLaunchHooks {
     static func run() {
         let defaults = UserDefaults.standard
+        // `-PTDebugPlayTorrent <file>` (BoundedStorageDebugHooks): the normal
+        // play flow on a local .torrent, once the launch screens are up.
+        if let file = BoundedStorageDebugHooks.torrentFile {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
+                print("[BoundedDebug] playing \(file)")
+                AppDelegate.shared.play(Movie(title: "Bounded storage test", id: "tt0000000"),
+                                        torrent: Torrent(url: file, quality: "1080p"))
+            }
+            return
+        }
         let tab = defaults.string(forKey: "PTDebugTab").flatMap { Int($0) }
         let media: Media? = defaults.string(forKey: "PTDebugOpenMovie").map { Movie(title: $0, id: $0) }
             ?? defaults.string(forKey: "PTDebugOpenShow").map { Show(title: $0, id: $0) }

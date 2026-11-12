@@ -19,10 +19,13 @@ extension PCTPlayerViewControllerDelegate {
 #if DEBUG && os(tvOS)
 /// Prints ONLY VLC's audio-pipeline log lines (aout / spdif / eac3 / a52 /
 /// avsamplebuffer…) so the passthrough negotiation is visible in Xcode's
-/// console without libvlc's full debug flood.
+/// console without libvlc's full debug flood — plus the demuxer and video
+/// output VLC picked, its seeks and first picture (bounded storage checks).
 final class VLCAudioLogFilter: NSObject, VLCLogging {
     var level: VLCLogLevel = .debug
-    private let keywords = ["aout", "audio output", "spdif", "eac3", "a52", "passthrough", "avsamplebuffer", "audiounit"]
+    private let keywords = ["aout", "audio output", "spdif", "eac3", "a52", "passthrough", "avsamplebuffer", "audiounit",
+                            "using demux module", "using vout display module", "seek request", "received first picture",
+                            "no spu decoder"]
     func handleMessage(_ message: String, logLevel: VLCLogLevel, context: VLCLogContext?) {
         let module = context?.module ?? ""
         let haystack = (module + " " + message).lowercased()
@@ -102,8 +105,7 @@ class PCTPlayerViewController: UIViewController, VLCMediaPlayerDelegate, UIGestu
         resetIdleTimer()
         mediaplayer.play()
         if mediaplayer.isSeekable {
-            let time = NSNumber(value: progressBar.scrubbingProgress * streamDuration)
-            mediaplayer.time = VLCTime(number: time)
+            seekLimited(toMilliseconds: NSNumber(value: progressBar.scrubbingProgress * streamDuration))
         }
     }
     
@@ -129,12 +131,13 @@ class PCTPlayerViewController: UIViewController, VLCMediaPlayerDelegate, UIGestu
     }
     
     @IBAction func fastForward() {
+        playheadWatch.noteOwnSeek()
         mediaplayer.jumpForward(30)
         noteUserMovedPlayhead()
     }
     
     @IBAction func rewind() {
-        mediaplayer.jumpBackward(30)
+        jumpBackwardLimited(30)
         noteUserMovedPlayhead()
     }
     
@@ -212,10 +215,13 @@ class PCTPlayerViewController: UIViewController, VLCMediaPlayerDelegate, UIGestu
         workItem?.cancel()
         idleWorkItem?.cancel()
         imageGenerator = nil
+        BoundedStorageSession.session(for: streamer)?.detachHTTPPlayer(self)
         
         // Always delete the stream's partial: the Apple TV sandbox is small
-        // and a kept partial can't be resumed anyway (see Media.play).
-        streamer.cancelStreamingAndDeleteData(true)
+        // and a kept partial can't be resumed anyway (see Media.play). Never
+        // a download's files: the SPM PopcornTorrent deletes a finished
+        // download's folder on `cancelStreamingAndDeleteData(true)`.
+        streamer.cancelStreamingAndDeleteData(!(streamer is PTTorrentDownload))
         
         NotificationCenter.default.removeObserver(self, name: .PTTorrentStatusDidChange, object: nil)
         
@@ -487,10 +493,14 @@ class PCTPlayerViewController: UIViewController, VLCMediaPlayerDelegate, UIGestu
     /// Latched by `isInputReady` once VLC played with its tracks registered.
     private var didReachPlayingWithTracks = false
 
-    /// The file's own text tracks: VLC's text tracks minus the OpenSubtitles
-    /// playback slaves (`ExternalSubtitleLoader.isVLCSlaveTrackId`).
+    /// The file's own text tracks VLC can show: VLC's text tracks minus the
+    /// OpenSubtitles playback slaves (`ExternalSubtitleLoader.isVLCSlaveTrackId`)
+    /// and the tracks no decoder takes (libavformat's demuxer lists SRT /
+    /// ASS / WebVTT tracks with no codec: `BoundedStorageUX.isUndecodableVLCTrack`).
     func embeddedTextTracks() -> [VLCMediaPlayer.Track] {
-        return mediaplayer.textTracks.filter { !ExternalSubtitleLoader.isVLCSlaveTrackId($0.trackId) }
+        return mediaplayer.textTracks.filter {
+            !ExternalSubtitleLoader.isVLCSlaveTrackId($0.trackId) && !BoundedStorageUX.isUndecodableVLCTrack(codec: $0.codec)
+        }
     }
 
     /// True once VLC really plays the input with its tracks registered.
@@ -521,6 +531,10 @@ class PCTPlayerViewController: UIViewController, VLCMediaPlayerDelegate, UIGestu
     func autoSelectSubtitleIfNeeded() {
         guard !didAutoSelectSubtitle, !userChoseSubtitle, isInputReady else { return }
         didAutoSelectSubtitle = true
+        // The file's text tracks VLC lists, and those it can show (a track
+        // without a codec — libavformat's demuxer — is left out).
+        let listed = mediaplayer.textTracks.filter { !ExternalSubtitleLoader.isVLCSlaveTrackId($0.trackId) }
+        print("[Player] text tracks: \(listed.count) listed, \(embeddedTextTracks().count) shown \(listed.map { "'\($0.trackName)'" })")
         guard let code = PlaybackLanguagePreferences.preferredSubtitleLanguageCode else { return }
         let embedded = embeddedTextTracks().filter {
             (PlaybackLanguagePreferences.matches($0.language, code: code)
@@ -708,6 +722,51 @@ class PCTPlayerViewController: UIViewController, VLCMediaPlayerDelegate, UIGestu
         return UIImage(cgImage: image)
     }
     
+    // MARK: - Bounded storage: VLC's demuxer
+
+    /// The bounded-storage options `mediaplayer.media` was made with.
+    private var boundedDemuxerOptions: [String] = []
+
+    /// `url`'s VLC media for a start at `position` (0…1), with bounded
+    /// storage's choice of Matroska demuxer (`BoundedStorageUX.vlcMediaOptions`)
+    /// — added BEFORE the player gets the media: VLCKit 4 opens the input
+    /// when `mediaplayer.media` is set and ignores the options added later
+    /// (measured with 4.0.0a21: ":demux=avformat" added after the
+    /// assignment left VLC on its own demuxer).
+    private func makeVLCMedia(startingAt position: Float) -> VLCMedia? {
+        let vlcMedia = VLCMedia(url: url)
+        boundedDemuxerOptions = BoundedStorageUX.vlcMediaOptions(url: url, session: boundedStorage,
+                                                                 startPosition: position, streamer: streamer)
+        for option in boundedDemuxerOptions { vlcMedia?.addOption(option) }
+        return vlcMedia
+    }
+
+    /// The resume prompt chose another start than `startPosition`: a new
+    /// media when bounded storage picks another demuxer for it (before
+    /// `play()`). The options the old one got after the assignment are
+    /// added again, as they were.
+    private func remakeVLCMediaIfNeeded(startingAt position: Float) {
+        guard mediaplayer.state == .stopped || mediaplayer.state == .opening,
+              BoundedStorageSession.session(for: streamer)?.isBounded == true else { return }
+        let previous = boundedDemuxerOptions
+        guard let vlcMedia = makeVLCMedia(startingAt: position), boundedDemuxerOptions != previous else {
+            boundedDemuxerOptions = previous
+            return
+        }
+        mediaplayer.media = vlcMedia
+        mediaplayer.media?.addOptions(Self.vlcTuningOptions)
+        mediaplayer.media?.addOptions([vlcSettingTextEncoding: SubtitleSettings.shared.encoding])
+    }
+
+    /// The caching / frame-drop options `viewDidLoad` adds to the media.
+    static let vlcTuningOptions: [String: Any] = [
+        "network-caching": NSNumber(value: 5000),
+        "file-caching":    NSNumber(value: 5000),
+        "live-caching":    NSNumber(value: 5000),
+        "drop-late-frames": NSNumber(value: 0),
+        "skip-frames":      NSNumber(value: 0),
+    ]
+
     // MARK: - View Methods
     
     /// Set when VLC takes over from the native (AVPlayer) player: the user has
@@ -744,6 +803,9 @@ class PCTPlayerViewController: UIViewController, VLCMediaPlayerDelegate, UIGestu
             }))
             continueWatchingAlert.addAction(UIAlertAction(title: "Start from Beginning".localized, style: .default, handler: { action in
                 UIDevice.current.userInterfaceIdiom == .tv ? NotificationCenter.default.removeObserver(self, name: .UIViewControllerFocusedViewDidChange, object: continueWatchingAlert) : ()
+                // Bounded storage: the demuxer picked for the resume point
+                // may not be the one for a start at 0:00.
+                self.remakeVLCMediaIfNeeded(startingAt: 0)
                 // The saved resume point is no longer protected: what VLC
                 // plays from 0:00 is saved as is.
                 self.watchProgress.restartFromBeginning()
@@ -772,20 +834,13 @@ class PCTPlayerViewController: UIViewController, VLCMediaPlayerDelegate, UIGestu
 
         mediaplayer.delegate = self
         mediaplayer.drawable = movieView
-        mediaplayer.media = VLCMedia(url: url)
+        mediaplayer.media = makeVLCMedia(startingAt: startPosition)
 
         // Tune VLC for max-quality playback on Apple TV 4K. Larger cache windows
         // hide network jitter on 1080p/2160p streams that PopcornTorrent serves
         // over HTTP localhost while still downloading. Disable VLC's framedrop
         // on slow seeks so high-bitrate sources keep their picture quality.
-        let mediaOptions: [String: Any] = [
-            "network-caching": NSNumber(value: 5000),
-            "file-caching":    NSNumber(value: 5000),
-            "live-caching":    NSNumber(value: 5000),
-            "drop-late-frames": NSNumber(value: 0),
-            "skip-frames":      NSNumber(value: 0),
-        ]
-        mediaplayer.media?.addOptions(mediaOptions)
+        mediaplayer.media?.addOptions(Self.vlcTuningOptions)
 
 #if os(tvOS)
         // Long-form movie audio session: this is what tvOS expects from a
@@ -817,6 +872,19 @@ class PCTPlayerViewController: UIViewController, VLCMediaPlayerDelegate, UIGestu
 #endif
 
         NotificationCenter.default.addObserver(self, selector: #selector(torrentStatusDidChange(_:)), name: .PTTorrentStatusDidChange, object: streamer)
+        // Bounded storage (a film larger than the free space): VLC reads
+        // through PopcornTorrent's server, which moves the window; its
+        // playhead tells the torrent what it may delete behind it.
+        BoundedStorageSession.session(for: streamer)?.attachHTTPPlayer(self, readAheadSeconds: 10) { [weak self] in
+            guard let self = self, !self.isClosing, self.didReceiveTimeTick,
+                  let milliseconds = self.mediaplayer.time.value?.doubleValue else { return nil }
+            return BoundedPlayerSample(time: milliseconds / 1000, isPlaying: self.mediaplayer.isPlaying)
+        }
+#if DEBUG
+        // BoundedStorageDebugHooks' scripted seeks and pauses.
+        NotificationCenter.default.addObserver(self, selector: #selector(debugScriptSeek(_:)), name: .ptDebugSeek, object: nil)
+        NotificationCenter.default.addObserver(self, selector: #selector(debugScriptPlayback(_:)), name: .ptDebugPlayback, object: nil)
+#endif
         
         let settings = SubtitleSettings.shared
         // These are private libvlc text-renderer selectors that may not exist
@@ -851,6 +919,22 @@ class PCTPlayerViewController: UIViewController, VLCMediaPlayerDelegate, UIGestu
 #endif
     }
     
+#if DEBUG
+    /// `-PTDebugSeek` (BoundedStorageDebugHooks): VLC to that time, limited
+    /// like a user's seek (bounded storage).
+    @objc private func debugScriptSeek(_ note: Notification) {
+        guard !isClosing, let seconds = note.userInfo?["seconds"] as? Double else { return }
+        print("[BoundedDebug] VLC seek → \(Int(seconds)) s")
+        seekLimited(toMilliseconds: NSNumber(value: Int32(clamping: Int64(seconds * 1000))))
+    }
+
+    /// `-PTDebugPause` (BoundedStorageDebugHooks).
+    @objc private func debugScriptPlayback(_ note: Notification) {
+        guard !isClosing, let playing = note.userInfo?["playing"] as? Bool else { return }
+        if playing { mediaplayer.play() } else { mediaplayer.pause() }
+    }
+#endif
+
     // MARK: - Player changes notifications
     
     @objc func torrentStatusDidChange(_ aNotification: Notification) {
@@ -877,6 +961,7 @@ class PCTPlayerViewController: UIViewController, VLCMediaPlayerDelegate, UIGestu
         didReceiveTimeTick = true
         applyStartPositionIfNeeded()
         notePlayerPosition() // after the resume seek was issued
+        checkBoundedPlayhead()
         
         playPauseButton?.setImage(UIImage(named: "Pause"), for: .normal)
         
@@ -978,6 +1063,80 @@ class PCTPlayerViewController: UIViewController, VLCMediaPlayerDelegate, UIGestu
         return true
     }
     
+    // MARK: - Bounded storage: rewinds
+
+    /// The stream's bounded storage (nil: a download). Its `isBounded` is
+    /// false in full mode: every seek below is then the plain one.
+    private var boundedStorage: BoundedStorageSession? { BoundedStorageSession.session(for: streamer) }
+
+    /// VLC's playhead in seconds; nil before its first time point.
+    private var playheadSeconds: Double? {
+        guard didReceiveTimeTick, let milliseconds = mediaplayer.time.value?.doubleValue else { return nil }
+        return milliseconds / 1000
+    }
+
+    /// VLC's time at the time ticks (`checkBoundedPlayhead`); seeks made
+    /// here are noted in it (`noteOwnSeek`).
+    var playheadWatch = VLCPlayheadWatch()
+
+    /// Bounded storage: where a seek to `seconds` goes — the earliest point
+    /// still available when it is further back than what is still on disk
+    /// (the user's decision: no new download, no rewind into deleted data),
+    /// with the message; `seconds` otherwise (forward, within what is kept,
+    /// full mode).
+    private func limitedSeekSeconds(_ seconds: Double) -> Double {
+        guard let now = playheadSeconds,
+              let landing = BoundedStorageUX.limitedRewindTarget(seconds, from: now, session: boundedStorage) else { return seconds }
+        BoundedStorageUX.logLimited(player: "VLC", target: seconds, playhead: now, landing: landing)
+        BoundedStorageToastView.show(BoundedStorageUX.rewindLimitedMessage(for: boundedStorage), in: view)
+        return landing
+    }
+
+    /// `mediaplayer.time =` a scrub's or a remote command's target
+    /// (milliseconds, as `streamDuration`), limited by bounded storage —
+    /// the very same value when nothing limits it (full mode). Returns the
+    /// milliseconds VLC is sent to.
+    @discardableResult
+    func seekLimited(toMilliseconds milliseconds: NSNumber) -> NSNumber {
+        let wanted = milliseconds.doubleValue / 1000
+        let seconds = limitedSeekSeconds(wanted)
+        let target = seconds == wanted ? milliseconds : NSNumber(value: seconds * 1000)
+        playheadWatch.noteOwnSeek()
+        mediaplayer.time = VLCTime(number: target)
+        return target
+    }
+
+    /// `jumpBackward(interval)` (±30 s, remote commands), limited by bounded
+    /// storage: stopped at the earliest point still available.
+    func jumpBackwardLimited(_ interval: Double) {
+        if let now = playheadSeconds, boundedStorage?.isBounded == true {
+            let landing = limitedSeekSeconds(max(0, now - interval))
+            if landing != max(0, now - interval) {
+                if landing < now {
+                    playheadWatch.noteOwnSeek()
+                    mediaplayer.time = VLCTime(number: NSNumber(value: Float(landing * 1000)))
+                }
+                return
+            }
+        }
+        playheadWatch.noteOwnSeek()
+        mediaplayer.jumpBackward(interval)
+    }
+
+    /// Bounded storage, every time tick: VLC's time went back past what is
+    /// still on disk by a path not limited above (its rewind at a rate) —
+    /// back to the earliest point still available, with the message. VLC
+    /// settling after a start or seek is not a rewind (`VLCPlayheadWatch`).
+    private func checkBoundedPlayhead() {
+        guard let now = playheadSeconds, let previous = playheadWatch.rewind(to: now),
+              let landing = BoundedStorageUX.limitedRewindTarget(now, from: previous, session: boundedStorage) else { return }
+        BoundedStorageUX.logLimited(player: "VLC (time tick)", target: now, playhead: previous, landing: landing)
+        if mediaplayer.rate != 1 { mediaplayer.rate = 1 }
+        playheadWatch.noteOwnSeek()
+        mediaplayer.time = VLCTime(number: NSNumber(value: Float(landing * 1000)))
+        BoundedStorageToastView.show(BoundedStorageUX.rewindLimitedMessage(for: boundedStorage), in: view)
+    }
+
     // MARK: - Watched progress
 
     /// Seeks to `startPosition` once the input is seekable, when the resume
@@ -991,6 +1150,7 @@ class PCTPlayerViewController: UIViewController, VLCMediaPlayerDelegate, UIGestu
     private func applyStartPositionIfNeeded() {
         guard resumePlayback, mediaplayer.isSeekable else { return }
         resumePlayback = false // before the seek: a seek can post a nested time tick (seen with `time =`)
+        playheadWatch.noteOwnSeek()
         mediaplayer.position = Double(startPosition)
         print("[Player] resuming at \(Int(startPosition * 100)) %")
     }

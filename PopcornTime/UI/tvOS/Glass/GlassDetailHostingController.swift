@@ -361,7 +361,8 @@ final class GlassDetailHostingController: UIHostingController<GlassDetailView>, 
         let state = currentDownloadState(of: media)
         guard state != .idle, let download = media.associatedDownload else {
             AppDelegate.shared.chooseQuality(view, media: media) { [weak self] torrent in
-                PTTorrentDownloadManager.shared().startDownloading(fromFileOrMagnetLink: torrent.url, mediaMetadata: media.mediaItemDictionary)
+                PTTorrentDownloadManager.shared().startDownloading(fromFileOrMagnetLink: torrent.url, mediaMetadata: media.mediaItemDictionary,
+                                                                   selectFileTDownload: PTTorrentStreamer.fileSelection(for: torrent.url))
                 self?.setDownloadState(.pending, of: media.id)
             }
             return

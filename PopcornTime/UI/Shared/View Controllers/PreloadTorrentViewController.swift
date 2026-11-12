@@ -34,6 +34,24 @@ class PreloadTorrentViewController: UIViewController {
     private var lastSample: (progress: Float, time: CFTimeInterval)?
     private var rateEMA: Double = 0
 
+    /// Bounded storage (the film is larger than the free space): « Limited
+    /// storage: you can rewind about N min », below the ETA. Hidden in full
+    /// mode.
+    private lazy var boundedLabel: UILabel = {
+        let label = UILabel()
+        label.translatesAutoresizingMaskIntoConstraints = false
+        label.textColor = UIColor.white.withAlphaComponent(0.85)
+        label.textAlignment = .center
+        label.numberOfLines = 2
+        label.font = .systemFont(ofSize: 26, weight: .medium)
+        label.shadowColor = UIColor.black.withAlphaComponent(0.6)
+        label.shadowOffset = CGSize(width: 0, height: 1)
+        label.isHidden = true
+        return label
+    }()
+    /// When the bounded-storage line was last computed (it reads the free space).
+    private var boundedNoteAt: CFTimeInterval = 0
+
     override func viewDidLoad() {
         super.viewDidLoad()
         installETALabelIfNeeded()
@@ -56,6 +74,36 @@ class PreloadTorrentViewController: UIViewController {
             etaLabel.leadingAnchor.constraint(greaterThanOrEqualTo: view.leadingAnchor, constant: 40),
             etaLabel.trailingAnchor.constraint(lessThanOrEqualTo: view.trailingAnchor, constant: -40),
         ])
+        view.addSubview(boundedLabel)
+        NSLayoutConstraint.activate([
+            boundedLabel.centerXAnchor.constraint(equalTo: anchorView.centerXAnchor),
+            boundedLabel.topAnchor.constraint(equalTo: etaLabel.bottomAnchor, constant: 14),
+            boundedLabel.leadingAnchor.constraint(greaterThanOrEqualTo: view.leadingAnchor, constant: 40),
+            boundedLabel.trailingAnchor.constraint(lessThanOrEqualTo: view.trailingAnchor, constant: -40),
+        ])
+    }
+
+    /// Bounded storage's line, at most every 5 s (it reads the free space);
+    /// at once when the stream turns out bounded.
+    private func updateBoundedNote() {
+        let now = CACurrentMediaTime()
+        guard now - boundedNoteAt >= 5
+                || (boundedLabel.isHidden && BoundedStorageSession.session(for: streamer)?.isBounded == true) else { return }
+        boundedNoteAt = now
+        guard let note = BoundedStorageUX.loadingNote(for: streamer) else {
+            boundedLabel.isHidden = true
+            return
+        }
+        let text = NSMutableAttributedString()
+        if let symbol = UIImage(systemName: BoundedStorageUX.symbolName,
+                                withConfiguration: UIImage.SymbolConfiguration(font: boundedLabel.font))?
+            .withTintColor(boundedLabel.textColor, renderingMode: .alwaysOriginal) {
+            text.append(NSAttributedString(attachment: NSTextAttachment(image: symbol)))
+            text.append(NSAttributedString(string: "  "))
+        }
+        text.append(NSAttributedString(string: note))
+        boundedLabel.attributedText = text
+        boundedLabel.isHidden = false
     }
 
     var progress: Float = 0.0 {
@@ -64,6 +112,7 @@ class PreloadTorrentViewController: UIViewController {
             processingView.isHidden = true
             progressView.progress = progress
             updateETA(progress)
+            updateBoundedNote()
         }
     }
 
@@ -113,7 +162,8 @@ class PreloadTorrentViewController: UIViewController {
     }
 
     @IBAction func cancel() {
-        streamer.cancelStreamingAndDeleteData(false)
+        // nil until a download's `play` answers (it is set in that handler).
+        streamer?.cancelStreamingAndDeleteData(false)
         dismiss(animated: true)
     }
 

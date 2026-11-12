@@ -17,11 +17,12 @@ import Alamofire
 /// the app's `Torrent` model. Magnets are reconstructed from the hash plus a
 /// set of large public trackers so libtorrent can bootstrap peers quickly,
 /// and carry the stream's `fileIdx` as a BEP 53 `so=` selection so season
-/// packs stream the requested episode rather than the biggest file where
-/// the streamer honours it (macOS). Releases that can't stream at all (disc
-/// images, archives, full Blu-ray / DVD structures) are dropped, and so are
-/// multi-episode packs of episode results where the streamer can only play
-/// a torrent's largest file (iOS / tvOS, see `dropsEpisodePacks`).
+/// packs stream the requested episode rather than the biggest file (the
+/// SPM PopcornTorrent of every app honours it). Releases that can't stream
+/// at all (disc images, archives, full Blu-ray / DVD structures) are
+/// dropped, and so are multi-episode packs of episode results where the
+/// whole pack would end up on a small disk (iOS / tvOS, see
+/// `dropsEpisodePacks`).
 public final class TorrentioClient {
 
     public static let shared = TorrentioClient()
@@ -97,13 +98,13 @@ public final class TorrentioClient {
     }
 
     /// Drop multi-episode torrents (season packs, complete series, episode
-    /// ranges) from EPISODE results. The iOS / tvOS PopcornTorrent pod
-    /// (1.3.15) always streams a torrent's LARGEST file — its file-selection
-    /// API keeps a process-wide flag that crashes later streams, so the apps
-    /// don't use it — and a pack would play another episode, or fail. macOS
-    /// streams through the SPM PopcornTorrent, which honours the magnet's
-    /// `so=` per instance, so packs stay there. Single-episode releases and
-    /// movies are never dropped.
+    /// ranges) from EPISODE results on iOS / tvOS. Every app streams the
+    /// magnet's `so=` file (SPM PopcornTorrent), but once playback moves past
+    /// the first pieces the streamer wants every file of the torrent again,
+    /// so the whole pack is downloaded — fine on a Mac, not on an Apple TV or
+    /// a phone. (The CocoaPods PopcornTorrent these apps used before could
+    /// only play a pack's largest file.) Single-episode releases and movies
+    /// are never dropped.
     #if os(macOS)
     public static var dropsEpisodePacks = false
     #else

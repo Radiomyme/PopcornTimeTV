@@ -648,3 +648,15 @@
 "Searching for subtitles…" = "جارٍ البحث عن الترجمات…";
 "Subtitles" = "الترجمة";
 "Audio" = "الصوت";
+
+/* Bounded storage: a film larger than the free space streams with only part of it on disk. Loading screen (%d = minutes a rewind can reach), the message over the video when a rewind goes further back than what is still stored, the alert when playback can't continue, and the stream errors (%@ = space to free, e.g. "1.2 GB" / the system's error text). */
+"BoundedStorage.Loading.Minutes" = "مساحة تخزين محدودة: يمكنك الرجوع إلى الخلف نحو %d د";
+"BoundedStorage.Loading.Generic" = "مساحة تخزين محدودة: سيكون الرجوع إلى الخلف محدودًا";
+"BoundedStorage.RewindLimited" = "لم يعد هذا الجزء مخزّنًا (مساحة تخزين محدودة).";
+"BoundedStorage.RewindNotDownloaded" = "لم يُنزَّل هذا الجزء (مساحة تخزين محدودة).";
+"BoundedStorage.CannotContinue.Title" = "توقّف التشغيل";
+"BoundedStorage.CannotContinue.Message" = "لم يعد هذا الجزء من الفيديو مخزّنًا (مساحة تخزين محدودة)، لذا لا يمكن متابعة التشغيل من هنا.";
+"BoundedStorage.NotEnoughSpace.Message" = "لا توجد مساحة فارغة كافية لتشغيل هذا الفيديو حتى مع مساحة التخزين المحدودة. حرّر %@ على الأقل ثم أعد المحاولة.";
+"BoundedStorage.NotEnoughSpace.Generic" = "لا توجد مساحة فارغة كافية لتشغيل هذا الفيديو حتى مع مساحة التخزين المحدودة. حرّر بعض المساحة ثم أعد المحاولة.";
+"BoundedStorage.FileError.Message" = "تعذّر حفظ الفيديو في وحدة التخزين (%@).";
+"BoundedStorage.TryLowerQuality" = "هل تريد تجربة جودة أقل؟";

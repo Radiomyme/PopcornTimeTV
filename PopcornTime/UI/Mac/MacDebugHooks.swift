@@ -1,5 +1,7 @@
 #if DEBUG
+import Foundation
 import AppKit
+import AVKit
 import SwiftUI
 import PopcornKit
 
@@ -22,7 +24,12 @@ import PopcornKit
 /// - `-PTDebugSnapshot <absolute .png path>` with `-PTDebugSnapshotDelay
 ///   <seconds>` (default 8): renders the window into that PNG
 ///   (`-PTDebugSnapshotAll YES` also writes every capture method's image);
-/// - `-PTDebugQuit YES`: quit after the snapshot.
+/// - `-PTDebugQuit YES`: quit after the snapshot;
+/// - `-PTDebugBoundedSnapshots <directory>` (bounded storage, with
+///   BoundedStorageDebugHooks' `-PTDebugPlayTorrent`): the player's window
+///   into `<directory>/bounded-loading.png` once the loading screen shows
+///   the bounded-storage line, and `bounded-toast.png` once a rewind is
+///   limited (MacPlayerView, `snapshotPlayerWindow`).
 /// Any of them also skips the release notes sheet. Nothing happens without
 /// these arguments.
 enum MacDebugHooks {
@@ -97,9 +104,134 @@ enum MacDebugHooks {
 
     // MARK: Snapshot
 
+    /// `-PTDebugBoundedSnapshots`: the player's sheet (else the key window) into
+    /// `<directory>/<name>.png`, `delay` seconds from now, once per name.
     @MainActor
-    private static func snapshot(to url: URL) {
-        guard let window = mainWindow else {
+    static func snapshotPlayerWindow(named name: String, after delay: Double) {
+        guard let directory = defaults.string(forKey: "PTDebugBoundedSnapshots"),
+              !takenPlayerSnapshots.contains(name) else { return }
+        takenPlayerSnapshots.insert(name)
+        Task { @MainActor in
+            try? await Task.sleep(nanoseconds: UInt64(max(0, delay) * 1_000_000_000))
+            // The player is a sheet (its own window); the app may not be active.
+            let window = NSApp.windows.first { $0.isVisible && $0.isSheet } ?? NSApp.keyWindow
+            snapshot(to: URL(fileURLWithPath: directory).appendingPathComponent(name + ".png"), window: window)
+        }
+    }
+
+    @MainActor
+    private static var takenPlayerSnapshots: Set<String> = []
+
+    // MARK: Player sheet (bounded storage coverage hooks)
+
+    /// The player's sheet (`MacPlayerView`), nil once it is closed.
+    @MainActor
+    static var playerSheet: NSWindow? {
+        NSApp.windows.first { $0.isVisible && $0.isSheet }
+    }
+
+    /// `-PTDebugClosePlayer` (BoundedStorageDebugHooks): closes the player the
+    /// way the user does — its close button (pressed through accessibility,
+    /// like a click), else its Escape shortcut. Returns how.
+    @MainActor
+    static func closePlayerSheet() -> String {
+        guard let sheet = playerSheet else { return "no player sheet — nothing done" }
+        let buttons = accessibilityNodes(in: sheet).filter { $0.role == NSAccessibility.Role.button.rawValue }
+        let labels = buttons.map { $0.label.isEmpty ? "?" : $0.label }
+        // The xmark button (SwiftUI names it after its symbol, "Close" or similar).
+        if let close = buttons.last(where: { node in
+            let label = node.label.lowercased()
+            return label.contains("close") || label.contains("xmark") || label.contains("fermer")
+        }), close.press() {
+            return "close button pressed (accessibility; buttons: \(labels))"
+        }
+        // The same button's shortcut: Escape, as a key equivalent of the sheet.
+        func escape(_ type: NSEvent.EventType) -> NSEvent? {
+            NSEvent.keyEvent(with: type, location: .zero, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime,
+                             windowNumber: sheet.windowNumber, context: nil, characters: "\u{1b}",
+                             charactersIgnoringModifiers: "\u{1b}", isARepeat: false, keyCode: 53)
+        }
+        if let down = escape(.keyDown) {
+            if sheet.performKeyEquivalent(with: down) { return "Escape shortcut (key equivalent; buttons: \(labels))" }
+            sheet.makeKey()
+            NSApp.sendEvent(down)
+            if let up = escape(.keyUp) { NSApp.sendEvent(up) }
+            return "Escape key event sent to the sheet (no button matched; buttons: \(labels))"
+        }
+        return "nothing could close the sheet (buttons: \(labels))"
+    }
+
+    /// The AVPlayer of the player sheet (native routes), nil for VLC.
+    @MainActor
+    static func currentAVPlayer() -> AVPlayer? {
+        guard let root = playerSheet?.contentView else { return nil }
+        func find(_ view: NSView, depth: Int) -> AVPlayerView? {
+            if let player = view as? AVPlayerView { return player }
+            guard depth < 60 else { return nil }
+            for sub in view.subviews { if let found = find(sub, depth: depth + 1) { return found } }
+            return nil
+        }
+        return find(root, depth: 0)?.player
+    }
+
+    /// The texts the player sheet shows (its accessibility static texts):
+    /// the status line, the bounded-storage note, a toast.
+    @MainActor
+    static func playerTexts() -> [String] {
+        guard let sheet = playerSheet else { return ["<no player sheet>"] }
+        var texts: [String] = []
+        for node in accessibilityNodes(in: sheet) where node.role == NSAccessibility.Role.staticText.rawValue {
+            let text = node.value.isEmpty ? node.label : node.value
+            if !text.isEmpty, !texts.contains(text) { texts.append(text) }
+        }
+        return texts
+    }
+
+    /// One accessibility element: role, label, value, and its press action.
+    private struct AccessibilityNode {
+        let role: String
+        let label: String
+        let value: String
+        let press: () -> Bool
+    }
+
+    /// The accessibility tree under the sheet's content view (SwiftUI builds
+    /// it on demand), depth-first. Read through the informal accessibility
+    /// methods (SwiftUI's elements implement them, not always the protocol).
+    @MainActor
+    private static func accessibilityNodes(in window: NSWindow) -> [AccessibilityNode] {
+        var nodes: [AccessibilityNode] = []
+        var count = 0
+        func visit(_ element: Any, depth: Int) {
+            guard depth < 40, count < 4000, let object = element as? NSObject else { return }
+            count += 1
+            func string(_ name: String) -> String {
+                let selector = NSSelectorFromString(name)
+                guard object.responds(to: selector) else { return "" }
+                return (object.perform(selector)?.takeUnretainedValue() as? String) ?? ""
+            }
+            let label = string("accessibilityLabel")
+            nodes.append(AccessibilityNode(role: string("accessibilityRole"),
+                                           label: label.isEmpty ? string("accessibilityTitle") : label,
+                                           value: string("accessibilityValue"),
+                                           press: {
+                let selector = NSSelectorFromString("accessibilityPerformPress")
+                guard object.responds(to: selector) else { return false }
+                typealias Press = @convention(c) (NSObject, Selector) -> Bool
+                return unsafeBitCast(object.method(for: selector), to: Press.self)(object, selector)
+            }))
+            let childrenSelector = NSSelectorFromString("accessibilityChildren")
+            guard object.responds(to: childrenSelector),
+                  let children = object.perform(childrenSelector)?.takeUnretainedValue() as? [Any] else { return }
+            for child in children { visit(child, depth: depth + 1) }
+        }
+        if let root = window.contentView { visit(root, depth: 0) }
+        return nodes
+    }
+
+    @MainActor
+    private static func snapshot(to url: URL, window explicitWindow: NSWindow? = nil) {
+        guard let window = explicitWindow ?? mainWindow else {
             print("[MacDebug] snapshot: no window")
             return
         }

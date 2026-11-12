@@ -222,7 +222,7 @@ final class MediaDetailViewModel: ObservableObject {
 /// over, not restarted).
 private struct PendingPlayback: Identifiable {
     let id = UUID()
-    /// The torrent's local HTTP endpoint (as reported by the streamer).
+    /// The torrent's local HTTP endpoint (`PlaybackRouting.playableLocalURL`).
     let url: URL
     /// The payload on disk (still downloading) — remux input, routing name.
     let localFile: URL
@@ -311,6 +311,10 @@ private struct DirectPlayerScreen: View {
                                // Completion only (1.0): at 0.999 up to 0.1 % is still missing.
                                // Also lets a starved player wait for more data.
                                downloadProgress: { streamer?.torrentStatus.totalProgress ?? 1 },
+                               // The whole file on disk (bounded storage: never once a
+                               // piece was deleted), and the stream's bounded storage.
+                               boundedStorage: BoundedStorageSession.session(for: streamer),
+                               isPayloadComplete: { streamer?.isWholeFileOnDisk ?? true },
                                onPlayerReady: { player in
                                    // Not during the view update that created it.
                                    DispatchQueue.main.async { cues.attach(to: player) }
@@ -320,7 +324,8 @@ private struct DirectPlayerScreen: View {
                                    // coordinates with the new item's own subtitles.
                                    cues.bindNativeSubtitles(of: item)
                                },
-                               onFallback: onFallback)
+                               onFallback: onFallback,
+                               onCannotContinue: onClose)
                 .ignoresSafeArea()
             SubtitleOverlayText(controller: subtitles)
                 .ignoresSafeArea()
@@ -386,6 +391,11 @@ struct MediaDetailView: View {
     @State private var peersCount: Int = 0
     @State private var downloadKbps: Double = 0
     @State private var streamErrorMessage: String?
+    /// Bounded storage (the film is larger than the free space): the
+    /// overlay's « Limited storage: you can rewind about N min » line, and
+    /// when it was last computed (it reads the free space).
+    @State private var boundedNote: String?
+    @State private var boundedNoteAt: TimeInterval = 0
     @State private var safariURL: IdentifiableURL?
     @State private var selectedSeason: Int = 0
     @AppStorage("autoSelectQuality") private var autoQuality = "Balanced"
@@ -524,6 +534,12 @@ struct MediaDetailView: View {
                         .font(.caption.monospacedDigit())
                         .foregroundStyle(.secondary)
                 }
+                if let note = boundedNote, streamErrorMessage == nil {
+                    Label(note, systemImage: BoundedStorageUX.symbolName)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center)
+                }
                 if let err = streamErrorMessage {
                     Text(err).font(.caption).foregroundStyle(.red).multilineTextAlignment(.center).padding(.horizontal, 8)
                 }
@@ -543,13 +559,14 @@ struct MediaDetailView: View {
     }
 
     private func cancelStream() {
-        PTTorrentStreamer.shared().cancelStreamingAndDeleteData(true)
+        PTTorrentStreamer.cancelCurrent(deleteData: true)
         startingStream = false
         bufferProgress = 0
         seedsCount = 0
         peersCount = 0
         downloadKbps = 0
         streamErrorMessage = nil
+        boundedNote = nil
     }
 
     @ViewBuilder
@@ -758,7 +775,8 @@ struct MediaDetailView: View {
         peersCount = 0
         downloadKbps = 0
         streamErrorMessage = nil
-        let streamer = PTTorrentStreamer.shared()
+        boundedNote = nil
+        boundedNoteAt = 0
         let mediaTitle = playMedia.title
         let magnet = torrent.url
         let isAtmos = torrent.tags.contains(.atmos)
@@ -767,10 +785,16 @@ struct MediaDetailView: View {
         // on every engine — VLC too, which resumes without asking (the native
         // players apply the same rule again).
         let startPosition = ResumePolicy.startPosition(forSavedProgress: Self.savedProgress(for: playMedia))
-        // Clean slate before a new stream: reset the streamer and reclaim disk
-        // from prior torrent partials + orphaned remux output (same as tvOS).
-        streamer.cancelStreamingAndDeleteData(true)
+        // Clean slate before a new stream: stop the previous stream and
+        // reclaim disk from prior torrent partials + orphaned remux output
+        // (same as tvOS). Then a new streamer, current until the next stream
+        // (the SPM PopcornTorrent has no singleton).
+        PTTorrentStreamer.cancelCurrent(deleteData: true)
         purgeOrphanTorrentDownloads()
+        let streamer = PTTorrentStreamer.startNew()
+        // A film larger than the free space streams in bounded storage
+        // (every player route drives the torrent's window).
+        BoundedStorageSession.prepare(streamer, durationSeconds: BoundedStorageSession.durationHint(for: playMedia))
         print("[iOS Detail] starting torrent: \(magnet.prefix(80))…")
 
         let progress: PTTorrentStreamerProgress = { status in
@@ -780,6 +804,14 @@ struct MediaDetailView: View {
                 peersCount = Int(status.peers)
                 // libtorrent reports bytes/s; surface as KB/s.
                 downloadKbps = Double(status.downloadSpeed) / 1024.0
+                // Bounded storage's line: every 5 s at most, at once when
+                // the stream turns out bounded.
+                let now = ProcessInfo.processInfo.systemUptime
+                if now - boundedNoteAt >= 5
+                    || (boundedNote == nil && BoundedStorageSession.session(for: streamer)?.isBounded == true) {
+                    boundedNoteAt = now
+                    boundedNote = BoundedStorageUX.loadingNote(for: streamer)
+                }
             }
         }
         let readyToPlay: PTTorrentStreamerReadyToPlay = { fileURL, filePath in
@@ -789,7 +821,9 @@ struct MediaDetailView: View {
                 // carry no extension). Unknown → remux, which fails fast to VLC.
                 let route = PlaybackRouting.route(forFileName: filePath.lastPathComponent)
                 print("[iOS Detail] ready: \(filePath.lastPathComponent) → \(route)")
-                pendingPlayback = PendingPlayback(url: fileURL,
+                // The streamer reports `http://0.0.0.0:<port>/`: every engine
+                // gets 127.0.0.1 and the payload's name, as on macOS.
+                pendingPlayback = PendingPlayback(url: PlaybackRouting.playableLocalURL(fileURL, fileName: filePath.lastPathComponent),
                                                   localFile: filePath,
                                                   engine: route,
                                                   title: mediaTitle,
@@ -801,8 +835,11 @@ struct MediaDetailView: View {
             }
         }
         let failure: PTTorrentStreamerFailure = { error in
+            // Not enough space even for bounded storage (-5: how much to
+            // free), another file error (-6), or the error's own text.
+            let message = StreamFailure(error, streamer: streamer).message(underlying: error) ?? error.localizedDescription
             DispatchQueue.main.async {
-                streamErrorMessage = error.localizedDescription
+                streamErrorMessage = message
                 // Keep the overlay open so the user sees the error and can dismiss
                 // explicitly via the "Annuler" button.
                 bufferProgress = 0
@@ -810,19 +847,15 @@ struct MediaDetailView: View {
             print("[iOS Detail] streaming failure: \(error.localizedDescription)")
         }
 
-        // Single-file API only, even when the magnet carries a BEP 53 `so=`
-        // index (kept in the magnet: harmless). The iOS/tvOS PopcornTorrent
-        // pod (1.3.15 binary) keeps a GLOBAL "user selects the file" flag
-        // after a cancel when its multi-file API was used — the next
-        // single-file stream or any download then calls a nil block and
-        // crashes — and in multi-file mode it still serves the torrent's
-        // LARGEST file, not the `so=` one. (Season packs are filtered out of
-        // the episode sources on iOS/tvOS for that reason; the macOS
-        // streamer honours `so=` per instance.)
-        streamer.startStreaming(fromFileOrMagnetLink: magnet,
+        // The streamed file: the magnet's BEP 53 `so=` file when valid, else
+        // the largest video file, as on tvOS and macOS
+        // (`PTTorrentStreamer.fileSelection`). Season packs stay filtered out
+        // of the iOS episode sources (`TorrentioClient.dropsEpisodePacks`).
+        streamer.startStreaming(fromMultiTorrentFileOrMagnetLink: magnet,
                                 progress: progress,
                                 readyToPlay: readyToPlay,
-                                failure: failure)
+                                failure: failure,
+                                selectFileToStream: PTTorrentStreamer.fileSelection(for: magnet))
     }
 
     /// A native engine gave up: continue on VLC with the SAME stream. The
@@ -844,7 +877,7 @@ struct MediaDetailView: View {
     /// already cancel it themselves; this also covers the direct AVPlayer
     /// path, which has no hook into the streamer.
     private func endPlayback() {
-        PTTorrentStreamer.shared().cancelStreamingAndDeleteData(false)
+        PTTorrentStreamer.cancelCurrent(deleteData: false)
     }
 }
 

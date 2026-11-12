@@ -5,7 +5,7 @@
 import UIKit
 import SwiftUI
 import PopcornKit
-import PopcornTorrent.PTTorrentDownloadManager
+import class PopcornTorrent.PTTorrentDownloadManager
 
 /// Root of the Settings tab (installed by `TVTabBarController`).
 final class GlassSettingsHostingController: UIHostingController<GlassSettingsView> {
@@ -133,12 +133,18 @@ enum GlassSettingsStore {
     // MARK: Cache
 
     /// Bytes in the folders `AppDelegate.aggressivelyFreeDiskSpace()` empties:
-    /// the temporary folder (stream partials, remux output, subtitles) and Caches.
+    /// the temporary folder (stream partials, remux output, subtitles) and
+    /// Caches — but not Caches/Downloads, the offline downloads it keeps (the
+    /// row and the "will be freed" figure counted them, and never went down).
+    /// Allocated bytes: a stream's file is a hole at the film's full size.
     static func cacheSize() -> Int64 {
         let fm = FileManager.default
-        var total = fm.folderSize(atPath: NSTemporaryDirectory())
-        if let caches = fm.urls(for: .cachesDirectory, in: .userDomainMask).first {
-            total += fm.folderSize(atPath: caches.path)
+        var total = fm.allocatedSize(atPath: NSTemporaryDirectory())
+        if let caches = fm.urls(for: .cachesDirectory, in: .userDomainMask).first,
+           let entries = try? fm.contentsOfDirectory(at: caches, includingPropertiesForKeys: nil) {
+            for entry in entries where entry.lastPathComponent != AppDelegate.offlineDownloadsFolderName {
+                total += fm.allocatedSize(atPath: entry.path)
+            }
         }
         return total
     }

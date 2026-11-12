@@ -347,3 +347,15 @@
 "Searching for subtitles…" = "Searching for subtitles…";
 "Subtitles" = "Subtitles";
 "Audio" = "Audio";
+
+/* Bounded storage: a film larger than the free space streams with only part of it on disk. Loading screen (%d = minutes a rewind can reach), the message over the video when a rewind goes further back than what is still stored, the alert when playback can't continue, and the stream errors (%@ = space to free, e.g. "1.2 GB" / the system's error text). */
+"BoundedStorage.Loading.Minutes" = "Limited storage: you can rewind about %d min";
+"BoundedStorage.Loading.Generic" = "Limited storage: rewinding will be limited";
+"BoundedStorage.RewindLimited" = "This part is no longer stored (limited storage).";
+"BoundedStorage.RewindNotDownloaded" = "This part hasn't been downloaded (limited storage).";
+"BoundedStorage.CannotContinue.Title" = "Playback stopped";
+"BoundedStorage.CannotContinue.Message" = "This part of the video is no longer stored (limited storage), so playback can't continue here.";
+"BoundedStorage.NotEnoughSpace.Message" = "Not enough free space to stream this video, even with limited storage. Free at least %@ and try again.";
+"BoundedStorage.NotEnoughSpace.Generic" = "Not enough free space to stream this video, even with limited storage. Free some space and try again.";
+"BoundedStorage.FileError.Message" = "The video could not be written to storage (%@).";
+"BoundedStorage.TryLowerQuality" = "Try a lower quality?";

@@ -15,6 +15,11 @@ import VLCKit
 @main
 struct PopcornTimeMacApp: App {
     init() {
+        #if DEBUG
+        // Bounded-storage verification runs: the loopback-only torrent
+        // session and the download directory, before anything uses them.
+        BoundedStorageDebugHooks.prepareAtLaunch()
+        #endif
         // VLCKit 4 delivers player callbacks on a background queue by default;
         // restore main-thread delivery before any player exists (same rationale
         // as the iOS/tvOS apps).

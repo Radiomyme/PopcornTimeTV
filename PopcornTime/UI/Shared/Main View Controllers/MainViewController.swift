@@ -2,7 +2,7 @@
 
 import UIKit
 import PopcornKit
-import PopcornTorrent.PTTorrentDownloadManager
+import class PopcornTorrent.PTTorrentDownloadManager
 import MediaPlayer.MPMediaItem
 
 class MainViewController: UIViewController, CollectionViewControllerDelegate {

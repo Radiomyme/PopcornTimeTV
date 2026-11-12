@@ -2,7 +2,7 @@
 
 import Foundation
 import PopcornKit
-import PopcornTorrent.PTTorrentStreamer
+import PopcornTorrent
 import MediaPlayer.MPMediaItem
 import AlamofireImage
 
@@ -43,16 +43,22 @@ extension AppDelegate: PCTPlayerViewControllerDelegate, UIViewControllerTransiti
 
         // 5) NSCachesDirectory for the app — system reclaims this on
         //    pressure but doing it ourselves makes the freed bytes visible
-        //    to libtorrent immediately.
+        //    to libtorrent immediately. Never Caches/Downloads: on tvOS the
+        //    offline downloads (PTTorrentDownloadManager) live there.
         if let caches = fm.urls(for: .cachesDirectory, in: .userDomainMask).first {
             if let entries = try? fm.contentsOfDirectory(at: caches, includingPropertiesForKeys: nil) {
-                for entry in entries {
+                for entry in entries where entry.lastPathComponent != Self.offlineDownloadsFolderName {
                     try? fm.removeItem(at: entry)
                 }
             }
         }
         print("[Cache] aggressivelyFreeDiskSpace done")
     }
+
+    /// The folder of the offline downloads under Caches on tvOS
+    /// (PTTorrentDownloadManager's `Caches/Downloads`): never wiped by
+    /// `aggressivelyFreeDiskSpace`.
+    static let offlineDownloadsFolderName = "Downloads"
 }
 
 extension AppDelegate {
@@ -249,7 +255,9 @@ extension AppDelegate {
         ThemeSongManager.shared.stopTheme()
         present(loadingViewController, animated: true)
         
-        let error: (String) -> Void = { [weak self] (errorMessage) in
+        // `failure`: what PopcornTorrent's error means (nil: another error,
+        // judged by its text as before).
+        let failed: (String, StreamFailure?) -> Void = { [weak self] (errorMessage, failure) in
             guard let self = self else { return }
 
             // libtorrent's "not enough space" message is reported in
@@ -261,9 +269,19 @@ extension AppDelegate {
             // both English and French to cover the localized libtorrent
             // build) and offer a one-tap downgrade to the next-lower
             // quality torrent rather than an unhelpful OK alert.
-            let isDiskFullError = errorMessage.localizedCaseInsensitiveContains("not enough space")
-                               || errorMessage.localizedCaseInsensitiveContains("pas assez d'espace")
-                               || errorMessage.localizedCaseInsensitiveContains("not enough disk")
+            // PopcornTorrent's codes first: -4 (doesn't fit / disk full) and
+            // -5 (not even bounded storage can run: the message says how
+            // much to free) both are disk-space failures; -6 (another file
+            // error) is not.
+            let isDiskFullError = failure.map { $0.isDiskSpace }
+                ?? (errorMessage.localizedCaseInsensitiveContains("not enough space")
+                    || errorMessage.localizedCaseInsensitiveContains("pas assez d'espace")
+                    || errorMessage.localizedCaseInsensitiveContains("not enough disk"))
+            // -5: the computed amount to free goes into the lower-quality offer.
+            let spaceToFree: String? = {
+                if case .notEnoughSpaceForBoundedStorage(let bytes)? = failure, bytes > 0 { return errorMessage }
+                return nil
+            }()
 
             // Find a smaller candidate from the same media — strictly
             // smaller `qualityValue` than what we just tried.
@@ -302,7 +320,10 @@ extension AppDelegate {
                     // Second hit (or no auto-clean possible) — offer the
                     // user the next-lower quality.
                     let title = "Espace insuffisant pour ce film en \(torrent.quality ?? "?")"
-                    let body  = "L'Apple TV n'a pas assez de place dans le cache de l'app pour télécharger ce torrent. Essayer une qualité inférieure ?"
+                    let body  = spaceToFree.map {
+                        $0 + "\n\n" + NSLocalizedString("BoundedStorage.TryLowerQuality", value: "Try a lower quality?",
+                                                        comment: "After the space to free, offers a smaller release")
+                    } ?? "L'Apple TV n'a pas assez de place dans le cache de l'app pour télécharger ce torrent. Essayer une qualité inférieure ?"
                     let alert = UIAlertController(title: title, message: body, preferredStyle: .alert)
                     alert.addAction(UIAlertAction(title: "Réessayer en \(fallback.quality ?? "qualité inférieure")", style: .default) { _ in
                         self.play(media, torrent: fallback)
@@ -317,6 +338,9 @@ extension AppDelegate {
             }
         }
         
+        let error: (String) -> Void = { failed($0, nil) }
+        let streamFailed: (StreamFailure, String) -> Void = { failed($1, $0) }
+
         let finishedLoading: (PreloadTorrentViewController, UIViewController) -> Void = { [weak self] (loadingVc, playerVc) in
             guard let self = self else { return }
             let flag = UIDevice.current.userInterfaceIdiom != .tv
@@ -364,7 +388,7 @@ extension AppDelegate {
                 // and the iOS VLC player. (A native → VLC hand-off,
                 // `handOffToVLC`, passes its own position as is.)
                 let startPosition = ResumePolicy.startPosition(forSavedProgress: currentProgress)
-                media.play(fromFileOrMagnetLink: torrent.url, nextEpisodeInSeries: nextEpisode, loadingViewController: loadingViewController, playViewController: playViewController, progress: startPosition, errorBlock: error, finishedLoadingBlock: finishedLoading)
+                media.play(fromFileOrMagnetLink: torrent.url, nextEpisodeInSeries: nextEpisode, loadingViewController: loadingViewController, playViewController: playViewController, progress: startPosition, errorBlock: error, streamFailureBlock: streamFailed, finishedLoadingBlock: finishedLoading)
                 return
             }
 
@@ -412,6 +436,7 @@ extension AppDelegate {
                        progress: currentProgress,
                        playBlock: playBlock,
                        errorBlock: error,
+                       streamFailureBlock: streamFailed,
                        finishedLoadingBlock: finishedLoading)
         }
     }

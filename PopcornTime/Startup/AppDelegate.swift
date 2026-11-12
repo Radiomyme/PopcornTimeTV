@@ -50,6 +50,11 @@ class AppDelegate: UIResponder, UIApplicationDelegate, UITabBarControllerDelegat
 
     func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?) -> Bool {
         print("[App] didFinishLaunching tosAccepted=\(UserDefaults.standard.bool(forKey: "tosAccepted"))")
+        #if DEBUG
+        // Bounded-storage verification runs: the loopback-only torrent
+        // session and the download directory, before anything uses them.
+        BoundedStorageDebugHooks.prepareAtLaunch()
+        #endif
 
         // VLCKit 4 rewrote event management and now dispatches player delegate
         // callbacks (mediaPlayerTimeChanged / StateChanged) on a BACKGROUND

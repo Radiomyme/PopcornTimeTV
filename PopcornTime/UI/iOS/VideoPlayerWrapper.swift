@@ -41,6 +41,12 @@ struct VideoPlayerWrapper: UIViewControllerRepresentable {
     /// player wait for more data instead of falling back. nil = a complete
     /// / local file.
     var downloadProgress: (() -> Float)? = nil
+    /// The stream's bounded storage (nil: none): AVPlayer's playhead tells
+    /// the torrent what it may delete behind it.
+    var boundedStorage: BoundedStorageSession? = nil
+    /// The whole payload is on disk (bounded-aware: `isWholeFileOnDisk`);
+    /// nil: `downloadProgress` reaching 1.
+    var isPayloadComplete: (() -> Bool)? = nil
     /// The player was created (e.g. to attach a `SubtitleCueController`).
     var onPlayerReady: ((AVPlayer) -> Void)? = nil
     /// The player's item was rebuilt after download starvation (e.g. to
@@ -52,12 +58,19 @@ struct VideoPlayerWrapper: UIViewControllerRepresentable {
     /// `resumeDecided`: playback had started (VLC continues without asking).
     /// The native part's progress is already saved when it runs.
     var onFallback: ((_ reason: String, _ resumeFraction: Float, _ resumeDecided: Bool) -> Void)? = nil
+    /// Bounded storage: native playback can't go on and VLC can't resume
+    /// where it would have to (that part of the torrent is deleted). The
+    /// message was shown; the owner closes the player.
+    var onCannotContinue: (() -> Void)? = nil
 
     /// Also the AVPlayerViewController's delegate: Picture in Picture state
     /// (AVKit calls it on the main thread).
     @MainActor
     final class Coordinator: NSObject, @preconcurrency AVPlayerViewControllerDelegate {
         var onFallback: ((_ reason: String, _ resumeFraction: Float, _ resumeDecided: Bool) -> Void)?
+        var onCannotContinue: (() -> Void)?
+        /// The player's view controller (bounded storage's alert).
+        private weak var playerController: AVPlayerViewController?
         var onItemReplaced: ((AVPlayerItem) -> Void)?
         var media: Media?
         /// The user's play / pause intent — what a starvation recovery ends
@@ -86,6 +99,14 @@ struct VideoPlayerWrapper: UIViewControllerRepresentable {
         private var readyTimeout: TimeInterval?
         private var isWaitingForData: (() -> Bool)?
         private var downloadProgress: (() -> Float)?
+        /// Bounded storage (`VideoPlayerWrapper.boundedStorage`): the whole
+        /// payload on disk, and the stream's session.
+        var isPayloadComplete: (() -> Bool)?
+        var boundedStorage: BoundedStorageSession?
+        /// Bounded storage: the forward buffer AVPlayer may keep over the
+        /// torrent's file, and how far past the playhead it may have read.
+        static let boundedForwardBufferSeconds: Double = 60
+        static let boundedReadAheadSeconds: Double = 75
         private lazy var starvation: PlaybackStarvationRecovery = makeStarvationRecovery()
         private var lastKnownTime: Double?
         private var lastKnownDuration: Double?
@@ -99,8 +120,18 @@ struct VideoPlayerWrapper: UIViewControllerRepresentable {
         /// Target of the resume seek in flight (player timeline, s): a seek
         /// AVPlayer may hold too.
         private var startSeekTarget: Double?
+        /// Bounded storage: AVPlayer waiting with the data on disk (sampled
+        /// 1 Hz by `directStallTimer`: the periodic time observer does not fire
+        /// while the item's time stands still) → the item is rebuilt
+        /// (`checkDirectStall`).
+        private var directStall = BoundedDirectStallWatch()
+        private var directStallTimer: Timer?
         private weak var indicator: UIActivityIndicatorView?
         private weak var bufferingLabel: UILabel?
+        /// The player's content overlay (bounded storage's message).
+        private weak var overlayView: UIView?
+        /// The pending check after a burst of time jumps (`scheduleBoundedRewindCheck`).
+        private var boundedRewindCheck: DispatchWorkItem?
 
         func start(player: AVPlayer, item: AVPlayerItem, url: URL, title: String?, startPosition: Float,
                    readyTimeout: TimeInterval?, isWaitingForData: (() -> Bool)?, downloadProgress: (() -> Float)?) {
@@ -111,8 +142,30 @@ struct VideoPlayerWrapper: UIViewControllerRepresentable {
             self.downloadProgress = downloadProgress
             if let isWaitingForData = isWaitingForData {
                 self.isWaitingForData = isWaitingForData
+            } else if let complete = isPayloadComplete {
+                self.isWaitingForData = { !complete() }
             } else if let progress = downloadProgress {
                 self.isWaitingForData = { !StarvationPolicy.isComplete(progress: progress()) }
+            }
+            if let session = boundedStorage {
+                directStallTimer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] timer in
+                    guard let self = self else { timer.invalidate(); return }
+                    MainActor.assumeIsolated {
+                        self.checkDirectStall()
+                        self.checkBoundedReverseScan()
+                    }
+                }
+                // AVPlayer reads through PopcornTorrent's server (which moves
+                // the window); its playhead tells the torrent what it may
+                // delete behind it.
+                if session.isBounded { item.preferredForwardBufferDuration = Self.boundedForwardBufferSeconds }
+                session.attachHTTPPlayer(self, readAheadSeconds: Self.boundedReadAheadSeconds) { [weak self] in
+                    guard let self = self, !self.didFallBack, let player = self.player,
+                          player.currentItem?.status == .readyToPlay else { return nil }
+                    let time = player.currentTime().seconds
+                    guard time.isFinite else { return nil }
+                    return BoundedPlayerSample(time: time, isPlaying: player.timeControlStatus == .playing)
+                }
             }
             // A finished (or nearly finished) title restarts from the beginning.
             self.startPosition = ResumePolicy.startPosition(forSavedProgress: startPosition)
@@ -141,6 +194,7 @@ struct VideoPlayerWrapper: UIViewControllerRepresentable {
                 MainActor.assumeIsolated {
                     guard let self = self, let item = self.player?.currentItem, jumped === item else { return }
                     self.noteHeldSeek(isJump: true)
+                    self.scheduleBoundedRewindCheck()
                 }
             })
             // A kill while suspended (or a crash later) keeps what was watched.
@@ -194,7 +248,9 @@ struct VideoPlayerWrapper: UIViewControllerRepresentable {
         /// Spinner + "Mise en mémoire tampon…" over the video, shown while
         /// recovering from download starvation.
         func installIndicator(in controller: AVPlayerViewController) {
+            playerController = controller
             guard let overlay = controller.contentOverlayView, indicator == nil else { return }
+            overlayView = overlay
             let spinner = UIActivityIndicatorView(style: .large)
             spinner.color = .white
             spinner.hidesWhenStopped = true
@@ -294,6 +350,78 @@ struct VideoPlayerWrapper: UIViewControllerRepresentable {
             heldSeek.note(wanted: player.currentTime().seconds, played: playedPosition.lastPlayedTime, isJump: isJump)
         }
 
+        // MARK: - Bounded storage: rewinds
+
+        /// Bounded storage, 1 Hz (periodic observer): AVPlayer waiting for 8 s
+        /// at the same time while the data ahead of the server's read position
+        /// is on disk is not waiting for the download — macOS AVPlayer's loader
+        /// stops requesting after a far seek's back-fill reached deleted data
+        /// (part-3 coverage md2–md5); iOS AVPlayer is untested. The item is
+        /// rebuilt at the playhead (`BoundedDirectStallWatch`). Full mode:
+        /// never.
+        private func checkDirectStall() {
+            guard let player = player else { return }
+            let isWaiting = player.timeControlStatus == .waitingToPlayAtSpecifiedRate
+                && player.currentItem?.status == .readyToPlay
+            let eligible = isWaiting && isItemHealthy && didStart && startSeekTarget == nil
+                && UIApplication.shared.applicationState == .active
+                && boundedStorage?.isBounded == true && boundedStorage?.hasDataAheadOfReader() == true
+            guard let time = directStall.note(time: player.currentTime().seconds, clock: ProcessInfo.processInfo.systemUptime,
+                                              isWaiting: isWaiting, isEligible: eligible) else { return }
+            print("[Player] bounded direct route: AVPlayer waiting at \(String(format: "%.1f", time)) s for "
+                  + "\(Int(BoundedDirectStallWatch.stallSeconds)) s with the data on disk → rebuilding the item")
+            starvation.rebuildNow(player: player, at: time, reason: BoundedDirectStallWatch.reason)
+        }
+
+        /// Bounded storage (`boundedStorage.isBounded`; nothing in full mode):
+        /// after a time jump of a healthy item (AVKit's scrubber or ±10 s, a
+        /// remote command), a playhead that went further back than what is
+        /// still on disk goes to the earliest point still available, with the
+        /// message — the user's decision: no new download, no VLC for a
+        /// rewind. Checked 0.35 s after the last jump of a burst: a drag on
+        /// the timeline (which seeks all along) is not fought.
+        private func scheduleBoundedRewindCheck() {
+            guard boundedStorage?.isBounded == true else { return }
+            boundedRewindCheck?.cancel()
+            let work = DispatchWorkItem { [weak self] in
+                MainActor.assumeIsolated { self?.checkBoundedRewind() }
+            }
+            boundedRewindCheck = work
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.35, execute: work)
+        }
+
+        /// Bounded storage, 1 Hz (`directStallTimer`): a reverse scan (a held
+        /// rewind) stops at the earliest point still available, with the
+        /// message, and plays on from there (`BoundedStorageUX.reverseScanLimit`).
+        private func checkBoundedReverseScan() {
+            guard isItemHealthy, startSeekTarget == nil, !didFallBack, let player = player else { return }
+            let now = player.currentTime().seconds
+            guard let landing = BoundedStorageUX.reverseScanLimit(time: now, rate: player.rate,
+                                                                  playedReference: playedPosition.lastPlayedTime,
+                                                                  session: boundedStorage) else { return }
+            player.rate = BoundedStorageUX.resumeRate(after: player)
+            BoundedStorageUX.logLimited(player: "AVPlayer (direct)", target: now,
+                                        playhead: playedPosition.lastPlayedTime ?? now, landing: landing)
+            player.seek(to: CMTime(seconds: landing, preferredTimescale: 600), toleranceBefore: .zero, toleranceAfter: .zero)
+            if let overlay = overlayView {
+                BoundedStorageToastView.show(BoundedStorageUX.rewindLimitedMessage(for: boundedStorage), in: overlay)
+            }
+        }
+
+        private func checkBoundedRewind() {
+            guard isItemHealthy, startSeekTarget == nil, let player = player else { return }
+            let now = player.currentTime().seconds
+            // From the last position playback actually reached (not a seek
+            // target AVPlayer still holds).
+            guard let reference = playedPosition.lastPlayedTime,
+                  let landing = BoundedStorageUX.limitedRewindTarget(now, from: reference, session: boundedStorage) else { return }
+            BoundedStorageUX.logLimited(player: "AVPlayer (direct)", target: now, playhead: reference, landing: landing)
+            player.seek(to: CMTime(seconds: landing, preferredTimescale: 600), toleranceBefore: .zero, toleranceAfter: .zero)
+            if let overlay = overlayView {
+                BoundedStorageToastView.show(BoundedStorageUX.rewindLimitedMessage(for: boundedStorage), in: overlay)
+            }
+        }
+
         /// The app went to the background: progress checkpoint, by the
         /// close's rules — `.watching` when playback goes on in Picture in
         /// Picture or over AirPlay, else `.paused`.
@@ -348,11 +476,18 @@ struct VideoPlayerWrapper: UIViewControllerRepresentable {
                                      resumeFraction: pendingStart,
                                      resumesPlayback: playIntent.wantsPlayback,
                                      positionIsUserTarget: target.isUserTarget,
-                                     stillDownloading: !StarvationPolicy.isComplete(progress: atFailure),
-                                     isDataReady: { time, waited in
-                                         StarvationPolicy.directDataReady(resumeTime: time, failurePosition: stood,
-                                                                          progress: progress(), progressAtFailure: atFailure,
-                                                                          waited: waited)
+                                     stillDownloading: !(isPayloadComplete?() ?? StarvationPolicy.isComplete(progress: atFailure)),
+                                     isDataReady: { [weak self] time, waited in
+                                         // Bounded storage: a position whose data is gone never
+                                         // gets ready (the recovery waits for the one
+                                         // `positionUnavailable` moved it to).
+                                         if let session = self?.boundedStorage, session.isBounded,
+                                            !session.canSeek(to: time, fromPlayerTime: stood) { return false }
+                                         // The whole file on disk (bounded-aware), else more of it.
+                                         if self?.isPayloadComplete?() == true { return true }
+                                         return StarvationPolicy.directDataReady(resumeTime: time, failurePosition: stood,
+                                                                                 progress: progress(), progressAtFailure: atFailure,
+                                                                                 waited: waited)
                                      }) {
                     // The recovery seeks and plays itself.
                     startObservations.forEach { $0.invalidate() }
@@ -400,13 +535,32 @@ struct VideoPlayerWrapper: UIViewControllerRepresentable {
             }
             recovery.makeItem = { [weak self] in
                 guard let self = self, !self.didFallBack, let url = self.url else { return nil }
-                return Self.makeItem(url: url, title: self.title)
+                let item = Self.makeItem(url: url, title: self.title)
+                if self.boundedStorage?.isBounded == true { item.preferredForwardBufferDuration = Self.boundedForwardBufferSeconds }
+                return item
             }
             recovery.onItemReplaced = { [weak self] item, restoresSelection in
                 guard let self = self else { return }
                 self.installFailureObserver(on: item, isReplacement: true)
                 if !restoresSelection { PlaybackLanguagePreferences.applyPreferredMediaSelection(to: item) }
                 self.onItemReplaced?(item)
+            }
+            // Bounded storage: the user moved the dead item further back than
+            // what is still on disk — it goes to the earliest point still
+            // available (with the message), never VLC there. Full mode:
+            // never unavailable (the torrent keeps the whole file), as before.
+            recovery.positionUnavailable = { [weak self] seconds in
+                guard let self = self, let session = self.boundedStorage, session.isBounded,
+                      let reference = self.playedPosition.lastPlayedTime, seconds < reference,
+                      let landing = BoundedStorageUX.limitedRewindTarget(seconds, from: reference, session: session)
+                else { return false }
+                BoundedStorageUX.logLimited(player: "AVPlayer (direct, recovering)", target: seconds, playhead: reference,
+                                            landing: landing)
+                self.player?.seek(to: CMTime(seconds: landing, preferredTimescale: 600), toleranceBefore: .zero, toleranceAfter: .zero)
+                if let overlay = self.overlayView {
+                    BoundedStorageToastView.show(BoundedStorageUX.rewindLimitedMessage(for: session), in: overlay)
+                }
+                return false
             }
             recovery.onResumed = { [weak self] _ in
                 guard let self = self, !self.didFallBack else { return }
@@ -459,6 +613,19 @@ struct VideoPlayerWrapper: UIViewControllerRepresentable {
         /// it, and the VLC player protects what was saved here.
         private func fallBack(_ reason: String, resumeTime: Double? = nil) {
             guard !didFallBack else { return }
+            // Bounded storage: VLC reads the torrent's file — never where it
+            // was deleted (HTTP 410: VLC stops for good). At the last played
+            // position instead when that is still there, else the player
+            // closes with the message (tvOS / macOS `boundedHandOff`;
+            // verify-playback 4).
+            var resumeTime = resumeTime
+            switch boundedHandOff(resumeTime: resumeTime) {
+            case .asked: break
+            case .at(let time): resumeTime = time
+            case .end:
+                endPlaybackForBoundedStorage(reason)
+                return
+            }
             var resume = startPosition
             if didStart, let fraction = knownPlaybackFraction(), fraction > 0.001 {
                 resume = ResumePolicy.handOffFraction(reached: fraction)
@@ -473,6 +640,48 @@ struct VideoPlayerWrapper: UIViewControllerRepresentable {
             invalidate()
             player?.pause()
             onFallback?(reason, resume, decided)
+        }
+
+        /// Bounded storage: where a hand-off to VLC may resume (see `fallBack`).
+        private enum BoundedHandOff { case asked, at(Double), end }
+
+        private func boundedHandOff(resumeTime: Double?) -> BoundedHandOff {
+            guard didStart, let session = boundedStorage, session.isBounded, player != nil else { return .asked }
+            let current: Double? = {
+                if starvation.isRecovering, let time = starvation.resumeTime { return time }
+                if let player = player, player.currentItem?.status == .readyToPlay {
+                    let time = player.currentTime().seconds
+                    if time.isFinite, time >= 0 { return time }
+                }
+                return starvation.abandonedTime ?? lastKnownTime
+            }()
+            guard let wanted = resumeTime ?? current, !session.canResumeOverHTTP(atPlayerSeconds: wanted) else { return .asked }
+            if let played = playedPosition.lastPlayedTime, played > wanted, session.canResumeOverHTTP(atPlayerSeconds: played) {
+                print("[Bounded] VLC can't resume at \(Int(wanted)) s (deleted) — at the last played position \(Int(played)) s")
+                return .at(played)
+            }
+            print("[Bounded] VLC can't resume at \(Int(wanted)) s: that part of the torrent is deleted")
+            return .end
+        }
+
+        /// Bounded storage: native playback can't go on and VLC can't resume
+        /// where it would have to (deleted): say so, then the owner closes the
+        /// player (the stream is cancelled as at any close).
+        private func endPlaybackForBoundedStorage(_ reason: String) {
+            print("[Bounded] native playback unavailable (\(reason)) and its data is deleted — closing the player")
+            saveProgressIfNeeded()
+            didFallBack = true
+            invalidate()
+            player?.pause()
+            let close = onCannotContinue
+            guard let presenter = playerController, presenter.presentedViewController == nil else {
+                close?()
+                return
+            }
+            let alert = UIAlertController(title: BoundedStorageUX.cannotContinueTitle,
+                                          message: BoundedStorageUX.cannotContinueMessage, preferredStyle: .alert)
+            alert.addAction(UIAlertAction(title: "OK".localized, style: .cancel) { _ in close?() })
+            presenter.present(alert, animated: true)
         }
 
         /// Periodic observer (1 Hz while playing, and on time jumps):
@@ -520,6 +729,10 @@ struct VideoPlayerWrapper: UIViewControllerRepresentable {
         }
 
         func invalidate() {
+            boundedRewindCheck?.cancel()
+            directStallTimer?.invalidate()
+            directStallTimer = nil
+            boundedStorage?.detachHTTPPlayer(self)
             starvation.cancel()
             failureObserver?.invalidate()
             failureObserver = nil
@@ -557,8 +770,11 @@ struct VideoPlayerWrapper: UIViewControllerRepresentable {
         vc.delegate = context.coordinator
 
         context.coordinator.onFallback = onFallback
+        context.coordinator.onCannotContinue = onCannotContinue
         context.coordinator.onItemReplaced = onItemReplaced
         context.coordinator.media = media
+        context.coordinator.isPayloadComplete = isPayloadComplete
+        context.coordinator.boundedStorage = boundedStorage
         context.coordinator.installIndicator(in: vc)
         context.coordinator.start(player: player, item: item, url: url, title: title, startPosition: startPosition,
                                   readyTimeout: readyTimeout, isWaitingForData: isWaitingForData,
@@ -569,6 +785,7 @@ struct VideoPlayerWrapper: UIViewControllerRepresentable {
 
     func updateUIViewController(_ vc: AVPlayerViewController, context: Context) {
         context.coordinator.onFallback = onFallback
+        context.coordinator.onCannotContinue = onCannotContinue
         context.coordinator.onItemReplaced = onItemReplaced
     }
 

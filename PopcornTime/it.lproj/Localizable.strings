@@ -645,3 +645,15 @@
 "Searching for subtitles…" = "Ricerca dei sottotitoli…";
 "Subtitles" = "Sottotitoli";
 "Audio" = "Audio";
+
+/* Bounded storage: a film larger than the free space streams with only part of it on disk. Loading screen (%d = minutes a rewind can reach), the message over the video when a rewind goes further back than what is still stored, the alert when playback can't continue, and the stream errors (%@ = space to free, e.g. "1.2 GB" / the system's error text). */
+"BoundedStorage.Loading.Minutes" = "Spazio limitato: puoi tornare indietro di circa %d min";
+"BoundedStorage.Loading.Generic" = "Spazio limitato: potrai tornare indietro solo di poco";
+"BoundedStorage.RewindLimited" = "Questa parte non è più memorizzata (spazio limitato).";
+"BoundedStorage.RewindNotDownloaded" = "Questa parte non è stata scaricata (spazio limitato).";
+"BoundedStorage.CannotContinue.Title" = "Riproduzione interrotta";
+"BoundedStorage.CannotContinue.Message" = "Questa parte del video non è più memorizzata (spazio limitato), quindi la riproduzione non può continuare da qui.";
+"BoundedStorage.NotEnoughSpace.Message" = "Spazio libero insufficiente per riprodurre questo video, anche con lo spazio limitato. Libera almeno %@ e riprova.";
+"BoundedStorage.NotEnoughSpace.Generic" = "Spazio libero insufficiente per riprodurre questo video, anche con lo spazio limitato. Libera un po' di spazio e riprova.";
+"BoundedStorage.FileError.Message" = "Impossibile salvare il video nella memoria (%@).";
+"BoundedStorage.TryLowerQuality" = "Vuoi provare una qualità inferiore?";

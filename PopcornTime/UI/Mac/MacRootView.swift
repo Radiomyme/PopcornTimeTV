@@ -40,6 +40,10 @@ struct MacRootView: View {
     @State private var path = NavigationPath()
     /// Release notes, shown once per version (not on a fresh install).
     @State private var showWhatsNew = false
+    #if DEBUG
+    /// `-PTDebugPlayTorrent` (BoundedStorageDebugHooks): the player sheet.
+    @State private var debugPlayback: MacPendingPlayback?
+    #endif
 
     var body: some View {
         // Read here, so that the destinations below get the current depth
@@ -81,7 +85,7 @@ struct MacRootView: View {
             #if DEBUG
             // Verification runs (-PTDebug… launch arguments): no release
             // notes over the page, and the requested section / page.
-            if MacDebugHooks.isActive {
+            if MacDebugHooks.isActive || BoundedStorageDebugHooks.isActive {
                 await runDebugHooks()
                 return
             }
@@ -92,6 +96,12 @@ struct MacRootView: View {
         .sheet(isPresented: $showWhatsNew) {
             WhatsNewView { showWhatsNew = false }
         }
+        #if DEBUG
+        .sheet(item: $debugPlayback) { item in
+            MacPlayerView(playback: item)
+                .frame(minWidth: 1024, minHeight: 576)
+        }
+        #endif
     }
 
     #if DEBUG
@@ -101,6 +111,15 @@ struct MacRootView: View {
     @MainActor
     private func runDebugHooks() async {
         await MacDebugHooks.prepareWindow()
+        // `-PTDebugPlayTorrent <file>` (BoundedStorageDebugHooks): the
+        // player on a local .torrent, as a placeholder movie.
+        if let file = BoundedStorageDebugHooks.torrentFile {
+            try? await Task.sleep(nanoseconds: 1_000_000_000)
+            print("[BoundedDebug] playing \(file)")
+            debugPlayback = MacPendingPlayback(torrent: Torrent(url: file, quality: "1080p"),
+                                               media: Movie(title: "Bounded storage test", id: "tt0000000"),
+                                               title: "Bounded storage test")
+        }
         if let requested = MacDebugHooks.section { section = requested }
         if let media = MacDebugHooks.media {
             try? await Task.sleep(nanoseconds: 600_000_000)
