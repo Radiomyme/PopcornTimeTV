@@ -334,7 +334,7 @@ public enum ReleaseName {
 
     // Episode markers, bounded by non-alphanumerics ("dts5", "x264" and
     // "1920x1080" never match).
-    private static let sxxEyyMarker = regex("(?<![\\p{L}\\p{N}])s(\\d{1,2})[ ._-]?e(\\d{1,3})(?!\\d)")
+    private static let sxxEyyMarker = regex("(?<![\\p{L}\\p{N}])s(\\d{1,2})[ ._-]?ep?(\\d{1,3})(?!\\d)")
     private static let nxNNMarker = regex("(?<![\\p{L}\\p{N}])(\\d{1,2})x(\\d{2,3})(?![\\p{L}\\p{N}])")
     /// Spanish sites number episodes "Cap.SEE": Cap.305 = S03E05, Cap.1012 = S10E12.
     private static let capMarker = regex("(?<![\\p{L}\\p{N}])cap[ ._]?(\\d{3,4})(?!\\d)")
@@ -380,6 +380,87 @@ public enum ReleaseName {
     /// marker wins over pack words ("Westworld - Temporada 4 [Cap.408]" is
     /// S04E08 alone).
     public static func episodeScope(of name: String, season: Int, episode: Int) -> EpisodeScope {
+        let (covered, spansSeasons, t, text) = coverage(of: name)
+        let all = NSRange(location: 0, length: (text as NSString).length)
+        let requested = EpisodeNumber(season: season, episode: episode)
+        if covered.contains(requested) {
+            switch covered.count {
+            case 1: return .requestedEpisode
+            case 2 where !spansSeasons: return .multiEpisode
+            default: return .pack
+            }
+        }
+        if !covered.isEmpty {
+            return covered.count >= 3 || spansSeasons ? .pack : .otherEpisode
+        }
+        let isPack = seasonMarker.firstMatch(in: text, range: all) != nil
+            || t.contains(where: { seasonWords.contains($0) || packWords.contains($0) })
+        return isPack ? .pack : .unknown
+    }
+
+    /// Whether a name's own episode markers include that episode: a single
+    /// episode, a double, or a range ("S01E01-E03" holds S01E03).
+    static func namesEpisode(_ name: String, season: Int, episode: Int) -> Bool {
+        return coverage(of: name).covered.contains(EpisodeNumber(season: season, episode: episode))
+    }
+
+    /// The one season a pack's name (or folder) names — "Show.S01.1080p",
+    /// "Show (Season 1)", "Saison 2" — without any episode marker; nil for
+    /// none, several ("S01-S03", "[S01-05]") or an episode.
+    static func singleSeason(of name: String) -> Int? {
+        let (covered, _, t, text) = coverage(of: name)
+        guard covered.isEmpty else { return nil }
+        let ns = text as NSString
+        var seasons = Set<Int>()
+        for match in seasonMarker.matches(in: text, range: NSRange(location: 0, length: ns.length)) {
+            guard let s = Int(ns.substring(with: match.range(at: 1))) else { continue }
+            seasons.insert(s)
+            // "S01-05", "S01~S05": a range of seasons.
+            let after = NSMaxRange(match.range)
+            if after < ns.length, seasonRangeContinuation.firstMatch(in: text, options: .anchored,
+                                                                      range: NSRange(location: after, length: ns.length - after)) != nil {
+                return nil
+            }
+        }
+        for i in t.indices where seasonWords.contains(t[i]) && i + 1 < t.count {
+            if let s = Int(t[i + 1]), t[i + 1].count <= 2 { seasons.insert(s) }
+        }
+        return seasons.count == 1 ? seasons.first : nil
+    }
+    private static let seasonRangeContinuation = regex("[ ._]*[-~][ ._]*s?\\d{1,2}(?!\\d)")
+
+    /// The episode number a file names on its own, inside a folder or a
+    /// torrent that names its season (`singleSeason`): "Episode 02",
+    /// "E02", "EP02", a leading "02 - Title", or scene numbering "102" /
+    /// "1012" (season × 100 + episode) for `season`. Nil when there is none.
+    static func episodeNumberInSeason(_ leaf: String, season: Int) -> Int? {
+        var text = leaf.lowercased()
+        if videoContainerExtension(of: text) != nil, let dot = text.lastIndex(of: ".") { text = String(text[..<dot]) }
+        let ns = text as NSString
+        let all = NSRange(location: 0, length: ns.length)
+        for pattern in [episodeOnlyMarker, leadingEpisodeNumber] {
+            if let match = pattern.firstMatch(in: text, range: all), let e = Int(ns.substring(with: match.range(at: 1))), e > 0 {
+                return e
+            }
+        }
+        for match in sceneNumber.matches(in: text, range: all) {
+            let digits = ns.substring(with: match.range(at: 1))
+            guard let code = Int(digits), code / 100 == season, code % 100 > 0,
+                  digits.count == (season < 10 ? 3 : 4) else { continue }
+            return code % 100
+        }
+        return nil
+    }
+    /// "Episode 2", "Épisode 02", "E02", "EP02", "Ep.2" (not "1080p", "x264": bounded).
+    private static let episodeOnlyMarker = regex("(?<![\\p{L}\\p{N}])(?:episode|épisode|episodio|folge|ep|e)[ ._-]?(\\d{1,3})(?![\\p{L}\\p{N}])")
+    /// "02 - Title", "02. Title", "02_Title", "02" alone.
+    private static let leadingEpisodeNumber = regex("^\\s*(\\d{1,3})(?:\\s*[-._]|\\s|$)")
+    /// "show.102.hdtv": three or four digits between non-alphanumerics.
+    private static let sceneNumber = regex("(?<![\\p{L}\\p{N}])(\\d{3,4})(?![\\p{L}\\p{N}])")
+
+    /// The episodes a name's markers cover, whether they span seasons, its
+    /// tokens and its lower-cased text.
+    private static func coverage(of name: String) -> (covered: Set<EpisodeNumber>, spansSeasons: Bool, tokens: [String], text: String) {
         let text = name.lowercased()
         let ns = text as NSString
         var covered = Set<EpisodeNumber>()
@@ -473,26 +554,14 @@ public enum ReleaseName {
             }
         }
         let t = tokens(text)
+        // "Season 3 Episode 5", "Season.1.E02", "Saison 1 EP02".
         for i in t.indices where seasonWords.contains(t[i]) && i + 3 < t.count {
-            if let s = Int(t[i + 1]), episodeWords.contains(t[i + 2]), let e = Int(t[i + 3]), t[i + 3].count <= 3 {
+            if let s = Int(t[i + 1]), episodeWords.contains(t[i + 2]) || t[i + 2] == "e", let e = Int(t[i + 3]), t[i + 3].count <= 3 {
                 add(s, e)
             }
         }
 
-        let requested = EpisodeNumber(season: season, episode: episode)
-        if covered.contains(requested) {
-            switch covered.count {
-            case 1: return .requestedEpisode
-            case 2 where !spansSeasons: return .multiEpisode
-            default: return .pack
-            }
-        }
-        if !covered.isEmpty {
-            return covered.count >= 3 || spansSeasons ? .pack : .otherEpisode
-        }
-        let isPack = seasonMarker.firstMatch(in: text, range: all) != nil
-            || t.contains(where: { seasonWords.contains($0) || packWords.contains($0) })
-        return isPack ? .pack : .unknown
+        return (covered, spansSeasons, t, text)
     }
 
     /// True when a release or file name covers more than one episode: a
@@ -694,14 +763,22 @@ public struct WantedFile: Equatable, Sendable, CustomStringConvertible {
     ///    file names another episode;
     /// 2. for an episode, the `so=` file, unless it names another episode;
     /// 3. the video file named after the episode (`ReleaseName.episodeScope`:
-    ///    "S03E05", "3x05", "Cap.305", "S3 - 05"…; samples left out), else a
-    ///    double episode holding it ("S03E04E05"); the largest of several;
-    /// 4. not found: with one video file at most, a single-episode torrent
+    ///    "S03E05", "S03EP05", "3x05", "Cap.305", "S3 - 05", "Season 3 E05"…;
+    ///    samples left out), else a double episode holding it ("S03E04E05"),
+    ///    else a range holding it ("S03E01-E06"); the largest of several;
+    /// 4. in a folder or torrent named after one season (`singleSeason`:
+    ///    "Show.S03.1080p/", "Season 3"), a file numbered on its own for that
+    ///    season: "Episode 05", "E05", "05 - Title", "305";
+    /// 5. not found: with one video file at most, a single-episode torrent
     ///    (its sample, subtitles…), the usual rule as before; with several,
     ///    a pack when one of them names an episode or a season, or the
     ///    torrent's name covers several episodes: `.notInTorrent`. Video
     ///    files without any marker (absolute numbering "Show - 013") and a
     ///    torrent name that doesn't say pack: the usual rule.
+    /// A sample is a file called "sample" / "trailer" (or in a Sample
+    /// folder) that is much smaller than the largest video file (under a
+    /// quarter of it; without sizes: unless every video file says so — the
+    /// word is then the show's title, "Trailer Park Boys").
     /// A movie (no numbers) stops after 1.
     public func choice(fileNames: [String], fileSizes: [Int64]? = nil, preferredIndex: Int? = nil,
                        torrentName: String? = nil) -> Choice {
@@ -732,19 +809,57 @@ public struct WantedFile: Equatable, Sendable, CustomStringConvertible {
             return .file(preferred)
         }
 
-        let videos = fileNames.indices.filter {
-            ReleaseName.isVideoFile(fileNames[$0]) && !ReleaseName.looksLikeSample(fileNames[$0])
+        let allVideos = fileNames.indices.filter { ReleaseName.isVideoFile(fileNames[$0]) }
+        let calledSample = Set(allVideos.filter { WantedFile.isCalledSample(fileNames[$0]) })
+        let largestVideo = sizes.flatMap { sizes in allVideos.map { sizes[$0] }.max() }
+        func isSample(_ index: Int) -> Bool {
+            guard calledSample.contains(index) else { return false }
+            if let sizes = sizes, let largestVideo = largestVideo, largestVideo > 0 { return sizes[index] * 4 < largestVideo }
+            return calledSample.count < allVideos.count
         }
+        let videos = allVideos.filter { !isSample($0) }
         let scopes = videos.map { scope($0) ?? .unknown }
         for wanted in [ReleaseName.EpisodeScope.requestedEpisode, .multiEpisode] {
             let matching = videos.indices.filter { scopes[$0] == wanted }.map { videos[$0] }
             if !matching.isEmpty { return .file(largest(matching)) }
+        }
+        if let season = season, let episode = episode {
+            // A range holding it: "S01E01-E03" for S01E03.
+            let ranges = videos.indices.filter {
+                scopes[$0] == .pack && ReleaseName.namesEpisode(WantedFile.leafName(fileNames[videos[$0]]), season: season, episode: episode)
+            }.map { videos[$0] }
+            if !ranges.isEmpty { return .file(largest(ranges)) }
+            // Numbered within its season: the season is the folder's or the torrent's.
+            let numbered = videos.indices.filter { position in
+                guard scopes[position] == .unknown || scopes[position] == .pack else { return false }
+                let path = fileNames[videos[position]]
+                guard WantedFile.seasonOfFolders(path) ?? torrentName.flatMap(ReleaseName.singleSeason(of:)) == season else { return false }
+                return ReleaseName.episodeNumberInSeason(WantedFile.leafName(path), season: season) == episode
+            }.map { videos[$0] }
+            if !numbered.isEmpty { return .file(largest(numbered)) }
         }
 
         guard videos.count > 1 else { return .usualRule }
         if scopes.contains(where: { $0 != .unknown }) { return .notInTorrent }
         if let name = torrentName, ReleaseName.coversSeveralEpisodes(name) { return .notInTorrent }
         return .usualRule
+    }
+
+    /// A file called "sample" or "trailer", or in a "Sample" folder.
+    static func isCalledSample(_ path: String) -> Bool {
+        if ReleaseName.looksLikeSample(path) { return true }
+        let folders = path.split(whereSeparator: { $0 == "/" || $0 == "\\" }).dropLast()
+        return folders.contains { ["sample", "samples"].contains($0.lowercased()) }
+    }
+
+    /// The one season a file's folders name ("Show.S02.1080p/02 - Title.mkv"),
+    /// the nearest folder first; nil when none does.
+    static func seasonOfFolders(_ path: String) -> Int? {
+        let folders = path.split(whereSeparator: { $0 == "/" || $0 == "\\" }).dropLast()
+        for folder in folders.reversed() {
+            if let season = ReleaseName.singleSeason(of: String(folder)) { return season }
+        }
+        return nil
     }
 
     /// The last path component of a file name or torrent path.

@@ -126,6 +126,56 @@ final class SeasonPackTests: CheckedTestCase {
               "unmarked parts of a single episode: as before")
     }
 
+    /// "Sample" / "Trailer" in the show's own title (Trailer Park Boys), or in an episode's: not a
+    /// sample unless the file is much smaller than the largest video file.
+    func testSampleWordsInTitles() {
+        let tpb = (1...6).map { String(format: "Trailer.Park.Boys.S01E%02d.1080p.WEB-DL.mkv", $0) } + ["Trailer.Park.Boys.S01.nfo"]
+        let tpbSizes: [Int64] = [900, 910, 920, 930, 940, 1200, 1].map { $0 * 1_000_000 }
+        let tpbName = "Trailer.Park.Boys.S01.1080p.WEB-DL"
+        for e in 1...6 {
+            check(want(1, e).choice(fileNames: tpb, fileSizes: tpbSizes, torrentName: tpbName) == .file(e - 1), "Trailer Park Boys S01E0\(e)")
+        }
+        check(want(1, 9).choice(fileNames: tpb, fileSizes: tpbSizes, torrentName: tpbName) == .notInTorrent, "Trailer Park Boys S01E09: not in the pack")
+        check(want(1, 2).choice(fileNames: tpb, fileSizes: nil, torrentName: tpbName) == .file(1), "Trailer Park Boys without sizes")
+        let titled = ["Show.S02E01.Pilot.mkv", "Show.S02E02.The.Trailer.mkv", "Show.S02E03.Finale.mkv"]
+        check(want(2, 2).choice(fileNames: titled, fileSizes: [5, 5, 9], torrentName: "Show.S02") == .file(1), "an episode called The Trailer")
+        let extras = ["Show.S01E01.mkv", "Show.S01E02.mkv", "Extras/Show.S01E02.Trailer.mkv"]
+        check(want(1, 2).choice(fileNames: extras, fileSizes: [900, 900, 40], torrentName: "Show.S01") == .file(1), "the episode, not a small trailer of it")
+        check(want(1, 3).choice(fileNames: extras + ["Sample/Show.S01E03.mkv"], fileSizes: [900, 900, 40, 30], torrentName: "Show.S01") == .notInTorrent,
+              "only a sample of it (in a Sample folder): not in the pack")
+    }
+
+    /// Packs named otherwise: "S01EP02", "Season 1 E02", files numbered within a season named by
+    /// their folder or the torrent ("Episode 02", "02 - Title", "102"), a range holding the episode.
+    func testOtherPackNamings() {
+        check(want(1, 2).choice(fileNames: ["Show.S01EP01.mkv", "Show.S01EP02.mkv", "Show.S01EP03.mkv"], fileSizes: [5, 5, 9]) == .file(1), "S01EP02")
+        check(want(1, 2).choice(fileNames: ["Show.Season.1.E01.mkv", "Show.Season.1.E02.mkv", "Show.Season.1.E03.mkv"], fileSizes: [5, 5, 9]) == .file(1),
+              "Season.1.E02")
+        let episodeWords = ["Show - Episode 01.mkv", "Show - Episode 02.mkv", "Show - Episode 03.mkv"]
+        check(want(1, 2).choice(fileNames: episodeWords, fileSizes: [5, 5, 9], torrentName: "Show Season 1") == .file(1), "Episode 02 in a Season 1 pack")
+        check(want(2, 2).choice(fileNames: episodeWords, fileSizes: [5, 5, 9], torrentName: "Show Season 1") == .notInTorrent,
+              "Episode 02 of a Season 1 pack is not S02E02")
+        let scene = ["show.101.hdtv.avi", "show.102.hdtv.avi", "show.103.hdtv.avi"]
+        check(want(1, 2).choice(fileNames: scene, fileSizes: [5, 5, 9], torrentName: "Show.S01.HDTV") == .file(1), "102 in an S01 pack")
+        let leading = ["Show.S01.1080p/01 - First.mkv", "Show.S01.1080p/02 - Second.mkv", "Show.S01.1080p/03 - Third.mkv"]
+        check(want(1, 2).choice(fileNames: leading, fileSizes: [5, 5, 9], torrentName: "Show.S01.1080p") == .file(1), "02 - Second under Show.S01.1080p")
+        check(want(1, 2).choice(fileNames: leading, fileSizes: [5, 5, 9], torrentName: nil) == .file(1), "the folder names the season")
+        let seasons = ["Show/Season 1/01.mkv", "Show/Season 1/02.mkv", "Show/Season 2/01.mkv", "Show/Season 2/02.mkv"]
+        check(want(2, 1).choice(fileNames: seasons, fileSizes: [5, 5, 5, 9], torrentName: "Show.Complete") == .file(2), "Season 2/01.mkv")
+        let ranges = ["Show.S01E01-E03.mkv", "Show.S01E04.mkv", "Show.S01E05.mkv"]
+        check(want(1, 3).choice(fileNames: ranges, fileSizes: [9, 5, 5]) == .file(0), "a range file holding E03")
+        check(want(1, 6).choice(fileNames: ranges, fileSizes: [9, 5, 5]) == .notInTorrent, "E06 in none of them")
+
+        check(ReleaseName.singleSeason(of: "Show.S01.1080p") == 1, "S01")
+        check(ReleaseName.singleSeason(of: "[Group] Show (Season 2) [1080p]") == 2, "Season 2")
+        check(ReleaseName.singleSeason(of: "Show.S01-S03.1080p") == nil, "S01-S03")
+        check(ReleaseName.singleSeason(of: "Show [S01-05]") == nil, "[S01-05]")
+        check(ReleaseName.singleSeason(of: "Show.S01E02.1080p") == nil, "an episode")
+        check(ReleaseName.singleSeason(of: "Show.2160p.x265") == nil, "no season")
+        check(ReleaseName.episodeNumberInSeason("Show.1080p.x264.mkv", season: 1) == nil, "1080p, x264: no number")
+        check(ReleaseName.episodeNumberInSeason("Show.720p.mkv", season: 7) == nil, "720p is not S07E20")
+    }
+
     func testMoviesUseTheSourcesFileNameOnly() {
         let collection = ["Saga.1.2001.1080p.mkv", "Saga.2.2003.1080p.mkv", "Saga.3.2005.1080p.mkv"]
         check(WantedFile(fileName: "Saga 2 2003 1080p.mp4")!.choice(fileNames: collection, fileSizes: [3, 2, 1]) == .file(1), "a film of a collection")
