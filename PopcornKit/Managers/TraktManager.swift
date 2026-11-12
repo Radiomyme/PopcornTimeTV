@@ -10,6 +10,21 @@ open class TraktManager: NetworkManager {
     
     /// Creates new instance of TraktManager class
     public static let shared = TraktManager()
+
+    /// Set once a Trakt call made with the app's API key alone has failed:
+    /// Trakt answers 403 to every such call since the key was revoked, and
+    /// an unreachable host (offline, DNS block, timeout, 5xx) fails the same
+    /// way. Later calls go straight to OpenMetadata, and pages know their
+    /// people did not come from Trakt (no Trakt person page for them).
+    /// Reset at each launch.
+    public private(set) static var anonymousAccessRefused = false
+
+    static func noteFailure(_ statusCode: Int?) {
+        if !anonymousAccessRefused {
+            print("[Trakt] " + (statusCode.map { "HTTP \($0)" } ?? "unreachable") + " — using OpenMetadata")
+        }
+        anonymousAccessRefused = true
+    }
     
     /// OAuth state parameter added for extra security against cross site forgery.
     fileprivate var state: String!
@@ -293,8 +308,15 @@ open class TraktManager: NetworkManager {
      - Parameter completion: The completion handler for the request containing an array of actors, array of crews and an optional error.
      */
     open func getPeople(forMediaOfType type: Trakt.MediaType, id: String, completion: @escaping ([Actor], [Crew], NSError?) -> Void) {
+        // Trakt refuses this app's key: TVMaze / YTS / Cinemeta instead.
+        let fallback = { OpenMetadata.people(forMediaOfType: type, id: id) { actors, crew in completion(actors, crew, nil) } }
+        guard !TraktManager.anonymousAccessRefused else { return fallback() }
         self.manager.request(Trakt.base + "/\(type.rawValue)/\(id)" + Trakt.people, headers: HTTPHeaders(Trakt.Headers.Default)).validate().responseData { response in
-            guard case .success(let __data) = response.result, let value = try? JSONSerialization.jsonObject(with: __data, options: .allowFragments) else { completion([Actor](), [Crew](), response.error as NSError?); return }
+            guard case .success(let __data) = response.result, let value = try? JSONSerialization.jsonObject(with: __data, options: .allowFragments) else {
+                TraktManager.noteFailure(response.response?.statusCode)
+                fallback()
+                return
+            }
             let responseObject = JSON(value)
             var actors = [Actor]()
             var crew = [Crew]()
@@ -443,8 +465,15 @@ open class TraktManager: NetworkManager {
      - Parameter completion: The requests completion handler containing array of related movies and an optional error.
      */
     open func getRelated<T: Media>(_ media: T, completion: @escaping ([T], NSError?) -> Void) {
+        // Trakt refuses this app's key: YTS suggestions / Cinemeta instead.
+        let fallback = { OpenMetadata.related(media) { related in completion(related.compactMap { $0 as? T }, nil) } }
+        guard !TraktManager.anonymousAccessRefused else { return fallback() }
         self.manager.request(Trakt.base + (media is Movie ? Trakt.movies : Trakt.shows) + "/\(media.id)" + Trakt.related, parameters: Trakt.extended, headers: HTTPHeaders(Trakt.Headers.Default)).validate().responseData { response in
-            guard case .success(let __data) = response.result, let value = try? JSONSerialization.jsonObject(with: __data, options: .allowFragments) else { completion([T](), response.error as NSError?); return }
+            guard case .success(let __data) = response.result, let value = try? JSONSerialization.jsonObject(with: __data, options: .allowFragments) else {
+                TraktManager.noteFailure(response.response?.statusCode)
+                fallback()
+                return
+            }
             let responseObject = JSON(value)
             let group = DispatchGroup()
             var array = [T]()
@@ -606,21 +635,6 @@ struct TraktContext: MapContext {}
 }
 
 extension TraktManager {
-    
-    #if canImport(UIKit)
-    /**
-     First part of the Trakt authentication process.
-
-     - Returns: A login view controller to be presented.
-     */
-    public func loginViewController() -> UIViewController {
-        #if os(tvOS)
-        return TraktAuthenticationViewController(nibName: "TraktAuthenticationViewController", bundle: TraktAuthenticationViewController.bundle)
-        #else
-        return UIViewController()
-        #endif
-    }
-    #endif
 
     /// Build the Trakt authorize URL for the iOS OAuth flow. The host app
     /// presents this in `SFSafariViewController`; once the user grants access

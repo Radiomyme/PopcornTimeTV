@@ -131,12 +131,19 @@ extension PCTPlayerViewController: UIViewControllerTransitioningDelegate {
         guard !progressBar.isScrubbing else {
             endScrubbing()
             if mediaplayer.isSeekable {
-                let time = NSNumber(value: progressBar.scrubbingProgress * streamDuration)
-                mediaplayer.time = VLCTime(number: time)
+                let wanted = NSNumber(value: progressBar.scrubbingProgress * streamDuration)
+                // Bounded storage: a scrub further back than what is still
+                // on disk stops at the earliest point still available.
+                let sent = seekLimited(toMilliseconds: wanted)
                 noteUserMovedPlayhead()
                 // Force a progress change rather than waiting for VLCKit's delegate call to.
-                progressBar.progress = progressBar.scrubbingProgress
-                progressBar.elapsedTimeLabel.text = progressBar.scrubbingTimeLabel.text
+                if sent === wanted {
+                    progressBar.progress = progressBar.scrubbingProgress
+                    progressBar.elapsedTimeLabel.text = progressBar.scrubbingTimeLabel.text
+                } else if streamDuration > 0 {
+                    progressBar.progress = sent.floatValue / streamDuration
+                    progressBar.elapsedTimeLabel.text = VLCTime(number: sent).stringValue
+                }
             }
             return
         }

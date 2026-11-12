@@ -530,11 +530,12 @@ struct RemuxStallWatch {
 /// earlier than one interval before that run — moves before it are the remux
 /// writing bytes already on disk while the swarm stalled (F3 x18d: a far seek
 /// while the swarm stalls, the swarm back seconds later). Per-piece
-/// publication passes: the iOS / tvOS PopcornTorrent sets `totalProgress`
-/// only when a piece finishes (7–15 s apart for 16 MiB pieces near the
-/// bitrate), the Mac's every 0.5 s. The cadence is per piece when the latest
-/// interval is `coarseProgressSeconds` or more — unless the one before it is
-/// shorter (a fine cadence that paused stays fine).
+/// publication passes: a streamer that sets `totalProgress` only when a
+/// piece finishes (7–15 s apart for 16 MiB pieces near the bitrate — the
+/// CocoaPods PopcornTorrent the iOS / tvOS apps used), the SPM one of every
+/// app every 0.5 s. The cadence is per piece when the latest interval is
+/// `coarseProgressSeconds` or more — unless the one before it is shorter (a
+/// fine cadence that paused stays fine).
 ///
 /// A pause or a slowdown of the download does not decide alone. The watch
 /// keeps the download's changes of the last `downloadMemorySeconds` across
@@ -663,7 +664,7 @@ struct FarTargetWatch {
     /// stopped.
     static let staleFactor: Double = 1.5
     /// Download changes this far apart (s) or more come per piece; closer
-    /// ones are a fine cadence (the Mac's 0.5 s refresh, seen at the 1 Hz
+    /// ones are a fine cadence (the streamer's 0.5 s refresh, seen at the 1 Hz
     /// tick: about 1 s apart). A cadence of 2 s is per piece: a piece-gated
     /// frontier there needs the piece credit. The cost, with ~10 s segments:
     /// pieces 1.6–2.6 s apart leave a target 1.5–1.7 bounds away native about

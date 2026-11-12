@@ -13,60 +13,68 @@ struct MacSettingsView: View {
     @AppStorage(PlaybackLanguagePreferences.audioLanguageDefaultsKey)    private var preferredAudioLanguage: String?
     @AppStorage(PlaybackLanguagePreferences.subtitleLanguageDefaultsKey) private var preferredSubtitleLanguage: String?
     @State private var isTraktSignedIn = TraktManager.shared.isSignedIn()
+    @Environment(\.openWindow) private var openWindow
 
     var body: some View {
         Form {
-            Section("Lecture") {
-                Picker("Qualité automatique", selection: $autoSelectQuality) {
-                    Text("Équilibré (démarrage rapide)").tag("Balanced")
-                    Text("La plus haute").tag("Highest")
-                    Text("La plus basse").tag("Lowest")
-                    Text("Choisir à chaque fois").tag("")
+            Section("Playback") {
+                // Labels only: the stored tags stay "Balanced" / "Highest" /
+                // "Lowest" / "" (MacAutoQuality, the iOS / tvOS settings).
+                Picker("Auto Select Quality", selection: $autoSelectQuality) {
+                    Text("Balanced (quick start)").tag("Balanced")
+                    Text("Highest").tag("Highest")
+                    Text("Lowest").tag("Lowest")
+                    Text("Always Ask").tag("")
                 }
                 .pickerStyle(.menu)
             }
 
             Section {
-                languagePicker("Langue audio préférée", storage: $preferredAudioLanguage)
-                languagePicker("Langue des sous-titres", storage: $preferredSubtitleLanguage)
+                languagePicker("Audio Language", storage: $preferredAudioLanguage)
+                languagePicker("Subtitle Language", storage: $preferredSubtitleLanguage)
             } header: {
-                Text("Langues")
+                Text("Languages")
             } footer: {
-                Text("Choisies automatiquement au lancement de la lecture quand le fichier (ou OpenSubtitles) les propose.")
+                Text("Audio and subtitles in these languages are picked automatically when the file or OpenSubtitles offers them.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
 
-            Section("Compte Trakt") {
+            Section("Trakt Account") {
                 if isTraktSignedIn {
-                    Label("Connecté à Trakt", systemImage: "checkmark.seal.fill")
+                    Label("Signed In to Trakt", systemImage: "checkmark.seal.fill")
                         .foregroundStyle(.green)
                     Button(role: .destructive) {
                         try? TraktManager.shared.logout()
                         isTraktSignedIn = TraktManager.shared.isSignedIn()
                     } label: {
-                        Label("Se déconnecter", systemImage: "rectangle.portrait.and.arrow.right")
+                        Label("Sign Out", systemImage: "rectangle.portrait.and.arrow.right")
                     }
                 } else {
                     Button {
                         NSWorkspace.shared.open(TraktManager.shared.iOSAuthorizationURL())
                     } label: {
-                        Label("Se connecter à Trakt (navigateur)", systemImage: "person.crop.circle.badge.plus")
+                        Label("Sign In to Trakt (Browser)", systemImage: "person.crop.circle.badge.plus")
                     }
                 }
             }
 
             Section("Sources") {
-                LabeledContent("API Films", value: "movies-api.accel.li + Time4Popcorn")
-                LabeledContent("API Séries", value: "eztvx.to (+ miroirs)")
+                LabeledContent("Movies API", value: "movies-api.accel.li + Time4Popcorn")
+                LabeledContent("Shows API", value: String(format: "%@ (+ mirrors)".localized, "eztvx.to"))
                 LabeledContent("Torrents", value: "Torrentio + T4P + YTS/EZTV")
             }
 
-            Section("À propos") {
+            Section("About") {
                 LabeledContent("Version", value: Bundle.main.macShortVersion)
-                LabeledContent("Moteur", value: "MKV remux → AVPlayer (Atmos) · VLC fallback")
+                LabeledContent("Engine", value: "MKV remux → AVPlayer (Atmos) · VLC fallback")
+                Button {
+                    openWindow(id: MacWhatsNewWindow.id)
+                } label: {
+                    Label("What's New", systemImage: "sparkles")
+                }
                 Link(destination: URL(string: "https://github.com/Radiomyme/PopcornTimeTV")!) {
-                    Label("Code source", systemImage: "chevron.left.forwardslash.chevron.right")
+                    Label("Source Code", systemImage: "chevron.left.forwardslash.chevron.right")
                 }
             }
         }
@@ -78,10 +86,10 @@ struct MacSettingsView: View {
         }
     }
 
-    /// "Aucune" + common languages (localized names). The selection is the
+    /// "None" + common languages (localized names). The selection is the
     /// ISO code, the stored value the localized name (tvOS convention), so a
     /// name saved under another UI language still shows up selected.
-    private func languagePicker(_ title: String, storage: Binding<String?>) -> some View {
+    private func languagePicker(_ title: LocalizedStringKey, storage: Binding<String?>) -> some View {
         let selection = Binding<String>(
             get: { storage.wrappedValue.flatMap(PlaybackLanguagePreferences.isoCode(for:)) ?? "" },
             set: { storage.wrappedValue = $0.isEmpty ? nil : PlaybackLanguagePreferences.storedName(forCode: $0) }
@@ -91,7 +99,7 @@ struct MacSettingsView: View {
             codes.insert(selection.wrappedValue, at: 0)
         }
         return Picker(title, selection: selection) {
-            Text("Aucune").tag("")
+            Text("None").tag("")
             ForEach(codes, id: \.self) { code in
                 Text(PlaybackLanguagePreferences.displayName(forCode: code)).tag(code)
             }

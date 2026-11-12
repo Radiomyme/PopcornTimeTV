@@ -240,6 +240,7 @@ final class MKVToHLSRemuxSession {
                 return conclude(.unsupported("Aucune image clé vidéo"))
             }
             let gotCluster: Bool = autoreleasepool {
+                defer { noteInputConsumed() }
                 guard let frames = demuxer.readNextCluster() else { return false }
                 bufferPrepareFrames(frames)
                 return true
@@ -290,6 +291,7 @@ final class MKVToHLSRemuxSession {
             // without draining, every cluster read stays resident until the
             // caller's pool drains (memory grew with the file size — measured).
             let produced: Int? = autoreleasepool {
+                defer { noteInputConsumed() }
                 guard let frames = demuxer.readNextCluster() else { return nil }
                 for frame in frames { route(frame) }
                 return cutReadySegments(limit: maxNewSegments - written)
@@ -590,6 +592,30 @@ final class MKVToHLSRemuxSession {
     /// with (output rate, bytes kept behind the playhead). Thread-safe.
     func segmentBytes() -> [Int64] { lock.withLock { lockedSegmentBytes } }
 
+    /// Source file offset of each published segment index, aligned with
+    /// `segmentDurations()`: the start of the Matroska Cluster holding the
+    /// segment's first video frame (its keyframe) — where a player resuming
+    /// in that segment (VLC at that time) starts reading the file. Tail
+    /// fillers and an absorbing last segment repeat the last real offset (a
+    /// lower bound). Non-decreasing. Thread-safe.
+    func segmentSourceOffsets() -> [Int64] { lock.withLock { lockedSourceOffsets } }
+
+    /// The demuxer's position in the input file once the header is parsed:
+    /// the next byte it will read, below which it never reads again (it
+    /// only moves forward; a cluster that isn't complete yet is retried from
+    /// its start, which this offset does not pass). 0 before the header is
+    /// parsed. Bounded storage releases the file below it (minus what a
+    /// hand-off at the playhead needs). Thread-safe.
+    var consumedInputOffset: Int64 { lock.withLock { lockedConsumedInput } }
+
+    /// Publishes the demuxer's position (`consumedInputOffset`, strictly
+    /// forward). Pump queue.
+    private func noteInputConsumed() {
+        guard headerParsed else { return }
+        let offset = Int64(clamping: demuxer.reader.offset)
+        lock.withLock { lockedConsumedInput = max(lockedConsumedInput, offset) }
+    }
+
     /// Info/MuxingApp and Info/WritingApp of the input (nil when absent or
     /// before the header is parsed). Thread-safe.
     var muxingApp: String? { lock.withLock { lockedMuxingApp } }
@@ -806,6 +832,9 @@ final class MKVToHLSRemuxSession {
     private var lockedWriteFailure: String?
     private var lockedBytesWritten: Int64 = 0
     private var lockedSegmentBytes: [Int64] = []
+    /// `segmentSourceOffsets()`, `consumedInputOffset`.
+    private var lockedSourceOffsets: [Int64] = []
+    private var lockedConsumedInput: Int64 = 0
     private var lockedMuxingApp: String?
     private var lockedWritingApp: String?
     private var lockedDurationKind: HeaderDurationKind = .normal
@@ -2160,6 +2189,8 @@ final class MKVToHLSRemuxSession {
     @discardableResult
     private func writeSegment(videoCount: Int, cutPTS: Int64?, extendTo: Int64? = nil) -> Bool {
         let index = segmentIndex
+        // Where the segment's first frame (its keyframe) sits in the source.
+        let sourceOffset = Int64(clamping: videoOutput?.pending.first?.clusterOffset ?? 0)
         guard let video = videoOutput,
               let window = makeFragments(index: index, sequence: UInt32(clamping: index + 1), videoCount: videoCount,
                                          cutPTS: cutPTS, extendTo: extendTo, suffix: "") else { return false }
@@ -2209,6 +2240,7 @@ final class MKVToHLSRemuxSession {
             guard let self = self else { return }
             self.lock.withLock {
                 self.lockedDurations.append(duration)
+                self.lockedSourceOffsets.append(max(sourceOffset, self.lockedSourceOffsets.last ?? 0))
                 self.lockedSegmentBytes.append(bytes)
                 self.lockedBytesWritten += bytes
                 self.lockedProgress.segmentsWritten = count
@@ -2289,6 +2321,7 @@ final class MKVToHLSRemuxSession {
             guard let self = self else { return }
             self.lock.withLock {
                 self.lockedDurations.append(state.seconds)
+                self.lockedSourceOffsets.append(self.lockedSourceOffsets.last ?? 0)
                 self.lockedSegmentBytes.append(bytes)
                 self.lockedBytesWritten += bytes
                 self.lockedProgress.segmentsWritten = count
@@ -2369,6 +2402,7 @@ final class MKVToHLSRemuxSession {
                 guard let self = self else { return }
                 self.lock.withLock {
                     self.lockedDurations.append(seconds)
+                    self.lockedSourceOffsets.append(self.lockedSourceOffsets.last ?? 0)
                     self.lockedSegmentBytes.append(bytes)
                     self.lockedBytesWritten += bytes
                     self.lockedProgress.segmentsWritten = count

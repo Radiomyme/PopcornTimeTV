@@ -188,6 +188,25 @@ public struct Show: Media, Equatable {
         self.episodes.sort { $0.season == $1.season ? $0.episode < $1.episode : $0.season < $1.season }
     }
 
+    /// A Cinemeta (Stremio's public catalog) series: `id` is the IMDb id. Used
+    /// for related titles; the detail page loads the full show by id.
+    public init?(cinemeta dict: [String: Any]) {
+        guard let imdb = dict["imdb_id"] as? String ?? dict["id"] as? String, imdb.hasPrefix("tt"),
+              let name = dict["name"] as? String, !name.isEmpty else { return nil }
+        self.id      = imdb
+        self.tmdbId  = nil
+        self.tvdbId  = "0"
+        self.slug    = name.slugged
+        self.title   = name.removingHtmlEncoding
+        self.year    = String(((dict["releaseInfo"] as? String) ?? (dict["year"] as? String) ?? "").prefix(4))
+        let imdbRating = Double((dict["imdbRating"] as? String) ?? "") ?? 0
+        self.rating  = Float(imdbRating * 10.0)
+        self.summary = ((dict["description"] as? String) ?? "No summary available.".localized).strippedOfHtml
+        self.genres  = (dict["genres"] as? [String]) ?? (dict["genre"] as? [String]) ?? []
+        self.largeCoverImage      = (dict["poster"] as? String).map { OpenMetadata.largerPoster($0) }
+        self.largeBackgroundImage = dict["background"] as? String
+    }
+
     /// Convenience init mapping a Time4Popcorn (`api.apiabcd.com`) show list
     /// object (`/shows`). Episodes are resolved later by `getShowInfo` via
     /// TVMaze (the show carries an imdb id TVMaze can look up). Posters are

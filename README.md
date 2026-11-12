@@ -4,7 +4,7 @@
 
 # PopcornTimeTV — modernized fork
 
-[![Version](https://img.shields.io/badge/version-5.0.0-blue.svg?style=flat)](https://github.com/Radiomyme/PopcornTimeTV/releases)
+[![Version](https://img.shields.io/badge/version-5.1.0-blue.svg?style=flat)](https://github.com/Radiomyme/PopcornTimeTV/releases)
 [![Platform](http://img.shields.io/badge/platform-tvOS%2026%20%7C%20iOS%2026%20%7C%20macOS-lightgrey.svg?style=flat)](https://github.com/Radiomyme/PopcornTimeTV)
 [![Swift](https://img.shields.io/badge/swift-5-orange.svg?style=flat)](https://swift.org)
 [![License](https://img.shields.io/badge/license-GPL_v3-373737.svg?style=flat)](LICENSE.md)
@@ -14,9 +14,102 @@ This fork brings the project up to date for **Xcode 26**, **tvOS 26** and **iOS 
 data layer around pluggable content providers, adds a native SwiftUI app for iPhone / iPad /
 Mac (Designed for iPad), and — new in **5.0.0** — ships a zero-dependency, pure-Swift
 **MKV → fMP4/HLS remux engine** that unlocks true **Dolby Atmos** (and HDR) through Apple's
-native `AVPlayer`.
+native `AVPlayer`. **5.1.0** redesigns the Apple TV pages in Liquid Glass, makes the remux
+engine play far more files natively, adds The Pirate Bay and Knaben sources with a Top 100, and
+plays films larger than the free space.
 
-## New in 5.0.0 — the remux engine (true Dolby Atmos)
+## New in 5.1.0
+
+The same notes are shown once in the app after the update (`WhatsNewRelease.current` in
+`PopcornTime/UI/Shared SwiftUI/WhatsNew.swift`; keep the two in step).
+
+**Apple TV**
+- **Liquid Glass movie and show pages** (SwiftUI): full-bleed artwork, Play that names
+  the episode it starts ("Play S2 · E5") with a progress bar, Trailer, Watchlist, Watched and
+  Download buttons, season pills, an episode shelf with a summary panel, "Viewers Also Watched",
+  cast & crew, information and accessibility cards. Real Liquid Glass on tvOS 26 and later,
+  materials on tvOS 17–25. The page opens as soon as the movie or show info is known; related
+  titles and cast fill in as they arrive.
+- **Cast and similar titles are back**, without a Trakt account: Trakt now refuses the app's
+  API key (HTTP 403) and the TMDB key is dead, so `OpenMetadata` (PopcornKit) uses keyless
+  sources instead: cast with photos from YTS (movies) and TVMaze (shows), directors and
+  writers from Cinemeta, "You Might Also Like" from YTS suggestions and Cinemeta's same-genre
+  titles, logos and landscape backdrops from metahub.
+- **Simpler Settings**: Auto Select Quality ("Always Ask" by default), audio and subtitle
+  languages, theme songs on/off, Clear Cache, Trakt sign-out and the version with its release
+  notes. Gone: the update check, Trakt sign-in, the VLC-only subtitle style rows and the
+  "clear cache on exit" switch (now always on).
+- **French**: the Apple TV app is now fully translated into French.
+- **What's New**: the release notes appear once after an update (never on a fresh install),
+  and again from Settings › Version.
+
+**Playback (Apple TV, iPhone / iPad, Mac)** — the remux engine described below now covers:
+- **Dolby Vision** profiles 5, 8.1 and 8.4 signalled natively, profile 7 as its HDR10 base
+  layer; HDR10, HDR10+ and HLG as encoded.
+- **Every compatible audio track** as its own selectable rendition (E-AC-3 / AC-3, AAC, MP3,
+  MP2, FLAC, Opus, ALAC; PCM converted to FLAC). TrueHD, DTS and Vorbis go to VLC unless the
+  file also has a compatible track.
+- **The file's own text subtitles** (SRT, SSA/ASS, WebVTT) in `AVPlayer`'s picker; a slow
+  OpenSubtitles download delays the start by about 15 seconds at most.
+- **Exact seeks** from the file's keyframe index, **download-aware playback** (waits for the
+  data instead of falling back) and far jumps that stay native when the data will arrive in
+  time; played segments are kept behind the playhead as far as the disk allows.
+- **A clearer quality picker** on every platform: quality, seeds and size per source, the
+  recommended one starred.
+
+**Small disks (Apple TV, Mac)**
+- **Films larger than the free space now play**: when a film doesn't fit (a 13 GB 4K film on an
+  Apple TV with 3 GB free, say), it streams in bounded storage: only a window around the
+  playhead stays on disk, and what has been watched is released as playback moves on, so the
+  device never fills up. The loading screen says about how far back a rewind can reach; a
+  rewind or a reverse scan past what is still stored stops at the earliest point still on disk,
+  with a message, and jumps ahead work as before. Only when even that can't fit does the app say
+  how much space to free (on Apple TV, with an offer to try a lower quality). Films that fit
+  play exactly as before. The iPhone / iPad app has the same code but hasn't run it yet.
+
+**Torrent engine (every platform)**
+- **One torrent engine everywhere**: Apple TV and iPhone / iPad now use the PopcornTorrent Swift
+  package the Mac already used (libtorrent 1.2.19 built from source; it streams the release's
+  main video file, or the file a Torrentio link names) instead of the CocoaPods PopcornTorrent
+  1.3.15 binary (libtorrent 1.2.1).
+
+**Catalog & sources (every platform)**
+- **Top 100**: a new sort for Movies and Shows with The Pirate Bay's most seeded titles of the
+  moment (its precompiled top 100s: Movies + HD + UHD, TV + HD TV + UHD TV), each release mapped
+  to its IMDb title through Cinemeta (TPB's id only when Cinemeta confirms title and year, else
+  an exact title + year search; box sets and unreadable names left out), ranked by the seeders
+  of all its torrents. Cached 15 minutes on disk; an older list is shown at once if The Pirate
+  Bay is slow or blocked.
+- **More torrents per title** from **The Pirate Bay** (apibay) and the **Knaben** meta-index
+  (1337x, TorrentGalaxy, Nyaa, YTS, RARBG archives…: most of what link launchers such as xtorx
+  list), labelled with their source in the picker. Precision first: a release is kept only when
+  its name is the film's title (or a known alias) followed by its year, alone (no pack, box set,
+  bonus disc, 3D or RiffTrax version, not filed under another film of that name), or exactly the
+  episode asked (show name, alternate titles, year / country when another show has the name).
+  Both sources are optional and fail fast: a blocked host costs a few seconds once, then is
+  skipped.
+- **Search finds more titles**: Cinemeta's catalog (every IMDb title) is added after the
+  existing results, exact title matches first; a title only Cinemeta knows still opens, with
+  Torrentio, The Pirate Bay and Knaben torrents (a series TVMaze doesn't know uses Cinemeta's
+  episode list).
+
+**Shows (every platform)**
+- **Mislabelled torrents left out**: EZTV files releases of other shows under a show's IMDb id
+  (every "Breaking Bad" entry is in fact "Breaking Brad", which added seasons 6–9 and wrong
+  files to seasons 1–5). Releases whose name doesn't match the show's title or one of its
+  alternate titles (TVMaze akas: "Money Heist" for "La Casa de Papel") are dropped.
+
+**iPhone / iPad**
+- Detail pages with cast, star rating and related titles (Apple TV parity).
+
+**Mac**
+- **Native Mac app** (macOS 14+) with the same remux engine: Dolby Atmos rendered spatially on
+  the Mac and AirPods.
+- **Liquid Glass movie and show pages** with the Apple TV layout (full-size artwork, logo,
+  season pills and an episode shelf, cast, similar titles, information cards), hover effects,
+  and a Watchlist section in the sidebar. The Mac app is now localized like the Apple TV one.
+
+## The remux engine (true Dolby Atmos) — new in 5.0.0, extended in 5.1.0
 
 MKV releases used to fall back to VLC, whose bundled build can't bitstream Dolby and tone-maps
 HDR to SDR. 5.0.0 adds a **pure-Swift, dependency-free Matroska demuxer + fragmented-MP4 (CMAF)
@@ -73,6 +166,8 @@ serves it to `AVPlayer` as a complete VOD HLS presentation over a localhost serv
 - New SwiftUI app for iPhone / iPad / Mac (Designed for iPad) sharing the `PopcornKit` core
 - Native macOS app (macOS 14+) with the same remux engine, so Atmos is rendered spatially on
   the Mac instead of being downmixed
+- One torrent engine on every platform: the PopcornTorrent Swift package (libtorrent 1.2.19) on
+  Apple TV, iPhone / iPad and Mac
 
 **Content & sources**
 - Pluggable `MediaProvider` layer (no more hardcoded, dead `api-fetch` host)
@@ -80,10 +175,13 @@ serves it to `AVPlayer` as a complete VOD HLS presentation over a localhost serv
   merged per title for far more releases)
 - TV shows via **EZTV** (mirror chain) + **TVMaze** metadata, with the full episode guide
   merged with per-episode torrents
+- **The Pirate Bay** + **Knaben** as extra torrent sources, The Pirate Bay's **Top 100**, and
+  **Cinemeta** in search (see "New in 5.1.0")
 - Image proxy (weserv.nl) so posters load even when the source CDN is ISP-blocked
 
 **Series**
-- Shows tab sorts by Trending / Popular / Top Rated / New / **A–Z**, plus genre filtering
+- Shows tab sorts by Trending / **Top 100** / Popular / Top Rated / New / **A–Z**, plus genre
+  filtering
 - Show detail lists episodes ordered by **season then episode**, duplicate releases collapsed
   into quality choices
 
@@ -120,7 +218,9 @@ serves it to `AVPlayer` as a complete VOD HLS presentation over a localhost serv
 
 ## Build
 
-Requires Xcode 26 and [CocoaPods](https://cocoapods.org). See [NOTICE.md](NOTICE.md) for the pods used.
+Requires Xcode 26 and [CocoaPods](https://cocoapods.org); PopcornTorrent (the torrent engine of
+all three apps) and GCDWebServer are Swift packages that Xcode resolves. See
+[NOTICE.md](NOTICE.md) for the dependencies.
 
 ```bash
 git clone https://github.com/Radiomyme/PopcornTimeTV.git
@@ -132,8 +232,7 @@ open PopcornTime.xcworkspace
 Then pick a scheme:
 - **PopcornTimetvOS** → run on an Apple TV simulator or device
 - **PopcornTimeiOS** → run on iPhone / iPad, or "My Mac (Designed for iPad)"
-- **PopcornTimeMac** → the native macOS app (torrent engine from the PopcornTorrent Swift
-  package, resolved by Xcode)
+- **PopcornTimeMac** → the native macOS app
 
 > Tip: keep the checkout **outside** an iCloud-synced folder (e.g. `~/Developer`). iCloud
 > creates `<file> 2.ext` conflict copies inside `Pods/` and can rewrite tracked project files,

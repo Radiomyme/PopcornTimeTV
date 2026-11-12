@@ -358,6 +358,101 @@ final class RemuxPlayback {
     /// pruned indexes need not be contiguous (`prunedIndexes`). Thread-safe.
     var prunedThrough: Int { stateLock.withLock { lockedPruned.last ?? -1 } }
 
+    // BOUNDED STORAGE ---------------------------------------------------------
+    // The torrent runs in PopcornTorrent's bounded mode (`PTStorageModeBounded`:
+    // the film doesn't fit, only a window of it is on disk). Then, and only
+    // then: the input is final once every byte of it is on disk
+    // (`isFileComplete`, not `totalProgress`), the pump reports the remux's
+    // read position to the torrent (`readPosition`), the stream's
+    // `BoundedStorageSession` releases what the remux has read
+    // (`consumedBefore`), and the disk budget comes from its split
+    // (`StorageBudget`: 512 MiB reserve, the torrent's budget, the HLS copy)
+    // instead of the 2 GiB reserve and the torrent's remaining bytes. Full mode
+    // is untouched.
+
+    /// True once the stream runs in bounded mode (latched: a stream never
+    /// leaves it). Thread-safe.
+    var isStorageBounded: Bool {
+        if stateLock.withLock({ lockedBounded }) { return true }
+        guard streamer?.storageMode == .bounded else { return false }
+        stateLock.withLock { lockedBounded = true }
+        return true
+    }
+
+    /// What the stream's bounded-storage session reads (`BoundedStorageSession`),
+    /// in one consistent snapshot. nil before the session exists. Thread-safe.
+    struct BoundedSnapshot {
+        /// `MKVToHLSRemuxSession.consumedInputOffset`: the demuxer never reads
+        /// below it again.
+        var readerOffset: Int64
+        /// Source offset of each written segment (its first cluster).
+        var segmentSourceOffsets: [Int64]
+        /// Segment spans on the player timeline (`playerTimeline`).
+        var playerDurations: [Double]
+        /// Segment spans as cut (media time from segment 0's start).
+        var mediaDurations: [Double]
+        var targetDuration: Double
+        /// Segment 0's earliest presentation time (s): media time of the
+        /// player timeline's 0.
+        var timelineStartSeconds: Double
+        var written: Int
+        var pruned: IndexSet
+        var played: Double?
+        var wanted: Double?
+        /// Deletable segments on disk (written, not pruned, index ≥ 1).
+        var deletableKeptBytes: Int64
+        var outputBytesPerSecond: Double?
+        var allowedKeptBytes: Int64
+        var finished: Bool
+        var isStopped: Bool
+    }
+
+    func boundedSnapshot() -> BoundedSnapshot? {
+        guard let session = session else { return nil }
+        let mediaDurations = session.segmentDurations()
+        let bytes = session.segmentBytes()
+        let offsets = session.segmentSourceOffsets()
+        let progress = session.progress
+        let (played, wanted, pruned, allowed, rate, stopped) = stateLock.withLock {
+            (lockedPlayedSeconds, lockedWantedSeconds, lockedPruned, lockedAllowedKeptBytes, lockedBudgetRate, lockedStopped)
+        }
+        let count = min(mediaDurations.count, bytes.count)
+        var kept: Int64 = 0
+        if count > 1 { for index in 1..<count where !pruned.contains(index) { kept += bytes[index] } }
+        return BoundedSnapshot(readerOffset: session.consumedInputOffset,
+                               segmentSourceOffsets: offsets,
+                               playerDurations: Self.playerTimeline(session),
+                               mediaDurations: mediaDurations,
+                               targetDuration: session.targetDuration,
+                               timelineStartSeconds: Double(session.timelineStart90k) / 90_000,
+                               written: progress.segmentsWritten,
+                               pruned: pruned,
+                               played: played,
+                               wanted: wanted,
+                               deletableKeptBytes: kept,
+                               outputBytesPerSecond: rate ?? Self.outputBytesPerSecond(segmentBytes: bytes, durations: mediaDurations),
+                               allowedKeptBytes: allowed,
+                               finished: progress.finished,
+                               isStopped: stopped)
+    }
+
+    /// The earliest position (player timeline, s) a NATIVE rewind from
+    /// `playerSeconds` reaches without a hole: the start of the first segment
+    /// of the run of kept segments (written, not pruned) that holds
+    /// `playerSeconds`. nil when that position's own segment is not
+    /// available (not written yet, or pruned). Any mode; thread-safe.
+    func earliestNativeRewindSeconds(fromPlayerSeconds playerSeconds: Double) -> Double? {
+        guard playerSeconds.isFinite, let session = session else { return nil }
+        let durations = Self.playerTimeline(session)
+        let target = session.targetDuration
+        let segment = Self.segmentIndex(coveringPlayerSeconds: max(0, playerSeconds), durations: durations,
+                                        targetDuration: target)
+        guard let first = BoundedStorage.earliestContiguousKeptSegment(playheadSegment: segment,
+                                                                       written: session.progress.segmentsWritten,
+                                                                       pruned: prunedIndexes) else { return nil }
+        return Self.segmentStart(index: first, durations: durations, targetDuration: target)
+    }
+
     private let server = GCDWebServer()
     /// Serial pump queue; each tick drains its own autorelease pool (the
     /// session also drains one per cluster).
@@ -429,6 +524,12 @@ final class RemuxPlayback {
     private var lockedBudgetEvaluatedBytes: Int64 = 0
     private var lockedBudgetInFlight = false
     private var lockedLoggedAllowance: Int64?
+    /// `isStorageBounded`, latched.
+    private var lockedBounded = false
+    /// What the eviction never deletes behind each position (s):
+    /// `minimumKeepBehindSeconds`, lowered in bounded mode when the split
+    /// gives a shorter HLS rewind (`StorageBudget.protectBehindSeconds`).
+    private var lockedProtectBehind: Double = RemuxPlayback.minimumKeepBehindSeconds
     /// Uptime of the last eviction log, and the segments evicted since it
     /// (the log is coalesced).
     private var lockedEvictionLoggedAt: TimeInterval?
@@ -508,9 +609,20 @@ final class RemuxPlayback {
         self.lockedHadStreamer = streamer != nil
         self.isAtmos = isAtmos
         // The "remux-" prefix is what purgeOrphanTorrentDownloads() sweeps.
-        self.outputDir = FileManager.default.temporaryDirectory
+        self.outputDir = (Self.outputParentOverride ?? FileManager.default.temporaryDirectory)
             .appendingPathComponent("remux-\(UUID().uuidString.prefix(8))")
+        self.boundedSession = BoundedStorageSession.session(for: streamer)
     }
+
+    /// The stream's bounded-storage session (set up where the stream
+    /// started: `BoundedStorageSession.prepare`); nil for a local file or a
+    /// stream started without it.
+    private let boundedSession: BoundedStorageSession?
+
+    /// Where the output directories go instead of the temporary directory
+    /// (DEBUG end-to-end runs keep the HLS copy on the torrent's volume).
+    /// Set before creating the object.
+    static var outputParentOverride: URL?
 
     deinit {
         stop()
@@ -519,6 +631,7 @@ final class RemuxPlayback {
     // MARK: - Lifecycle
 
     func start() {
+        boundedSession?.attachRemux(self)
         installHandlers()
         var options: [String: Any] = [GCDWebServerOption_Port: 50710,
                                       GCDWebServerOption_BindToLocalhost: true]
@@ -560,6 +673,7 @@ final class RemuxPlayback {
         }
         guard !alreadyStopped else { return }
         timer?.cancel()
+        boundedSession?.detachRemux(self)
         let held: [HeldRequest] = holdLock.withLock {
             holdClosed = true
             let all = heldRequests
@@ -593,6 +707,9 @@ final class RemuxPlayback {
     }
 
     private var isStopped: Bool { stateLock.withLock { lockedStopped } }
+
+    /// `stop()` ran (bounded storage stops reading this remux). Thread-safe.
+    var isStoppedForBounded: Bool { isStopped }
 
     // MARK: - HTTP handlers
 
@@ -967,13 +1084,14 @@ final class RemuxPlayback {
         guard let session = session else { return .hold }
         let durations = Self.playerTimeline(session)
         let written = session.progress.segmentsWritten
-        let (played, wanted, reportedAt, requests, pruned) = stateLock.withLock {
-            (lockedPlayedSeconds, lockedWantedSeconds, lockedPositionsReportedAt, lockedRecentRequests, lockedPruned)
+        let (played, wanted, reportedAt, requests, pruned, protectBehind) = stateLock.withLock {
+            (lockedPlayedSeconds, lockedWantedSeconds, lockedPositionsReportedAt, lockedRecentRequests, lockedPruned,
+             lockedProtectBehind)
         }
         return Self.prunedRequestDecision(index: index, durations: durations, written: written,
                                           targetDuration: session.targetDuration,
                                           receivedAt: receivedAt, played: played, wanted: wanted, reportedAt: reportedAt,
-                                          requests: requests, pruned: pruned)
+                                          requests: requests, pruned: pruned, protectBehind: protectBehind)
     }
 
     // MARK: - Playlists
@@ -1558,6 +1676,23 @@ final class RemuxPlayback {
     /// has since been released does not count as complete either.
     private var isInputComplete: Bool {
         guard let streamer = streamer else { return !stateLock.withLock { lockedHadStreamer } }
+        // Bounded mode: every byte the demuxer will still read is on disk —
+        // from its position (`consumedInputOffset`, strictly forward: it never
+        // reads below it again) to the end of the file. Pieces below were
+        // deleted, so `isFileComplete` alone never gets there, and the last
+        // segment is only cut by `finish()` (report_4 B5 "once [reader, EOF)
+        // is all present"). PopcornTorrent never drops a piece of that range
+        // once it is all on disk (`piecesToDrop`): zeros read from then on are
+        // real data. Its read position is the remux's (`reportReadPosition`,
+        // after every tick). `totalProgress` there is the share downloaded
+        // once, which says nothing about what is still on disk.
+        if isStorageBounded {
+            if streamer.isFileComplete { return true }
+            guard let session = lockedSessionValue, session.isHeaderParsed else { return false }
+            let size = streamer.fileSize.longLongValue
+            let reader = session.consumedInputOffset
+            return size > 0 && reader > 0 && streamer.firstMissingOffset(from: reader) >= size
+        }
         return streamer.torrentStatus.totalProgress >= 1.0
     }
 
@@ -1723,6 +1858,7 @@ final class RemuxPlayback {
             if produced >= 6 && written >= anchor + 3 { break }
             if Date().timeIntervalSince(tickStart) > 0.8 { break }
         }
+        reportReadPosition(session)
         if let reason = session.writeFailure {
             haltAfterWriteFailure(reason)
             return
@@ -2032,17 +2168,24 @@ final class RemuxPlayback {
                 () -> (Double?, Double?, IndexSet, Int64, Double?) in
                 let sticky = Self.stickyBudgetAnchor(lockedStickyAnchor, anchor: anchorIndex,
                                                      played: lockedPlayedSeconds, wanted: lockedWantedSeconds,
-                                                     durations: durations, targetDuration: target)
+                                                     durations: durations, targetDuration: target,
+                                                     protectBehind: lockedProtectBehind)
                 lockedStickyAnchor = sticky
                 // Only when it adds something: at the anchor it is the anchor.
                 let stickyStart = sticky.flatMap { $0 == anchorIndex ? nil
                     : Self.segmentStart(index: $0, durations: durations, targetDuration: target) }
                 return (lockedPlayedSeconds, lockedWantedSeconds, lockedPruned, lockedAllowedKeptBytes, stickyStart)
             }
+            let protectBehind = stateLock.withLock { lockedProtectBehind }
             let positions = Self.budgetPositions(played: played, wanted: wanted, anchorStart: anchorStart,
                                                  stickyStart: stickyStart)
+            // Bounded storage: what lies ahead of the playhead is never
+            // written again (the remux reads forward, and the torrent data
+            // there is released): behind it goes first. Full mode: unchanged.
+            let boundedPlayhead = isStorageBounded ? [played, wanted].compactMap { $0 }.min() : nil
             let victims = Self.evictionVictims(durations: durations, segmentBytes: bytes, pruned: pruned,
-                                               positions: positions, allowedKeptBytes: allowed)
+                                               positions: positions, allowedKeptBytes: allowed,
+                                               protectBehind: protectBehind, behindFirstOf: boundedPlayhead)
             guard !victims.isEmpty else { return ([], allowed, positions, pruned) }
             let evicted = IndexSet(victims)
             stateLock.withLock { lockedPruned.formUnion(evicted) }
@@ -2196,17 +2339,24 @@ final class RemuxPlayback {
     /// start − (X + lookahead) (ahead); the smallest over the positions
     /// counts, and ties go to the lower index. Empty when everything fits —
     /// also when only protected segments are left over the budget.
+    /// `behindFirstOf` (bounded storage: the playhead, the lower of `played`
+    /// and `wanted`): every segment that ends at or before it goes before any
+    /// segment past it, each group furthest first — after a rewind the media
+    /// the remux wrote ahead of the new playhead is what playback reaches
+    /// next, and it can't be written again. nil: distance alone (full mode).
     static func evictionVictims(durations: [Double], segmentBytes: [Int64], pruned: IndexSet, positions: [Double],
                                 allowedKeptBytes: Int64,
                                 protectBehind: Double = RemuxPlayback.minimumKeepBehindSeconds,
-                                lookahead: Double = RemuxPlayback.lookaheadSeconds) -> [Int] {
+                                lookahead: Double = RemuxPlayback.lookaheadSeconds,
+                                behindFirstOf playhead: Double? = nil) -> [Int] {
         let count = min(durations.count, segmentBytes.count)
         guard count > 1 else { return [] }
         var kept: Int64 = 0
         for index in 1..<count where !pruned.contains(index) { kept += max(0, segmentBytes[index]) }
         guard kept > allowedKeptBytes else { return [] }
         let xs = positions.filter { $0.isFinite }
-        var candidates: [(distance: Double, index: Int)] = []
+        var candidates: [(ahead: Bool, distance: Double, index: Int)] = []
+        let behindLimit = playhead.flatMap { $0.isFinite ? $0 : nil }
         var start = durations[0]
         for index in 1..<count {
             let end = start + durations[index]
@@ -2217,11 +2367,15 @@ final class RemuxPlayback {
                     if end >= x - protectBehind && start <= x + lookahead { isProtected = true; break }
                     distance = min(distance, end <= x ? x - end : start - (x + lookahead))
                 }
-                if !isProtected { candidates.append((distance, index)) }
+                let ahead = behindLimit.map { end > $0 } ?? false
+                if !isProtected { candidates.append((ahead, distance, index)) }
             }
             start = end
         }
-        candidates.sort { $0.distance != $1.distance ? $0.distance > $1.distance : $0.index < $1.index }
+        candidates.sort {
+            if $0.ahead != $1.ahead { return !$0.ahead }
+            return $0.distance != $1.distance ? $0.distance > $1.distance : $0.index < $1.index
+        }
         var victims: [Int] = []
         for candidate in candidates {
             guard kept > allowedKeptBytes else { break }
@@ -2349,6 +2503,10 @@ final class RemuxPlayback {
         let span = kept.first.flatMap { first in kept.last.map { first..<($0 + 1) } }
         guard let rate = Self.outputBytesPerSecond(segmentBytes: bytes, durations: durations, kept: span) else { return }
         let keptBytes = kept.reduce(Int64(0)) { $0 + bytes[$1] }
+        if isStorageBounded, let boundedSession = boundedSession {
+            evaluateBoundedDiskBudget(boundedSession, writtenBytes: writtenBytes, keptBytes: keptBytes, rate: rate)
+            return
+        }
         let available = Self.availableCapacity(of: outputDir)
         let remaining = remainingTorrentBytes
         let allowed = Self.allowedKeptBytes(availableBytes: available, keptDeletableBytes: keptBytes,
@@ -2370,6 +2528,44 @@ final class RemuxPlayback {
                   + "lookahead \(gb(Int64(Self.lookaheadSeconds * rate))), remux \(String(format: "%.2f", rate / 1e6)) MB/s)"
                   + " — rewind window of linear playback ≈ \(rewind >= 1e7 ? "∞" : "\(Int(rewind.rounded())) s")")
         }
+    }
+
+    /// Bounded mode's `evaluateDiskBudget`: the allowance is the HLS share
+    /// of the split (`StorageBudget.hlsAllowedBytes`, fresh free space, the
+    /// torrent's budget and what it holds on disk) — no 2 GiB reserve, no
+    /// remaining-torrent term — and the eviction's protected span behind
+    /// each position follows the split's rewind (60…180 s).
+    private func evaluateBoundedDiskBudget(_ boundedSession: BoundedStorageSession, writtenBytes: Int64,
+                                           keptBytes: Int64, rate: Double) {
+        let split = boundedSession.remuxSplit(hlsDeletableBytes: keptBytes, outputBytesPerSecond: rate)
+        let allowed = split.hlsAllowedBytes
+        let changed: Bool = stateLock.withLock {
+            lockedAllowedKeptBytes = allowed
+            lockedBudgetRate = rate
+            lockedBudgetEvaluatedAt = Self.uptime
+            lockedBudgetEvaluatedBytes = writtenBytes
+            lockedProtectBehind = split.protectBehindSeconds
+            if let logged = lockedLoggedAllowance, abs(Double(allowed) - Double(logged)) <= 0.2 * Double(logged) { return false }
+            lockedLoggedAllowance = allowed
+            return true
+        }
+        if changed {
+            func gb(_ value: Int64) -> String { String(format: "%.2f GB", Double(value) / 1e9) }
+            print("[Remux] disk budget (bounded storage): \(gb(allowed)) of segments may stay on disk "
+                  + "(room \(gb(split.roomBytes)) after the \(gb(BoundedStorage.reserveBytes)) reserve, "
+                  + "own kept \(gb(keptBytes)), torrent budget \(gb(split.torrentBudget)), "
+                  + "HLS ahead \(gb(split.hlsAheadBytes)), remux \(String(format: "%.2f", rate / 1e6)) MB/s)"
+                  + " — native rewind ≈ \(Int(split.rewindSeconds.rounded())) s, protected \(Int(split.protectBehindSeconds)) s")
+        }
+    }
+
+    /// Bounded mode: tells the torrent where the remux reads next (pump
+    /// queue, after each tick): the window follows the reader. Never in full
+    /// mode (PopcornTorrent's own window, unchanged).
+    private func reportReadPosition(_ session: MKVToHLSRemuxSession) {
+        guard isStorageBounded, let streamer = streamer else { return }
+        let offset = session.consumedInputOffset
+        if offset > 0 { streamer.readPosition = offset }
     }
 
     var statsSummary: String {

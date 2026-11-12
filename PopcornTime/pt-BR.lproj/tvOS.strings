@@ -125,8 +125,6 @@
 /* Class = "UITabBarItem"; title = "Settings"; ObjectID = "oLg-DL-tTH"; */
 "oLg-DL-tTH.title" = "Ajustes";
 
-/* Class = "UILabel"; text = "Checking for updates..."; ObjectID = "ou1-vf-UfF"; */
-"ou1-vf-UfF.text" = "Procurando por atualizações...";
 
 /* Class = "UITabBarItem"; title = "Shows"; ObjectID = "p8l-oH-6Vs"; */
 "p8l-oH-6Vs.title" = "Seriados";
@@ -147,8 +145,17 @@
 "vP2-pF-jYW.text" = "Volume da música tema";
 
 /* Class = "UILabel"; text = "Cast & Crew"; ObjectID = "vje-gU-hwQ"; */
-"vje-gU-hwQ.text" = "Elenco";
+"vje-gU-hwQ.text" = "Elenco e equipe";
 
 /* Class = "UIButton"; normalTitle = "Play Next"; ObjectID = "wUm-fX-3pb"; */
 "wUm-fX-3pb.normalTitle" = "A seguir";
 
+
+/* Class = "UINavigationItem"; title = "Movies"; ObjectID = "jvN-d2-mze"; */
+"jvN-d2-mze.title" = "Filmes";
+
+/* Class = "UINavigationItem"; title = "Shows"; ObjectID = "DvR-v2-5Xm"; */
+"DvR-v2-5Xm.title" = "Seriados";
+
+/* Class = "UINavigationItem"; title = "Watchlist"; ObjectID = "5WB-pT-Oa2"; */
+"5WB-pT-Oa2.title" = "Favoritos";

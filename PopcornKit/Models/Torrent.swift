@@ -265,8 +265,15 @@ public enum ReleaseName {
             case "dvd" where next == "r":
                 return true
             case "complete" where !isEncode:
-                if next == "bluray" || (next == "blu" && next2 == "ray") { return true }
-                if next == "uhd" && (next2 == "bluray" || (next2 == "blu" && at(i + 3) == "ray")) { return true }
+                // "COMPLETE BLURAY", "COMPLETE UHD BLURAY", "COMPLETE.2160p.UHD.BLURAY":
+                // a resolution / "UHD" may come between.
+                var j = i + 1
+                while true {
+                    if at(j) == "uhd" || at(j) == "4k" { j += 1; continue }
+                    if let number = Int(at(j)), [1080, 2160].contains(number), at(j + 1) == "p" { j += 2; continue }
+                    break
+                }
+                if at(j) == "bluray" || (at(j) == "blu" && at(j + 1) == "ray") { return true }
             case "disc", "disk":
                 // "Disc1", "Disc 2" — not "The.Disc.2020" (a year).
                 if !isEncode, let number = Int(next), number < 100 { return true }
@@ -775,6 +782,17 @@ public struct VideoTags: OptionSet, Codable {
             case "cam", "camrip", "hdcam", "hqcam", "hdts", "telesync", "tsrip", "hdtc", "telecine",
                  "dvdscr", "bdscr", "screener", "scr", "pdvd", "predvd":
                 if wordTags[i] { tags.insert(.cam) }
+            case "ts":
+                // A bare "TS" (telesync) right after the year or the resolution,
+                // or right before the codec: "IT 2017 TS x264",
+                // "Superman.2025.1080p.TS.READNFO". Never a ".ts" file extension.
+                let afterYear = prev.count == 4 && Int(prev).map { (1900...2099).contains($0) } == true
+                let afterResolution = prev == "p" && ["480", "720", "1080", "2160"].contains(at(i - 2))
+                let beforeCodec = ["x", "h", "xvid", "divx", "hevc", "avc"].contains(next)
+                if wordTags[i], afterYear || afterResolution || beforeCodec,
+                   !raw.lowercased().trimmingCharacters(in: .whitespaces).hasSuffix(".ts") {
+                    tags.insert(.cam)
+                }
             default:
                 break
             }
@@ -1244,5 +1262,31 @@ public extension Torrent {
         if a.seeds != b.seeds { return a.seeds > b.seeds }
         if pa.score != pb.score { return pa.score > pb.score }
         return a.url < b.url
+    }
+}
+
+// MARK: - Picker labels
+
+public extension Torrent {
+
+    /// Separator between the quality and the source in the labels of the
+    /// aggregated torrents: "1080p HEVC — TPB", "2160p HDR — Knaben · 1337x",
+    /// "720p — T4P", "1080p — ThePirateBay" (a Torrentio indexer).
+    static let sourceSeparator = " — "
+
+    /// The quality part of `quality` ("2160p DV HDR HEVC"), without the source.
+    var qualityLabel: String {
+        let label = quality ?? ""
+        guard let range = label.range(of: Torrent.sourceSeparator) else { return label }
+        let head = label[..<range.lowerBound].trimmingCharacters(in: .whitespaces)
+        return head.isEmpty ? label : head
+    }
+
+    /// Where the torrent was found ("TPB", "Knaben · 1337x", "T4P", a
+    /// Torrentio indexer); nil when the label names no source (YTS, EZTV).
+    var sourceLabel: String? {
+        guard let label = quality, let range = label.range(of: Torrent.sourceSeparator) else { return nil }
+        let tail = label[range.upperBound...].trimmingCharacters(in: .whitespaces)
+        return tail.isEmpty ? nil : tail
     }
 }

@@ -35,45 +35,6 @@ extension UIColor {
         return UInt32(truncatingIfNeeded: rgb)
     }
     
-    @nonobjc var localizedString: String? {
-        switch self {
-        case UIColor.black:
-            return "Black".localized
-        case UIColor.darkGray:
-            return "Dark Gray".localized
-        case UIColor.lightGray:
-            return "Light Gray".localized
-        case UIColor.white:
-            return "White".localized
-        case UIColor.gray:
-            return "Gray".localized
-        case UIColor.red:
-            return "Red".localized
-        case UIColor.green:
-            return "Green".localized
-        case UIColor.blue:
-            return "Blue".localized
-        case UIColor.cyan:
-            return "Cyan".localized
-        case UIColor.yellow:
-            return "Yellow".localized
-        case UIColor.magenta:
-            return "Magenta".localized
-        case UIColor.orange:
-            return "Orange".localized
-        case UIColor.purple:
-            return "Purple".localized
-        case UIColor.brown:
-            return "Brown".localized
-        default:
-            return nil
-        }
-    }
-    
-    @nonobjc static var systemColors: [UIColor] {
-        return [UIColor.black, UIColor.darkGray, UIColor.lightGray, UIColor.white, UIColor.gray, UIColor.red, UIColor.green, UIColor.blue, UIColor.cyan, UIColor.yellow, UIColor.magenta, UIColor.orange, UIColor.purple, UIColor.brown]
-    }
-    
     @nonobjc static var app: UIColor {
         return UIDevice.current.userInterfaceIdiom == .tv ? .white : UIColor(red: 0.37, green: 0.41, blue: 0.91, alpha: 1.0)
     }

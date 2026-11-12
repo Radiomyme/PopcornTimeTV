@@ -22,7 +22,10 @@ struct MacPlayerView: View {
             if let vlcURL = controller.vlcURL {
                 // Resumes where the native player stopped.
                 MacVLCPlayerView(url: vlcURL, subtitles: controller.subtitles, media: playback.media,
-                                 startPosition: controller.vlcStartPosition)
+                                 startPosition: controller.vlcStartPosition,
+                                 resumePoint: controller.resumePoint, nativeHighWater: controller.highWater,
+                                 boundedStorage: BoundedStorageSession.session(for: controller.streamer),
+                                 streamer: controller.streamer)
                     .ignoresSafeArea()
             } else if let player = controller.player {
                 MacAVPlayerRepresentable(player: player, onPictureInPictureChanged: { active in
@@ -43,10 +46,10 @@ struct MacPlayerView: View {
                     VStack(spacing: 10) {
                         ProgressView()
                             .controlSize(.large)
-                        Text("Mise en mémoire tampon…")
+                        Text("Buffering…")
                             .font(.headline)
                         if !controller.isRebuildingStuckItem {
-                            Text("Le téléchargement est plus lent que la lecture")
+                            Text("The download is slower than playback")
                                 .font(.callout)
                                 .foregroundStyle(.secondary)
                         }
@@ -61,6 +64,12 @@ struct MacPlayerView: View {
                     ProgressView(value: controller.buffering, total: 1.0)
                         .frame(width: 320)
                     Text(controller.statusLine).font(.callout).foregroundStyle(.secondary)
+                    // Bounded storage: the film is larger than the free space.
+                    if let note = controller.boundedNote {
+                        Label(note, systemImage: BoundedStorageUX.symbolName)
+                            .font(.callout)
+                            .foregroundStyle(.secondary)
+                    }
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .background(Color.black)
@@ -95,6 +104,8 @@ struct MacPlayerView: View {
                 .keyboardShortcut("n", modifiers: [])
                 .opacity(0)
         }
+        // Bounded storage: a rewind stopped at the earliest point still on disk.
+        .boundedStorageToast(controller.boundedToast)
         .background(Color.black)
         .onAppear { controller.start(playback) }
         .onDisappear { controller.stop() }
@@ -107,7 +118,7 @@ struct MacPlayerView: View {
 final class MacPlayerController: ObservableObject {
     @Published var player: AVPlayer?
     @Published var buffering: Double = 0
-    @Published var statusLine = "Connexion aux sources…"
+    @Published var statusLine = "Connecting to sources…".localized
     @Published var showStats = true
     @Published var statsText = ""
     /// Set when the native path gives up (DTS / TrueHD-only audio, VP9,
@@ -126,6 +137,17 @@ final class MacPlayerController: ObservableObject {
     /// That overlay is up for an item stuck on complete data being rebuilt
     /// (no "download slower" line).
     @Published private(set) var isRebuildingStuckItem = false
+    /// Bounded storage: the loading screen's line (nil in full mode).
+    @Published private(set) var boundedNote: String?
+    /// Bounded storage's message over the video (a limited rewind).
+    @Published private(set) var boundedToast: BoundedStorageToastMessage?
+    /// When `boundedNote` was last computed (it reads the free space).
+    private var boundedNoteAt: TimeInterval = -.infinity
+    /// The pending check after a burst of time jumps (`scheduleBoundedRewindCheck`).
+    private var boundedRewindCheck: DispatchWorkItem?
+    /// Bounded storage ended playback for good (`endPlaybackForBoundedStorage`):
+    /// the status screen keeps saying why, nothing restarts it.
+    private var boundedPlaybackEnded = false
 
     /// The torrent's direct HTTP endpoint (direct AVPlayer path, VLC).
     private var directURL: URL?
@@ -135,6 +157,9 @@ final class MacPlayerController: ObservableObject {
     private var cueSubscription: AnyCancellable?
     private var statsTimer: Timer?
     private var stopped = false
+    /// The controllers that started a stream (weak): one still playing in
+    /// another window keeps the purge before a new stream away (`start`).
+    private static let liveControllers = NSHashTable<MacPlayerController>.weakObjects()
     private var loggedAtmosVerdict = false
     private var engineLine = "…"
     /// What AVPlayer plays (master playlist / torrent HTTP endpoint): the
@@ -163,6 +188,9 @@ final class MacPlayerController: ObservableObject {
     /// Remux path, remux finished: an item frozen while the user wants it
     /// playing (sampled 1 Hz) → natural end / rebuild / VLC.
     private var stuckWatch = StuckPlaybackWatch()
+    /// Bounded storage, direct path: AVPlayer waiting with the data on disk
+    /// (sampled 1 Hz) → the item is rebuilt (`checkDirectStall`).
+    private var directStall = BoundedDirectStallWatch()
     /// Remux path: the item AVPlayer started on live EVENT playlists, replaced
     /// once when the remux has finished (`rebuildLiveBornItemIfEnded`).
     private var liveBornWatch = LiveBornItemWatch()
@@ -176,28 +204,77 @@ final class MacPlayerController: ObservableObject {
     /// item's time jumps (`reportPlaybackPositions` at once).
     private var playerObservers: [NSObjectProtocol] = []
     /// alextud's PopcornTorrent has no singleton — each stream owns an instance.
-    private let streamer = PTTorrentStreamer()
+    let streamer = PTTorrentStreamer()
+    #if DEBUG
+    /// BoundedStorageDebugHooks' seek / pause observers.
+    private var debugObservers: [NSObjectProtocol] = []
+    #endif
+    /// The saved progress this session protects (read when it starts; 0 for
+    /// none or a finished title) and the furthest position (0…1) reached
+    /// natively (1 Hz): `MacPlaybackProgress.save`'s rules. Both go to the
+    /// VLC fallback, which saves the rest of the session.
+    private(set) var resumePoint: Float = 0
+    private(set) var highWater: Float = 0
 
     func start(_ playback: MacPendingPlayback) {
+        #if DEBUG
+        // BoundedStorageDebugHooks' scripted seeks and pauses.
+        debugObservers = [
+            NotificationCenter.default.addObserver(forName: .ptDebugSeek, object: nil, queue: .main) { [weak self] note in
+                let seconds = note.userInfo?["seconds"] as? Double
+                MainActor.assumeIsolated {
+                    guard let self, let seconds, self.vlcURL == nil, let player = self.player else { return }
+                    let now = player.currentTime().seconds
+                    print("[BoundedDebug] AVPlayer seek \(Int(now)) → \(Int(seconds)) s")
+                    // Limited like a user's seek (bounded storage).
+                    if let reference = self.playedPosition.lastPlayedTime ?? (now.isFinite ? now : nil),
+                       let landing = BoundedStorageUX.limitedRewindTarget(seconds, from: reference, session: self.boundedStorage) {
+                        self.limitRewind(target: seconds, from: reference, landing: landing)
+                        return
+                    }
+                    player.seek(to: CMTime(seconds: seconds, preferredTimescale: 600), toleranceBefore: .zero, toleranceAfter: .zero)
+                }
+            },
+            NotificationCenter.default.addObserver(forName: .ptDebugPlayback, object: nil, queue: .main) { [weak self] note in
+                let playing = note.userInfo?["playing"] as? Bool
+                MainActor.assumeIsolated {
+                    guard let self, let playing, self.vlcURL == nil, let player = self.player else { return }
+                    if playing { player.play() } else { player.pause() }
+                }
+            },
+        ]
+        #endif
         let magnet = playback.torrent.url
         // Reclaim prior torrent partials + orphaned remux output (shared
-        // cross-platform helper — same disk-bounding as iOS/tvOS).
-        purgeOrphanTorrentDownloads()
+        // cross-platform helper — same disk-bounding as iOS/tvOS). Not while
+        // another window plays: its torrent folder and HLS copy are not
+        // orphans (verify-storage F6 — its remux lost its segments, and
+        // libtorrent could reopen its file by path as a new, unsized one).
+        // The next play with no other window, or the next launch, purges.
+        if !Self.liveControllers.allObjects.contains(where: { $0 !== self && !$0.stopped }) {
+            purgeOrphanTorrentDownloads()
+        }
+        Self.liveControllers.add(self)
 
         media = playback.media
+        resumePoint = MacPlaybackProgress.resumePoint(for: playback.media)
         subtitles = playback.media.subtitles
         let isAtmos = playback.torrent.tags.contains(.atmos)
         let hintsHDR = !playback.torrent.tags.isDisjoint(with: [.hdr10, .hdr10Plus, .dolbyVision])
         // BEP 53 `so=` (Torrentio season packs): stream THAT file.
         let preferredIndex = Torrent.selectedFileIndex(fromMagnet: magnet)
+        // A film larger than the free space streams in bounded storage
+        // (every route below drives the torrent's window).
+        BoundedStorageSession.prepare(streamer, durationSeconds: BoundedStorageSession.durationHint(for: playback.media))
 
         streamer.startStreaming(fromMultiTorrentFileOrMagnetLink: magnet, progress: { [weak self] status in
             DispatchQueue.main.async {
-                guard let self = self, self.player == nil, self.vlcURL == nil else { return }
+                guard let self = self, self.player == nil, self.vlcURL == nil, !self.boundedPlaybackEnded else { return }
                 self.buffering = Double(status.bufferingProgress)
-                self.statusLine = String(format: "Buffering %.0f%% · %d seeds · %d KB/s",
+                self.statusLine = String(format: "Buffering %.0f%% · %d seeds · %d KB/s".localized,
                                          status.bufferingProgress * 100, status.seeds,
                                          status.downloadSpeed / 1024)
+                self.refreshBoundedNote()
             }
         }, readyToPlay: { [weak self] videoFileURL, videoFilePath in
             DispatchQueue.main.async {
@@ -222,7 +299,13 @@ final class MacPlayerController: ObservableObject {
                 }
             }
         }, failure: { [weak self] (error: Error) in
-            DispatchQueue.main.async { self?.statusLine = "Échec: \(error.localizedDescription)" }
+            DispatchQueue.main.async {
+                guard let self = self else { return }
+                // Not enough space even for bounded storage (-5: how much to
+                // free), another file error (-6), or the error's own text.
+                let message = StreamFailure(error, streamer: self.streamer).message(underlying: error) ?? error.localizedDescription
+                self.statusLine = String(format: "Failed: %@".localized, message)
+            }
         }, selectFileToStream: { @Sendable (fileNames: [String], fileSizes: [NSNumber]) -> Int32 in
             // Runs on libtorrent's thread (pure helper only). Multi-file
             // torrents: the magnet's `so=` file when valid, else the largest
@@ -242,7 +325,7 @@ final class MacPlayerController: ObservableObject {
     // MARK: - Remux path (MKV / WebM)
 
     private func startRemux(localFile: URL, isAtmos: Bool, releaseHintsHDR: Bool) {
-        statusLine = "Remuxage MKV → HLS…"
+        statusLine = "Remuxing MKV → HLS…".localized
         engineLine = "MKV remux → AVPlayer (macOS natif)"
         let remux = RemuxPlayback(localFile: localFile,
                                   streamer: streamer,
@@ -281,9 +364,11 @@ final class MacPlayerController: ObservableObject {
         }
         // A seek into pruned segments while a starvation recovery waits:
         // the dead item requests nothing, the recovery asks here.
-        starvation.positionUnavailable = { [weak remux] seconds in
-            guard let remux = remux else { return false }
-            return !remux.isAvailable(playerSeconds: seconds)
+        starvation.positionUnavailable = { [weak self, weak remux] seconds in
+            guard let remux = remux, !remux.isAvailable(playerSeconds: seconds) else { return false }
+            // Bounded storage: a rewind there is blocked, not handed to VLC —
+            // the dead item moves to the earliest point still available.
+            return !(self?.limitRecoveringRewind(to: seconds) ?? false)
         }
         // OpenSubtitles → native HLS subtitle tracks (fetched when the detail
         // screen found none).
@@ -313,10 +398,18 @@ final class MacPlayerController: ObservableObject {
 
     private func startDirect() {
         guard let url = directURL else { return }
-        statusLine = "Ouverture du fichier…"
+        statusLine = "Opening the file…".localized
         engineLine = "MP4 direct → AVPlayer (macOS natif)"
-        // Nothing is ever pruned on the torrent's own file.
-        starvation.positionUnavailable = nil
+        // Nothing is ever pruned on the torrent's own file — except in
+        // bounded storage: a seek of the dead item further back than what is
+        // still on disk moves it to the earliest point still available (never
+        // VLC there). Full mode: never unavailable, as before.
+        starvation.positionUnavailable = { [weak self] seconds in
+            guard let self = self, let session = self.boundedStorage, session.isBounded,
+                  let reference = self.playedPosition.lastPlayedTime, seconds < reference,
+                  !session.canSeek(to: seconds, fromPlayerTime: reference) else { return false }
+            return !self.limitRecoveringRewind(to: seconds)
+        }
         let cues = SubtitleCueController(subtitles: subtitles)
         cueController = cues
         if cues.available.isEmpty {
@@ -334,7 +427,23 @@ final class MacPlayerController: ObservableObject {
             cues.autoSelectPreferred()
         }
         attachPlayer(to: url, direct: true)
+        // Bounded storage: AVPlayer reads through PopcornTorrent's server
+        // (which moves the window); its playhead tells the torrent what it
+        // may delete behind it.
+        BoundedStorageSession.session(for: streamer)?.attachHTTPPlayer(self, readAheadSeconds: Self.directReadAheadSeconds) { [weak self] in
+            guard let self = self, self.isDirectPlayback, self.vlcURL == nil, let player = self.player,
+                  player.currentItem?.status == .readyToPlay else { return nil }
+            let time = player.currentTime().seconds
+            guard time.isFinite else { return nil }
+            return BoundedPlayerSample(time: time, isPlaying: player.timeControlStatus == .playing)
+        }
     }
+
+    /// Bounded storage, direct path: the forward buffer AVPlayer may keep
+    /// (`preferredForwardBufferDuration`), and how far past the playhead it
+    /// may have read (the buffer plus a margin).
+    static let directForwardBufferSeconds: Double = 60
+    static let directReadAheadSeconds: Double = 75
 
     // MARK: - Player
 
@@ -365,6 +474,10 @@ final class MacPlayerController: ObservableObject {
         // Let macOS spatialize the 5.1 + Atmos objects (built-in speakers /
         // AirPods) — this is the whole point of the native Mac app.
         item.allowedAudioSpatializationFormats = .monoStereoAndMultichannel
+        if isDirectPlayback, BoundedStorageSession.session(for: streamer)?.isBounded == true {
+            // Bounded storage: a known read-ahead over the torrent's file.
+            item.preferredForwardBufferDuration = Self.directForwardBufferSeconds
+        }
         return item
     }
 
@@ -386,6 +499,7 @@ final class MacPlayerController: ObservableObject {
                 guard let self = self, let item = self.player?.currentItem, jumped === item else { return }
                 self.reportPlaybackPositions()
                 self.noteHeldSeek(isJump: true)
+                self.scheduleBoundedRewindCheck()
             }
         })
     }
@@ -472,7 +586,7 @@ final class MacPlayerController: ObservableObject {
         if !isReplacement {
             observer.shouldExtendReadyTimeout = { [weak self] in
                 guard let self = self else { return false }
-                return !StarvationPolicy.isComplete(progress: self.streamer.torrentStatus.totalProgress)
+                return !self.streamer.isWholeFileOnDisk
             }
         }
         failureObserver = observer
@@ -526,6 +640,11 @@ final class MacPlayerController: ObservableObject {
     /// pruned range. (No start seek here: the Mac never resumes natively.)
     private func unavailableSegmentRequested(at playerSeconds: Double) {
         guard !stopped, vlcURL == nil, !isDirectPlayback, remux != nil else { return }
+        // Bounded storage: a rewind past the kept media is blocked (the
+        // earliest point still available instead, never VLC); playback
+        // reaching a pruned span ahead goes on below (VLC at the playhead,
+        // when its data is still there: `fallBackToVLC`).
+        if limitBoundedRewind(toPrunedSegmentAt: playerSeconds) { return }
         let target = ResumePolicy.handOffTime(prunedSegmentStart: playerSeconds, playhead: player?.currentTime().seconds)
         print("[Player] pruned segment requested at \(Int(playerSeconds)) s — target \(Int(target)) s")
         fallBackToVLC(ResumePolicy.rewindPastBufferReason, resumeTime: target)
@@ -540,16 +659,27 @@ final class MacPlayerController: ObservableObject {
         if isDirectPlayback {
             let streamer = self.streamer
             let atFailure = streamer.torrentStatus.totalProgress
-            return (!StarvationPolicy.isComplete(progress: atFailure), { time, waited in
-                StarvationPolicy.directDataReady(resumeTime: time, failurePosition: failurePosition,
-                                                 progress: streamer.torrentStatus.totalProgress,
-                                                 progressAtFailure: atFailure, waited: waited)
+            // The whole file on disk (bounded storage: `isFileComplete`), else more of it.
+            return (!streamer.isWholeFileOnDisk, { time, waited in
+                // Bounded storage: a position whose data is gone never gets
+                // ready (the recovery waits for the one
+                // `limitRecoveringRewind` moved it to).
+                if let session = BoundedStorageSession.session(for: streamer), session.isBounded,
+                   !session.canSeek(to: time, fromPlayerTime: failurePosition) { return false }
+                if streamer.isWholeFileOnDisk { return true }
+                return StarvationPolicy.directDataReady(resumeTime: time, failurePosition: failurePosition,
+                                                        progress: streamer.torrentStatus.totalProgress,
+                                                        progressAtFailure: atFailure, waited: waited)
             })
         }
         guard let remux = remux, remux.failureReason == nil else { return nil }
         let finished = remux.session?.progress.finished ?? false
         return (!finished, { [weak remux] time, _ in
             guard let session = remux?.session else { return false }
+            // Bounded storage: a deleted segment never comes back (the
+            // recovery waits for the playhead `limitRecoveringRewind` moved
+            // instead of rebuilding there).
+            if remux?.isStorageBounded == true, remux?.isAvailable(playerSeconds: time) == false { return false }
             let progress = session.progress
             return StarvationPolicy.remuxDataReady(frontierSeconds: progress.mediaSeconds, finished: progress.finished,
                                                    resumeTime: time, durationKnown: session.totalDurationSeconds > 0)
@@ -653,10 +783,22 @@ final class MacPlayerController: ObservableObject {
     /// the end credits continues there instead of restarting the movie.
     private func fallBackToVLC(_ reason: String, resumeTime: Double? = nil) {
         guard !stopped, vlcURL == nil else { return }
-        guard let url = directURL else {
-            statusLine = "Lecture impossible : \(reason)"
+        // Bounded storage: VLC reads the torrent's file — never where it
+        // was deleted (it would get HTTP 410 and stop).
+        var resumeTime = resumeTime
+        switch boundedHandOff(resumeTime: resumeTime) {
+        case .asked: break
+        case .at(let time): resumeTime = time
+        case .end:
+            endPlaybackForBoundedStorage(reason)
             return
         }
+        guard let url = directURL else {
+            statusLine = String(format: "Cannot play: %@".localized, reason)
+            return
+        }
+        // The native part of the session, up to now (VLC gets it as nativeHighWater).
+        noteHighWater()
         let reached = resumeTime.flatMap { fraction(ofPlayerTime: $0) } ?? knownPlaybackFraction()
         if let fraction = reached, fraction > 0.001 {
             vlcStartPosition = ResumePolicy.handOffFraction(reached: fraction)
@@ -675,7 +817,8 @@ final class MacPlayerController: ObservableObject {
         player = nil
         remux?.stop()
         remux = nil
-        statusLine = "Lecture via VLC…"
+        BoundedStorageSession.session(for: streamer)?.detachHTTPPlayer(self)
+        statusLine = "Playing with VLC…".localized
         vlcURL = url
     }
 
@@ -722,8 +865,11 @@ final class MacPlayerController: ObservableObject {
             let duration = item.duration.seconds
             if duration.isFinite, duration > 0 { lastKnownDuration = duration }
         }
+        noteHighWater()
         reportPlaybackPositions()
         checkStuckPlayback()
+        checkDirectStall()
+        checkBoundedReverseScan()
         rebuildLiveBornItemIfEnded()
         reloadTrackSummaries()
         var lines = ["Engine  \(engineLine)"]
@@ -826,6 +972,38 @@ final class MacPlayerController: ObservableObject {
         }
     }
 
+    /// Bounded storage, direct path, 1 Hz: AVPlayer waiting for 8 s at the
+    /// same time while the data ahead of the server's read position is on
+    /// disk is not waiting for the download — macOS AVPlayer's loader stops
+    /// requesting after a far seek's back-fill reached deleted data (part-3
+    /// coverage md2–md5). The item is rebuilt at the playhead
+    /// (`BoundedDirectStallWatch`). Full mode: never.
+    private func checkDirectStall() {
+        guard let player = player else { return }
+        let isWaiting = player.timeControlStatus == .waitingToPlayAtSpecifiedRate
+            && player.currentItem?.status == .readyToPlay
+        let eligible = isWaiting && isDirectPlayback && vlcURL == nil && !stopped && !starvation.isRecovering
+            && boundedStorage?.isBounded == true && boundedStorage?.hasDataAheadOfReader() == true
+        guard let time = directStall.note(time: player.currentTime().seconds, clock: ProcessInfo.processInfo.systemUptime,
+                                          isWaiting: isWaiting, isEligible: eligible) else { return }
+        print("[Player] bounded direct route: AVPlayer waiting at \(String(format: "%.1f", time)) s for "
+              + "\(Int(BoundedDirectStallWatch.stallSeconds)) s with the data on disk → rebuilding the item")
+        starvation.rebuildNow(player: player, at: time, reason: BoundedDirectStallWatch.reason)
+    }
+
+    /// Bounded storage, 1 Hz: a reverse scan (J key, a held rewind) stops at
+    /// the earliest point still available, with the message, and plays on
+    /// from there (`BoundedStorageUX.reverseScanLimit`).
+    private func checkBoundedReverseScan() {
+        guard let player = player, isItemHealthy, !stopped else { return }
+        let now = player.currentTime().seconds
+        guard let landing = BoundedStorageUX.reverseScanLimit(time: now, rate: player.rate,
+                                                              playedReference: playedPosition.lastPlayedTime,
+                                                              session: boundedStorage) else { return }
+        player.rate = BoundedStorageUX.resumeRate(after: player)
+        limitRewind(target: now, from: playedPosition.lastPlayedTime ?? now, landing: landing)
+    }
+
     /// A new current item (the first one, a recovery's replacement): when
     /// AVPlayer starts it on live EVENT playlists — remux of a file without a
     /// Matroska Duration that hasn't finished yet — it is replaced once the
@@ -861,12 +1039,190 @@ final class MacPlayerController: ObservableObject {
                               resumesPlayback: playing, exactPosition: true)
     }
 
+    /// The session's furthest native position (1 Hz, and at close).
+    private func noteHighWater() {
+        guard player != nil, vlcURL == nil, let fraction = knownPlaybackFraction() else { return }
+        highWater = max(highWater, fraction)
+    }
+
+    /// Closing the native player: saves the known position (≥ 80 % marks the
+    /// title watched) — never below the session's resume point unless it
+    /// played past it. Nothing while buffering, and nothing once VLC took
+    /// over: MacVLCController saves its own position.
+    private func saveProgressIfNeeded() {
+        guard !stopped, vlcURL == nil, player != nil, let media,
+              let fraction = knownPlaybackFraction(), fraction > 0 else { return }
+        noteHighWater()
+        MacPlaybackProgress.save(fraction, for: media, resumePoint: resumePoint, highWater: highWater)
+    }
+
     /// `MacAVPlayerRepresentable`: Picture in Picture started / ended.
     func pictureInPictureChanged(_ active: Bool) {
         isPictureInPictureActive = active
     }
 
+    // MARK: - Bounded storage
+
+    /// The stream's bounded storage. Its `isBounded` is false in full mode:
+    /// nothing below acts then.
+    private var boundedStorage: BoundedStorageSession? { BoundedStorageSession.session(for: streamer) }
+
+    /// The loading screen's line, at most every 5 s (it reads the free space).
+    private func refreshBoundedNote() {
+        guard !boundedPlaybackEnded else { return }
+        let now = ProcessInfo.processInfo.systemUptime
+        guard now - boundedNoteAt >= 5 || (boundedNote == nil && boundedStorage?.isBounded == true) else { return }
+        boundedNoteAt = now
+        boundedNote = BoundedStorageUX.loadingNote(for: streamer)
+        #if DEBUG
+        if boundedNote != nil { MacDebugHooks.snapshotPlayerWindow(named: "bounded-loading", after: 1) }
+        #endif
+    }
+
+    /// Bounded storage, after a time jump of a healthy item (the player
+    /// view's scrubber, ±15 s, the keyboard, a remote command): a playhead
+    /// that went further back than what is still on disk goes to the
+    /// earliest point still available, with the message — the user's
+    /// decision: no new download, no VLC for a rewind. Checked 0.35 s after
+    /// the last jump of a burst: a drag on the timeline is not fought.
+    private func scheduleBoundedRewindCheck() {
+        guard boundedStorage?.isBounded == true else { return }
+        boundedRewindCheck?.cancel()
+        let work = DispatchWorkItem { [weak self] in
+            MainActor.assumeIsolated { self?.checkBoundedRewind() }
+        }
+        boundedRewindCheck = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35, execute: work)
+    }
+
+    private func checkBoundedRewind() {
+        guard isItemHealthy, let player = player else { return }
+        let now = player.currentTime().seconds
+        // From the last position playback actually reached (not a seek
+        // target AVPlayer still holds: a far seek forward, then back, stays
+        // allowed).
+        guard let reference = playedPosition.lastPlayedTime,
+              let landing = BoundedStorageUX.limitedRewindTarget(now, from: reference, session: boundedStorage) else { return }
+        limitRewind(target: now, from: reference, landing: landing)
+    }
+
+    /// `unavailableSegmentRequested` in bounded mode: a pruned segment
+    /// BEHIND the last played position is a rewind past the kept media —
+    /// blocked: the playhead goes to the earliest point still available
+    /// (unless it is already there: the request was the blocked seek's).
+    /// False for a pruned span ahead, and outside bounded mode.
+    private func limitBoundedRewind(toPrunedSegmentAt playerSeconds: Double) -> Bool {
+        guard let session = boundedStorage, session.isBounded, let player = player,
+              let reference = playedPosition.lastPlayedTime, playerSeconds < reference else { return false }
+        let now = player.currentTime().seconds
+        let earliest = session.earliestRewindTime(fromPlayerTime: reference) ?? reference
+        if now.isFinite, now >= earliest { return true }
+        // AVKit seeks all along a timeline drag, and each pruned segment it
+        // asks for lands here — the time-jump check limits the rewind 0.35 s
+        // after the last jump instead, so the drag is not fought.
+        if isItemHealthy {
+            scheduleBoundedRewindCheck()
+            return true
+        }
+        let target = now.isFinite ? min(now, reference) : playerSeconds
+        let landing = BoundedStorageUX.limitedRewindTarget(target, from: reference, session: session) ?? reference
+        limitRewind(target: target, from: reference, landing: landing)
+        return true
+    }
+
+    /// Bounded storage, during a starvation recovery: the user moved the
+    /// dead item's playhead into deleted media. Instead of VLC there, it
+    /// goes to the earliest point still available — the recovery follows it
+    /// as the user's new target at its next look — with the message. True
+    /// when it did.
+    private func limitRecoveringRewind(to seconds: Double) -> Bool {
+        guard let session = boundedStorage, session.isBounded, player != nil,
+              let reference = playedPosition.lastPlayedTime, seconds < reference else { return false }
+        let landing = BoundedStorageUX.limitedRewindTarget(seconds, from: reference, session: session) ?? reference
+        limitRewind(target: seconds, from: reference, landing: landing)
+        return true
+    }
+
+    /// Moves the playhead to `landing` (a limited rewind) and says why.
+    private func limitRewind(target: Double, from reference: Double, landing: Double) {
+        BoundedStorageUX.logLimited(player: "AVPlayer", target: target, playhead: reference, landing: landing)
+        player?.seek(to: CMTime(seconds: landing, preferredTimescale: 600), toleranceBefore: .zero, toleranceAfter: .zero)
+        let toast = BoundedStorageToastMessage(text: BoundedStorageUX.rewindLimitedMessage(for: boundedStorage))
+        boundedToast = toast
+        DispatchQueue.main.asyncAfter(deadline: .now() + BoundedStorageToastMessage.visibleSeconds) { [weak self] in
+            guard let self, self.boundedToast?.id == toast.id else { return }
+            self.boundedToast = nil
+        }
+        #if DEBUG
+        MacDebugHooks.snapshotPlayerWindow(named: "bounded-toast", after: 1)
+        #endif
+    }
+
+    /// Bounded storage: the hand-off to VLC at `resumeTime` (nil: the
+    /// current position) would read deleted torrent data (HTTP 410). VLC
+    /// continues where playback was instead when THAT is still there (a
+    /// rewind target that is gone); `.end` when nothing can play here.
+    private enum BoundedHandOff { case asked, at(Double), end }
+
+    private func boundedHandOff(resumeTime: Double?) -> BoundedHandOff {
+        guard let session = boundedStorage, session.isBounded, player != nil else { return .asked }
+        let current: Double? = {
+            if starvation.isRecovering, let time = starvation.resumeTime { return time }
+            if let player = player, player.currentItem?.status == .readyToPlay {
+                let time = player.currentTime().seconds
+                if time.isFinite, time >= 0 { return time }
+            }
+            return starvation.abandonedTime ?? lastKnownTime
+        }()
+        guard let wanted = resumeTime ?? current, !session.canResumeOverHTTP(atPlayerSeconds: wanted) else { return .asked }
+        if let played = playedPosition.lastPlayedTime, played > wanted, session.canResumeOverHTTP(atPlayerSeconds: played) {
+            print("[Bounded] VLC can't resume at \(Int(wanted)) s (deleted) — at the last played position \(Int(played)) s")
+            return .at(played)
+        }
+        print("[Bounded] VLC can't resume at \(Int(wanted)) s: that part of the torrent is deleted")
+        return .end
+    }
+
+    /// Bounded storage: native playback can't go on and VLC can't resume
+    /// where it would have to (deleted): stop, cancel the stream (its disk
+    /// space comes back at once) and say so on the player's status screen,
+    /// which stays as it is until the user closes the player (the stream's
+    /// progress, still reported every 0.5 s until the cancel lands, no
+    /// longer overwrites it: `boundedPlaybackEnded`).
+    private func endPlaybackForBoundedStorage(_ reason: String) {
+        print("[Bounded] native playback unavailable (\(reason)) and its data is deleted — stopped")
+        boundedPlaybackEnded = true
+        noteHighWater()
+        starvation.cancel()
+        failureObserver?.invalidate()
+        failureObserver = nil
+        boundedRewindCheck?.cancel()
+        cueSubscription = nil
+        cueController?.detach()
+        cueController = nil
+        removePlayerObservers()
+        player?.pause()
+        player?.replaceCurrentItem(with: nil)
+        player = nil
+        remux?.stop()
+        remux = nil
+        BoundedStorageSession.session(for: streamer)?.detachHTTPPlayer(self)
+        isWaitingForData = false
+        buffering = 0
+        // Title on the status line, the reason under it (one sentence each).
+        statusLine = BoundedStorageUX.cannotContinueTitle
+        boundedNote = BoundedStorageUX.cannotContinueMessage
+        // Nothing can play this stream any more: give its space back now
+        // (`stop()` cancels again when the player closes — harmless).
+        streamer.cancelStreamingAndDeleteData(true)
+    }
+
     func stop() {
+        #if DEBUG
+        debugObservers.forEach { NotificationCenter.default.removeObserver($0) }
+        debugObservers = []
+        #endif
+        saveProgressIfNeeded()
         stopped = true
         statsTimer?.invalidate()
         statsTimer = nil
@@ -876,10 +1232,12 @@ final class MacPlayerController: ObservableObject {
         cueSubscription = nil
         cueController?.detach()
         removePlayerObservers()
+        boundedRewindCheck?.cancel()
         player?.pause()
         player = nil
         remux?.stop()
         remux = nil
+        BoundedStorageSession.session(for: streamer)?.detachHTTPPlayer(self)
         streamer.cancelStreamingAndDeleteData(false)
     }
 }

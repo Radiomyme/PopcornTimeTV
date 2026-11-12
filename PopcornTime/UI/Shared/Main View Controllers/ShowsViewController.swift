@@ -43,7 +43,11 @@ class ShowsViewController: MediaViewController {
         guard !collectionViewController.isLoading else { return }
         collectionViewController.isLoading = true
         collectionViewController.hasNextPage = false
-        PopcornKit.loadShows(page, filterBy: currentFilter, genre: currentGenre) { [unowned self] (shows, error) in
+        let filter = currentFilter, genre = currentGenre, generation = loadGeneration
+        PopcornKit.loadShows(page, filterBy: filter, genre: genre) { [unowned self] (shows, error) in
+            // Another list was asked for meanwhile (a filter or genre, even the
+            // same one again): its own load (`didRefresh`) fills the grid.
+            guard generation == self.loadGeneration else { return }
             self.collectionViewController.isLoading = false
             
             guard let shows = shows else { self.collectionViewController.error = error; self.collectionView?.reloadData(); return }

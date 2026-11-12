@@ -6,8 +6,10 @@ import PopcornKit
 /// One torrent row shared by the iOS and macOS quality pickers, so all
 /// platforms present the same information for judging the quality/seeds
 /// tradeoff: resolution + codec/HDR/Atmos tags, a health-colored seed
-/// indicator with seed/peer counts and size, and a "Recommandé" badge on the
-/// best quality-vs-seeds pick (`Torrent.balancedPick`).
+/// indicator with the source (TPB, Knaben · 1337x, a Torrentio indexer…),
+/// seed/peer counts and size, and a "Recommandé" badge on the best
+/// quality-vs-seeds pick (`Torrent.balancedPick`). The source sits on the
+/// second line: appended to a long quality label it was cut off.
 struct TorrentPickerRow: View {
     let torrent: Torrent
     /// Whether this is the recommended (best ratio) torrent in its set.
@@ -22,9 +24,10 @@ struct TorrentPickerRow: View {
 
             VStack(alignment: .leading, spacing: 3) {
                 HStack(spacing: 6) {
-                    Text(torrent.quality ?? "—")
+                    Text(verbatim: torrent.qualityLabel.isEmpty ? "—" : torrent.qualityLabel)
                         .font(.subheadline.weight(.semibold))
                         .lineLimit(1)
+                        .truncationMode(.middle)
                     if recommended {
                         Text("Recommandé")
                             .font(.caption2.weight(.bold))
@@ -33,9 +36,20 @@ struct TorrentPickerRow: View {
                             .foregroundStyle(.white)
                     }
                 }
-                Text(detailLine)
-                    .font(.caption.monospacedDigit())
-                    .foregroundStyle(.secondary)
+                HStack(spacing: 0) {
+                    if let source = torrent.sourceLabel {
+                        Text(verbatim: source)
+                            .fontWeight(.semibold)
+                            .lineLimit(1)
+                            .layoutPriority(-1)
+                        Text(verbatim: " · ")
+                    }
+                    Text(verbatim: detailLine)
+                        .lineLimit(1)
+                        .layoutPriority(1)
+                }
+                .font(.caption.monospacedDigit())
+                .foregroundStyle(.secondary)
             }
 
             Spacer(minLength: 8)

@@ -13,6 +13,10 @@ final class MoviesViewModel: ObservableObject {
     private var currentPage = 1
     private(set) var filter: MovieManager.Filters = .trending
     private(set) var genre:  NetworkManager.Genres = .all
+    /// Bumped by `reload`: a load started for an older list is ignored when
+    /// it lands (a filter or genre picked while it ran), and never keeps the
+    /// grid "loading".
+    private var generation = 0
 
     func setFilter(_ newFilter: MovieManager.Filters) {
         filter = newFilter
@@ -25,10 +29,12 @@ final class MoviesViewModel: ObservableObject {
     }
 
     func reload() {
+        generation += 1
         currentPage = 1
         movies = []
         hasMore = true
         errorMessage = nil
+        isLoading = false
         loadMore()
     }
 
@@ -37,15 +43,14 @@ final class MoviesViewModel: ObservableObject {
         isLoading = true
         let page = currentPage
         let captured = (filter, genre)
+        let generation = self.generation
         PopcornKit.loadMovies(page,
                               filterBy: captured.0,
                               genre: captured.1) { [weak self] results, error in
             DispatchQueue.main.async {
-                guard let self = self,
-                      self.filter == captured.0,
-                      self.genre  == captured.1 else { return }
+                guard let self = self, self.generation == generation else { return }
                 self.isLoading = false
-                if let error = error { self.errorMessage = error.localizedDescription; self.hasMore = false; return }
+                if let error = error { self.errorMessage = GridError.message(for: error); self.hasMore = false; return }
                 let new = results ?? []
                 if new.isEmpty {
                     self.hasMore = false
@@ -57,6 +62,14 @@ final class MoviesViewModel: ObservableObject {
                 }
             }
         }
+    }
+}
+
+/// The message of a grid's load error: The Pirate Bay's Top 100
+/// (`PirateBayTop100`) adds a hint, as the site is blocked on some networks.
+enum GridError {
+    static func message(for error: NSError) -> String {
+        return PirateBayTop100.message(for: error)
     }
 }
 

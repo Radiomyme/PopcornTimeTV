@@ -3,9 +3,13 @@ use_frameworks!
 source 'https://github.com/CocoaPods/Specs'
 source 'https://github.com/PopcornTimeTV/Specs'
 
+# PopcornTorrent (the libtorrent streamer) and its GCDWebServer are NOT pods:
+# the tvOS, iOS and macOS apps all link the Swift package
+# github.com/Radiomyme/PopcornTorrent (libtorrent 1.2.19 built from source),
+# added to the app targets in the Xcode project. The CocoaPods PopcornTorrent
+# 1.3.15 binary (libtorrent 1.2.1, 2019) is gone, and GCDWebServer with it.
 target 'PopcornTimetvOS' do
     platform :tvos, '17.0'
-    pod 'PopcornTorrent', '~> 1.3.15'
     pod 'XCDYouTubeKit', '~> 2.9'
     pod 'Alamofire', '~> 5.9'
     pod 'AlamofireImage', '~> 4.3'
@@ -29,11 +33,11 @@ end
 
 # iOS app uses SwiftUI + AVPlayer (no VLC — drops MobileVLCKit. .mkv won't
 # play here; SwiftUI build is for AVPlayer-friendly content. PopcornTorrent
-# is shared from CocoaPods PopcornTimeTV/Specs.) XCDYouTubeKit dropped
-# because its iOS-8 deployment target hits Xcode 14.3+ libarclite removal.
+# is the Swift package shared with tvOS and macOS, see above.) XCDYouTubeKit
+# dropped because its iOS-8 deployment target hits Xcode 14.3+ libarclite
+# removal.
 target 'PopcornTimeiOS' do
     platform :ios, '17.0'
-    pod 'PopcornTorrent', '~> 1.3.15'
     pod 'Alamofire', '~> 5.9'
     pod 'AlamofireImage', '~> 4.3'
     pod 'ReachabilitySwift', '~> 5.2'
@@ -65,8 +69,11 @@ end
 
 # Bump pod deployment targets that are too old for Xcode 26 (12.0 minimum
 # for iOS, 14.0 minimum for tvOS) and force EXCLUDED_ARCHS for arm64
-# simulator on Apple Silicon Macs (PopcornTorrent's xcframework only
-# ships an x86_64 simulator slice).
+# simulator on Apple Silicon Macs. That exclusion was for the PopcornTorrent
+# pod, whose binary only shipped an x86_64 simulator slice; the SPM
+# PopcornTorrent builds both simulator archs and VLCKit 4's xcframework has
+# arm64 simulator slices, but the app targets still exclude arm64 too (the
+# simulator runs are x86_64 under Rosetta), so it stays until both go together.
 post_install do |installer|
     installer.pods_project.targets.each do |target|
         name = target.name
@@ -108,7 +115,8 @@ post_install do |installer|
             # GCDWebServer ships a few decade-old Objective-C warnings (no
             # prototype, enum-mismatch ternary). They're in 3rd-party code
             # we can't patch upstream — silence them so they stop polluting
-            # the issue navigator.
+            # the issue navigator. (No pod matches since GCDWebServer comes
+            # with the SPM PopcornTorrent; kept in case it returns as a pod.)
             # NOTE: with use_frameworks! + multi-platform, CocoaPods names the
             # target 'GCDWebServer-iOS' / 'GCDWebServer-tvOS' (not bare
             # 'GCDWebServer'), so match the prefix — an `== ` check silently

@@ -40,16 +40,22 @@ extension Media {
         }
         },
         errorBlock: @escaping (String) -> Void,
+        streamFailureBlock: ((StreamFailure, String) -> Void)? = nil,
         finishedLoadingBlock: @escaping (PreloadTorrentViewController, UIViewController) -> Void)
     {
-        if hasDownloaded, let download = associatedDownload {
+        if let download = completedDownload {
             return download.play { (videoFileURL, videoFilePath) in
-                loadingViewController.streamer = download
-                playBlock(videoFileURL, videoFilePath, self, nextEpisode, progress, playViewController, download)
-                finishedLoadingBlock(loadingViewController, playViewController)
+                // The SPM PopcornTorrent answers a finished download at once,
+                // with its file URL (no web server): keep the asynchronous
+                // hand-off the players were written for.
+                DispatchQueue.main.async {
+                    loadingViewController.streamer = download
+                    playBlock(videoFileURL, videoFilePath, self, nextEpisode, progress, playViewController, download)
+                    finishedLoadingBlock(loadingViewController, playViewController)
+                }
             }
         }
-        
+
         // Wipe any leftover torrent partials before starting a new stream.
         // PTTorrentStreamer caches under `NSTemporaryDirectory()/Downloads/<hash>/...`
         // and only cleans the *current* torrent on cancel — failed streams,
@@ -59,17 +65,22 @@ extension Media {
         // to make the next "Highest" pick fail with "not enough space".
         //
         // NOTE: we intentionally do NOT try to keep a movie's partial for
-        // fast-resume. Resuming a preallocated partial makes libtorrent read
-        // back pieces from disk, and this build crashes in
-        // `torrent::on_disk_read_complete` (a memmove overrun at a piece
-        // boundary) — a bug in the prebuilt PopcornTorrent/libtorrent we can't
-        // patch. So every stream starts clean; re-buffering on replay is the
-        // safe trade until the torrent library is replaced/updated.
-        PTTorrentStreamer.shared().cancelStreamingAndDeleteData(true)
+        // fast-resume. The CocoaPods PopcornTorrent (libtorrent 1.2.1) crashed
+        // reading a resumed partial back (`torrent::on_disk_read_complete`, a
+        // memmove overrun at a piece boundary), and the SPM PopcornTorrent's
+        // resume path hasn't been tried on the Apple TV. So every stream
+        // starts clean; re-buffering on replay is the safe trade.
+        PTTorrentStreamer.cancelCurrent(deleteData: true)
         purgeOrphanTorrentDownloads()
 
         if url.hasPrefix("magnet") || (url.hasSuffix(".torrent") && !url.hasPrefix("http")) {
-            loadingViewController.streamer = .shared()
+            // A new streamer per stream (the SPM PopcornTorrent has no
+            // singleton); it is the current one until the next stream.
+            let streamer = PTTorrentStreamer.startNew()
+            loadingViewController.streamer = streamer
+            // A film larger than the free space streams in bounded storage
+            // (every player route drives the torrent's window).
+            BoundedStorageSession.prepare(streamer, durationSeconds: BoundedStorageSession.durationHint(for: self))
             // PTTorrentStreamer dispatches its callbacks on libtorrent's
             // background queue. The blocks below all touch UIKit
             // (loadingViewController.progress / present(playerVc) /
@@ -77,25 +88,15 @@ extension Media {
             // to main inside each callback so the caller doesn't have to
             // care about the streamer's threading.
             //
-            // Always the single-file API, which streams the torrent's LARGEST
-            // file, even when the magnet carries a BEP 53 `so=` file selection
-            // (Torrentio `fileIdx`). Never call
-            // `startStreaming(fromMultiTorrentFileOrMagnetLink:…selectFileToStream:)`
-            // with this PopcornTorrent pod (1.3.15 binary):
-            //  • it sets a process-wide `shouldUserSelectFiles` flag that only
-            //    its first file lookup clears — a stream cancelled before the
-            //    metadata arrives leaves it set, and the next single-file
-            //    stream or download then calls a nil selection block (crash on
-            //    the libtorrent alerts thread);
-            //  • its later lookups ignore the selection anyway, so it would
-            //    serve the largest file while only the selected one downloads.
-            // `so=` stays in the magnet: harmless here (the pod re-prioritises
-            // the largest file once the metadata arrives) and honoured by the
-            // macOS SPM streamer. Season packs are filtered out of iOS/tvOS
-            // episode results instead (`TorrentioClient.dropsEpisodePacks`).
+            // The streamed file: the magnet's BEP 53 `so=` file (Torrentio
+            // `fileIdx`) when valid, else the largest video file, as on
+            // macOS (`PTTorrentStreamer.fileSelection`); only that file's
+            // pieces are wanted. Season packs stay filtered out of iOS/tvOS
+            // episode results for now (`TorrentioClient.dropsEpisodePacks`
+            // says why).
             print("[Streamer] startStreaming magnet=\(url.prefix(80))…")
             var lastLoggedTenth: Float = -1
-            PTTorrentStreamer.shared().startStreaming(fromFileOrMagnetLink: url, progress: { (status) in
+            streamer.startStreaming(fromMultiTorrentFileOrMagnetLink: url, progress: { (status) in
                 // Sample every 10% of buffering so the log doesn't drown the console.
                 let bucket = (status.bufferingProgress * 10).rounded(.down)
                 if bucket != lastLoggedTenth {
@@ -108,20 +109,35 @@ extension Media {
                 DispatchQueue.main.async { loadingBlock(status, loadingViewController) }
                 }, readyToPlay: { (videoFileURL, videoFilePath) in
                     print("[Streamer] readyToPlay url=\(videoFileURL)")
+                    // The streamer reports `http://0.0.0.0:<port>/`: the
+                    // players get 127.0.0.1 and the payload's name, as on
+                    // macOS (VLC opens it directly).
+                    let playableURL = PlaybackRouting.playableLocalURL(videoFileURL, fileName: videoFilePath.lastPathComponent)
                     DispatchQueue.main.async {
-                        playBlock(videoFileURL, videoFilePath, self, nextEpisode, progress, playViewController, .shared())
+                        playBlock(playableURL, videoFilePath, self, nextEpisode, progress, playViewController, streamer)
                         finishedLoadingBlock(loadingViewController, playViewController)
                     }
                 }, failure: { error in
                     print("[Streamer] FAILURE: \(error.localizedDescription)")
-                    DispatchQueue.main.async { errorBlock(error.localizedDescription) }
-            })
+                    // Not enough space even for bounded storage (-5: the
+                    // message says how much to free), another file error
+                    // (-6), or the error's own text.
+                    let failure = StreamFailure(error, streamer: streamer)
+                    let message = failure.message(underlying: error) ?? error.localizedDescription
+                    DispatchQueue.main.async {
+                        if let streamFailureBlock = streamFailureBlock {
+                            streamFailureBlock(failure, message)
+                        } else {
+                            errorBlock(message)
+                        }
+                    }
+            }, selectFileToStream: PTTorrentStreamer.fileSelection(for: url))
         } else {
             PopcornKit.downloadTorrentFile(url, completion: { (url, error) in
                 // Alamofire hands the response back on its own queue too.
                 DispatchQueue.main.async {
                     guard let url = url, error == nil else { errorBlock(error!.localizedDescription); return }
-                    self.play(fromFileOrMagnetLink: url, nextEpisodeInSeries: nextEpisode, loadingViewController: loadingViewController, playViewController: playViewController, progress: progress, loadingBlock: loadingBlock, playBlock: playBlock, errorBlock: errorBlock, finishedLoadingBlock: finishedLoadingBlock)
+                    self.play(fromFileOrMagnetLink: url, nextEpisodeInSeries: nextEpisode, loadingViewController: loadingViewController, playViewController: playViewController, progress: progress, loadingBlock: loadingBlock, playBlock: playBlock, errorBlock: errorBlock, streamFailureBlock: streamFailureBlock, finishedLoadingBlock: finishedLoadingBlock)
                 }
             })
         }
@@ -162,8 +178,16 @@ extension Media {
         return PTTorrentDownloadManager.shared().activeDownloads.first(where: {($0.mediaMetadata[MPMediaItemPropertyPersistentID] as? String) == self.id}) != nil
     }
     
+    /// The completed download of this media, if any. Playback uses this one, not
+    /// `associatedDownload`: an unfinished entry of the same media (e.g. one left
+    /// by the CocoaPods PopcornTorrent, which the SPM one resumes into another
+    /// folder) comes first there, and a paused download never answers `play`.
+    var completedDownload: PTTorrentDownload? {
+        return PTTorrentDownloadManager.shared().completedDownloads.first(where: {($0.mediaMetadata[MPMediaItemPropertyPersistentID] as? String) == self.id})
+    }
+
     /// Boolean value indicating whether the media has been downloaded.
     var hasDownloaded: Bool {
-        return PTTorrentDownloadManager.shared().completedDownloads.first(where: {($0.mediaMetadata[MPMediaItemPropertyPersistentID] as? String) == self.id}) != nil
+        return completedDownload != nil
     }
 }

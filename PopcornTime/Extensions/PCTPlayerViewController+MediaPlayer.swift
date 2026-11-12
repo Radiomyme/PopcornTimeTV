@@ -41,7 +41,7 @@ extension PCTPlayerViewController {
         // (`noteUserMovedPlayhead`, as the ±30 s buttons and the scrub do).
         if #available(iOS 9.1, tvOS 9.1, *) {
             add(center.changePlaybackPositionCommand) { player, event in
-                player.mediaplayer.time = VLCTime(number: NSNumber(value: (event as! MPChangePlaybackPositionCommandEvent).positionTime * 1000))
+                player.seekLimited(toMilliseconds: NSNumber(value: (event as! MPChangePlaybackPositionCommandEvent).positionTime * 1000))
                 player.noteUserMovedPlayhead()
                 return .success
             }
@@ -58,13 +58,14 @@ extension PCTPlayerViewController {
         }
         
         add(center.skipForwardCommand) { player, event in
+            player.playheadWatch.noteOwnSeek()
             player.mediaplayer.jumpForward((event as! MPSkipIntervalCommandEvent).interval) // VLCKit 4: seconds as Double
             player.noteUserMovedPlayhead()
             return .success
         }
 
         add(center.skipBackwardCommand) { player, event in
-            player.mediaplayer.jumpBackward((event as! MPSkipIntervalCommandEvent).interval)
+            player.jumpBackwardLimited((event as! MPSkipIntervalCommandEvent).interval)
             player.noteUserMovedPlayhead()
             return .success
         }

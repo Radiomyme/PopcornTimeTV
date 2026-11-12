@@ -1,8 +1,8 @@
 /* (No Commment) */
-"%@ version %@ of Popcorn Time is now available." = "@$1% النسخة %2$@ من التطبيق متاحة الان";
+"%@ version %@ of Popcorn Time is now available." = "أصبحت النسخة %2$@ (%1$@) من Popcorn Time متاحة الآن.";
 
 /* (No Commment) */
-"Accessibility" = "امكانية الوصول";
+"Accessibility" = "تسهيلات الاستخدام";
 
 /* (No Commment) */
 "Action" = "أكشن";
@@ -14,7 +14,7 @@
 "All" = "الجميع";
 
 /* (No Commment) */
-"Animation" = "أنمي";
+"Animation" = "رسوم متحركة";
 
 /* (No Commment) */
 "Are you sure you want to Sign Out?" = "هل أنت متأكد من تسجيل الخروج؟";
@@ -158,13 +158,13 @@
 "Family" = "عائلي";
 
 /* (No Commment) */
-"Fan Film" = "شخصيات";
+"Fan Film" = "أفلام المعجبين";
 
 /* (No Commment) */
 "Fantasy" = "فانتازي";
 
 /* (No Commment) */
-"Film Noir" = "الاأضواء";
+"Film Noir" = "فيلم نوار";
 
 /* (No Commment) */
 "Fine" = "حسناً";
@@ -200,7 +200,7 @@
 "Horror" = "رعب";
 
 /* (No Commment) */
-"Indie" = "هندي";
+"Indie" = "مستقل";
 
 /* (No Commment) */
 "Information" = "معلومات";
@@ -308,7 +308,7 @@
 "Orange" = "برتقالي";
 
 /* (No Commment) */
-"Paused" = "ايقاف مؤقت";
+"Paused" = "متوقف مؤقتاً";
 
 /* (No Commment) */
 "Pending" = "قيد الإنتظار";
@@ -362,7 +362,7 @@
 "Romance" = "رومانسي";
 
 /* (No Commment) */
-"Run Time" = "تشغيل الوقت";
+"Run Time" = "المدة";
 
 /* (No Commment) */
 "SSL Error" = "خطأ";
@@ -449,7 +449,7 @@
 "Subtitle Language" = "لغة الترجمة";
 
 /* (No Commment) */
-"Subtitles for the deaf and Hard of Hearing (SDH) refer to subtitles in the original language with the addition of relevant non-dialog information." = "ترجمات للصم وصعوبة السمع (سد) تشير إلى ترجمات في لانوج الأصلية مع إضافة المعلومات غير الحوار ذات الصلة";
+"Subtitles for the deaf and Hard of Hearing (SDH) refer to subtitles in the original language with the addition of relevant non-dialog information." = "ترجمة الصم وضعاف السمع (SDH) هي ترجمة باللغة الأصلية تُضاف إليها معلومات مهمة غير الحوار.";
 
 /* (No Commment) */
 "Success" = "نجح";
@@ -470,7 +470,7 @@
 "There are no updates available for Popcorn Time at this time." = "لا يوجد تحديث متاح حالياً للتطبيق";
 
 /* (No Commment) */
-"Thriller" = "نبذة";
+"Thriller" = "إثارة";
 
 /* (No Commment) */
 "Top Rated" = "الأعلى تقييم";
@@ -480,6 +480,12 @@
 
 /* (No Commment) */
 "Trending" = "الأعلى مشاهدة";
+"Top 100" = "أفضل 100";
+"The Pirate Bay could not be reached." = "تعذّر الوصول إلى The Pirate Bay.";
+"The titles of the Top 100 could not be loaded. Try again later." = "تعذّر تحميل عناوين قائمة أفضل 100. حاول مرة أخرى لاحقًا.";
+"Top 100 Unavailable" = "قائمة أفضل 100 غير متاحة";
+"The site may be blocked on your network. Try again later." = "قد يكون الموقع محظورًا على شبكتك. حاول مرة أخرى لاحقًا.";
+"Try Again" = "إعادة المحاولة";
 
 /* (No Commment) */
 "Try adding movies or shows to your watchlist." = "حاول اضافة فيلم او مسلسل للمفضلة‫‬";
@@ -506,13 +512,13 @@
 "War" = "حرب";
 
 /* (No Commment) */
-"Watch %@ on %@" = "@$2% مشاهدة %1$@ تشغيل";
+"Watch %@ on %@" = "شاهد %1$@ على %2$@";
 
 /* (No Commment) */
 "Watchlist Empty" = "المفضلة فارغة";
 
 /* (No Commment) */
-"We didn't turn anything up for %@. Try something else." = "لم يتم تحويل شيء الى %1$@. حاول لاحقاً";
+"We didn't turn anything up for %@. Try something else." = "لم نعثر على أي نتائج لـ %@. جرّب شيئاً آخر.";
 
 /* (No Commment) */
 "Western" = "كاوبوي";
@@ -539,7 +545,7 @@
 "Series" = "المواسم";
 
 /* (No Commment) */
-"Trailer" = "نبذة";
+"Trailer" = "إعلان تشويقي";
 
 /* (No Commment) */
 "Watched" = "تمت مشاهدته";
@@ -547,3 +553,116 @@
 /* (No Commment) */
 "Watchlist" = "المفضلة";
 
+
+/* 5.1: Settings, detail pages and What's New (5.1.0) */
+"A - Z" = "أبجدياً";
+"Audio Language" = "لغة الصوت";
+"Balanced" = "متوازنة";
+"Choose a preferred audio language. When the file carries a matching audio track, it will be selected automatically." = "اختر لغة الصوت المفضلة. إذا احتوى الملف على مسار صوتي بهذه اللغة، فسيتم اختياره تلقائياً.";
+"No audio tracks available." = "لا توجد مسارات صوتية متاحة.";
+"Settings" = "الإعدادات";
+"Sort" = "فرز";
+"Time remaining" = "الوقت المتبقي";
+"Always Ask" = "السؤال دائماً";
+"Playback" = "التشغيل";
+"Audio and subtitles in these languages are picked automatically when the file or OpenSubtitles offers them." = "يتم اختيار الصوت والترجمة بهذه اللغات تلقائياً عندما يوفرها الملف أو OpenSubtitles.";
+"Choose the source every time; the recommended one is starred." = "اختر المصدر في كل مرة؛ المصدر الموصى به مميز بنجمة.";
+"The best quality that starts quickly." = "أفضل جودة مع بدء تشغيل سريع.";
+"Always the best picture, even if it takes longer to start." = "أفضل صورة دائماً، حتى لو استغرق بدء التشغيل وقتاً أطول.";
+"The smallest file, for the quickest start." = "أصغر ملف، لبدء التشغيل بأسرع ما يمكن.";
+"Detail Pages" = "صفحات التفاصيل";
+"Plays the soundtrack of the movie or the theme of the show on its page." = "يشغّل موسيقى الفيلم أو شارة المسلسل في صفحته.";
+"Theme Songs" = "موسيقى الشارة";
+"Storage" = "التخزين";
+"Temporary video files, posters and network caches." = "ملفات الفيديو المؤقتة والملصقات وذاكرة الشبكة المؤقتة.";
+"Clear Cache" = "مسح ذاكرة التخزين المؤقت";
+"About %@ will be freed." = "سيتم تحرير حوالي %@.";
+"A download is in progress. Clear the cache once it has finished." = "يوجد تحميل قيد التنفيذ. امسح ذاكرة التخزين المؤقت بعد انتهائه.";
+"Cache Cleared" = "تم مسح ذاكرة التخزين المؤقت";
+"%@ reclaimed." = "تم تحرير %@.";
+"Account" = "الحساب";
+"Sign Out of Trakt" = "تسجيل الخروج من Trakt";
+"About" = "حول";
+"Version" = "النسخة";
+"What's New" = "ما الجديد";
+"Popcorn Time is free and open-source software." = "Popcorn Time برنامج حر ومفتوح المصدر.";
+"In Watchlist" = "في المفضلة";
+"Add to Watchlist" = "إضافة إلى المفضلة";
+"Mark as Watched" = "تعيين كمُشاهَد";
+"Mark as Unwatched" = "تعيين كغير مُشاهَد";
+"Download" = "تحميل";
+"Downloaded" = "تم التحميل";
+"Pause" = "إيقاف مؤقت";
+"Resume" = "استئناف";
+"Season %lld" = "الموسم %lld";
+"1 Season" = "موسم واحد";
+"%lld Seasons" = "عدد المواسم: %lld";
+"Episode %lld" = "الحلقة %lld";
+"1 Episode" = "حلقة واحدة";
+"%lld Episodes" = "عدد الحلقات: %lld";
+"S%lld · E%lld" = "م%1$lld · ح%2$lld";
+"Viewers Also Watched" = "قد يعجبك أيضاً";
+"Cast & Crew" = "الممثلون وطاقم العمل";
+
+/* Director(s) / Starring: info rows and crew roles (credit style, as on Arabic film posters). */
+"Director" = "إخراج";
+"Directors" = "إخراج";
+"Starring" = "بطولة";
+
+/* Crew roles shown under cast & crew headshots (TVMaze / Cinemeta credits). */
+"Writer" = "تأليف";
+"Creator" = "مبتكر العمل";
+
+/* Mac: Play / episode right-click menu item (always shows the quality sheet), and the sidebar section. */
+"Choose Quality…" = "اختر الدقة…";
+"Search" = "بحث";
+
+/* Mac: Movies / Shows grids (sort menu) and Search (MacGridViews). */
+"Filter" = "تصفية";
+"Movie or show title" = "عنوان الفيلم أو المسلسل";
+
+/* Mac: Settings window (MacSettingsView). "%@ (+ mirrors)": %@ is the shows API host. */
+"Balanced (quick start)" = "متوازنة (بدء سريع)";
+"Languages" = "اللغات";
+"Trakt Account" = "حساب Trakt";
+"Signed In to Trakt" = "تم تسجيل الدخول إلى Trakt";
+"Sign In to Trakt (Browser)" = "تسجيل الدخول إلى Trakt (المتصفح)";
+"Sources" = "المصادر";
+"Movies API" = "واجهة برمجة الأفلام";
+"Shows API" = "واجهة برمجة المسلسلات";
+"%@ (+ mirrors)" = "%@ (+ مرايا)";
+"Torrents" = "التورنت";
+"Engine" = "المحرك";
+"Source Code" = "الشيفرة المصدرية";
+
+/* Mac: Popcorn Time menu item opening the release notes window. */
+"What's New…" = "ما الجديد…";
+
+/* Mac: native player status (MacPlayerView). "Buffering %.0f%% · %d seeds · %d KB/s": buffered percentage, seeds, download speed. "Failed: %@" / "Cannot play: %@": the reason. */
+"Buffering…" = "جارٍ التخزين المؤقت…";
+"The download is slower than playback" = "التنزيل أبطأ من التشغيل";
+"Connecting to sources…" = "جارٍ الاتصال بالمصادر…";
+"Buffering %.0f%% · %d seeds · %d KB/s" = "التخزين المؤقت %.0f%% · %d مشاركين · %d ك.ب/ث";
+"Failed: %@" = "فشل: %@";
+"Remuxing MKV → HLS…" = "جارٍ إعادة تغليف MKV → HLS…";
+"Opening the file…" = "جارٍ فتح الملف…";
+"Cannot play: %@" = "تعذّر التشغيل: %@";
+"Playing with VLC…" = "التشغيل عبر VLC…";
+
+/* Mac: VLC fallback player menus (MacVLCPlayerView). */
+"Tracks in the File" = "مسارات الملف";
+"Searching for subtitles…" = "جارٍ البحث عن الترجمات…";
+"Subtitles" = "الترجمة";
+"Audio" = "الصوت";
+
+/* Bounded storage: a film larger than the free space streams with only part of it on disk. Loading screen (%d = minutes a rewind can reach), the message over the video when a rewind goes further back than what is still stored, the alert when playback can't continue, and the stream errors (%@ = space to free, e.g. "1.2 GB" / the system's error text). */
+"BoundedStorage.Loading.Minutes" = "مساحة تخزين محدودة: يمكنك الرجوع إلى الخلف نحو %d د";
+"BoundedStorage.Loading.Generic" = "مساحة تخزين محدودة: سيكون الرجوع إلى الخلف محدودًا";
+"BoundedStorage.RewindLimited" = "لم يعد هذا الجزء مخزّنًا (مساحة تخزين محدودة).";
+"BoundedStorage.RewindNotDownloaded" = "لم يُنزَّل هذا الجزء (مساحة تخزين محدودة).";
+"BoundedStorage.CannotContinue.Title" = "توقّف التشغيل";
+"BoundedStorage.CannotContinue.Message" = "لم يعد هذا الجزء من الفيديو مخزّنًا (مساحة تخزين محدودة)، لذا لا يمكن متابعة التشغيل من هنا.";
+"BoundedStorage.NotEnoughSpace.Message" = "لا توجد مساحة فارغة كافية لتشغيل هذا الفيديو حتى مع مساحة التخزين المحدودة. حرّر %@ على الأقل ثم أعد المحاولة.";
+"BoundedStorage.NotEnoughSpace.Generic" = "لا توجد مساحة فارغة كافية لتشغيل هذا الفيديو حتى مع مساحة التخزين المحدودة. حرّر بعض المساحة ثم أعد المحاولة.";
+"BoundedStorage.FileError.Message" = "تعذّر حفظ الفيديو في وحدة التخزين (%@).";
+"BoundedStorage.TryLowerQuality" = "هل تريد تجربة جودة أقل؟";

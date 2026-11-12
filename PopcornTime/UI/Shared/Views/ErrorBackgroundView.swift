@@ -1,6 +1,7 @@
 
 
 import UIKit
+import class PopcornKit.PirateBayTop100
 
 class ErrorBackgroundView: UIView {
     @IBOutlet var titleLabel: UILabel?
@@ -13,6 +14,11 @@ class ErrorBackgroundView: UIView {
     }
     
     func setUpView(error: NSError) {
+        // The Top 100 filter: The Pirate Bay can't be reached (blocked on
+        // some networks) or the titles couldn't be loaded, and no list is cached.
+        if error.domain == PirateBayTop100.errorDomain {
+            return setUpView(title: "Top 100 Unavailable".localized, description: PirateBayTop100.message(for: error))
+        }
         let helpfulDescription: String
         let title: String
         switch error.code {

@@ -3,12 +3,10 @@ import AVFoundation
 
 // CONTRACT FILE — owned by agent C2. Shared by the tvOS, iOS and macOS apps.
 //
-// Storage (kept compatible with the existing tvOS settings):
-//   "preferredAudioLanguage"    — localized language NAME ("Français") as
-//                                  written by the tvOS Settings screen (codes
+// Storage (same on the three apps' Settings screens):
+//   "preferredAudioLanguage"    — localized language NAME ("Français") (codes
 //                                  like "fr" must be accepted too).
-//   "preferredSubtitleLanguage" — same convention, iOS / macOS settings.
-//   tvOS also honours SubtitleSettings.shared.language (tvOS-only class).
+//   "preferredSubtitleLanguage" — same convention.
 //
 // Language identification is deliberately tolerant: values come from the
 // settings screens (localized names, possibly written under another UI
@@ -18,11 +16,11 @@ import AVFoundation
 
 enum PlaybackLanguagePreferences {
 
-    /// UserDefaults keys (shared with the tvOS Settings screen).
+    /// UserDefaults keys (written by the Settings screens of the three apps).
     static let audioLanguageDefaultsKey = "preferredAudioLanguage"
     static let subtitleLanguageDefaultsKey = "preferredSubtitleLanguage"
 
-    /// Common ISO 639-1 codes offered by the settings pickers (iOS / macOS).
+    /// Common ISO 639-1 codes offered by the settings pickers (tvOS / iOS / macOS).
     static let pickerLanguageCodes: [String] = [
         "en", "fr", "de", "es", "it", "pt", "nl", "ru", "ja", "ko", "zh", "ar",
         "he", "tr", "pl", "cs", "sk", "hu", "ro", "bg", "el", "uk", "hr", "sr",
@@ -36,13 +34,6 @@ enum PlaybackLanguagePreferences {
 
     /// ISO 639-1 code of the preferred subtitle language, nil = none.
     static var preferredSubtitleLanguageCode: String? {
-#if os(tvOS)
-        // The tvOS Settings screen stores the subtitle language in the
-        // archived SubtitleSettings object (localized name), not in a key.
-        if let name = SubtitleSettings.shared.language, let code = isoCode(for: name) {
-            return code
-        }
-#endif
         return storedCode(forKey: subtitleLanguageDefaultsKey)
     }
 
@@ -153,10 +144,10 @@ enum PlaybackLanguagePreferences {
         externallyManagedLegibleItems.add(item)
     }
 
-    // MARK: - Settings helpers (iOS / macOS pickers)
+    // MARK: - Settings helpers (tvOS / iOS / macOS pickers)
 
     /// Localized, capitalized language name ("Français") — the value the
-    /// settings screens store, same expression as the tvOS Settings screen.
+    /// Settings screens of the three apps store.
     static func storedName(forCode code: String) -> String {
         return Locale.current.localizedString(forLanguageCode: code)?.localizedCapitalized ?? code
     }

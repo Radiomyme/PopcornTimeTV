@@ -24,12 +24,17 @@ func purgeOrphanTorrentDownloads() {
     let tmp = NSTemporaryDirectory() as NSString
     var freed: Int64 = 0
 
+    // Allocated bytes, not logical sizes: a stream's file is created at its
+    // final size (a hole) and bounded storage punches out what it consumed —
+    // the logical size of a 13 GB film says nothing of what deleting it frees
+    // (verify-storage F4: "freed 13 GB" for 1-2 GB really freed).
+    let sizeKeys: Set<URLResourceKey> = [.totalFileAllocatedSizeKey, .fileAllocatedSizeKey]
     func directorySize(_ path: String) -> Int64 {
-        guard let en = fm.enumerator(atPath: path) else { return 0 }
+        guard let en = fm.enumerator(at: URL(fileURLWithPath: path), includingPropertiesForKeys: Array(sizeKeys)) else { return 0 }
         var total: Int64 = 0
-        for case let sub as String in en {
-            let attrs = try? fm.attributesOfItem(atPath: (path as NSString).appendingPathComponent(sub))
-            total += (attrs?[.size] as? NSNumber)?.int64Value ?? 0
+        for case let file as URL in en {
+            let values = try? file.resourceValues(forKeys: sizeKeys)
+            total += Int64(values?.totalFileAllocatedSize ?? values?.fileAllocatedSize ?? 0)
         }
         return total
     }

@@ -2,7 +2,7 @@
 
 import Foundation
 import PopcornKit
-import PopcornTorrent.PTTorrentStreamer
+import PopcornTorrent
 import MediaPlayer.MPMediaItem
 import AlamofireImage
 
@@ -43,16 +43,22 @@ extension AppDelegate: PCTPlayerViewControllerDelegate, UIViewControllerTransiti
 
         // 5) NSCachesDirectory for the app — system reclaims this on
         //    pressure but doing it ourselves makes the freed bytes visible
-        //    to libtorrent immediately.
+        //    to libtorrent immediately. Never Caches/Downloads: on tvOS the
+        //    offline downloads (PTTorrentDownloadManager) live there.
         if let caches = fm.urls(for: .cachesDirectory, in: .userDomainMask).first {
             if let entries = try? fm.contentsOfDirectory(at: caches, includingPropertiesForKeys: nil) {
-                for entry in entries {
+                for entry in entries where entry.lastPathComponent != Self.offlineDownloadsFolderName {
                     try? fm.removeItem(at: entry)
                 }
             }
         }
         print("[Cache] aggressivelyFreeDiskSpace done")
     }
+
+    /// The folder of the offline downloads under Caches on tvOS
+    /// (PTTorrentDownloadManager's `Caches/Downloads`): never wiped by
+    /// `aggressivelyFreeDiskSpace`.
+    static let offlineDownloadsFolderName = "Downloads"
 }
 
 extension AppDelegate {
@@ -68,10 +74,18 @@ extension AppDelegate {
             let group = DispatchGroup()
             var aggregated: [Torrent] = []
             var t4p: [Torrent] = []
+            var extra: [Torrent] = []
 
             group.enter()
             TorrentioClient.shared.streams(imdbId: showId, season: episode.season, episode: episode.episode) { torrents in
                 aggregated = torrents
+                group.leave()
+            }
+            // The Pirate Bay + Knaben, exact episode only (`ExtraTorrentSources`).
+            group.enter()
+            ExtraTorrentSources.shared.episodeTorrents(imdbId: showId, showTitle: episode.show?.title,
+                                                       season: episode.season, episode: episode.episode) { torrents in
+                extra = torrents
                 group.leave()
             }
             group.enter()
@@ -82,9 +96,11 @@ extension AppDelegate {
 
             group.notify(queue: .main) { [weak self] in
                 var augmented = episode
-                // T4P primary, EZTV + Torrentio as fallback.
-                augmented.torrents = TorrentioClient.merge(t4p, with: episode.torrents + aggregated)
-                print("[chooseQuality] episode S\(episode.season)E\(episode.episode): \(t4p.count) t4p + \(episode.torrents.count) EZTV + \(aggregated.count) aggregated -> \(augmented.torrents.count)")
+                // T4P primary, EZTV + Torrentio + TPB / Knaben as fallback (a
+                // TPB / Knaben copy of a listed torrent keeps the listed row).
+                let legacy = episode.torrents + aggregated
+                augmented.torrents = TorrentioClient.merge(t4p, with: legacy + ExtraTorrentSources.novel(extra, beside: t4p + legacy))
+                print("[chooseQuality] episode S\(episode.season)E\(episode.episode): \(t4p.count) t4p + \(episode.torrents.count) EZTV + \(aggregated.count) aggregated + \(extra.count) TPB/Knaben -> \(augmented.torrents.count)")
                 self?.presentQualityChoice(sender, media: augmented, completion: completion)
             }
             return
@@ -157,13 +173,17 @@ extension AppDelegate {
 
         // Enrich each row with seeds + size so the best quality/seeds ratio is
         // visible at a glance (like the iOS/macOS pickers), and star the
-        // recommended `balancedPick`. Best resolution first.
+        // recommended `balancedPick`. Best resolution first. The source (TPB,
+        // Knaben · 1337x, a Torrentio indexer…) comes last, and the separators
+        // are narrow: tvOS shrinks a row too long for the sheet, then cuts its
+        // middle (the seeds); the focused row scrolls to show it all.
         let recommendedURL = Torrent.balancedPick(from: sorted)?.url
         var recommendedAction: UIAlertAction?
         for torrent in sorted.reversed() {
-            var label = torrent.quality ?? "—"
-            label += "   ·   \(torrent.seeds) seeds"
-            if let size = torrent.size, !size.isEmpty { label += "   ·   \(size)" }
+            var label = torrent.qualityLabel.isEmpty ? "—" : torrent.qualityLabel
+            label += "  ·  \(torrent.seeds) seeds"
+            if let size = torrent.size, !size.isEmpty { label += "  ·  \(size)" }
+            if let source = torrent.sourceLabel { label += "  ·  \(source)" }
             if torrent.url == recommendedURL { label = "⭐︎ " + label }
             let action = UIAlertAction(title: label, style: .default) { _ in completion(torrent) }
             alertController.addAction(action)
@@ -230,7 +250,10 @@ extension AppDelegate {
                 episodesLeftInShow.removeFirst(index + 1)
             }
             
-            nextEpisode = !episodesLeftInShow.isEmpty ? episodesLeftInShow.removeFirst() : nil
+            // Up Next proposes the following episode only once it can be
+            // played: the guide also lists announced episodes (future air
+            // date, no torrent), which would end on "No torrents found".
+            nextEpisode = episodesLeftInShow.first.flatMap { $0.isAvailableToPlay ? $0 : nil }
             nextEpisode?.show = episode.show
         } else {
             backgroundImage = media.largeBackgroundImage
@@ -241,9 +264,14 @@ extension AppDelegate {
         }
         loadingViewController.titleLabel.text = media.title
         
+        // The detail page's theme song must not play over the buffering
+        // screen and the movie (the page also stops it when it disappears).
+        ThemeSongManager.shared.stopTheme()
         present(loadingViewController, animated: true)
         
-        let error: (String) -> Void = { [weak self] (errorMessage) in
+        // `failure`: what PopcornTorrent's error means (nil: another error,
+        // judged by its text as before).
+        let failed: (String, StreamFailure?) -> Void = { [weak self] (errorMessage, failure) in
             guard let self = self else { return }
 
             // libtorrent's "not enough space" message is reported in
@@ -255,19 +283,29 @@ extension AppDelegate {
             // both English and French to cover the localized libtorrent
             // build) and offer a one-tap downgrade to the next-lower
             // quality torrent rather than an unhelpful OK alert.
-            let isDiskFullError = errorMessage.localizedCaseInsensitiveContains("not enough space")
-                               || errorMessage.localizedCaseInsensitiveContains("pas assez d'espace")
-                               || errorMessage.localizedCaseInsensitiveContains("not enough disk")
+            // PopcornTorrent's codes first: -4 (doesn't fit / disk full) and
+            // -5 (not even bounded storage can run: the message says how
+            // much to free) both are disk-space failures; -6 (another file
+            // error) is not.
+            let isDiskFullError = failure.map { $0.isDiskSpace }
+                ?? (errorMessage.localizedCaseInsensitiveContains("not enough space")
+                    || errorMessage.localizedCaseInsensitiveContains("pas assez d'espace")
+                    || errorMessage.localizedCaseInsensitiveContains("not enough disk"))
+            // -5: the computed amount to free goes into the lower-quality offer.
+            let spaceToFree: String? = {
+                if case .notEnoughSpaceForBoundedStorage(let bytes)? = failure, bytes > 0 { return errorMessage }
+                return nil
+            }()
 
             // Find a smaller candidate from the same media — strictly
-            // smaller `qualityValue` than what we just tried.
-            let smaller: Torrent? = {
-                let candidates = media.torrents.sorted(by: <)
-                guard let currentIdx = candidates.firstIndex(where: { $0.url == torrent.url }) else {
-                    return candidates.dropLast().last
-                }
-                return currentIdx == 0 ? nil : candidates[currentIdx - 1]
-            }()
+            // smaller `qualityValue` than what we just tried (a known
+            // resolution, never a 3D release), the best ranked of those.
+            // Not the next row of the ranking, which is usually the same
+            // resolution; and the failed torrent need not be in
+            // `media.torrents` (an episode's extra-source rows are not).
+            let smaller: Torrent? = media.torrents
+                .filter { $0.qualityValue < torrent.qualityValue && $0.qualityValue > .threeD }
+                .max(by: <)
 
             // Always tear down the half-started loading VC so we can
             // present the alert cleanly.
@@ -296,7 +334,10 @@ extension AppDelegate {
                     // Second hit (or no auto-clean possible) — offer the
                     // user the next-lower quality.
                     let title = "Espace insuffisant pour ce film en \(torrent.quality ?? "?")"
-                    let body  = "L'Apple TV n'a pas assez de place dans le cache de l'app pour télécharger ce torrent. Essayer une qualité inférieure ?"
+                    let body  = spaceToFree.map {
+                        $0 + "\n\n" + NSLocalizedString("BoundedStorage.TryLowerQuality", value: "Try a lower quality?",
+                                                        comment: "After the space to free, offers a smaller release")
+                    } ?? "L'Apple TV n'a pas assez de place dans le cache de l'app pour télécharger ce torrent. Essayer une qualité inférieure ?"
                     let alert = UIAlertController(title: title, message: body, preferredStyle: .alert)
                     alert.addAction(UIAlertAction(title: "Réessayer en \(fallback.quality ?? "qualité inférieure")", style: .default) { _ in
                         self.play(media, torrent: fallback)
@@ -311,6 +352,9 @@ extension AppDelegate {
             }
         }
         
+        let error: (String) -> Void = { failed($0, nil) }
+        let streamFailed: (StreamFailure, String) -> Void = { failed($1, $0) }
+
         let finishedLoading: (PreloadTorrentViewController, UIViewController) -> Void = { [weak self] (loadingVc, playerVc) in
             guard let self = self else { return }
             let flag = UIDevice.current.userInterfaceIdiom != .tv
@@ -358,7 +402,7 @@ extension AppDelegate {
                 // and the iOS VLC player. (A native → VLC hand-off,
                 // `handOffToVLC`, passes its own position as is.)
                 let startPosition = ResumePolicy.startPosition(forSavedProgress: currentProgress)
-                media.play(fromFileOrMagnetLink: torrent.url, nextEpisodeInSeries: nextEpisode, loadingViewController: loadingViewController, playViewController: playViewController, progress: startPosition, errorBlock: error, finishedLoadingBlock: finishedLoading)
+                media.play(fromFileOrMagnetLink: torrent.url, nextEpisodeInSeries: nextEpisode, loadingViewController: loadingViewController, playViewController: playViewController, progress: startPosition, errorBlock: error, streamFailureBlock: streamFailed, finishedLoadingBlock: finishedLoading)
                 return
             }
 
@@ -406,6 +450,7 @@ extension AppDelegate {
                        progress: currentProgress,
                        playBlock: playBlock,
                        errorBlock: error,
+                       streamFailureBlock: streamFailed,
                        finishedLoadingBlock: finishedLoading)
         }
     }
@@ -460,7 +505,17 @@ extension AppDelegate {
     }
     
     func downloadButton(_ button: DownloadButton, wasPressedWith download: PTTorrentDownload, didDeleteHandler: (() -> Void)? = nil) {
-        switch button.downloadState {
+        downloadControl(wasPressedIn: button.downloadState, with: download, sourceView: button, stateDidChange: { state in
+            button.downloadState = state
+        }, didDeleteHandler: didDeleteHandler)
+    }
+
+    /// A download control showing `state` was pressed (a `DownloadButton`, or
+    /// the glass detail page's Download buttons): downloaded → Play / Delete
+    /// Download sheet, downloading → pause, paused → resume. `stateDidChange`
+    /// receives the control's new state.
+    func downloadControl(wasPressedIn state: DownloadButton.State, with download: PTTorrentDownload, sourceView: UIView?, stateDidChange: @escaping (DownloadButton.State) -> Void, didDeleteHandler: (() -> Void)? = nil) {
+        switch state {
         case .downloaded:
             let alertController = UIAlertController(title: nil, message: nil, preferredStyle: .actionSheet, blurStyle: .dark)
             
@@ -469,19 +524,19 @@ extension AppDelegate {
             })
             alertController.addAction(UIAlertAction(title: "Delete Download".localized, style: .destructive) { _ in
                 PTTorrentDownloadManager.shared().delete(download)
-                button.downloadState = .normal
+                stateDidChange(.normal)
                 didDeleteHandler?()
             })
             alertController.addAction(UIAlertAction(title: "Cancel".localized, style: .cancel, handler: nil))
             
-            alertController.popoverPresentationController?.sourceView = button
+            alertController.popoverPresentationController?.sourceView = sourceView
             alertController.show(animated: true)
         case .downloading:
             download.pause()
-            button.downloadState = .paused
+            stateDidChange(.paused)
         case .paused:
             download.resume()
-            button.downloadState = .downloading
+            stateDidChange(.downloading)
         default:
             break
         }
@@ -532,7 +587,7 @@ extension AppDelegate {
     }
     
     func animationController(forPresented presented: UIViewController, presenting: UIViewController, source: UIViewController) -> UIViewControllerAnimatedTransitioning? {
-        if presented is PreloadTorrentViewController && activeViewController is DetailViewController {
+        if presented is PreloadTorrentViewController && activeViewController is GlassDetailHostingController {
             return PreloadTorrentViewControllerAnimatedTransitioning(isPresenting: true)
         }
         return nil
@@ -540,7 +595,7 @@ extension AppDelegate {
     }
     
     func animationController(forDismissed dismissed: UIViewController) -> UIViewControllerAnimatedTransitioning? {
-        if dismissed is PreloadTorrentViewController && activeViewController is DetailViewController {
+        if dismissed is PreloadTorrentViewController && activeViewController is GlassDetailHostingController {
             return PreloadTorrentViewControllerAnimatedTransitioning(isPresenting: false)
         }
         return nil

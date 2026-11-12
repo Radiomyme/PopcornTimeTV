@@ -217,6 +217,12 @@
 "Recently Added" = "Recently Added";
 "Top Rated" = "Top Rated";
 "Trending" = "Trending";
+"Top 100" = "Top 100";
+"The Pirate Bay could not be reached." = "The Pirate Bay could not be reached.";
+"The titles of the Top 100 could not be loaded. Try again later." = "The titles of the Top 100 could not be loaded. Try again later.";
+"Top 100 Unavailable" = "Top 100 Unavailable";
+"The site may be blocked on your network. Try again later." = "The site may be blocked on your network. Try again later.";
+"Try Again" = "Try Again";
 
 "All" = "All";
 "Action" = "Action";
@@ -247,3 +253,115 @@
 "Thriller" = "Thriller";
 "War" = "War";
 "Western" = "Western";
+
+/* 5.1: Keys used in code that had no entry */
+"A - Z" = "A - Z";
+"Audio Language" = "Audio Language";
+"Balanced" = "Balanced";
+"Choose a preferred audio language. When the file carries a matching audio track, it will be selected automatically." = "Choose a preferred audio language. When the file carries a matching audio track, it will be selected automatically.";
+"No audio tracks available." = "No audio tracks available.";
+"Settings" = "Settings";
+"Sort" = "Sort";
+"Time remaining" = "Time remaining";
+
+/* 5.1: Settings (GlassSettingsView) */
+"Always Ask" = "Always Ask";
+"Playback" = "Playback";
+"Audio and subtitles in these languages are picked automatically when the file or OpenSubtitles offers them." = "Audio and subtitles in these languages are picked automatically when the file or OpenSubtitles offers them.";
+"Choose the source every time; the recommended one is starred." = "Choose the source every time; the recommended one is starred.";
+"The best quality that starts quickly." = "The best quality that starts quickly.";
+"Always the best picture, even if it takes longer to start." = "Always the best picture, even if it takes longer to start.";
+"The smallest file, for the quickest start." = "The smallest file, for the quickest start.";
+"Detail Pages" = "Detail Pages";
+"Plays the soundtrack of the movie or the theme of the show on its page." = "Plays the soundtrack of the movie or the theme of the show on its page.";
+"Theme Songs" = "Theme Songs";
+"Storage" = "Storage";
+"Temporary video files, posters and network caches." = "Temporary video files, posters and network caches.";
+"Clear Cache" = "Clear Cache";
+"About %@ will be freed." = "About %@ will be freed.";
+"A download is in progress. Clear the cache once it has finished." = "A download is in progress. Clear the cache once it has finished.";
+"Cache Cleared" = "Cache Cleared";
+"%@ reclaimed." = "%@ reclaimed.";
+"Account" = "Account";
+"Sign Out of Trakt" = "Sign Out of Trakt";
+"About" = "About";
+"Version" = "Version";
+"What's New" = "What's New";
+"Popcorn Time is free and open-source software." = "Popcorn Time is free and open-source software.";
+
+/* 5.1: Detail pages (GlassDetailView, tvOS) */
+"In Watchlist" = "In Watchlist";
+"Add to Watchlist" = "Add to Watchlist";
+"Mark as Watched" = "Mark as Watched";
+"Mark as Unwatched" = "Mark as Unwatched";
+"Download" = "Download";
+"Downloaded" = "Downloaded";
+"Pause" = "Pause";
+"Resume" = "Resume";
+"Season %lld" = "Season %lld";
+"1 Season" = "1 Season";
+"%lld Seasons" = "%lld Seasons";
+"Episode %lld" = "Episode %lld";
+"1 Episode" = "1 Episode";
+"%lld Episodes" = "%lld Episodes";
+"S%lld · E%lld" = "S%1$lld · E%2$lld";
+"Viewers Also Watched" = "You Might Also Like";
+"Cast & Crew" = "Cast & Crew";
+
+/* Crew roles shown under cast & crew headshots (TVMaze / Cinemeta credits). */
+"Writer" = "Writer";
+"Creator" = "Creator";
+
+/* Mac: Play / episode right-click menu item (always shows the quality sheet), and the sidebar section. */
+"Choose Quality…" = "Choose Quality…";
+"Search" = "Search";
+
+/* Mac: Movies / Shows grids (sort menu) and Search (MacGridViews). */
+"Filter" = "Filter";
+"Movie or show title" = "Movie or show title";
+
+/* Mac: Settings window (MacSettingsView). "%@ (+ mirrors)": %@ is the shows API host. */
+"Balanced (quick start)" = "Balanced (quick start)";
+"Languages" = "Languages";
+"Trakt Account" = "Trakt Account";
+"Signed In to Trakt" = "Signed In to Trakt";
+"Sign In to Trakt (Browser)" = "Sign In to Trakt (Browser)";
+"Sources" = "Sources";
+"Movies API" = "Movies API";
+"Shows API" = "Shows API";
+"%@ (+ mirrors)" = "%@ (+ mirrors)";
+"Torrents" = "Torrents";
+"Engine" = "Engine";
+"Source Code" = "Source Code";
+
+/* Mac: Popcorn Time menu item opening the release notes window. */
+"What's New…" = "What's New…";
+
+/* Mac: native player status (MacPlayerView). "Buffering %.0f%% · %d seeds · %d KB/s": buffered percentage, seeds, download speed. "Failed: %@" / "Cannot play: %@": the reason. */
+"Buffering…" = "Buffering…";
+"The download is slower than playback" = "The download is slower than playback";
+"Connecting to sources…" = "Connecting to sources…";
+"Buffering %.0f%% · %d seeds · %d KB/s" = "Buffering %.0f%% · %d seeds · %d KB/s";
+"Failed: %@" = "Failed: %@";
+"Remuxing MKV → HLS…" = "Remuxing MKV → HLS…";
+"Opening the file…" = "Opening the file…";
+"Cannot play: %@" = "Cannot play: %@";
+"Playing with VLC…" = "Playing with VLC…";
+
+/* Mac: VLC fallback player menus (MacVLCPlayerView). */
+"Tracks in the File" = "Tracks in the File";
+"Searching for subtitles…" = "Searching for subtitles…";
+"Subtitles" = "Subtitles";
+"Audio" = "Audio";
+
+/* Bounded storage: a film larger than the free space streams with only part of it on disk. Loading screen (%d = minutes a rewind can reach), the message over the video when a rewind goes further back than what is still stored, the alert when playback can't continue, and the stream errors (%@ = space to free, e.g. "1.2 GB" / the system's error text). */
+"BoundedStorage.Loading.Minutes" = "Limited storage: you can rewind about %d min";
+"BoundedStorage.Loading.Generic" = "Limited storage: rewinding will be limited";
+"BoundedStorage.RewindLimited" = "This part is no longer stored (limited storage).";
+"BoundedStorage.RewindNotDownloaded" = "This part hasn't been downloaded (limited storage).";
+"BoundedStorage.CannotContinue.Title" = "Playback stopped";
+"BoundedStorage.CannotContinue.Message" = "This part of the video is no longer stored (limited storage), so playback can't continue here.";
+"BoundedStorage.NotEnoughSpace.Message" = "Not enough free space to stream this video, even with limited storage. Free at least %@ and try again.";
+"BoundedStorage.NotEnoughSpace.Generic" = "Not enough free space to stream this video, even with limited storage. Free some space and try again.";
+"BoundedStorage.FileError.Message" = "The video could not be written to storage (%@).";
+"BoundedStorage.TryLowerQuality" = "Try a lower quality?";

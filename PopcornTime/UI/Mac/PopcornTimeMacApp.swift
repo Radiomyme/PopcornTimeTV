@@ -15,6 +15,11 @@ import VLCKit
 @main
 struct PopcornTimeMacApp: App {
     init() {
+        #if DEBUG
+        // Bounded-storage verification runs: the loopback-only torrent
+        // session and the download directory, before anything uses them.
+        BoundedStorageDebugHooks.prepareAtLaunch()
+        #endif
         // VLCKit 4 delivers player callbacks on a background queue by default;
         // restore main-thread delivery before any player exists (same rationale
         // as the iOS/tvOS apps).
@@ -53,5 +58,36 @@ struct PopcornTimeMacApp: App {
         Settings {
             MacSettingsView()
         }
+
+        // The release notes again (they show once at launch, in a sheet):
+        // Popcorn Time › What's New… and Settings › About.
+        Window("What's New", id: MacWhatsNewWindow.id) {
+            MacWhatsNewWindow()
+        }
+        .windowResizability(.contentSize)
+        .commands {
+            CommandGroup(after: .appInfo) {
+                MacWhatsNewCommand()
+            }
+        }
+    }
+}
+
+/// Content of the "What's New" window; Continue closes it.
+struct MacWhatsNewWindow: View {
+    static let id = "whatsnew"
+    @Environment(\.dismissWindow) private var dismissWindow
+
+    var body: some View {
+        WhatsNewView { dismissWindow(id: Self.id) }
+    }
+}
+
+/// Popcorn Time › What's New…
+private struct MacWhatsNewCommand: View {
+    @Environment(\.openWindow) private var openWindow
+
+    var body: some View {
+        Button("What's New…") { openWindow(id: MacWhatsNewWindow.id) }
     }
 }

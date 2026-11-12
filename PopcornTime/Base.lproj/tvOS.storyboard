@@ -2175,44 +2175,6 @@
             </objects>
             <point key="canvasLocation" x="3858" y="3041"/>
         </scene>
-        <!--View Controller-->
-        <scene sceneID="JOY-xh-Gve">
-            <objects>
-                <viewController storyboardIdentifier="CheckForUpdatesViewController" definesPresentationContext="YES" useStoryboardIdentifierAsRestorationIdentifier="YES" id="FIx-zP-dth" sceneMemberID="viewController">
-                    <layoutGuides>
-                        <viewControllerLayoutGuide type="top" id="3Wt-W3-tZN"/>
-                        <viewControllerLayoutGuide type="bottom" id="wgd-eh-X5B"/>
-                    </layoutGuides>
-                    <view key="view" contentMode="scaleToFill" id="5I5-xa-fzN">
-                        <rect key="frame" x="0.0" y="0.0" width="438" height="85"/>
-                        <autoresizingMask key="autoresizingMask" widthSizable="YES" heightSizable="YES"/>
-                        <subviews>
-                            <label opaque="NO" userInteractionEnabled="NO" contentMode="left" horizontalHuggingPriority="1000" verticalHuggingPriority="1000" horizontalCompressionResistancePriority="1000" verticalCompressionResistancePriority="1000" text="Checking for updates..." textAlignment="natural" lineBreakMode="tailTruncation" baselineAdjustment="alignBaselines" adjustsFontSizeToFit="NO" translatesAutoresizingMaskIntoConstraints="NO" id="ou1-vf-UfF">
-                                <rect key="frame" x="60" y="80" width="378" height="45"/>
-                                <fontDescription key="fontDescription" type="system" pointSize="37"/>
-                                <nil key="textColor"/>
-                                <nil key="highlightedColor"/>
-                            </label>
-                            <activityIndicatorView opaque="NO" contentMode="scaleToFill" horizontalHuggingPriority="1000" verticalHuggingPriority="1000" horizontalCompressionResistancePriority="1000" verticalCompressionResistancePriority="1000" animating="YES" style="white" translatesAutoresizingMaskIntoConstraints="NO" id="GOi-Qc-oXC">
-                                <rect key="frame" x="0.0" y="83" width="40" height="40"/>
-                            </activityIndicatorView>
-                        </subviews>
-                        <constraints>
-                            <constraint firstItem="GOi-Qc-oXC" firstAttribute="centerY" secondItem="ou1-vf-UfF" secondAttribute="centerY" id="Cmc-3R-5sg"/>
-                            <constraint firstAttribute="bottomMargin" secondItem="ou1-vf-UfF" secondAttribute="bottom" constant="20" id="SCx-8K-JQQ"/>
-                            <constraint firstAttribute="trailing" secondItem="ou1-vf-UfF" secondAttribute="trailing" id="Tmn-pJ-S1i"/>
-                            <constraint firstItem="ou1-vf-UfF" firstAttribute="leading" secondItem="GOi-Qc-oXC" secondAttribute="trailing" constant="20" id="cYu-um-tUO"/>
-                            <constraint firstItem="GOi-Qc-oXC" firstAttribute="leading" secondItem="5I5-xa-fzN" secondAttribute="leading" id="qak-0J-Tl9"/>
-                            <constraint firstItem="ou1-vf-UfF" firstAttribute="top" secondItem="5I5-xa-fzN" secondAttribute="topMargin" constant="20" id="tbm-2i-dqV"/>
-                        </constraints>
-                    </view>
-                    <freeformSimulatedSizeMetrics key="simulatedDestinationMetrics"/>
-                    <size key="freeformSize" width="438" height="85"/>
-                </viewController>
-                <placeholder placeholderIdentifier="IBFirstResponder" id="PZm-6M-k0K" userLabel="First Responder" sceneMemberID="firstResponder"/>
-            </objects>
-            <point key="canvasLocation" x="3858" y="4484"/>
-        </scene>
         <!--Player View Controller-->
         <scene sceneID="yZ7-yV-uDO">
             <objects>

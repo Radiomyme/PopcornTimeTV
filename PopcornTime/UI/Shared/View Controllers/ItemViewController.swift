@@ -180,7 +180,8 @@ class ItemViewController: UIViewController, PTTorrentDownloadManagerListener {
     @IBAction func download(_ sender: DownloadButton) {
         if sender.downloadState == .normal {
             AppDelegate.shared.chooseQuality(sender, media: media) { [unowned self] (torrent) in
-                PTTorrentDownloadManager.shared().startDownloading(fromFileOrMagnetLink: torrent.url, mediaMetadata: self.media.mediaItemDictionary)
+                PTTorrentDownloadManager.shared().startDownloading(fromFileOrMagnetLink: torrent.url, mediaMetadata: self.media.mediaItemDictionary,
+                                                                   selectFileTDownload: PTTorrentStreamer.fileSelection(for: torrent.url))
                 sender.downloadState = .pending
             }
         } else if let download = media.associatedDownload {

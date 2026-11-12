@@ -40,6 +40,7 @@ final class MediaDetailViewModel: ObservableObject {
         let group = DispatchGroup()
         var t4p: [Torrent] = []
         var aggregated: [Torrent] = []
+        var extra: [Torrent] = []
 
         group.enter()
         Time4PopcornClient.shared.episodeTorrents(imdbId: showId, season: episode.season, episode: episode.episode) { torrents in
@@ -51,12 +52,19 @@ final class MediaDetailViewModel: ObservableObject {
             aggregated = torrents
             group.leave()
         }
+        group.enter()
+        ExtraTorrentSources.shared.episodeTorrents(imdbId: showId, showTitle: episode.show?.title,
+                                                   season: episode.season, episode: episode.episode) { torrents in
+            extra = torrents
+            group.leave()
+        }
         group.notify(queue: .main) { [weak self] in
             guard let self = self else { return }
             self.loadingSourcesFor = nil
-            // T4P primary (base of the merge), EZTV + Torrentio as fallback,
-            // then sorted best-quality-first for the picker.
-            let merged = TorrentioClient.merge(t4p, with: base + aggregated).sorted(by: >)
+            // T4P primary (base of the merge), EZTV + Torrentio + TPB / Knaben
+            // as fallback, then sorted best-quality-first for the picker.
+            let legacy = base + aggregated
+            let merged = TorrentioClient.merge(t4p, with: legacy + ExtraTorrentSources.novel(extra, beside: t4p + legacy)).sorted(by: >)
             let title = "S\(episode.season)E\(episode.episode)" + (episode.title.isEmpty ? "" : " · \(episode.title)")
             if merged.isEmpty {
                 self.noSourcesMessage = "Aucune source trouvée pour \(title)."
@@ -73,19 +81,82 @@ final class MediaDetailViewModel: ObservableObject {
         if media is Movie {
             PopcornKit.getMovieInfo(media.id) { [weak self] movie, error in
                 DispatchQueue.main.async {
-                    self?.loading = false
-                    self?.enrichedMovie = movie
-                    self?.errorMessage = error?.localizedDescription
+                    guard let self else { return }
+                    self.loading = false
+                    self.errorMessage = error?.localizedDescription
+                    guard var movie = movie else {
+                        // A failed reload keeps the page already shown.
+                        if self.enrichedMovie?.id == media.id { self.errorMessage = nil } else { self.enrichedMovie = nil }
+                        return
+                    }
+                    // The page reloads when it comes back (after a related
+                    // title or the player): keep what the first load found.
+                    if let old = self.enrichedMovie, old.id == movie.id, !old.related.isEmpty || !old.crew.isEmpty {
+                        movie.related = old.related
+                        movie.actors = old.actors
+                        movie.crew = old.crew
+                        self.enrichedMovie = movie
+                    } else {
+                        self.enrichedMovie = movie
+                        self.loadRelatedAndPeople(of: movie)
+                    }
                 }
             }
         } else if media is Show {
             PopcornKit.getShowInfo(media.id) { [weak self] show, error in
                 DispatchQueue.main.async {
-                    self?.loading = false
-                    self?.enrichedShow = show
-                    self?.errorMessage = error?.localizedDescription
-                    if let show = show { self?.augmentEpisodeTorrents(for: show) }
+                    guard let self else { return }
+                    self.loading = false
+                    self.errorMessage = error?.localizedDescription
+                    guard var show = show else {
+                        if self.enrichedShow?.id == media.id { self.errorMessage = nil } else { self.enrichedShow = nil }
+                        return
+                    }
+                    // Same as movies: keep the first load's related and cast.
+                    let kept = self.enrichedShow.map { $0.id == show.id && (!$0.related.isEmpty || !$0.actors.isEmpty) } ?? false
+                    if kept, let old = self.enrichedShow {
+                        show.related = old.related
+                        show.actors = old.actors
+                        show.crew = old.crew
+                    }
+                    self.enrichedShow = show
+                    self.augmentEpisodeTorrents(for: show)
+                    if !kept { self.loadRelatedAndPeople(of: show) }
                 }
+            }
+        }
+    }
+
+    /// Fills the "Vous aimerez aussi" and cast rows. TraktManager falls back to keyless
+    /// sources (YTS, Cinemeta, TVMaze) since Trakt refuses the app's key.
+    private func loadRelatedAndPeople(of movie: Movie) {
+        TraktManager.shared.getRelated(movie) { [weak self] related, _ in
+            DispatchQueue.main.async {
+                guard let self, self.enrichedMovie?.id == movie.id else { return }
+                self.enrichedMovie?.related = related
+            }
+        }
+        TraktManager.shared.getPeople(forMediaOfType: .movies, id: movie.id) { [weak self] actors, crew, _ in
+            DispatchQueue.main.async {
+                guard let self, self.enrichedMovie?.id == movie.id else { return }
+                if !actors.isEmpty { self.enrichedMovie?.actors = actors }
+                self.enrichedMovie?.crew = crew
+            }
+        }
+    }
+
+    private func loadRelatedAndPeople(of show: Show) {
+        TraktManager.shared.getRelated(show) { [weak self] related, _ in
+            DispatchQueue.main.async {
+                guard let self, self.enrichedShow?.id == show.id else { return }
+                self.enrichedShow?.related = related
+            }
+        }
+        TraktManager.shared.getPeople(forMediaOfType: .shows, id: show.id) { [weak self] actors, crew, _ in
+            DispatchQueue.main.async {
+                guard let self, self.enrichedShow?.id == show.id else { return }
+                if !actors.isEmpty { self.enrichedShow?.actors = actors }
+                self.enrichedShow?.crew = crew
             }
         }
     }
@@ -104,10 +175,17 @@ final class MediaDetailViewModel: ObservableObject {
         let group = DispatchGroup()
         var aggregated: [Torrent] = []
         var t4p: [Torrent] = []
+        var extra: [Torrent] = []
 
         group.enter()
         TorrentioClient.shared.streams(imdbId: show.id, season: episode.season, episode: episode.episode) { torrents in
             aggregated = torrents
+            group.leave()
+        }
+        group.enter()
+        ExtraTorrentSources.shared.episodeTorrents(imdbId: show.id, showTitle: show.title,
+                                                   season: episode.season, episode: episode.episode) { torrents in
+            extra = torrents
             group.leave()
         }
         group.enter()
@@ -116,8 +194,9 @@ final class MediaDetailViewModel: ObservableObject {
             group.leave()
         }
         group.notify(queue: .main) { [weak self] in
-            // T4P primary, EZTV + Torrentio as fallback.
-            self?.augmentedEpisodeTorrents = TorrentioClient.merge(t4p, with: base + aggregated)
+            // T4P primary, EZTV + Torrentio + TPB / Knaben as fallback.
+            let legacy = base + aggregated
+            self?.augmentedEpisodeTorrents = TorrentioClient.merge(t4p, with: legacy + ExtraTorrentSources.novel(extra, beside: t4p + legacy))
         }
     }
 
@@ -159,7 +238,7 @@ final class MediaDetailViewModel: ObservableObject {
 /// over, not restarted).
 private struct PendingPlayback: Identifiable {
     let id = UUID()
-    /// The torrent's local HTTP endpoint (as reported by the streamer).
+    /// The torrent's local HTTP endpoint (`PlaybackRouting.playableLocalURL`).
     let url: URL
     /// The payload on disk (still downloading) — remux input, routing name.
     let localFile: URL
@@ -248,6 +327,10 @@ private struct DirectPlayerScreen: View {
                                // Completion only (1.0): at 0.999 up to 0.1 % is still missing.
                                // Also lets a starved player wait for more data.
                                downloadProgress: { streamer?.torrentStatus.totalProgress ?? 1 },
+                               // The whole file on disk (bounded storage: never once a
+                               // piece was deleted), and the stream's bounded storage.
+                               boundedStorage: BoundedStorageSession.session(for: streamer),
+                               isPayloadComplete: { streamer?.isWholeFileOnDisk ?? true },
                                onPlayerReady: { player in
                                    // Not during the view update that created it.
                                    DispatchQueue.main.async { cues.attach(to: player) }
@@ -257,7 +340,8 @@ private struct DirectPlayerScreen: View {
                                    // coordinates with the new item's own subtitles.
                                    cues.bindNativeSubtitles(of: item)
                                },
-                               onFallback: onFallback)
+                               onFallback: onFallback,
+                               onCannotContinue: onClose)
                 .ignoresSafeArea()
             SubtitleOverlayText(controller: subtitles)
                 .ignoresSafeArea()
@@ -323,6 +407,11 @@ struct MediaDetailView: View {
     @State private var peersCount: Int = 0
     @State private var downloadKbps: Double = 0
     @State private var streamErrorMessage: String?
+    /// Bounded storage (the film is larger than the free space): the
+    /// overlay's « Limited storage: you can rewind about N min » line, and
+    /// when it was last computed (it reads the free space).
+    @State private var boundedNote: String?
+    @State private var boundedNoteAt: TimeInterval = 0
     @State private var safariURL: IdentifiableURL?
     @State private var selectedSeason: Int = 0
     @AppStorage("autoSelectQuality") private var autoQuality = "Balanced"
@@ -461,6 +550,12 @@ struct MediaDetailView: View {
                         .font(.caption.monospacedDigit())
                         .foregroundStyle(.secondary)
                 }
+                if let note = boundedNote, streamErrorMessage == nil {
+                    Label(note, systemImage: BoundedStorageUX.symbolName)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center)
+                }
                 if let err = streamErrorMessage {
                     Text(err).font(.caption).foregroundStyle(.red).multilineTextAlignment(.center).padding(.horizontal, 8)
                 }
@@ -480,13 +575,14 @@ struct MediaDetailView: View {
     }
 
     private func cancelStream() {
-        PTTorrentStreamer.shared().cancelStreamingAndDeleteData(true)
+        PTTorrentStreamer.cancelCurrent(deleteData: true)
         startingStream = false
         bufferProgress = 0
         seedsCount = 0
         peersCount = 0
         downloadKbps = 0
         streamErrorMessage = nil
+        boundedNote = nil
     }
 
     @ViewBuilder
@@ -642,9 +738,9 @@ struct MediaDetailView: View {
     @ViewBuilder
     private var relatedSection: some View {
         if let movie = viewModel.enrichedMovie, !movie.related.isEmpty {
-            RelatedRow(title: "Vus aussi", items: movie.related)
+            RelatedRow(title: "Vous aimerez aussi", items: movie.related)
         } else if let show = viewModel.enrichedShow, !show.related.isEmpty {
-            RelatedRow(title: "Vus aussi", items: show.related)
+            RelatedRow(title: "Vous aimerez aussi", items: show.related)
         }
     }
 
@@ -695,7 +791,8 @@ struct MediaDetailView: View {
         peersCount = 0
         downloadKbps = 0
         streamErrorMessage = nil
-        let streamer = PTTorrentStreamer.shared()
+        boundedNote = nil
+        boundedNoteAt = 0
         let mediaTitle = playMedia.title
         let magnet = torrent.url
         let isAtmos = torrent.tags.contains(.atmos)
@@ -704,10 +801,16 @@ struct MediaDetailView: View {
         // on every engine — VLC too, which resumes without asking (the native
         // players apply the same rule again).
         let startPosition = ResumePolicy.startPosition(forSavedProgress: Self.savedProgress(for: playMedia))
-        // Clean slate before a new stream: reset the streamer and reclaim disk
-        // from prior torrent partials + orphaned remux output (same as tvOS).
-        streamer.cancelStreamingAndDeleteData(true)
+        // Clean slate before a new stream: stop the previous stream and
+        // reclaim disk from prior torrent partials + orphaned remux output
+        // (same as tvOS). Then a new streamer, current until the next stream
+        // (the SPM PopcornTorrent has no singleton).
+        PTTorrentStreamer.cancelCurrent(deleteData: true)
         purgeOrphanTorrentDownloads()
+        let streamer = PTTorrentStreamer.startNew()
+        // A film larger than the free space streams in bounded storage
+        // (every player route drives the torrent's window).
+        BoundedStorageSession.prepare(streamer, durationSeconds: BoundedStorageSession.durationHint(for: playMedia))
         print("[iOS Detail] starting torrent: \(magnet.prefix(80))…")
 
         let progress: PTTorrentStreamerProgress = { status in
@@ -717,6 +820,14 @@ struct MediaDetailView: View {
                 peersCount = Int(status.peers)
                 // libtorrent reports bytes/s; surface as KB/s.
                 downloadKbps = Double(status.downloadSpeed) / 1024.0
+                // Bounded storage's line: every 5 s at most, at once when
+                // the stream turns out bounded.
+                let now = ProcessInfo.processInfo.systemUptime
+                if now - boundedNoteAt >= 5
+                    || (boundedNote == nil && BoundedStorageSession.session(for: streamer)?.isBounded == true) {
+                    boundedNoteAt = now
+                    boundedNote = BoundedStorageUX.loadingNote(for: streamer)
+                }
             }
         }
         let readyToPlay: PTTorrentStreamerReadyToPlay = { fileURL, filePath in
@@ -726,7 +837,9 @@ struct MediaDetailView: View {
                 // carry no extension). Unknown → remux, which fails fast to VLC.
                 let route = PlaybackRouting.route(forFileName: filePath.lastPathComponent)
                 print("[iOS Detail] ready: \(filePath.lastPathComponent) → \(route)")
-                pendingPlayback = PendingPlayback(url: fileURL,
+                // The streamer reports `http://0.0.0.0:<port>/`: every engine
+                // gets 127.0.0.1 and the payload's name, as on macOS.
+                pendingPlayback = PendingPlayback(url: PlaybackRouting.playableLocalURL(fileURL, fileName: filePath.lastPathComponent),
                                                   localFile: filePath,
                                                   engine: route,
                                                   title: mediaTitle,
@@ -738,8 +851,11 @@ struct MediaDetailView: View {
             }
         }
         let failure: PTTorrentStreamerFailure = { error in
+            // Not enough space even for bounded storage (-5: how much to
+            // free), another file error (-6), or the error's own text.
+            let message = StreamFailure(error, streamer: streamer).message(underlying: error) ?? error.localizedDescription
             DispatchQueue.main.async {
-                streamErrorMessage = error.localizedDescription
+                streamErrorMessage = message
                 // Keep the overlay open so the user sees the error and can dismiss
                 // explicitly via the "Annuler" button.
                 bufferProgress = 0
@@ -747,19 +863,15 @@ struct MediaDetailView: View {
             print("[iOS Detail] streaming failure: \(error.localizedDescription)")
         }
 
-        // Single-file API only, even when the magnet carries a BEP 53 `so=`
-        // index (kept in the magnet: harmless). The iOS/tvOS PopcornTorrent
-        // pod (1.3.15 binary) keeps a GLOBAL "user selects the file" flag
-        // after a cancel when its multi-file API was used — the next
-        // single-file stream or any download then calls a nil block and
-        // crashes — and in multi-file mode it still serves the torrent's
-        // LARGEST file, not the `so=` one. (Season packs are filtered out of
-        // the episode sources on iOS/tvOS for that reason; the macOS
-        // streamer honours `so=` per instance.)
-        streamer.startStreaming(fromFileOrMagnetLink: magnet,
+        // The streamed file: the magnet's BEP 53 `so=` file when valid, else
+        // the largest video file, as on tvOS and macOS
+        // (`PTTorrentStreamer.fileSelection`). Season packs stay filtered out
+        // of the iOS episode sources (`TorrentioClient.dropsEpisodePacks`).
+        streamer.startStreaming(fromMultiTorrentFileOrMagnetLink: magnet,
                                 progress: progress,
                                 readyToPlay: readyToPlay,
-                                failure: failure)
+                                failure: failure,
+                                selectFileToStream: PTTorrentStreamer.fileSelection(for: magnet))
     }
 
     /// A native engine gave up: continue on VLC with the SAME stream. The
@@ -781,7 +893,7 @@ struct MediaDetailView: View {
     /// already cancel it themselves; this also covers the direct AVPlayer
     /// path, which has no hook into the streamer.
     private func endPlayback() {
-        PTTorrentStreamer.shared().cancelStreamingAndDeleteData(false)
+        PTTorrentStreamer.cancelCurrent(deleteData: false)
     }
 }
 

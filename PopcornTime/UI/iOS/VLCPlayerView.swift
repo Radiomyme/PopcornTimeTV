@@ -192,7 +192,21 @@ final class VLCPlayerViewController: UIViewController, VLCMediaPlayerDelegate, U
             "drop-late-frames": NSNumber(value: 0),
             "skip-frames":      NSNumber(value: 0),
         ])
+        // Bounded storage: which Matroska demuxer VLC uses
+        // (`BoundedStorageUX.vlcMediaOptions`).
+        for option in BoundedStorageUX.vlcMediaOptions(url: url, session: boundedStorage, startPosition: startPosition,
+                                                       streamer: streamer) {
+            media.addOption(option)
+        }
         player.media = media
+        // Bounded storage: VLC reads through PopcornTorrent's server (which
+        // moves the window); its playhead tells the torrent what it may
+        // delete behind it.
+        BoundedStorageSession.session(for: streamer)?.attachHTTPPlayer(self, readAheadSeconds: 10) { [weak self] in
+            guard let self = self, !self.isClosing, let milliseconds = self.player.time.value?.doubleValue,
+                  milliseconds > 0 else { return nil }
+            return BoundedPlayerSample(time: milliseconds / 1000, isPlaying: self.player.isPlaying)
+        }
 
         // Tap anywhere toggles controls. Attached to the ROOT view, not the
         // movie surface: VLCKit's drawable installs its own rendering
@@ -237,12 +251,13 @@ final class VLCPlayerViewController: UIViewController, VLCMediaPlayerDelegate, U
     }
 
     @objc private func seekBackward() {
-        player.jumpBackward(10)
+        jumpBackwardLimited(10)
         noteUserMovedPlayhead()
         showControls()
     }
 
     @objc private func seekForward() {
+        playheadWatch.noteOwnSeek()
         player.jumpForward(10)
         noteUserMovedPlayhead()
         showControls()
@@ -260,6 +275,7 @@ final class VLCPlayerViewController: UIViewController, VLCMediaPlayerDelegate, U
         nerdStatsTimer?.invalidate()
         nerdStatsTimer = nil
         player.stop()
+        BoundedStorageSession.session(for: streamer)?.detachHTTPPlayer(self)
         streamer?.cancelStreamingAndDeleteData(false)
         streamer = nil
         try? FileManager.default.removeItem(at: subtitleDirectory)
@@ -323,6 +339,8 @@ final class VLCPlayerViewController: UIViewController, VLCMediaPlayerDelegate, U
         progressSlider.maximumValue = 1
         progressSlider.tintColor = .white
         progressSlider.addTarget(self, action: #selector(scrub), for: .valueChanged)
+        progressSlider.addTarget(self, action: #selector(scrubBegan), for: .touchDown)
+        progressSlider.addTarget(self, action: #selector(scrubEnded), for: [.touchUpInside, .touchUpOutside, .touchCancel])
         progressSlider.addTarget(self, action: #selector(scheduleHideControls), for: .touchUpInside)
         controlsView.addSubview(progressSlider)
 
@@ -407,9 +425,45 @@ final class VLCPlayerViewController: UIViewController, VLCMediaPlayerDelegate, U
         showControls()
     }
 
+    /// The user's finger is on the slider (`scrubBegan` / `scrubEnded`).
+    private var isScrubbing = false
+    /// Bounded storage: a drag over what is no longer on disk is sent (and
+    /// limited) once, where it ends, instead of snapping back with the
+    /// message at every step (verify-playback 5).
+    private var pendingScrub = false
+
+    @objc private func scrubBegan() {
+        isScrubbing = true
+    }
+
+    @objc private func scrubEnded() {
+        isScrubbing = false
+        guard pendingScrub else { return }
+        pendingScrub = false
+        scrub()
+    }
+
     @objc private func scrub() {
         // VLCMediaPlayer.position is normalized 0...1 (Double in VLCKit 4).
-        player.position = Double(progressSlider.value)
+        var position = Double(progressSlider.value)
+        if isScrubbing, boundedStorage?.isBounded == true, let duration = durationSeconds, duration > 0,
+           let now = playheadSeconds,
+           BoundedStorageUX.limitedRewindTarget(position * duration, from: now, session: boundedStorage) != nil {
+            pendingScrub = true
+            return
+        }
+        pendingScrub = false
+        // Bounded storage: a drag further back than what is still on disk
+        // stops at the earliest point still available.
+        if let duration = durationSeconds, duration > 0 {
+            let limited = limitedSeekSeconds(position * duration)
+            if limited != position * duration {
+                position = min(1, max(0, limited / duration))
+                progressSlider.setValue(Float(position), animated: false)
+            }
+        }
+        playheadWatch.noteOwnSeek()
+        player.position = position
         noteUserMovedPlayhead()
     }
 
@@ -430,7 +484,11 @@ final class VLCPlayerViewController: UIViewController, VLCMediaPlayerDelegate, U
     // contract; "index" is the row position, mapped back to a track id /
     // OpenSubtitles entry by `subtitleChoices()`.
     private func embeddedTextTracks() -> [VLCMediaPlayer.Track] {
-        return player.textTracks.filter { !slaveTrackIdSet.contains($0.trackId) }
+        // Not the tracks no decoder takes (libavformat's demuxer lists SRT /
+        // ASS / WebVTT tracks with no codec: `BoundedStorageUX.isUndecodableVLCTrack`).
+        return player.textTracks.filter {
+            !slaveTrackIdSet.contains($0.trackId) && !BoundedStorageUX.isUndecodableVLCTrack(codec: $0.codec)
+        }
     }
 
     private func subtitleChoices() -> [(name: String, choice: SubtitleChoice)] {
@@ -787,7 +845,78 @@ final class VLCPlayerViewController: UIViewController, VLCMediaPlayerDelegate, U
     private func applyStartPositionIfNeeded() {
         guard !didApplyStartPosition, VLCWatchProgress.seeksAtStart(startPosition), player.isSeekable else { return }
         didApplyStartPosition = true
+        playheadWatch.noteOwnSeek()
         player.position = Double(startPosition)
+    }
+
+    // MARK: - Bounded storage: rewinds
+
+    /// The stream's bounded storage (nil: none). Its `isBounded` is false in
+    /// full mode: every seek below is then the plain one.
+    private var boundedStorage: BoundedStorageSession? { BoundedStorageSession.session(for: streamer) }
+
+    /// VLC's playhead in seconds; nil before its first time point.
+    private var playheadSeconds: Double? {
+        guard let milliseconds = player.time.value?.doubleValue, milliseconds > 0 else { return nil }
+        return milliseconds / 1000
+    }
+
+    /// The input's length in seconds, nil while unknown.
+    private var durationSeconds: Double? {
+        if let length = player.media?.length.value?.doubleValue, length > 0 { return length / 1000 }
+        if let remaining = player.remainingTime?.value?.doubleValue, let elapsed = player.time.value?.doubleValue {
+            let total = abs(remaining) + elapsed
+            return total > 0 ? total / 1000 : nil
+        }
+        return nil
+    }
+
+    /// VLC's time at the time ticks (`checkBoundedPlayhead`); seeks made
+    /// here are noted in it (`noteOwnSeek`).
+    private var playheadWatch = VLCPlayheadWatch()
+
+    /// Bounded storage: where a seek to `seconds` goes — the earliest point
+    /// still available when it is further back than what is still on disk
+    /// (the user's decision: no new download, no rewind into deleted data),
+    /// with the message; `seconds` otherwise (forward, within what is kept,
+    /// full mode).
+    private func limitedSeekSeconds(_ seconds: Double) -> Double {
+        guard let now = playheadSeconds,
+              let landing = BoundedStorageUX.limitedRewindTarget(seconds, from: now, session: boundedStorage) else { return seconds }
+        BoundedStorageUX.logLimited(player: "VLC", target: seconds, playhead: now, landing: landing)
+        BoundedStorageToastView.show(BoundedStorageUX.rewindLimitedMessage(for: boundedStorage), in: view)
+        return landing
+    }
+
+    /// `jumpBackward(interval)`, limited by bounded storage: stopped at the
+    /// earliest point still available.
+    private func jumpBackwardLimited(_ interval: Double) {
+        if let now = playheadSeconds, boundedStorage?.isBounded == true {
+            let target = max(0, now - interval)
+            let landing = limitedSeekSeconds(target)
+            if landing != target {
+                if landing < now {
+                    playheadWatch.noteOwnSeek()
+                    player.time = VLCTime(number: NSNumber(value: landing * 1000))
+                }
+                return
+            }
+        }
+        playheadWatch.noteOwnSeek()
+        player.jumpBackward(interval)
+    }
+
+    /// Bounded storage, every time tick: VLC's time went back past what is
+    /// still on disk by a path not limited above — back to the earliest
+    /// point still available, with the message.
+    private func checkBoundedPlayhead() {
+        // Not VLC settling after a start or seek (`VLCPlayheadWatch`).
+        guard let now = playheadSeconds, let previous = playheadWatch.rewind(to: now),
+              let landing = BoundedStorageUX.limitedRewindTarget(now, from: previous, session: boundedStorage) else { return }
+        BoundedStorageUX.logLimited(player: "VLC (time tick)", target: now, playhead: previous, landing: landing)
+        playheadWatch.noteOwnSeek()
+        player.time = VLCTime(number: NSNumber(value: landing * 1000))
+        BoundedStorageToastView.show(BoundedStorageUX.rewindLimitedMessage(for: boundedStorage), in: view)
     }
 
     // MARK: - Watched progress
@@ -974,6 +1103,7 @@ final class VLCPlayerViewController: UIViewController, VLCMediaPlayerDelegate, U
         // register a moment after playback starts.
         applyStartPositionIfNeeded()
         notePlayerPosition()
+        checkBoundedPlayhead()
         autoSelectAudioTrackIfNeeded()
         autoSelectSubtitleIfNeeded()
         applyPendingSubtitle()

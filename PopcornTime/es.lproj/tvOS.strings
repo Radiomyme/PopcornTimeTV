@@ -125,8 +125,6 @@
 /* Class = "UITabBarItem"; title = "Settings"; ObjectID = "oLg-DL-tTH"; */
 "oLg-DL-tTH.title" = "Ajustes";
 
-/* Class = "UILabel"; text = "Checking for updates..."; ObjectID = "ou1-vf-UfF"; */
-"ou1-vf-UfF.text" = "Comprobando actualizaciones...";
 
 /* Class = "UITabBarItem"; title = "Shows"; ObjectID = "p8l-oH-6Vs"; */
 "p8l-oH-6Vs.title" = "Series";
@@ -141,13 +139,22 @@
 "rTI-it-IkT.normalTitle" = "Ordenar";
 
 /* Class = "UILabel"; text = "Clear All Cache"; ObjectID = "rrQ-1r-aq3"; */
-"rrQ-1r-aq3.text" = "Borrar todo el caché";
+"rrQ-1r-aq3.text" = "Borrar toda la caché";
 
 /* Class = "UILabel"; text = "Theme Song Volume"; ObjectID = "vP2-pF-jYW"; */
 "vP2-pF-jYW.text" = "Volumen de tema musical";
 
 /* Class = "UILabel"; text = "Cast & Crew"; ObjectID = "vje-gU-hwQ"; */
-"vje-gU-hwQ.text" = "Reparto & Equipo";
+"vje-gU-hwQ.text" = "Reparto y equipo";
 
 /* Class = "UIButton"; normalTitle = "Play Next"; ObjectID = "wUm-fX-3pb"; */
 "wUm-fX-3pb.normalTitle" = "Reproducir siguiente";
+
+/* Class = "UINavigationItem"; title = "Movies"; ObjectID = "jvN-d2-mze"; */
+"jvN-d2-mze.title" = "Películas";
+
+/* Class = "UINavigationItem"; title = "Shows"; ObjectID = "DvR-v2-5Xm"; */
+"DvR-v2-5Xm.title" = "Series";
+
+/* Class = "UINavigationItem"; title = "Watchlist"; ObjectID = "5WB-pT-Oa2"; */
+"5WB-pT-Oa2.title" = "Mi lista";

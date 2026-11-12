@@ -2,7 +2,7 @@
 "%@ version %@ of Popcorn Time is now available." = "%1$@ versione %2$@ di Popcorn Time è adesso disponibile.";
 
 /* (No Commment) */
-"Accessibility" = "Accessibilià";
+"Accessibility" = "Accessibilità";
 
 /* (No Commment) */
 "Action" = "Azione";
@@ -32,7 +32,7 @@
 "Audio Delay" = "Ritardo Audio";
 
 /* (No Commment) */
-"Auto Select Quality" = "Seleziona Automaticamente la Qualità";
+"Auto Select Quality" = "Seleziona automaticamente la qualità";
 
 /* (No Commment) */
 "Black" = "Nero";
@@ -59,7 +59,7 @@
 "Cellular Data is turned off for streaming" = "I Dati Cellulare sono disattivati per lo streaming";
 
 /* (No Commment) */
-"Choose Quality" = "Scegli la Qualità";
+"Choose Quality" = "Scegli la qualità";
 
 /* (No Commment) */
 "Choose a default font for the player subtitles." = "Scegli un font predefinito per i sottotitoli.";
@@ -107,7 +107,7 @@
 "Delete" = "Cancella";
 
 /* (No Commment) */
-"Delete Download" = "Cancella Download";
+"Delete Download" = "Elimina download";
 
 /* (No Commment) */
 "Disaster" = "Catastrofici";
@@ -119,7 +119,7 @@
 "Download Failed" = "Download Fallito";
 
 /* (No Commment) */
-"Downloading" = "Scaricando";
+"Downloading" = "Download in corso";
 
 /* (No Commment) */
 "Downloads Empty" = "Download Vuoti";
@@ -164,7 +164,7 @@
 "Fantasy" = "Fantasy";
 
 /* (No Commment) */
-"Film Noir" = "Classici";
+"Film Noir" = "Noir";
 
 /* (No Commment) */
 "Fine" = "Precisione";
@@ -200,10 +200,10 @@
 "Horror" = "Horror";
 
 /* (No Commment) */
-"Indie" = "Indipendeti";
+"Indie" = "Indipendenti";
 
 /* (No Commment) */
-"Information" = "Informazione";
+"Information" = "Informazioni";
 
 /* (No Commment) */
 "It looks like your ISP/Network admin is blocking our servers. You can try again with a VPN to hide your internet traffic from them. Please do so at your own risk" = "Sembra che il tuo gestore ISP/Network stia bloccando i nostri server. Puoi provare ad utilizzare una VPN per nascondere il tuo traffico da loro. Fallo a tuo rischio.";
@@ -308,10 +308,10 @@
 "Orange" = "Arancione";
 
 /* (No Commment) */
-"Paused" = "In Pausa";
+"Paused" = "In pausa";
 
 /* (No Commment) */
-"Pending" = "In Sospeso";
+"Pending" = "In attesa";
 
 /* (No Commment) */
 "People" = "Persone";
@@ -344,7 +344,7 @@
 "Reduce Loud Sounds" = "Riduci audio Suoni Intensi";
 
 /* (No Commment) */
-"Released" = "Distribuito";
+"Released" = "Uscita";
 
 /* (No Commment) */
 "Remove" = "Rimuovi";
@@ -362,7 +362,7 @@
 "Romance" = "Sentimentale";
 
 /* (No Commment) */
-"Run Time" = "Tempo di Riproduzione";
+"Run Time" = "Durata";
 
 /* (No Commment) */
 "SSL Error" = "Errore SSL";
@@ -425,7 +425,7 @@
 "Stop" = "Stop";
 
 /* (No Commment) */
-"Stop Download" = "Ferma Download";
+"Stop Download" = "Interrompi download";
 
 /* (No Commment) */
 "Subtitle Color" = "Colore dei Sottotitoli";
@@ -446,7 +446,7 @@
 "Subtitle Font Style" = "Stile Font dei Sottotitoli";
 
 /* (No Commment) */
-"Subtitle Language" = "Lingua dei Sottotitoli";
+"Subtitle Language" = "Lingua dei sottotitoli";
 
 /* (No Commment) */
 "Subtitles for the deaf and Hard of Hearing (SDH) refer to subtitles in the original language with the addition of relevant non-dialog information." = "I Sottotitoli per sordi e audiolesi (SDH) sono riferiti a sottotitoli in lingua originale con l'aggiunta di informazioni rilevanti ai non-dialoghi.";
@@ -458,7 +458,7 @@
 "Successfully authenticated with Trakt" = "Autenticazione con Trakt avvenuta con successo";
 
 /* (No Commment) */
-"Suspense" = "Suspense>";
+"Suspense" = "Suspense";
 
 /* (No Commment) */
 "Theme Song Volume" = "Volume del Tema Musicale";
@@ -480,6 +480,12 @@
 
 /* (No Commment) */
 "Trending" = "In Tendenza";
+"Top 100" = "Top 100";
+"The Pirate Bay could not be reached." = "Impossibile raggiungere The Pirate Bay.";
+"The titles of the Top 100 could not be loaded. Try again later." = "Impossibile caricare i titoli della Top 100. Riprova più tardi.";
+"Top 100 Unavailable" = "Top 100 non disponibile";
+"The site may be blocked on your network. Try again later." = "Il sito potrebbe essere bloccato sulla tua rete. Riprova più tardi.";
+"Try Again" = "Riprova";
 
 /* (No Commment) */
 "Try adding movies or shows to your watchlist." = "Prova ad aggiungere Film o Serie TV alla tua watchlist.";
@@ -506,7 +512,7 @@
 "War" = "Guerra";
 
 /* (No Commment) */
-"Watch %@ on %@" = "Guarda %1$@ on %2$@";
+"Watch %@ on %@" = "Guarda %1$@ su %2$@";
 
 /* (No Commment) */
 "Watchlist Empty" = "Watchlist Vuota";
@@ -527,7 +533,7 @@
 "Yellow" = "Giallo";
 
 /* (No Commment) */
-"Yes" = "Si";
+"Yes" = "Sì";
 
 /* (No Commment) */
 "You're Offline" = "Sei Offline";
@@ -539,10 +545,121 @@
 "Series" = "Stagioni";
 
 /* (No Commment) */
-"Trailer" = "Anteprima";
+"Trailer" = "Trailer";
 
 /* (No Commment) */
 "Watched" = "Guardato";
 
 /* (No Commment) */
 "Watchlist" = "Watchlist";
+
+/* 5.1: Settings, detail pages and What's New (5.1.0) */
+"A - Z" = "A - Z";
+"Audio Language" = "Lingua audio";
+"Balanced" = "Bilanciata";
+"Choose a preferred audio language. When the file carries a matching audio track, it will be selected automatically." = "Scegli una lingua audio preferita. Se il file contiene una traccia in questa lingua, verrà selezionata automaticamente.";
+"No audio tracks available." = "Nessuna traccia audio disponibile.";
+"Settings" = "Impostazioni";
+"Sort" = "Ordina";
+"Time remaining" = "Tempo rimanente";
+"Always Ask" = "Chiedi sempre";
+"Playback" = "Riproduzione";
+"Audio and subtitles in these languages are picked automatically when the file or OpenSubtitles offers them." = "L'audio e i sottotitoli in queste lingue vengono scelti automaticamente quando il file o OpenSubtitles li offrono.";
+"Choose the source every time; the recommended one is starred." = "Scegli la fonte ogni volta; quella consigliata è contrassegnata da una stella.";
+"The best quality that starts quickly." = "La qualità migliore con un avvio rapido.";
+"Always the best picture, even if it takes longer to start." = "Sempre la migliore immagine, anche se ci vuole più tempo per partire.";
+"The smallest file, for the quickest start." = "Il file più leggero, per partire il prima possibile.";
+"Detail Pages" = "Schede dei titoli";
+"Plays the soundtrack of the movie or the theme of the show on its page." = "Riproduce la colonna sonora del film o la sigla della serie nella sua scheda.";
+"Theme Songs" = "Temi musicali";
+"Storage" = "Archiviazione";
+"Temporary video files, posters and network caches." = "File video temporanei, locandine e cache di rete.";
+"Clear Cache" = "Svuota la cache";
+"About %@ will be freed." = "Verranno liberati circa %@.";
+"A download is in progress. Clear the cache once it has finished." = "È in corso un download. Svuota la cache quando sarà terminato.";
+"Cache Cleared" = "Cache svuotata";
+"%@ reclaimed." = "%@ liberati.";
+"Account" = "Account";
+"Sign Out of Trakt" = "Disconnetti da Trakt";
+"About" = "Informazioni";
+"Version" = "Versione";
+"What's New" = "Novità";
+"Popcorn Time is free and open-source software." = "Popcorn Time è un software libero e open source.";
+"In Watchlist" = "Nella Watchlist";
+"Add to Watchlist" = "Aggiungi alla Watchlist";
+"Mark as Watched" = "Segna come guardato";
+"Mark as Unwatched" = "Segna come non guardato";
+"Download" = "Scarica";
+"Downloaded" = "Scaricato";
+"Pause" = "Pausa";
+"Resume" = "Riprendi";
+"Season %lld" = "Stagione %lld";
+"1 Season" = "1 stagione";
+"%lld Seasons" = "%lld stagioni";
+"Episode %lld" = "Episodio %lld";
+"1 Episode" = "1 episodio";
+"%lld Episodes" = "%lld episodi";
+"S%lld · E%lld" = "S%1$lld · E%2$lld";
+"Viewers Also Watched" = "Potrebbe piacerti anche";
+"Cast & Crew" = "Cast e troupe";
+
+/* Detail page information rows (Director / Directors / Starring) and crew roles shown under cast & crew headshots (TVMaze / Cinemeta credits). */
+"Director" = "Regista";
+"Directors" = "Registi";
+"Starring" = "Interpreti";
+"Writer" = "Sceneggiatore";
+"Creator" = "Ideatore";
+
+/* Mac: Play / episode right-click menu item (always shows the quality sheet), and the sidebar section. */
+"Choose Quality…" = "Scegli la qualità…";
+"Search" = "Cerca";
+
+/* Mac: Movies / Shows grids (sort menu) and Search (MacGridViews). */
+"Filter" = "Filtro";
+"Movie or show title" = "Titolo del film o della serie";
+
+/* Mac: Settings window (MacSettingsView). "%@ (+ mirrors)": %@ is the shows API host. */
+"Balanced (quick start)" = "Bilanciata (avvio rapido)";
+"Languages" = "Lingue";
+"Trakt Account" = "Account Trakt";
+"Signed In to Trakt" = "Connesso a Trakt";
+"Sign In to Trakt (Browser)" = "Accedi a Trakt (browser)";
+"Sources" = "Fonti";
+"Movies API" = "API film";
+"Shows API" = "API serie TV";
+"%@ (+ mirrors)" = "%@ (+ mirror)";
+"Torrents" = "Torrent";
+"Engine" = "Motore";
+"Source Code" = "Codice sorgente";
+
+/* Mac: Popcorn Time menu item opening the release notes window. */
+"What's New…" = "Novità…";
+
+/* Mac: native player status (MacPlayerView). "Buffering %.0f%% · %d seeds · %d KB/s": buffered percentage, seeds, download speed. "Failed: %@" / "Cannot play: %@": the reason. */
+"Buffering…" = "Buffering in corso…";
+"The download is slower than playback" = "Il download è più lento della riproduzione";
+"Connecting to sources…" = "Connessione alle fonti…";
+"Buffering %.0f%% · %d seeds · %d KB/s" = "Buffering %.0f%% · %d seed · %d KB/s";
+"Failed: %@" = "Errore: %@";
+"Remuxing MKV → HLS…" = "Remux MKV → HLS in corso…";
+"Opening the file…" = "Apertura del file…";
+"Cannot play: %@" = "Impossibile riprodurre: %@";
+"Playing with VLC…" = "Riproduzione con VLC…";
+
+/* Mac: VLC fallback player menus (MacVLCPlayerView). */
+"Tracks in the File" = "Tracce del file";
+"Searching for subtitles…" = "Ricerca dei sottotitoli…";
+"Subtitles" = "Sottotitoli";
+"Audio" = "Audio";
+
+/* Bounded storage: a film larger than the free space streams with only part of it on disk. Loading screen (%d = minutes a rewind can reach), the message over the video when a rewind goes further back than what is still stored, the alert when playback can't continue, and the stream errors (%@ = space to free, e.g. "1.2 GB" / the system's error text). */
+"BoundedStorage.Loading.Minutes" = "Spazio limitato: puoi tornare indietro di circa %d min";
+"BoundedStorage.Loading.Generic" = "Spazio limitato: potrai tornare indietro solo di poco";
+"BoundedStorage.RewindLimited" = "Questa parte non è più memorizzata (spazio limitato).";
+"BoundedStorage.RewindNotDownloaded" = "Questa parte non è stata scaricata (spazio limitato).";
+"BoundedStorage.CannotContinue.Title" = "Riproduzione interrotta";
+"BoundedStorage.CannotContinue.Message" = "Questa parte del video non è più memorizzata (spazio limitato), quindi la riproduzione non può continuare da qui.";
+"BoundedStorage.NotEnoughSpace.Message" = "Spazio libero insufficiente per riprodurre questo video, anche con lo spazio limitato. Libera almeno %@ e riprova.";
+"BoundedStorage.NotEnoughSpace.Generic" = "Spazio libero insufficiente per riprodurre questo video, anche con lo spazio limitato. Libera un po' di spazio e riprova.";
+"BoundedStorage.FileError.Message" = "Impossibile salvare il video nella memoria (%@).";
+"BoundedStorage.TryLowerQuality" = "Vuoi provare una qualità inferiore?";
