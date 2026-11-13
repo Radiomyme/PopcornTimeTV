@@ -225,6 +225,53 @@ struct MacGlassCircleAction: View {
     }
 }
 
+// MARK: - Spinner
+
+/// Indeterminate spinner drawn by SwiftUI itself, for containers that scale:
+/// a lifted still (`macGlassLift`), a glass button that grows on hover and
+/// bounces on press. The system ProgressView is an AppKit view
+/// (NSProgressIndicator, fixed 16 / 32 pt sizes) that SwiftUI scales by
+/// resizing it: every frame of such an animation logged "AppKitProgressView
+/// … has an maximum length (32.35…) that doesn't satisfy min <= max".
+/// VoiceOver reads it as "Loading…", like the system spinner it replaces.
+struct MacGlassSpinner: View {
+    /// 16 = the small system spinner, 32 = the regular one.
+    var diameter: CGFloat = 32
+    /// Nil: the foreground style (a button label's color).
+    var color: Color?
+
+    private static let spokes = 8
+    /// Steps per second (the system spinner turns in steps too).
+    private static let rate = 10.0
+
+    var body: some View {
+        TimelineView(.animation(minimumInterval: 1 / Self.rate)) { context in
+            let step = Int(context.date.timeIntervalSinceReferenceDate * Self.rate) % Self.spokes
+            ZStack {
+                ForEach(0..<Self.spokes, id: \.self) { index in
+                    Capsule()
+                        .fill(color.map(AnyShapeStyle.init) ?? AnyShapeStyle(.foreground))
+                        .frame(width: max(1.5, diameter * 0.09), height: diameter * 0.28)
+                        .offset(y: -diameter * 0.32)
+                        .rotationEffect(.degrees(Double(index) * 360 / Double(Self.spokes)))
+                        .opacity(Self.opacity(of: index, at: step))
+                }
+            }
+            .frame(width: diameter, height: diameter)
+        }
+        .accessibilityElement()
+        .accessibilityLabel(Text(verbatim: NSLocalizedString("Spinner.Loading", value: "Loading…",
+                                                              comment: "VoiceOver: a spinner (something is loading)")))
+        .accessibilityAddTraits(.updatesFrequently)
+    }
+
+    /// The leading spoke opaque, the ones behind it fading out (clockwise).
+    private static func opacity(of index: Int, at step: Int) -> Double {
+        let behind = (step - index + spokes) % spokes
+        return 1 - Double(behind) / Double(spokes) * 0.8
+    }
+}
+
 // MARK: - Section header
 
 struct MacGlassSectionHeader: View {

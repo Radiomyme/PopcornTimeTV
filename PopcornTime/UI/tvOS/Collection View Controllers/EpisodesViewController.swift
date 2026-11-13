@@ -116,7 +116,7 @@ class EpisodesViewController: UIViewController, UICollectionViewDataSource, UICo
         if sender.downloadState == .normal {
             AppDelegate.shared.chooseQuality(sender, media: media) { (torrent) in
                 PTTorrentDownloadManager.shared().startDownloading(fromFileOrMagnetLink: torrent.url, mediaMetadata: media.mediaItemDictionary,
-                                                                   selectFileTDownload: PTTorrentStreamer.fileSelection(for: torrent.url))
+                                                                   selectFileTDownload: PTTorrentStreamer.fileSelection(for: torrent.url, media: media, torrent: torrent))
                 sender.downloadState = .pending
             }
         } else if let download = media.associatedDownload {

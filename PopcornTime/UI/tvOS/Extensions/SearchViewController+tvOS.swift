@@ -30,11 +30,21 @@ extension SearchViewController {
         searchBar.keyboardAppearance = .dark
         searchBar.searchBarStyle = .minimal
         searchBar.sizeToFit()
+
+        // The keyboard and the results are in place from the first frame the
+        // tab shows (they were added once the tab had appeared: the first
+        // visit to Search showed an empty screen, then the keyboard popped in).
+        installSearchContainerIfNeeded()
     }
     
     override func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)
 
+        installSearchContainerIfNeeded()
+        installResultsFocusGuide()
+    }
+
+    private func installSearchContainerIfNeeded() {
         searchContainerViewController = searchContainerViewController ?? {
             let container = UISearchContainerViewController(searchController: searchController)
 
@@ -57,89 +67,111 @@ extension SearchViewController {
 
             return container
         }()
-
-        installResultsFocusGuide()
     }
 
     /// tvOS focus engine picks the focusable view geometrically closest to
     /// the current focused element when the user navigates down. With only
     /// 2 results in a left-aligned grid, neither cell sits below the
     /// centered MOVIES/SHOWS/PEOPLE scope buttons, so the engine refuses
-    /// to descend. Plant a horizontal UIFocusGuide INSIDE the search
-    /// results' collection view (the focus environment that
-    /// UISearchController actually queries on a downward move) and point
-    /// it at the first visible cell. The guide doesn't render, doesn't
-    /// affect hit-testing — it only steers the focus engine.
+    /// to descend. A full-width UIFocusGuide inside the results' collection
+    /// view, just above their first row (below the scope bar), points at the
+    /// first visible cell. The guide doesn't render, doesn't affect
+    /// hit-testing — it only steers the focus engine, and only while the
+    /// focus is on the scope bar (`updateResultsFocusGuide`).
     private func installResultsFocusGuide() {
         guard let cv = collectionViewController?.collectionView else { return }
         guard cv.layoutGuides.first(where: { $0 is UIFocusGuide }) == nil else { return }
         let guide = UIFocusGuide()
+        guide.isEnabled = false
         cv.addLayoutGuide(guide)
+        let top = guide.topAnchor.constraint(equalTo: cv.frameLayoutGuide.topAnchor)
         NSLayoutConstraint.activate([
             guide.leadingAnchor.constraint(equalTo: cv.frameLayoutGuide.leadingAnchor),
             guide.trailingAnchor.constraint(equalTo: cv.frameLayoutGuide.trailingAnchor),
-            guide.topAnchor.constraint(equalTo: cv.frameLayoutGuide.topAnchor),
-            guide.heightAnchor.constraint(equalToConstant: 80),
+            top,
+            guide.heightAnchor.constraint(equalToConstant: SearchViewController.focusGuideHeight),
         ])
         focusGuide = guide
+        focusGuideTop = top
     }
 
+    private static let focusGuideHeight: CGFloat = 40
+
     private static let focusGuideKey: UnsafeRawPointer =
+        UnsafeRawPointer(UnsafeMutablePointer<UInt8>.allocate(capacity: 1))
+    private static let focusGuideTopKey: UnsafeRawPointer =
         UnsafeRawPointer(UnsafeMutablePointer<UInt8>.allocate(capacity: 1))
     private var focusGuide: UIFocusGuide? {
         get { objc_getAssociatedObject(self, SearchViewController.focusGuideKey) as? UIFocusGuide }
         set { objc_setAssociatedObject(self, SearchViewController.focusGuideKey, newValue, .OBJC_ASSOCIATION_RETAIN_NONATOMIC) }
     }
+    private var focusGuideTop: NSLayoutConstraint? {
+        get { objc_getAssociatedObject(self, SearchViewController.focusGuideTopKey) as? NSLayoutConstraint }
+        set { objc_setAssociatedObject(self, SearchViewController.focusGuideTopKey, newValue, .OBJC_ASSOCIATION_RETAIN_NONATOMIC) }
+    }
 
     override func viewDidLayoutSubviews() {
         super.viewDidLayoutSubviews()
         if focusGuide == nil { installResultsFocusGuide() }
-        updateResultsFocusGuide(focusInResults: isFocusInResults)
+        updateResultsFocusGuide(scopeBarFocused: isScopeBar(UIFocusSystem.focusSystem(for: self)?.focusedItem as? UIView))
     }
 
-    /// Keep the results focus guide from trapping the user in the grid.
-    ///
-    /// The guide (planted at the top of the results collection view, pointing
-    /// at the first cell) only exists to help the focus engine DESCEND from
-    /// the centered MOVIES/SHOWS/PEOPLE scope tabs into a sparse, left-aligned
-    /// result set. But while it's active it also intercepts an *upward* move
-    /// out of the top row and redirects focus straight back to the first cell
-    /// — so after scrolling down and picking a result, the user could never
-    /// go back up to the search bar or reach the tab bar. Disable the guide's
-    /// redirect whenever focus is inside the results, and restore it once
-    /// focus is above them (for the next downward move).
+    /// The guide steers only a downward move from the scope bar into the
+    /// results. Anywhere else it is off: pinned at the top of the results'
+    /// frame (the whole screen, behind the keyboard) it used to catch every
+    /// upward move — from the keyboard (Up never reached the tab bar: the
+    /// focus went keyboard → first result → scope bar → keyboard…) and from
+    /// the results' top row once they had scrolled (focus stuck on it,
+    /// Menu left the app). Off, the search container's own focus moves
+    /// apply: Up from the results reaches the scope bar and the keyboard,
+    /// Up from the keyboard the tab bar.
     override func didUpdateFocus(in context: UIFocusUpdateContext, with coordinator: UIFocusAnimationCoordinator) {
         super.didUpdateFocus(in: context, with: coordinator)
-        guard let cv = collectionViewController?.collectionView else { return }
-        let nextInResults = context.nextFocusedView?.isDescendant(of: cv) ?? false
-        updateResultsFocusGuide(focusInResults: nextInResults)
+        updateResultsFocusGuide(scopeBarFocused: isScopeBar(context.nextFocusedView))
+        revealSearchBarIfFirstRow(context.nextFocusedView)
     }
 
-    private var isFocusInResults: Bool {
-        collectionViewController?.collectionView?.visibleCells.contains(where: { $0.isFocused }) ?? false
-    }
-
-    private func updateResultsFocusGuide(focusInResults: Bool) {
-        guard let guide = focusGuide else { return }
-        if focusInResults {
-            // Route an upward move out of the top visible row back to the
-            // search bar. The guide is pinned to the *visible* top of the
-            // collection view, so this works from any row: once the grid has
-            // scrolled earlier rows off-screen, pressing up from the topmost
-            // visible cell lands on the search bar (and from there the tab
-            // bar is reachable). Just clearing the guide isn't enough — the
-            // search bar is a sibling above the collection view, not a
-            // focusable cell, so the engine can't reach it on its own once
-            // scrolled. Pointing at it explicitly guarantees the exit.
-            if let searchBar = searchBar {
-                guide.preferredFocusEnvironments = [searchBar]
-            } else {
-                guide.preferredFocusEnvironments = []
-            }
-        } else if let first = collectionViewController?.collectionView?.visibleCells.first {
-            guide.preferredFocusEnvironments = [first]
-        } else {
-            guide.preferredFocusEnvironments = []
+    /// The results scrolled down take the keyboard and the scope bar with
+    /// them, off the screen: from the first row, Up found nothing above and
+    /// the focus stayed there (Menu then left the app). Back on the first
+    /// row, the results scroll back to their top, the search bar with them,
+    /// so the next Up reaches the scope bar, then the keyboard and the tab bar.
+    private func revealSearchBarIfFirstRow(_ view: UIView?) {
+        guard let cv = collectionViewController?.collectionView, let cell = view as? UICollectionViewCell,
+              cell.isDescendant(of: cv), cv.numberOfSections > 0, cv.numberOfItems(inSection: 0) > 0,
+              let firstRow = cv.layoutAttributesForItem(at: IndexPath(item: 0, section: 0))?.frame,
+              abs(cell.frame.minY - firstRow.minY) < 1 else { return }
+        let top = -cv.adjustedContentInset.top
+        guard cv.contentOffset.y > top + 1 else { return }
+        DispatchQueue.main.async {
+            cv.setContentOffset(CGPoint(x: cv.contentOffset.x, y: top), animated: true)
         }
+    }
+
+    /// A Movies / Shows / People button of the search bar's scope bar.
+    private func isScopeBar(_ view: UIView?) -> Bool {
+        guard let searchBar = searchBar else { return false }
+        var current = view
+        while let candidate = current, candidate !== searchBar {
+            if candidate is UISegmentedControl { return candidate.isDescendant(of: searchBar) }
+            current = candidate.superview
+        }
+        return false
+    }
+
+    private func updateResultsFocusGuide(scopeBarFocused: Bool) {
+        guard let guide = focusGuide else { return }
+        guard scopeBarFocused, let cv = collectionViewController?.collectionView,
+              let first = cv.visibleCells.min(by: { ($0.frame.minY, $0.frame.minX) < ($1.frame.minY, $1.frame.minX) }) else {
+            guide.isEnabled = false
+            guide.preferredFocusEnvironments = []
+            return
+        }
+        // Just above the first row, in the collection view's frame (the
+        // guide is pinned to its frameLayoutGuide): below the scope bar.
+        let firstRowTop = first.frame.minY - cv.contentOffset.y
+        focusGuideTop?.constant = max(0, firstRowTop - SearchViewController.focusGuideHeight - 4)
+        guide.preferredFocusEnvironments = [first]
+        guide.isEnabled = true
     }
 }

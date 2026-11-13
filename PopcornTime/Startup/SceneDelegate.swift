@@ -233,9 +233,7 @@ private enum DebugLaunchHooks {
     private static func focus(_ viewController: UIViewController?, in tabBarController: UITabBarController, after delay: Double) {
         guard let viewController, let tabBarController = tabBarController as? TVTabBarController else { return }
         DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
-            tabBarController.environmentsToFocus = [viewController]
-            tabBarController.setNeedsFocusUpdate()
-            tabBarController.updateFocusIfNeeded()
+            tabBarController.moveFocus(to: viewController)
         }
     }
 }

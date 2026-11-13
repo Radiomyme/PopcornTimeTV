@@ -106,7 +106,8 @@ class SearchViewController: MainViewController, UISearchBarDelegate {
             }
         case .people:
             TraktManager.shared.search(forPerson: text) { results, error in
-                completion(results as! [Crew], error)
+                // Nil when Trakt fails (an error to show, not a crash).
+                completion(results?.compactMap { $0 as? Crew }, error)
             }
         default:
             return

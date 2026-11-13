@@ -457,9 +457,8 @@ struct MacGlassActionRow: View {
             VStack(spacing: 4) {
                 HStack(spacing: 8) {
                     if page.isPreparingPlay {
-                        ProgressView()
-                            .controlSize(.small)
-                            .tint(.white)
+                        // Not ProgressView: the glass button scales on hover / press.
+                        MacGlassSpinner(diameter: 16)
                     } else {
                         Image(systemName: "play.fill")
                     }
@@ -486,5 +485,8 @@ struct MacGlassActionRow: View {
                 Label("Choose Quality…", systemImage: "slider.horizontal.3")
             }
         }
+        #if DEBUG
+        .macGlassDebugAnchor("play")
+        #endif
     }
 }

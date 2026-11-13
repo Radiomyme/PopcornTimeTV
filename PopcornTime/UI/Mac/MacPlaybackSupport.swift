@@ -7,6 +7,24 @@ struct MacPendingPlayback: Identifiable {
     let torrent: Torrent
     let media: Media
     let title: String
+    /// The title's releases (the quality sheet's list): where the player
+    /// looks for another source (a source that does not answer) and for a
+    /// lighter release (a download slower than the video). Empty:
+    /// `media.torrents`.
+    var sources: [Torrent] = []
+    /// 0…1 position to start at — a switch to a lighter release resumes
+    /// where the other one was; 0: from the beginning (the Mac does not
+    /// resume otherwise).
+    var startFraction: Float = 0
+
+    /// `sources`, else the media's own list (DEBUG: plus
+    /// `-PTDebugLighterTorrent`), each with the media's runtime when it has
+    /// none: its bitrate for the « Choose another source » picker.
+    var knownSources: [Torrent] {
+        let runtime = Torrent.mediaRuntime(of: media)
+        return PlaybackStreamContext.withDebugSources(sources.isEmpty ? media.torrents : sources)
+            .map { $0.mediaRuntime == nil ? $0.withMediaRuntime(runtime) : $0 }
+    }
 }
 
 /// A movie's or an episode's sources, driving the quality-picker sheet.

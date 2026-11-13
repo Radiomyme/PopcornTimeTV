@@ -62,6 +62,9 @@ struct VideoPlayerWrapper: UIViewControllerRepresentable {
     /// where it would have to (that part of the torrent is deleted). The
     /// message was shown; the owner closes the player.
     var onCannotContinue: (() -> Void)? = nil
+    /// The stream's deficit watch (download slower than the release): this
+    /// player reports to it once a second; the owner shows its offer.
+    var deficitMonitor: BandwidthDeficitMonitor? = nil
 
     /// Also the AVPlayerViewController's delegate: Picture in Picture state
     /// (AVKit calls it on the main thread).
@@ -103,6 +106,8 @@ struct VideoPlayerWrapper: UIViewControllerRepresentable {
         /// payload on disk, and the stream's session.
         var isPayloadComplete: (() -> Bool)?
         var boundedStorage: BoundedStorageSession?
+        /// `VideoPlayerWrapper.deficitMonitor`.
+        var deficitMonitor: BandwidthDeficitMonitor?
         /// Bounded storage: the forward buffer AVPlayer may keep over the
         /// torrent's file, and how far past the playhead it may have read.
         static let boundedForwardBufferSeconds: Double = 60
@@ -170,6 +175,9 @@ struct VideoPlayerWrapper: UIViewControllerRepresentable {
             // A finished (or nearly finished) title restarts from the beginning.
             self.startPosition = ResumePolicy.startPosition(forSavedProgress: startPosition)
             resumePoint = self.startPosition
+            deficitMonitor?.attach(self) { [weak self] in
+                MainActor.assumeIsolated { self?.deficitPlaybackState() }
+            }
             installFailureObserver(on: item)
             timeObserver = player.addPeriodicTimeObserver(forInterval: CMTime(seconds: 1, preferredTimescale: 600),
                                                           queue: .main) { [weak self] _ in
@@ -728,7 +736,22 @@ struct VideoPlayerWrapper: UIViewControllerRepresentable {
             }
         }
 
+        /// The player as the deficit watch sees it (nil once VLC took over).
+        private func deficitPlaybackState() -> BandwidthDeficitMonitor.PlaybackState? {
+            guard !didFallBack, let player = player else { return nil }
+            let recovering = starvation.isRecovering
+            let time = recovering ? starvation.resumeTime : player.currentTime().seconds
+            var duration = player.currentItem?.duration.seconds ?? .nan
+            if !duration.isFinite || duration <= 0 { duration = lastKnownDuration ?? .nan }
+            let waiting = player.timeControlStatus == .waitingToPlayAtSpecifiedRate && playIntent.wantsPlayback
+            return BandwidthDeficitMonitor.PlaybackState(playhead: time, duration: duration.isFinite ? duration : nil,
+                                                         hasStarted: didStart && playedPosition.lastPlayedTime != nil,
+                                                         wantsPlayback: playIntent.wantsPlayback,
+                                                         isStalled: (recovering && !starvation.isRebuildingStuckItem) || waiting)
+        }
+
         func invalidate() {
+            deficitMonitor?.detach(self)
             boundedRewindCheck?.cancel()
             directStallTimer?.invalidate()
             directStallTimer = nil
@@ -775,6 +798,7 @@ struct VideoPlayerWrapper: UIViewControllerRepresentable {
         context.coordinator.media = media
         context.coordinator.isPayloadComplete = isPayloadComplete
         context.coordinator.boundedStorage = boundedStorage
+        context.coordinator.deficitMonitor = deficitMonitor
         context.coordinator.installIndicator(in: vc)
         context.coordinator.start(player: player, item: item, url: url, title: title, startPosition: startPosition,
                                   readyTimeout: readyTimeout, isWaitingForData: isWaitingForData,

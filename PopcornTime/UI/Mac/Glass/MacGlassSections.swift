@@ -136,6 +136,9 @@ struct MacGlassEpisodesSection: View {
         .contextMenu { menu(for: episode) }
         .help(Text(verbatim: episode.title))
         .accessibilityLabel(Text("S\(episode.season) · E\(episode.number)") + Text(verbatim: ", " + episode.title))
+        #if DEBUG
+        .macGlassDebugAnchor("episode-" + episode.id)
+        #endif
     }
 
     @ViewBuilder
@@ -238,9 +241,8 @@ struct MacGlassEpisodeStill: View {
             if isBusy {
                 ZStack {
                     Color.black.opacity(0.45)
-                    ProgressView()
-                        .controlSize(.regular)
-                        .tint(.white)
+                    // Not ProgressView: the still scales on hover / press.
+                    MacGlassSpinner(diameter: 32, color: .white)
                 }
                 .transition(.opacity)
             }

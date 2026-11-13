@@ -12,6 +12,9 @@ struct EpisodeSources: Identifiable {
     let torrents: [Torrent]
     /// The episode these sources play — subtitles, watched progress.
     var episode: Episode? = nil
+    /// What they play when it is not an episode (a movie: « Choose another
+    /// source » after a source that did not answer).
+    var playMedia: Media? = nil
 }
 
 @MainActor
@@ -61,9 +64,16 @@ final class MediaDetailViewModel: ObservableObject {
         group.notify(queue: .main) { [weak self] in
             guard let self = self else { return }
             self.loadingSourcesFor = nil
+            // The show's runtime on every candidate before the merge: with
+            // their sizes it gives the bitrates, so the merge keeps the
+            // releases the connection can carry (`precedesInListing`), and
+            // the picker shows them.
+            let runtime = Torrent.mediaRuntime(of: episode, show: self.enrichedShow)
+            t4p = t4p.withMediaRuntime(runtime)
+            extra = extra.withMediaRuntime(runtime)
             // T4P primary (base of the merge), EZTV + Torrentio + TPB / Knaben
             // as fallback, then sorted best-quality-first for the picker.
-            let legacy = base + aggregated
+            let legacy = (base + aggregated).withMediaRuntime(runtime)
             let merged = TorrentioClient.merge(t4p, with: legacy + ExtraTorrentSources.novel(extra, beside: t4p + legacy)).sorted(by: >)
             let title = "S\(episode.season)E\(episode.episode)" + (episode.title.isEmpty ? "" : " · \(episode.title)")
             if merged.isEmpty {
@@ -194,20 +204,28 @@ final class MediaDetailViewModel: ObservableObject {
             group.leave()
         }
         group.notify(queue: .main) { [weak self] in
-            // T4P primary, EZTV + Torrentio + TPB / Knaben as fallback.
-            let legacy = base + aggregated
-            self?.augmentedEpisodeTorrents = TorrentioClient.merge(t4p, with: legacy + ExtraTorrentSources.novel(extra, beside: t4p + legacy))
+            // T4P primary, EZTV + Torrentio + TPB / Knaben as fallback. The
+            // show's runtime first: with their sizes it gives the bitrates,
+            // so the merge keeps the releases the connection can carry
+            // (`precedesInListing`), as in `loadEpisodeSources`.
+            let runtime = Torrent.mediaRuntime(of: episode, show: show)
+            let legacy = (base + aggregated).withMediaRuntime(runtime)
+            self?.augmentedEpisodeTorrents = TorrentioClient.merge(t4p.withMediaRuntime(runtime),
+                                                                   with: legacy + ExtraTorrentSources.novel(extra.withMediaRuntime(runtime), beside: t4p + legacy))
         }
     }
 
     /// Sorted torrents (best quality first). For a Show, prefer the augmented
     /// episode list (EZTV + Torrentio + T4P) once ready, else the EZTV-only
     /// torrents of the first available unwatched episode.
+    /// Runtimes attached: each release's bitrate (size / runtime) for the
+    /// recommendation and the labels.
     var torrents: [Torrent] {
-        if let movie = enrichedMovie { return movie.torrents.sorted(by: >) }
+        if let movie = enrichedMovie { return movie.torrents.withMediaRuntime(of: movie).sorted(by: >) }
         if let show = enrichedShow {
-            if let augmented = augmentedEpisodeTorrents { return augmented.sorted(by: >) }
-            return (targetEpisode(of: show)?.torrents ?? []).sorted(by: >)
+            let runtime = Torrent.mediaRuntime(of: show)
+            if let augmented = augmentedEpisodeTorrents { return augmented.withMediaRuntime(runtime).sorted(by: >) }
+            return (targetEpisode(of: show)?.torrents ?? []).withMediaRuntime(runtime).sorted(by: >)
         }
         return []
     }
@@ -262,6 +280,18 @@ private struct PlaybackScreen: View {
     let onClose: () -> Void
 
     var body: some View {
+        engine
+            // The download can't keep up with this release: a lighter one at
+            // the same position, or carry on (every engine reports to it).
+            .overlay(alignment: .top) {
+                if let monitor = PlaybackStreamContext.of(playback.streamer)?.deficit {
+                    BandwidthDeficitBanner(monitor: monitor)
+                }
+            }
+    }
+
+    @ViewBuilder
+    private var engine: some View {
         switch playback.engine {
         case .remux:
             RemuxPlayerView(localFile: playback.localFile,
@@ -341,7 +371,8 @@ private struct DirectPlayerScreen: View {
                                    cues.bindNativeSubtitles(of: item)
                                },
                                onFallback: onFallback,
-                               onCannotContinue: onClose)
+                               onCannotContinue: onClose,
+                               deficitMonitor: PlaybackStreamContext.of(streamer)?.deficit)
                 .ignoresSafeArea()
             SubtitleOverlayText(controller: subtitles)
                 .ignoresSafeArea()
@@ -407,11 +438,26 @@ struct MediaDetailView: View {
     @State private var peersCount: Int = 0
     @State private var downloadKbps: Double = 0
     @State private var streamErrorMessage: String?
+    /// The stream failed because the torrent lacks the episode (a season
+    /// pack, PopcornTorrent -9): the overlay offers another source.
+    @State private var streamFailedNotInTorrent = false
     /// Bounded storage (the film is larger than the free space): the
     /// overlay's « Limited storage: you can rewind about N min » line, and
     /// when it was last computed (it reads the free space).
     @State private var boundedNote: String?
     @State private var boundedNoteAt: TimeInterval = 0
+    /// The stream's preparation (`LoadingPhaseTracker`): the overlay's line
+    /// from the first second, and the « source not answering » state.
+    @State private var loadingTracker = LoadingPhaseTracker()
+    @State private var loadingPhase: LoadingPhase = .starting
+    @State private var loadingLine = LoadingPhase.starting.line
+    @State private var loadingStreamer: PTTorrentStreamer?
+    /// Buffering, but minutes from playing (`LoadingPhaseTracker.isSlow`).
+    @State private var loadingSlow = false
+    /// What the overlay prepares: « Choose another source » leaves it out.
+    @State private var loadingSource: StreamSource?
+    /// « Lighter version »: played once the cover is gone (`endPlayback`).
+    @State private var pendingSwitch: PendingSwitch?
     @State private var safariURL: IdentifiableURL?
     @State private var selectedSeason: Int = 0
     @AppStorage("autoSelectQuality") private var autoQuality = "Balanced"
@@ -457,7 +503,7 @@ struct MediaDetailView: View {
         .sheet(item: $viewModel.episodeSources) { sources in
             QualityPickerSheet(title: sources.title, torrents: sources.torrents) { torrent in
                 viewModel.episodeSources = nil
-                play(torrent, media: sources.episode ?? media)
+                play(torrent, media: sources.episode ?? sources.playMedia ?? media, sources: sources.torrents)
             }
         }
         .alert("Aucune source",
@@ -537,14 +583,22 @@ struct MediaDetailView: View {
     private var streamingOverlay: some View {
         if startingStream {
             VStack(spacing: 14) {
-                ProgressView(value: Double(bufferProgress))
-                    .progressViewStyle(.linear)
-                    .tint(.accentColor)
-                    .frame(width: 240)
-                Text(bufferProgress > 0
-                     ? String(format: "Buffering · %.0f %%", bufferProgress * 100)
-                     : "Recherche de peers…")
-                    .font(.headline)
+                if loadingPhase.isBuffering {
+                    ProgressView(value: Double(bufferProgress))
+                        .progressViewStyle(.linear)
+                        .tint(.accentColor)
+                        .frame(width: 240)
+                } else if !loadingPhase.isNotResponding && streamErrorMessage == nil {
+                    ProgressView()
+                }
+                // From the first second: peers, the torrent's details,
+                // buffering — or that the source is not answering. Not under
+                // a failure (the line stopped where the stream did).
+                if streamErrorMessage == nil {
+                    Text(loadingLine)
+                        .font(.headline)
+                        .multilineTextAlignment(.center)
+                }
                 if seedsCount > 0 || peersCount > 0 {
                     Text("\(seedsCount) seeds · \(peersCount) peers · \(formatKbps(downloadKbps))")
                         .font(.caption.monospacedDigit())
@@ -558,6 +612,24 @@ struct MediaDetailView: View {
                 }
                 if let err = streamErrorMessage {
                     Text(err).font(.caption).foregroundStyle(.red).multilineTextAlignment(.center).padding(.horizontal, 8)
+                    // A season pack without the episode: the title's other releases.
+                    if streamFailedNotInTorrent, !otherSources.isEmpty {
+                        Button(LoadingPhase.chooseAnotherSourceTitle) { chooseAnotherSource() }
+                            .buttonStyle(.borderedProminent)
+                    }
+                }
+                if loadingPhase.isNotResponding, streamErrorMessage == nil {
+                    if !otherSources.isEmpty {
+                        Button(LoadingPhase.chooseAnotherSourceTitle) { chooseAnotherSource() }
+                            .buttonStyle(.borderedProminent)
+                    }
+                    Button(LoadingPhase.keepWaitingTitle) { keepWaiting() }
+                        .buttonStyle(.bordered)
+                } else if loadingSlow, streamErrorMessage == nil, !otherSources.isEmpty {
+                    // Alive but minutes from playing: another source,
+                    // beside the progress.
+                    Button(LoadingPhase.chooseAnotherSourceTitle) { chooseAnotherSource() }
+                        .buttonStyle(.bordered)
                 }
                 Button("Annuler", role: .cancel) { cancelStream() }
                     .buttonStyle(.bordered)
@@ -566,7 +638,54 @@ struct MediaDetailView: View {
             .padding(20)
             .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 16))
             .padding(.horizontal, 24)
+            // The stall rules need the clock even when no status comes.
+            .onReceive(Timer.publish(every: 1, on: .main, in: .common).autoconnect()) { _ in
+                guard startingStream, streamErrorMessage == nil, let streamer = loadingStreamer else { return }
+                updateLoadingPhase(streamer: streamer, fromCallback: false)
+            }
+            #if DEBUG
+            .onChange(of: loadingPhase.isNotResponding) { _, stalled in
+                guard stalled else { return }
+                BandwidthDebugHooks.loadingStalled(choose: otherSources.isEmpty ? nil : { chooseAnotherSource() },
+                                                   keepWaiting: { keepWaiting() })
+            }
+            #endif
         }
+    }
+
+    /// The loading phase from the stream (progress block, 1 s timer).
+    private func updateLoadingPhase(streamer: PTTorrentStreamer, fromCallback: Bool) {
+        guard startingStream, streamer === loadingStreamer else { return }
+        loadingPhase = loadingTracker.update(streamer: streamer, fromCallback: fromCallback)
+        loadingLine = loadingTracker.line
+        loadingSlow = loadingTracker.isSlow
+    }
+
+    /// « Keep waiting »: the message goes, every stall rule counts again.
+    private func keepWaiting() {
+        loadingTracker.keepWaiting()
+        loadingPhase = loadingTracker.phase
+        loadingLine = loadingTracker.line
+    }
+
+    /// The title's other releases (the source being prepared left out).
+    private var otherSources: [Torrent] {
+        guard let source = loadingSource else { return [] }
+        return source.sources.filter { $0.url != source.torrent.url }
+    }
+
+    /// « Choose another source » (a source that does not answer): this
+    /// stream stops and the quality picker comes back without it.
+    private func chooseAnotherSource() {
+        guard let source = loadingSource else { return }
+        let others = otherSources.sorted(by: >)
+        print("[iOS Detail] choose another source (instead of \(source.torrent.quality ?? "?"))")
+        cancelStream()
+        guard !others.isEmpty else { return }
+        let episode = source.media as? Episode
+        let title = episode.map { "S\($0.season)E\($0.episode)" + ($0.title.isEmpty ? "" : " · \($0.title)") } ?? source.media.title
+        viewModel.episodeSources = EpisodeSources(title: title, torrents: others, episode: episode,
+                                                  playMedia: episode == nil ? source.media : nil)
     }
 
     private func formatKbps(_ kbps: Double) -> String {
@@ -577,11 +696,13 @@ struct MediaDetailView: View {
     private func cancelStream() {
         PTTorrentStreamer.cancelCurrent(deleteData: true)
         startingStream = false
+        loadingStreamer = nil
         bufferProgress = 0
         seedsCount = 0
         peersCount = 0
         downloadKbps = 0
         streamErrorMessage = nil
+        streamFailedNotInTorrent = false
         boundedNote = nil
     }
 
@@ -714,7 +835,7 @@ struct MediaDetailView: View {
                 Text("Qualités disponibles").font(.headline)
                 ForEach(viewModel.torrents, id: \.url) { torrent in
                     Button {
-                        play(torrent, media: viewModel.enrichedMovie ?? media)
+                        play(torrent, media: viewModel.enrichedMovie ?? media, sources: viewModel.torrents)
                     } label: {
                         TorrentPickerRow(torrent: torrent, recommended: torrent.url == recommended)
                             .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
@@ -772,7 +893,7 @@ struct MediaDetailView: View {
             pick = torrents.first(where: { $0.qualityValue == lowestBucket })
         default:        pick = Torrent.balancedPick(from: torrents)  // Balanced / choose-each-time
         }
-        if let pick = pick { play(pick, media: viewModel.defaultPlaybackMedia ?? media) }
+        if let pick = pick { play(pick, media: viewModel.defaultPlaybackMedia ?? media, sources: torrents) }
     }
 
     /// Watched progress (0…1) saved by the native / VLC players.
@@ -783,14 +904,24 @@ struct MediaDetailView: View {
     }
 
     /// Stream `torrent` and, once it is ready, open the player picked from
-    /// the REAL payload name. `playMedia` is the movie or the EPISODE.
-    private func play(_ torrent: Torrent, media playMedia: Media) {
+    /// the REAL payload name. `playMedia` is the movie or the EPISODE;
+    /// `sources`: the title's releases (another source, a lighter release);
+    /// `startOverride`: where to start (0…1), decided by the user — a
+    /// switch to a lighter release.
+    private func play(_ torrent: Torrent, media playMedia: Media, sources: [Torrent] = [], startOverride: Float? = nil) {
         startingStream = true
+        loadingTracker = LoadingPhaseTracker()
+        loadingPhase = .starting
+        loadingLine = LoadingPhase.starting.line
+        loadingSlow = false
+        loadingSource = StreamSource(torrent: torrent, media: playMedia,
+                                     sources: PlaybackStreamContext.withDebugSources(sources.isEmpty ? playMedia.torrents : sources))
         bufferProgress = 0
         seedsCount = 0
         peersCount = 0
         downloadKbps = 0
         streamErrorMessage = nil
+        streamFailedNotInTorrent = false
         boundedNote = nil
         boundedNoteAt = 0
         let mediaTitle = playMedia.title
@@ -800,7 +931,8 @@ struct MediaDetailView: View {
         // A finished (or nearly finished) title restarts from the beginning
         // on every engine — VLC too, which resumes without asking (the native
         // players apply the same rule again).
-        let startPosition = ResumePolicy.startPosition(forSavedProgress: Self.savedProgress(for: playMedia))
+        let startPosition = startOverride.map { ResumePolicy.handOffFraction(reached: $0) }
+            ?? ResumePolicy.startPosition(forSavedProgress: Self.savedProgress(for: playMedia))
         // Clean slate before a new stream: stop the previous stream and
         // reclaim disk from prior torrent partials + orphaned remux output
         // (same as tvOS). Then a new streamer, current until the next stream
@@ -808,13 +940,26 @@ struct MediaDetailView: View {
         PTTorrentStreamer.cancelCurrent(deleteData: true)
         purgeOrphanTorrentDownloads()
         let streamer = PTTorrentStreamer.startNew()
+        loadingStreamer = streamer
         // A film larger than the free space streams in bounded storage
         // (every player route drives the torrent's window).
         BoundedStorageSession.prepare(streamer, durationSeconds: BoundedStorageSession.durationHint(for: playMedia))
+        // The release, the title's other releases and how to switch: every
+        // engine reports to the stream's deficit watch, the cover shows its
+        // offer; « Lighter version » closes the cover, then `endPlayback`
+        // plays the release from where this one was.
+        let context = PlaybackStreamContext.attach(to: streamer, media: playMedia, sourceURL: magnet, torrent: torrent,
+                                                   sources: loadingSource?.sources, decidedStart: startOverride)
+        let known = context.sources
+        context.onSwitch = { lighter, fraction in
+            pendingSwitch = PendingSwitch(torrent: lighter, media: playMedia, sources: known, start: fraction)
+            pendingPlayback = nil
+        }
         print("[iOS Detail] starting torrent: \(magnet.prefix(80))…")
 
         let progress: PTTorrentStreamerProgress = { status in
             DispatchQueue.main.async {
+                updateLoadingPhase(streamer: streamer, fromCallback: true)
                 bufferProgress = status.bufferingProgress
                 seedsCount = Int(status.seeds)
                 peersCount = Int(status.peers)
@@ -832,7 +977,9 @@ struct MediaDetailView: View {
         }
         let readyToPlay: PTTorrentStreamerReadyToPlay = { fileURL, filePath in
             DispatchQueue.main.async {
+                guard streamer === loadingStreamer else { return }
                 startingStream = false
+                loadingStreamer = nil
                 // Route on the REAL payload name (magnet display names often
                 // carry no extension). Unknown → remux, which fails fast to VLC.
                 let route = PlaybackRouting.route(forFileName: filePath.lastPathComponent)
@@ -853,9 +1000,12 @@ struct MediaDetailView: View {
         let failure: PTTorrentStreamerFailure = { error in
             // Not enough space even for bounded storage (-5: how much to
             // free), another file error (-6), or the error's own text.
-            let message = StreamFailure(error, streamer: streamer).message(underlying: error) ?? error.localizedDescription
+            let failure = StreamFailure(error, streamer: streamer)
+            let message = failure.message(underlying: error) ?? error.localizedDescription
+            let notInTorrent: Bool = { if case .episodeNotInTorrent = failure { return true }; return false }()
             DispatchQueue.main.async {
                 streamErrorMessage = message
+                streamFailedNotInTorrent = notInTorrent
                 // Keep the overlay open so the user sees the error and can dismiss
                 // explicitly via the "Annuler" button.
                 bufferProgress = 0
@@ -863,15 +1013,17 @@ struct MediaDetailView: View {
             print("[iOS Detail] streaming failure: \(error.localizedDescription)")
         }
 
-        // The streamed file: the magnet's BEP 53 `so=` file when valid, else
-        // the largest video file, as on tvOS and macOS
-        // (`PTTorrentStreamer.fileSelection`). Season packs stay filtered out
-        // of the iOS episode sources (`TorrentioClient.dropsEpisodePacks`).
+        // The streamed file, as on tvOS and macOS
+        // (`PTTorrentStreamer.fileSelection`): an episode's own file in a
+        // season pack (none when the pack lacks it: the stream fails), else
+        // the magnet's BEP 53 `so=` file when valid, else the largest video
+        // file. Torrentio's packs stay filtered out of the iOS episode
+        // sources (`TorrentioClient.dropsEpisodePacks`).
         streamer.startStreaming(fromMultiTorrentFileOrMagnetLink: magnet,
                                 progress: progress,
                                 readyToPlay: readyToPlay,
                                 failure: failure,
-                                selectFileToStream: PTTorrentStreamer.fileSelection(for: magnet))
+                                selectFileToStream: PTTorrentStreamer.fileSelection(for: magnet, media: playMedia, torrent: torrent))
     }
 
     /// A native engine gave up: continue on VLC with the SAME stream. The
@@ -894,7 +1046,29 @@ struct MediaDetailView: View {
     /// path, which has no hook into the streamer.
     private func endPlayback() {
         PTTorrentStreamer.cancelCurrent(deleteData: false)
+        // « Lighter version »: the cover is gone, its stream cancelled.
+        if let next = pendingSwitch {
+            pendingSwitch = nil
+            play(next.torrent, media: next.media, sources: next.sources, startOverride: next.start)
+        }
     }
+}
+
+/// The stream the overlay prepares.
+private struct StreamSource {
+    let torrent: Torrent
+    let media: Media
+    /// The title's releases.
+    let sources: [Torrent]
+}
+
+/// « Lighter version »: what plays once the cover has closed.
+private struct PendingSwitch {
+    let torrent: Torrent
+    let media: Media
+    let sources: [Torrent]
+    /// 0…1.
+    let start: Float
 }
 
 /// Quality picker shown after selecting an episode — lists every resolved

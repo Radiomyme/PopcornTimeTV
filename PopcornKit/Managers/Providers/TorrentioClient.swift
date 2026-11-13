@@ -37,14 +37,22 @@ public final class TorrentioClient {
     /// Public trackers appended to reconstructed magnet links. Torrentio
     /// returns bare info-hashes; without trackers libtorrent would rely on
     /// DHT alone which is slow to bootstrap on Apple TV. Also used for the
-    /// magnets of the extra sources (`ExtraTorrentSources`).
+    /// magnets of the extra sources (`ExtraTorrentSources`) and of YTS.
+    /// PopcornTorrent announces to every one of them at once and adds the
+    /// same well-known list to every public torrent it plays (magnets from
+    /// the other providers included), so this list only needs to be good,
+    /// not long.
     static let trackers: [String] = [
         "udp://tracker.opentrackr.org:1337/announce",
+        "udp://open.demonii.com:1337/announce",
         "udp://open.stealth.si:80/announce",
         "udp://tracker.torrent.eu.org:451/announce",
         "udp://exodus.desync.com:6969/announce",
-        "udp://open.demonii.com:1337/announce",
+        "udp://explodie.org:6969/announce",
         "udp://tracker.dler.org:6969/announce",
+        "udp://tracker.qu.ax:6969/announce",
+        "udp://opentracker.io:6969/announce",
+        "udp://tracker.theoks.net:6969/announce",
     ]
 
     private let session: Session = {
@@ -200,13 +208,14 @@ public final class TorrentioClient {
 
         // Seeded candidates within the size cap, in listing order.
         let capabilities = PlaybackCapabilities.current
+        let connection = StreamBandwidth.connectionEstimate
         let candidates = aggregated
             .filter { torrent in
                 torrent.seeds > 0
                     && (sizeInBytes(torrent.size).map { $0 <= maxSizeBytes } ?? true)
                     && infoHash(fromMagnet: torrent.url) != nil
             }
-            .sorted { Torrent.precedesInListing($0, $1, capabilities: capabilities) }
+            .sorted { Torrent.precedesInListing($0, $1, capabilities: capabilities, connection: connection) }
         func isClean(_ torrent: Torrent) -> Bool {
             return !torrent.playability(for: capabilities).isPenalized
         }
@@ -229,15 +238,13 @@ public final class TorrentioClient {
         return merged.sorted(by: <)
     }
 
-    /// Parse Torrentio's human size string ("54.33 GB", "850 MB") to bytes.
+    /// Bytes of a size label ("54.33 GB", "850 MB"), for every provider the
+    /// merge sees: also EZTV's / T4P's `ByteCountFormatter` labels in the
+    /// user's locale ("1,46 Go", Arabic-Indic digits), which the former
+    /// "GB" / "MB" scan read as a few bytes, so the size cap let a 55 GB
+    /// release through (`StreamBandwidth.bytes(fromSizeLabel:)`).
     static func sizeInBytes(_ raw: String?) -> Int64? {
-        guard let raw = raw?.uppercased() else { return nil }
-        let scanner = Scanner(string: raw)
-        guard let value = scanner.scanDouble() else { return nil }
-        if raw.contains("GB") { return Int64(value * 1024 * 1024 * 1024) }
-        if raw.contains("MB") { return Int64(value * 1024 * 1024) }
-        if raw.contains("KB") { return Int64(value * 1024) }
-        return Int64(value)
+        return StreamBandwidth.bytes(fromSizeLabel: raw)
     }
 
     static func infoHash(fromMagnet magnet: String) -> String? {

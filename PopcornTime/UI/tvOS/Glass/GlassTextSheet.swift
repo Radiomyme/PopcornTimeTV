@@ -45,6 +45,7 @@ struct GlassTextSheet: View {
             .buttonStyle(GlassSheetPanelStyle())
             .focused($isFocused)
             .onExitCommand(perform: onClose)
+            .accessibilityIdentifier("Detail.TextSheet")
         }
         .onAppear { isFocused = true }
         .transition(.opacity.combined(with: .scale(scale: 0.97)))

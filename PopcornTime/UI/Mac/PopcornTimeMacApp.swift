@@ -1,8 +1,9 @@
 
 
+import Foundation
+import AppKit
 import SwiftUI
 import PopcornKit
-import GCDWebServer
 import VLCKit
 
 /// Native macOS app entry point. Shares the whole core with iOS/tvOS —
@@ -15,20 +16,19 @@ import VLCKit
 @main
 struct PopcornTimeMacApp: App {
     init() {
+        // GCDWebServer (torrent streaming + remux HLS servers): quiet about
+        // the players' cancelled requests. First: -PTDebugHTTPTrace replaces it.
+        GCDWebServerLogging.configure()
         #if DEBUG
         // Bounded-storage verification runs: the loopback-only torrent
         // session and the download directory, before anything uses them.
         BoundedStorageDebugHooks.prepareAtLaunch()
+        MacKeyWindowTrace.installIfRequested()
         #endif
         // VLCKit 4 delivers player callbacks on a background queue by default;
         // restore main-thread delivery before any player exists (same rationale
         // as the iOS/tvOS apps).
         VLCLibrary.sharedEventsConfiguration = VLCEventsLegacyConfiguration()
-
-        // Silence GCDWebServer's per-chunk "[DEBUG] Connection sent…" console
-        // flood from both the torrent streaming server and the remux HLS
-        // server. 3 = warnings and up (same as the iOS/tvOS apps).
-        GCDWebServer.setLogLevel(3)
 
         // Pre-warm the provider chain (same as the iOS app).
         _ = MediaProviders.shared
@@ -91,3 +91,30 @@ private struct MacWhatsNewCommand: View {
         Button("What's New…") { openWindow(id: MacWhatsNewWindow.id) }
     }
 }
+
+#if DEBUG
+/// `-PTDebugKeyWindowTrace YES`: every `-[NSWindow makeKeyWindow]` sent to a
+/// window that cannot become key (AppKit then logs "Warning: -[NSWindow
+/// makeKeyWindow] called on … which returned NO from canBecomeKeyWindow")
+/// prints the window and the call stack, to tell our calls from AppKit's.
+enum MacKeyWindowTrace {
+    static func installIfRequested() {
+        guard UserDefaults.standard.bool(forKey: "PTDebugKeyWindowTrace"),
+              let method = class_getInstanceMethod(NSWindow.self, #selector(NSWindow.makeKey)) else { return }
+        typealias MakeKey = @convention(c) (NSWindow, Selector) -> Void
+        let original = unsafeBitCast(method_getImplementation(method), to: MakeKey.self)
+        let selector = #selector(NSWindow.makeKey)
+        let replacement: @convention(block) (NSWindow) -> Void = { window in
+            if !window.canBecomeKey {
+                let parent = window.parent.map { "\(type(of: $0)) #\($0.windowNumber)" } ?? "none"
+                print("[KeyTrace] makeKeyWindow on \(type(of: window)) #\(window.windowNumber) frame \(NSStringFromRect(window.frame)) "
+                      + "parent \(parent) sheet \(window.isSheet) key now: \(NSApp.keyWindow.map { "\(type(of: $0)) #\($0.windowNumber)" } ?? "none")")
+                print(Thread.callStackSymbols.prefix(28).map { "[KeyTrace]   " + $0 }.joined(separator: "\n"))
+            }
+            original(window, selector)
+        }
+        method_setImplementation(method, imp_implementationWithBlock(replacement))
+        print("[KeyTrace] on")
+    }
+}
+#endif

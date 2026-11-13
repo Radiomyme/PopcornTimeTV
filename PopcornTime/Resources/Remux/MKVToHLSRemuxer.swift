@@ -467,12 +467,12 @@ final class MKVToHLSRemuxSession {
         let snapshot = progress
         let expected = expectedSegmentCount
         var parts = ["\(snapshot.segmentsWritten)/\(expected > 0 ? String(expected) : "?") segments",
-                     "\(Int(snapshot.mediaSeconds)) s remuxées"]
+                     "\(Int(snapshot.mediaSeconds)) s remuxed"]
         let (audioCount, subtitleCount) = lock.withLock { (lockedAudio.count, lockedSubtitles.count) }
         if lockedVideoAvailable {
-            parts.append("vidéo + \(audioCount) audio" + (subtitleCount > 0 ? " + \(subtitleCount) sous-titres" : ""))
+            parts.append("video + \(audioCount) audio" + (subtitleCount > 0 ? " + \(subtitleCount) subtitles" : ""))
         }
-        if snapshot.finished { parts.append("terminé") }
+        if snapshot.finished { parts.append("finished") }
         return parts.joined(separator: " · ")
     }
 

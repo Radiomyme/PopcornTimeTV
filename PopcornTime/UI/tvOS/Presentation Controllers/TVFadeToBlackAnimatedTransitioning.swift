@@ -14,10 +14,25 @@ class TVFadeToBlackAnimatedTransitioning: NSObject, UIViewControllerAnimatedTran
     }
     
     func transitionDuration(using transitionContext: UIViewControllerContextTransitioning?) -> TimeInterval {
-        return 1.0
+        return transitionContext?.isAnimated == false ? 0 : 1.0
     }
     
     func animateTransition(using transitionContext: UIViewControllerContextTransitioning)  {
+        // A presentation or dismissal asked without animation (UIKit still
+        // calls a custom animator): done at once.
+        guard transitionContext.isAnimated else {
+            if isPresenting, let view = transitionContext.view(forKey: .to) {
+                transitionContext.containerView.addSubview(view)
+                view.frame = transitionContext.containerView.bounds
+            } else {
+                if let presenting = transitionContext.view(forKey: .to) {
+                    transitionContext.containerView.insertSubview(presenting, at: 0)
+                }
+                transitionContext.view(forKey: .from)?.removeFromSuperview()
+            }
+            transitionContext.completeTransition(!transitionContext.transitionWasCancelled)
+            return
+        }
         isPresenting ? animatePresentationWithTransitionContext(transitionContext) : animateDismissalWithTransitionContext(transitionContext)
     }
     

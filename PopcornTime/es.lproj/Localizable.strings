@@ -597,6 +597,7 @@
 "Popcorn Time is free and open-source software." = "Popcorn Time es software libre y de código abierto.";
 "In Watchlist" = "En Mi lista";
 "Add to Watchlist" = "Añadir a Mi lista";
+"Remove from Watchlist" = "Quitar de Mi lista";
 "Mark as Watched" = "Marcar como visto";
 "Mark as Unwatched" = "Marcar como no visto";
 "Download" = "Descargar";
@@ -670,3 +671,42 @@
 "BoundedStorage.NotEnoughSpace.Generic" = "No hay suficiente espacio libre para reproducir este vídeo, ni siquiera con almacenamiento limitado. Libera espacio y vuelve a intentarlo.";
 "BoundedStorage.FileError.Message" = "No se ha podido guardar el vídeo en el almacenamiento (%@).";
 "BoundedStorage.TryLowerQuality" = "¿Quieres probar con una calidad inferior?";
+
+/* Quality pickers: estimated bitrate of a release and its warning when recent downloads (the connection, or its swarms) are slower (ConnectionSpeed.swift) */
+"Bandwidth.Bitrate" = "≈ %d Mb/s";
+"Bandwidth.Warning.Connection" = "Puede ir a saltos: tus descargas llegan a unos %d Mb/s";
+"Bandwidth.Warning.Heavy" = "Muy pesado: puede ir a saltos";
+
+/* Loading screen phases (LoadingPhase.swift) */
+"LoadingPhase.LookingForPeers" = "Buscando pares…";
+"LoadingPhase.GettingDetails" = "Obteniendo la información del torrent…";
+"LoadingPhase.GettingDetails.Connected" = "Obteniendo la información del torrent… (conectados: %d)";
+"LoadingPhase.NotResponding.NoPeers" = "Esta fuente no responde (0 pares). Prueba con otra.";
+"LoadingPhase.NotResponding.NoDetails" = "Esta fuente no envía la información del torrent. Prueba con otra.";
+"LoadingPhase.NotResponding.NoData" = "Esta fuente no envía ningún dato. Prueba con otra.";
+"LoadingPhase.ChooseAnotherSource" = "Elegir otra fuente";
+"LoadingPhase.KeepWaiting" = "Seguir esperando";
+
+/* Over the video when the download is slower than the release (BandwidthDeficit.swift): %1$@ = the release's bitrate, %2$@ = the download rate, both in megabits per second ("72", "5.5"); the buttons switch to a lighter release at the same time, or keep this one. */
+"BandwidthDeficit.Message" = "Esta versión necesita ~%1$@ Mb/s y la descarga solo da ~%2$@: la reproducción se va a interrumpir.";
+"BandwidthDeficit.Lighter" = "Versión más ligera";
+"BandwidthDeficit.Continue" = "Continuar";
+
+/* Player loading screen while buffering (Mac): connected seeds and download speed in kilobytes per second. */
+"PlayerLoading.Swarm" = "Semillas: %1$d · %2$d KB/s";
+
+/* Loading screen (tvOS): connected seeds, a count-neutral form. Busy card while an episode's sources load (tvOS). Quality pickers (iOS, macOS): badge of the recommended release. Spinner (macOS), for VoiceOver. */
+"PlayerLoading.Seeds" = "Semillas: %d";
+"Sources.Loading" = "Buscando fuentes…";
+"Picker.Recommended" = "Recomendado";
+"Spinner.Loading" = "Cargando…";
+
+/* Apple TV: a release that does not fit the app's cache (%@ = its quality, 1080p…; the smaller release's). Native player: resume question while the file still downloads (%@ = the position, 1:02:07). */
+"DiskFull.Title" = "No hay espacio suficiente para la versión %@";
+"DiskFull.Message" = "El Apple TV no tiene espacio suficiente en la caché de la app para descargar este torrent. ¿Pruebas una calidad inferior?";
+"DiskFull.RetryIn" = "Reintentar en %@";
+"DiskFull.RetryLower" = "Probar una calidad inferior";
+"Remux.Resume.Title" = "¿Reanudar la reproducción?";
+"Remux.Resume.Message" = "Este archivo aún se está descargando: para reanudar rápido se usa el reproductor VLC. Desde el principio, la reproducción sigue siendo nativa (HDR, Dolby Atmos).";
+"Remux.Resume.At" = "Reanudar en %@";
+"Remux.Resume.FromStart" = "Empezar desde el principio";

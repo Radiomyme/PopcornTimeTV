@@ -6,7 +6,6 @@ import Reachability
 import ObjectMapper
 import MarqueeLabel
 import VLCKit
-import GCDWebServer
 import AlamofireImage
 
 public let vlcSettingTextEncoding = "subsdec-encoding"
@@ -51,6 +50,9 @@ class AppDelegate: UIResponder, UIApplicationDelegate, UITabBarControllerDelegat
 
     func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?) -> Bool {
         print("[App] didFinishLaunching tosAccepted=\(UserDefaults.standard.bool(forKey: "tosAccepted"))")
+        // GCDWebServer (torrent streaming + remux HLS servers): quiet about
+        // the players' cancelled requests. First: -PTDebugHTTPTrace replaces it.
+        GCDWebServerLogging.configure()
         #if DEBUG
         // Bounded-storage verification runs: the loopback-only torrent
         // session and the download directory, before anything uses them.
@@ -65,11 +67,6 @@ class AppDelegate: UIResponder, UIApplicationDelegate, UITabBarControllerDelegat
         // legacy events configuration restores VLCKit 3.x behaviour (callbacks
         // on the main thread). Must be set before any VLCMediaPlayer is created.
         VLCLibrary.sharedEventsConfiguration = VLCEventsLegacyConfiguration()
-
-        // Silence GCDWebServer (PopcornTorrent's HTTP streaming server): in
-        // debug builds it logs "[DEBUG] Connection sent N bytes on socket X"
-        // for every chunk, drowning the console. 3 = warnings and up.
-        GCDWebServer.setLogLevel(3)
 
         // metahub serves some posters as WebP (recent titles, often in the
         // Top 100), which AlamofireImage refused by content type: the grids
@@ -169,7 +166,8 @@ class AppDelegate: UIResponder, UIApplicationDelegate, UITabBarControllerDelegat
                 let segue = AutoPlayStoryboardSegue(identifier: type, source: vc, destination: loadingViewController)
                 vc.prepare(for: segue, sender: media)
 
-                tabBarController.tabBar.isHidden = true
+                // The tab bar stays (tvOS hides it while the page has the
+                // focus): hidden here, nothing ever showed it again.
                 vc.navigationController?.push(loadingViewController, animated: true)
             }
         }
