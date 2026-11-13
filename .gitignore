@@ -15,3 +15,6 @@ Pods/
 # Secrets
 Secrets.xcconfig
 .env
+
+# macOS Finder (the .DS_Store at the root is still tracked: `git rm --cached .DS_Store` to drop it)
+.DS_Store

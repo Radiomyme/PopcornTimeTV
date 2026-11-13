@@ -45,11 +45,16 @@ The same notes are shown once in the app after the update (`WhatsNewRelease.curr
   takes the episode's own file: the file the source names (Time4Popcorn's file name), the
   magnet's `so=`, else the video file named after the episode (S01E03, S01EP03, 1x03, Cap.103,
   "S1 - 03", "Season 1 E03"…, a range such as S01E01-E03; E01 never taken for E10), else, in a
-  folder or torrent named after the season, the file numbered on its own ("Episode 03", "03 -
-  Title", "103"). Samples are left out when they are much smaller than the episodes (a show
-  called *Trailer Park Boys* is not a trailer). A pack without the episode now fails with
+  folder or torrent named after the season (or a batch that names none, "(01-28) [Batch]", a
+  "Complete" miniseries), the file numbered on its own ("Episode 03", "03 - Title", "Show -
+  03", "Part 3", "3of6", "Серия 03", "103"). A `so=` file numbered absolutely is played when it
+  is the episode's place in the season ("S03 - 50" for S03E13 in a pack from 38). Samples are
+  left out when they are much smaller than the episodes, also when the source names one (a
+  show called *Trailer Park Boys* is not a trailer). A pack without the episode now fails with
   "This torrent does not contain the requested episode. Please choose another source." instead
-  of playing its largest file, another episode. Single-file torrents and movies play as before.
+  of playing its largest file, another episode, and offers *Choose another source* (on Apple
+  TV that pack is also left out of the title's automatic picks). Two episodes downloaded from one pack each keep
+  their own folder. Single-file torrents and movies play as before.
 - A quieter console (GCDWebServer and libvlc errors only).
 
 **Torrent engine (every platform)**
@@ -58,7 +63,8 @@ The same notes are shown once in the app after the update (`WhatsNewRelease.curr
   one request at a time). The pieces ahead of the read position are fetched in file order at
   high priority, a deadline is set only on a piece a reader waits for once it is late, peers no
   longer take whole pieces each, and requests held by peers far slower than the rest are
-  cancelled when they would make a needed piece late.
+  cancelled when they would make a needed piece late. After a forward seek or a resume, the
+  pieces ahead of the reader come before the part skipped behind it.
 - **More of the swarm**: more peers and connections (Apple TV 100 per torrent / 200 in all,
   iPhone / iPad 80 / 160, Mac 100 / 400; the app's limit of open files is raised so these apply),
   faster connection attempts and timeouts (kept moderate for home routers), every
@@ -84,7 +90,8 @@ The same notes are shown once in the app after the update (`WhatsNewRelease.curr
 - Play/Pause on a poster opens the title and plays it, also on a Continue Watching card (on a
   page: the focused episode, a related title, or what Play plays); holding Select on a poster
   offers Play, Watchlist and Watched. Search shows its
-  keyboard at once, and VoiceOver reads every poster's title.
+  keyboard at once, Up from its results goes back to the keyboard and the tab bar (it used to
+  loop back to the first result), and VoiceOver reads every poster's title.
 
 **Tests** (see [Tests](#tests))
 - ⌘U runs the app's unit tests on the Mac in seconds, offline; PopcornTorrent's own tests no
@@ -334,13 +341,17 @@ tools/run-tests.sh full     # quick + the long benches, the independent ones in 
 tools/run-tests.sh clean    # forget the cached builds
 ```
 
+PopcornTorrent's suites need a clone of it: the workspace's local package when you point it at
+one, else `POPCORNTORRENT_DIR=<clone> tools/run-tests.sh`. Without either (a plain clone of this
+repository) they are skipped, and the summary says so.
+
 | Suite | Mode | Time |
 |---|---|---|
 | PopcornTimeTests (macOS) | quick | ~8 s (+ ~20 s when a source changed, ~70 s from scratch) |
 | PopcornTorrentLogicTests, PopcornTorrent-Tests (offline, sandboxed) | quick | ~8 s |
-| PopcornTorrent SessionHarness: 6 modes and the network settings of the 3 profiles, in parallel (sandboxed) | full | ~3 min |
-| P10 / B6: a real AVPlayer on a 20 s clip (needs `format-coverage-wip`) | full | ~3 min |
-| Remux e2e engine, then the F3 bench (needs `PT_FORMAT_BENCH`, see `format-coverage-wip/REPRISE.md`) | full | ~17 min + ~90 min |
+| PopcornTorrent SessionHarness: 10 modes and the network settings of the 3 profiles, in parallel (sandboxed) | full | ~3 min |
+| P10 / B6: a real AVPlayer on a 20 s clip (local benches, not in the repository: skipped without them) | full | ~3 min |
+| Remux e2e engine, then the F3 bench (local benches, not in the repository; `PT_FORMAT_BENCH`) | full | ~17 min + ~90 min |
 | Bounded-storage disk-image runs (`PT_BOUNDED_RUNS=1`) | full | ~5 min |
 
 Builds, stamps and logs go to `~/Library/Caches/PopcornTimeTV-tests` (`PT_TEST_CACHE`): a test
@@ -353,8 +364,9 @@ can reach a tracker, the DHT or a peer outside 127.0.0.1.
 drives the tvOS app on an Apple TV simulator with the remote (`XCUIRemote`): Back to the Top
 100, Trending and Shows grids (same poster, same place, no movement), Menu while a page slides
 in, on a slow loading screen and on a load error, a page's summary and shelves, a show's
-episodes, the quality chooser, the poster menu, Settings, Search, Downloads, the Watchlist and
-What's New. 17 tests, about 5 minutes. They read the public catalog APIs, never press Play, and
+episodes, the quality chooser, the poster menu, Settings, Search (Up from its results back to
+the tab bar), Downloads, the Watchlist and What's New, Menu pressed twice or three times in
+quick succession, and Menu with the focus in the tab bar. 21 tests, about 6 minutes. They read the public catalog APIs, never press Play, and
 set the app up with DEBUG launch arguments, so they are built with the DEBUG condition (the app
 for x86_64, the test runner for arm64):
 

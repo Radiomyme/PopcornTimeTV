@@ -11,9 +11,10 @@
 #                               xctest directly (xcodebuild alone costs ~15 s per run).
 #   tools/run-tests.sh full     quick, then the long benches, the independent ones in parallel; a
 #                               bench whose kit is not on this Mac is skipped with a note:
-#                               - PopcornTorrent's SessionHarness, 6 modes and the network settings
+#                               - PopcornTorrent's SessionHarness, 10 modes and the network settings
 #                                 of the tvOS / iOS / Mac profiles (offline, sandboxed)          ~2.5 min
-#                               - P10 and B6 (a real AVPlayer on a 20 s clip; format-coverage-wip)  ~3 min
+#                               - P10 and B6 (a real AVPlayer on a 20 s clip; format-coverage-wip, a
+#                                 local bench folder, not in the repository)                    ~3 min
 #                               - with PT_FORMAT_BENCH=<restored bench folder>: the remux e2e engine
 #                                 (~17 min), then the F3 bench (~90 min), see format-coverage-wip/REPRISE.md
 #                               - with PT_BOUNDED_RUNS=1: the bounded-storage disk-image runs   ~5 min
@@ -65,10 +66,11 @@ fork_dir() {
 
 # A short hash of the content of a git tree's inputs (the files as they are on disk, tracked or
 # not): a commit that leaves them as they are (a README) does not change it, so nothing is rebuilt.
+# Finder's .DS_Store files are not inputs.
 inputs_hash() {
   local dir=$1; shift
   local files=$(git -C $dir ls-files --cached --others --exclude-standard -- "$@" |
-      while IFS= read -r file; do [[ -f $dir/$file ]] && print -r -- $file; done | sort -u)
+      while IFS= read -r file; do [[ -f $dir/$file && ${file:t} != .DS_Store ]] && print -r -- $file; done | sort -u)
   { print -r -- $files; print -r -- $files | git -C $dir hash-object --stdin-paths } | shasum | cut -c1-16
 }
 
@@ -79,7 +81,10 @@ executed() { grep -E 'Executed [0-9]+ tests?' $1 | tail -1 | sed -E 's/^[[:space
 
 app_tests() {
   local start=$EPOCHREALTIME dd=${PT_APP_DERIVED_DATA:-$CACHE/app-dd} stamp=$CACHE/app.stamp hash f
-  hash=$(inputs_hash $REPO PopcornKit PopcornTime/Resources PopcornTime/Startup PopcornTimeTests PopcornTime.xcodeproj)
+  # The workspace too: its package pins (Package.resolved) and a local package override decide
+  # which PopcornTorrent the bundle is built against.
+  hash=$(inputs_hash $REPO PopcornKit PopcornTime/Resources PopcornTime/Startup PopcornTimeTests PopcornTime.xcodeproj \
+      PopcornTime.xcworkspace/contents.xcworkspacedata PopcornTime.xcworkspace/xcshareddata/swiftpm/Package.resolved)
   f=$(fork_dir); [[ -n $f ]] && hash=$hash-$(inputs_hash $f PopcornTorrent Package.swift Package.resolved)
   local products=$dd/Build/Products/Debug built=cached
   if [[ ! -d $products/PopcornTimeTests.xctest || $(cat $stamp 2>/dev/null) != $hash ]]; then
@@ -137,8 +142,8 @@ fork_tests() {
 
 # MARK: - Full: SessionHarness (PopcornTorrent), its runs in parallel
 
-# The six session modes, and the network settings of each platform's profile (mode:profile).
-SESSION_MODES=(zombie starve guest background legacy premetadata network:tv network:ios network:mac)
+# The session modes, and the network settings of each platform's profile (mode:profile).
+SESSION_MODES=(zombie starve guest background legacy premetadata nofile packs restart trackers network:tv network:ios network:mac)
 
 session_harness() {
   local start=$EPOCHREALTIME f=$(fork_dir) build=$CACHE/harness-build
