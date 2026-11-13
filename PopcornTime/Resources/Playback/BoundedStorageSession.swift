@@ -825,6 +825,10 @@ enum StreamFailure {
     case notEnoughSpaceForBoundedStorage(bytesToFree: Int64)
     /// Another file error (I/O, permissions). PopcornTorrent -6.
     case fileError
+    /// The torrent does not hold the episode asked for (a season pack
+    /// without it): no file was chosen. PopcornTorrent -9. The flows offer
+    /// another source and leave this one out of the title's picks.
+    case episodeNotInTorrent
     case other
 
     init(_ error: Error, streamer: PTTorrentStreamer?) {
@@ -850,6 +854,8 @@ enum StreamFailure {
                 : 0)
         case PTTorrentStreamerError.Code.file.rawValue:
             self = .fileError
+        case PTTorrentStreamerError.Code.noFileSelected.rawValue:
+            self = .episodeNotInTorrent
         default:
             self = .other
         }
@@ -860,7 +866,7 @@ enum StreamFailure {
     var isDiskSpace: Bool {
         switch self {
         case .notEnoughSpace, .notEnoughSpaceForBoundedStorage: return true
-        case .fileError, .other: return false
+        case .fileError, .episodeNotInTorrent, .other: return false
         }
     }
 
@@ -885,7 +891,7 @@ enum StreamFailure {
                                                     value: "The video could not be written to storage (%@).",
                                                     comment: "File error while streaming; %@ = system message"),
                           error.localizedDescription)
-        case .notEnoughSpace, .other:
+        case .notEnoughSpace, .episodeNotInTorrent, .other:
             return nil
         }
     }

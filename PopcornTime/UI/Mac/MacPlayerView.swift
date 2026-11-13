@@ -220,7 +220,15 @@ private struct MacPlayerSession: View {
                     .font(.callout)
                     .foregroundStyle(.secondary)
             }
-            if controller.loadingPhase.isNotResponding {
+            if controller.episodeNotInTorrent {
+                // A season pack without the episode: the title's other releases.
+                if !alternatives.isEmpty {
+                    Button(LoadingPhase.chooseAnotherSourceTitle) { onChooseAnotherSource(playback.torrent) }
+                        .buttonStyle(.borderedProminent)
+                        .keyboardShortcut(.defaultAction)
+                        .padding(.top, 4)
+                }
+            } else if controller.loadingPhase.isNotResponding {
                 HStack(spacing: 12) {
                     if !alternatives.isEmpty {
                         Button(LoadingPhase.chooseAnotherSourceTitle) { onChooseAnotherSource(playback.torrent) }
@@ -260,6 +268,9 @@ final class MacPlayerController: ObservableObject {
     @Published private(set) var showsLoadingSpinner = true
     /// Buffering, but minutes from playing (`LoadingPhaseTracker.isSlow`).
     @Published private(set) var loadingIsSlow = false
+    /// The stream failed because the torrent lacks the episode (a season
+    /// pack, PopcornTorrent -9): the loading screen offers another source.
+    @Published private(set) var episodeNotInTorrent = false
     /// The download against the release's bitrate (`BandwidthDeficitBanner`).
     @Published private(set) var deficitMonitor: BandwidthDeficitMonitor?
     /// The offer shown now (DEBUG snapshots).
@@ -489,7 +500,9 @@ final class MacPlayerController: ObservableObject {
                 guard let self = self else { return }
                 // Not enough space even for bounded storage (-5: how much to
                 // free), another file error (-6), or the error's own text.
-                let message = StreamFailure(error, streamer: self.streamer).message(underlying: error) ?? error.localizedDescription
+                let failure = StreamFailure(error, streamer: self.streamer)
+                let message = failure.message(underlying: error) ?? error.localizedDescription
+                if case .episodeNotInTorrent = failure { self.episodeNotInTorrent = true }
                 self.loadingDone = true
                 self.showsLoadingSpinner = false
                 self.loadingPhase = .starting

@@ -453,6 +453,20 @@ extension AppDelegate {
                     })
                     alert.addAction(UIAlertAction(title: "Cancel".localized, style: .cancel, handler: nil))
                     alert.show(animated: true)
+                } else if case .episodeNotInTorrent? = failure {
+                    // A season pack without the episode (PopcornTorrent -9):
+                    // left out of this title's pickers and automatic picks
+                    // (an automatic pick took the same pack again), and the
+                    // quality picker one press away.
+                    AppDelegate.unansweredSources[media.id, default: []].insert(AppDelegate.sourceKey(torrent.url))
+                    let alert = UIAlertController(title: "Error".localized, message: errorMessage, preferredStyle: .alert)
+                    alert.addAction(UIAlertAction(title: LoadingPhase.chooseAnotherSourceTitle, style: .default) { _ in
+                        self.chooseQuality(nil, media: media) { torrent in
+                            self.play(media, torrent: torrent)
+                        }
+                    })
+                    alert.addAction(UIAlertAction(title: "Cancel".localized, style: .cancel, handler: nil))
+                    alert.show(animated: true)
                 } else {
                     let alert = UIAlertController(title: "Error".localized, message: errorMessage, preferredStyle: .alert)
                     alert.addAction(UIAlertAction(title: "OK".localized, style: .cancel, handler: nil))

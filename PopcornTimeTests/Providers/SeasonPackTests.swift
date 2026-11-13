@@ -3,7 +3,9 @@
 //  PopcornTimeTests
 //
 //  Season packs: which file of a multi-file torrent a stream of an episode plays
-//  (`WantedFile`, PopcornKit/Models/Torrent.swift), never another episode. Pure, offline;
+//  (`WantedFile`, PopcornKit/Models/Torrent.swift), never another episode. The names are
+//  what PopcornTorrent passes the selection: each file's path inside the torrent, its
+//  folders included ("Show.S01.1080p/Season 1/01.mkv"). Pure, offline;
 //  section 9 runs on Time4Popcorn's recorded House of the Dragon answer
 //  (Fixtures/Packs/t4p_house_of_the_dragon.json: the fields the parser reads, magnets
 //  without their trackers). (Port of the season-pack harness: 396 checks.)
@@ -116,8 +118,11 @@ final class SeasonPackTests: CheckedTestCase {
         check(want(1, 3).choice(fileNames: ["Show.S01E01.mkv", "Show.S01E03.sample.mkv", "Show.S01E02.mkv"], fileSizes: [5, 1, 5])
               == .notInTorrent, "only the sample of the episode: not in the pack")
         let absolute = ["[Group] Show - 01 [1080p].mkv", "[Group] Show - 02 [1080p].mkv", "[Group] Show - 03 [1080p].mkv"]
-        check(want(1, 2).choice(fileNames: absolute, fileSizes: [1, 2, 3], torrentName: "[Group] Show (Season 1) [1080p]") == .notInTorrent,
-              "absolute numbering in a torrent named as a season: not played blindly")
+        check(want(1, 2).choice(fileNames: absolute, fileSizes: [1, 2, 3], torrentName: "[Group] Show (Season 1) [1080p]") == .file(1),
+              "Show - 02 in a torrent named as season 1")
+        let absolute2 = ["[Group] Show - 13 [1080p].mkv", "[Group] Show - 14 [1080p].mkv", "[Group] Show - 15 [1080p].mkv"]
+        check(want(2, 1).choice(fileNames: absolute2, fileSizes: [1, 2, 3], torrentName: "[Group] Show (Season 2) [1080p]") == .notInTorrent,
+              "absolute numbering (13-15) in a torrent named as season 2: not played blindly")
         check(want(1, 2).choice(fileNames: absolute, fileSizes: [1, 2, 3], torrentName: "[Group] Show [1080p]") == .usualRule,
               "absolute numbering, no pack name: as before")
         check(want(1, 2).choice(fileNames: absolute, fileSizes: [1, 2, 3], torrentName: nil) == .usualRule, "absolute numbering, no name")
@@ -174,6 +179,100 @@ final class SeasonPackTests: CheckedTestCase {
         check(ReleaseName.singleSeason(of: "Show.2160p.x265") == nil, "no season")
         check(ReleaseName.episodeNumberInSeason("Show.1080p.x264.mkv", season: 1) == nil, "1080p, x264: no number")
         check(ReleaseName.episodeNumberInSeason("Show.720p.mkv", season: 7) == nil, "720p is not S07E20")
+    }
+
+    /// Torrentio's so= in packs numbered absolutely: "S03 - 50" is S03E13 when the season's
+    /// files run from 38 (Attack on Titan, Jujutsu Kaisen); never another season's file.
+    func testAbsoluteNumberingSo() {
+        let pnpName = "[PnP] Shingeki no Kyojin S03 [38-59] (1080p) [Batch]"
+        let pnp = (38...59).map { "\(pnpName)/[PnP] Shingeki no Kyojin S03 - \($0) (1080p).mkv" }
+        let pnpSizes = [Int64](repeating: 1_400_000_000, count: pnp.count)
+        check(want(3, 13).choice(fileNames: pnp, fileSizes: pnpSizes, preferredIndex: 12, torrentName: pnpName) == .file(12),
+              "AoT S03E13: so= on S03 - 50, the 13th from 38")
+        check(want(3, 1).choice(fileNames: pnp, fileSizes: pnpSizes, preferredIndex: 0, torrentName: pnpName) == .file(0), "AoT S03E01: S03 - 38")
+        check(want(3, 13).choice(fileNames: pnp, fileSizes: pnpSizes, preferredIndex: 10, torrentName: pnpName) == .notInTorrent,
+              "so= on S03 - 48 for S03E13: not its place")
+        check(want(3, 13).choice(fileNames: pnp, fileSizes: pnpSizes, torrentName: pnpName) == .notInTorrent, "no so=: not played blindly")
+        let hs = (1...25).map { String(format: "[HorribleSubs] Shingeki no Kyojin S1 - %02d [1080p].mkv", $0) }
+            + (26...37).map { "[HorribleSubs] Shingeki no Kyojin S2 - \($0) [1080p].mkv" }
+            + (38...59).map { "[HorribleSubs] Shingeki no Kyojin S3 - \($0) [1080p].mkv" }
+        let hsSizes = [Int64](repeating: 500_000_000, count: hs.count)
+        let s3e13 = hs.firstIndex(of: "[HorribleSubs] Shingeki no Kyojin S3 - 50 [1080p].mkv")!
+        check(want(3, 13).choice(fileNames: hs, fileSizes: hsSizes, preferredIndex: s3e13,
+                                 torrentName: "[HorribleSubs] Shingeki no Kyojin S1 + S2 + S3 (Unofficial Batch)") == .file(s3e13),
+              "AoT S3 - 50 in a three-season batch")
+        let jjk = (25...47).map { "Jujutsu.Kaisen.S02E\($0).1080p.WEB.x264-iDN_CreW.mkv" }
+        check(want(2, 1).choice(fileNames: jjk, fileSizes: [Int64](repeating: 9, count: jjk.count), preferredIndex: 0,
+                                torrentName: "Jujutsu.Kaisen.S02.1080p.WEB.x264-iDN_CreW") == .file(0), "JJK S02E01: S02E25")
+        let ad = (1...10).map { String(format: "American.Dad.S11E%02d.720p.WEB.x264.mkv", $0) }
+        check(want(2, 1).choice(fileNames: ad, fileSizes: [Int64](repeating: 9, count: ad.count), preferredIndex: 7,
+                                torrentName: "American.Dad.S11.720p.WEB") == .notInTorrent, "American Dad S02E01: so= on S11E08 refused")
+        let mixed = ["Show.S03E13.mkv", "Show.S03E40.mkv", "Show.S03E41.mkv"]
+        check(want(3, 13).choice(fileNames: mixed, fileSizes: [5, 5, 5], preferredIndex: 1) == .file(0), "a file naming the episode wins over so=")
+    }
+
+    /// Time4Popcorn names a sample as the episode's file: the episode plays, not its 8 MB sample.
+    func testTheSourcesFileNameIsNeverASample() {
+        let names = ["The.Simpsons.11x13/the.simpsons.11x13.dvdrip.xvid-ositv.avi",
+                     "The.Simpsons.11x13/Sample/sample-the.simpsons.11x13.dvdrip.xvid-ositv.avi",
+                     "The.Simpsons.11x13/the.simpsons.11x13.dvdrip.xvid-ositv.nfo"]
+        let sizes: [Int64] = [183_000_000, 8_835_072, 4_000]
+        check(want(11, 13, "Sample/sample-the.simpsons.11x13.dvdrip.xvid-ositv.avi").choice(fileNames: names, fileSizes: sizes) == .file(0),
+              "Simpsons 11x13: the episode, not the sample T4P names")
+        check(WantedFile(fileName: "sample-movie.2019.1080p.mkv")!.choice(fileNames: ["Movie.2019/movie.2019.1080p.mkv", "Movie.2019/Sample/sample-movie.2019.1080p.mkv"],
+                                                                          fileSizes: [8_000_000_000, 50_000_000]) == .usualRule,
+              "a movie whose source names its sample: the usual rule (the largest)")
+    }
+
+    /// Files numbered on their own in a pack that names its season (or none): "Show - 05",
+    /// "Part 3", "3of6", "Серия 03", "第03集", and a show called by a number ("24").
+    func testFilesNumberedOnTheirOwn() {
+        let kimetsuName = "[Judas] Kimetsu no Yaiba (Season 1) [1080p][HEVC x265 10bit][Multi-Subs] (Batch)"
+        let kimetsu = (1...26).map { String(format: "%@/[Judas] Kimetsu no Yaiba - %02d.mkv", kimetsuName, $0) }
+        let sizes26 = [Int64](repeating: 7, count: 26)
+        check(want(1, 5).choice(fileNames: kimetsu, fileSizes: sizes26, torrentName: kimetsuName) == .file(4), "Kimetsu - 05 in a Season 1 batch")
+        check(want(2, 5).choice(fileNames: kimetsu, fileSizes: sizes26, torrentName: kimetsuName) == .notInTorrent, "not S02E05")
+        let expanse = (1...13).map { String(format: "The Expanse Season 2/The Expanse - %02d - Title %d.mkv", $0, $0) }
+        check(want(2, 5).choice(fileNames: expanse, fileSizes: [Int64](repeating: 7, count: 13), torrentName: "The Expanse Season 2") == .file(4),
+              "The Expanse - 05 - Title")
+        let t24 = (1...24).map { String(format: "24 Season 1/24 - %02d - Title.avi", $0) }
+        let sizes24 = [Int64](repeating: 7, count: 24)
+        check(want(1, 5).choice(fileNames: t24, fileSizes: sizes24, torrentName: "24 Season 1") == .file(4), "24 - 05: 05, not the show's 24")
+        check(want(1, 24).choice(fileNames: t24, fileSizes: sizes24, torrentName: "24 Season 1") == .file(23), "24 - 24")
+        let chernobyl = (1...5).map { "Chernobyl.Part.\($0).1080p.WEB.H264.mkv" }
+        check(want(1, 3).choice(fileNames: chernobyl, fileSizes: [7, 7, 7, 7, 7], torrentName: "Chernobyl.Complete.1080p.WEB.H264") == .file(2),
+              "Chernobyl Part.3 in a Complete miniseries")
+        let earth = (1...6).map { "Planet.Earth.II.\($0)of6.1080p.mkv" }
+        check(want(1, 4).choice(fileNames: earth, fileSizes: [7, 7, 7, 7, 7, 7], torrentName: "Planet.Earth.II.Complete.1080p") == .file(3), "4of6")
+        let russian = (1...8).map { String(format: "Сезон 2/Серия %02d.mkv", $0) }
+        check(want(2, 3).choice(fileNames: russian, fileSizes: [Int64](repeating: 7, count: 8), torrentName: "Шоу") == .file(2), "Сезон 2/Серия 03")
+        let chinese = (1...8).map { String(format: "第%02d集.mp4", $0) }
+        check(want(1, 2).choice(fileNames: chinese, fileSizes: [Int64](repeating: 7, count: 8), torrentName: "Show.S01.1080p") == .file(1), "第02集")
+        let batchName = "[SubsPlease] Show (01-28) (1080p) [Batch]"
+        let batch = (1...28).map { String(format: "%@/[SubsPlease] Show - %02d (1080p) [ABCD1234].mkv", batchName, $0) }
+        let sizes28 = [Int64](repeating: 7, count: 28)
+        check(want(1, 5).choice(fileNames: batch, fileSizes: sizes28, torrentName: batchName) == .file(4), "a (01-28) batch is season 1")
+        check(want(2, 5).choice(fileNames: batch, fileSizes: sizes28, torrentName: batchName) == .notInTorrent, "not season 2")
+        check(ReleaseName.episodeNumberInSeason("Show - 1080p.mkv", season: 1) == nil, "- 1080p is no episode")
+        check(ReleaseName.episodeNumberInSeason("Show (2019) - 05 [WEB]", season: 1) == 5, "Show (2019) - 05")
+    }
+
+    /// Episode titles after the marker are not range ends: "S02E01 - 8 00 A.M." (24),
+    /// "S01E01 - 33" (Battlestar Galactica). A torrent named "S01E01 - 10 [1080p]" still is a range.
+    func testTitlesThatStartWithANumber() {
+        let plex = (1...5).map { String(format: "24 (2001) - S02E%02d - %d 00 A.M. - %d 00 A.M..mkv", $0, $0 + 7, $0 + 8) }
+        let plexSizes: [Int64] = [9, 5, 5, 5, 5]
+        for e in 1...5 {
+            check(want(2, e).choice(fileNames: plex, fileSizes: plexSizes, torrentName: "24 Season 2") == .file(e - 1), "24 S02E0\(e): its own file")
+        }
+        let bsg = ["Battlestar Galactica (2004) - S01E01 - 33.mkv", "Battlestar Galactica (2004) - S01E02 - Water.mkv"]
+        check(want(1, 5).choice(fileNames: bsg, fileSizes: [9, 5], torrentName: "Battlestar Galactica (2004) Season 1") == .notInTorrent,
+              "BSG S01E05 absent: not \"33\"")
+        check(ReleaseName.episodeScope(of: "Show S01E01 - 10 [1080p]", season: 1, episode: 5) == .pack, "a spaced range in a torrent's name")
+        check(ReleaseName.episodeScope(of: "Show S01E01 - 10", season: 1, episode: 5) == .pack, "a spaced range at the end of a torrent's name")
+        check(ReleaseName.episodeScope(of: "Black Mirror - S01E02 - 15 Million Merits", season: 1, episode: 5) == .otherEpisode,
+              "a title after the marker")
+        check(ReleaseName.episodeScope(of: "Show.S01E01-10.1080p", season: 1, episode: 5) == .pack, "S01E01-10")
     }
 
     func testMoviesUseTheSourcesFileNameOnly() {

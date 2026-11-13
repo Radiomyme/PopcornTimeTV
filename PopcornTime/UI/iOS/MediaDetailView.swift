@@ -438,6 +438,9 @@ struct MediaDetailView: View {
     @State private var peersCount: Int = 0
     @State private var downloadKbps: Double = 0
     @State private var streamErrorMessage: String?
+    /// The stream failed because the torrent lacks the episode (a season
+    /// pack, PopcornTorrent -9): the overlay offers another source.
+    @State private var streamFailedNotInTorrent = false
     /// Bounded storage (the film is larger than the free space): the
     /// overlay's « Limited storage: you can rewind about N min » line, and
     /// when it was last computed (it reads the free space).
@@ -609,6 +612,11 @@ struct MediaDetailView: View {
                 }
                 if let err = streamErrorMessage {
                     Text(err).font(.caption).foregroundStyle(.red).multilineTextAlignment(.center).padding(.horizontal, 8)
+                    // A season pack without the episode: the title's other releases.
+                    if streamFailedNotInTorrent, !otherSources.isEmpty {
+                        Button(LoadingPhase.chooseAnotherSourceTitle) { chooseAnotherSource() }
+                            .buttonStyle(.borderedProminent)
+                    }
                 }
                 if loadingPhase.isNotResponding, streamErrorMessage == nil {
                     if !otherSources.isEmpty {
@@ -694,6 +702,7 @@ struct MediaDetailView: View {
         peersCount = 0
         downloadKbps = 0
         streamErrorMessage = nil
+        streamFailedNotInTorrent = false
         boundedNote = nil
     }
 
@@ -912,6 +921,7 @@ struct MediaDetailView: View {
         peersCount = 0
         downloadKbps = 0
         streamErrorMessage = nil
+        streamFailedNotInTorrent = false
         boundedNote = nil
         boundedNoteAt = 0
         let mediaTitle = playMedia.title
@@ -990,9 +1000,12 @@ struct MediaDetailView: View {
         let failure: PTTorrentStreamerFailure = { error in
             // Not enough space even for bounded storage (-5: how much to
             // free), another file error (-6), or the error's own text.
-            let message = StreamFailure(error, streamer: streamer).message(underlying: error) ?? error.localizedDescription
+            let failure = StreamFailure(error, streamer: streamer)
+            let message = failure.message(underlying: error) ?? error.localizedDescription
+            let notInTorrent: Bool = { if case .episodeNotInTorrent = failure { return true }; return false }()
             DispatchQueue.main.async {
                 streamErrorMessage = message
+                streamFailedNotInTorrent = notInTorrent
                 // Keep the overlay open so the user sees the error and can dismiss
                 // explicitly via the "Annuler" button.
                 bufferProgress = 0
