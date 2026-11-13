@@ -249,7 +249,8 @@ extension AppDelegate {
                 completion(torrent)
             } else {
                 let alertController = UIAlertController(title: "No torrents found".localized, message: "Torrents could not be found for the specified media.".localized, preferredStyle: .alert)
-                alertController.addAction(UIAlertAction(title: "OK".localized, style: .default, handler: nil))
+                // .cancel: Menu closes it on the Apple TV.
+                alertController.addAction(UIAlertAction(title: "OK".localized, style: .cancel, handler: nil))
                 alertController.show(animated: true)
             }
             return
@@ -459,13 +460,24 @@ extension AppDelegate {
                     // (an automatic pick took the same pack again), and the
                     // quality picker one press away.
                     AppDelegate.unansweredSources[media.id, default: []].insert(AppDelegate.sourceKey(torrent.url))
+                    // « Choose another source » only when one is known (the
+                    // stream's list minus this one and those left out), as on
+                    // the loading screen: with none, the picker ended on « No
+                    // torrents found ». Menu closes the alert either way.
+                    let excluded = AppDelegate.unansweredSources[media.id] ?? []
+                    let known = PlaybackStreamContext.of(loadingViewController.streamer)?.sources ?? media.torrents
+                    let hasOtherSource = known.contains { !excluded.contains(AppDelegate.sourceKey($0.url)) }
                     let alert = UIAlertController(title: "Error".localized, message: errorMessage, preferredStyle: .alert)
-                    alert.addAction(UIAlertAction(title: LoadingPhase.chooseAnotherSourceTitle, style: .default) { _ in
-                        self.chooseQuality(nil, media: media) { torrent in
-                            self.play(media, torrent: torrent)
-                        }
-                    })
-                    alert.addAction(UIAlertAction(title: "Cancel".localized, style: .cancel, handler: nil))
+                    if hasOtherSource {
+                        alert.addAction(UIAlertAction(title: LoadingPhase.chooseAnotherSourceTitle, style: .default) { _ in
+                            self.chooseQuality(nil, media: media) { torrent in
+                                self.play(media, torrent: torrent)
+                            }
+                        })
+                        alert.addAction(UIAlertAction(title: "Cancel".localized, style: .cancel, handler: nil))
+                    } else {
+                        alert.addAction(UIAlertAction(title: "OK".localized, style: .cancel, handler: nil))
+                    }
                     alert.show(animated: true)
                 } else {
                     let alert = UIAlertController(title: "Error".localized, message: errorMessage, preferredStyle: .alert)
