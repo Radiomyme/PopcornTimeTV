@@ -121,8 +121,10 @@ final class SeasonPackTests: CheckedTestCase {
         check(want(1, 2).choice(fileNames: absolute, fileSizes: [1, 2, 3], torrentName: "[Group] Show (Season 1) [1080p]") == .file(1),
               "Show - 02 in a torrent named as season 1")
         let absolute2 = ["[Group] Show - 13 [1080p].mkv", "[Group] Show - 14 [1080p].mkv", "[Group] Show - 15 [1080p].mkv"]
-        check(want(2, 1).choice(fileNames: absolute2, fileSizes: [1, 2, 3], torrentName: "[Group] Show (Season 2) [1080p]") == .notInTorrent,
-              "absolute numbering (13-15) in a torrent named as season 2: not played blindly")
+        for e in [1, 13, 14, 15] {
+            check(want(2, e).choice(fileNames: absolute2, fileSizes: [1, 2, 3], torrentName: "[Group] Show (Season 2) [1080p]") == .notInTorrent,
+                  "absolute numbering (13-15) in a torrent named as season 2: S02E\(e) not played blindly")
+        }
         check(want(1, 2).choice(fileNames: absolute, fileSizes: [1, 2, 3], torrentName: "[Group] Show [1080p]") == .usualRule,
               "absolute numbering, no pack name: as before")
         check(want(1, 2).choice(fileNames: absolute, fileSizes: [1, 2, 3], torrentName: nil) == .usualRule, "absolute numbering, no name")
@@ -142,6 +144,19 @@ final class SeasonPackTests: CheckedTestCase {
         }
         check(want(1, 9).choice(fileNames: tpb, fileSizes: tpbSizes, torrentName: tpbName) == .notInTorrent, "Trailer Park Boys S01E09: not in the pack")
         check(want(1, 2).choice(fileNames: tpb, fileSizes: nil, torrentName: tpbName) == .file(1), "Trailer Park Boys without sizes")
+        // The whole series: its SD seasons a tenth of its 1080p ones.
+        var series: [String] = [], seriesSizes: [Int64] = []
+        for season in 1...12 {
+            for e in 1...6 {
+                series.append(String(format: "Trailer.Park.Boys.S01-S12.Complete/Season %d/Trailer.Park.Boys.S%02dE%02d.%@", season, season, e,
+                                     season <= 7 ? "DVDRip.XviD.avi" : "1080p.WEB.x264.mkv"))
+                seriesSizes.append(season <= 7 ? 175_000_000 : 1_600_000_000)
+            }
+        }
+        let seriesName = "Trailer.Park.Boys.S01-S12.Complete"
+        check(want(1, 1, "Trailer.Park.Boys.S01E01.DVDRip.XviD.avi").choice(fileNames: series, fileSizes: seriesSizes, torrentName: seriesName) == .file(0),
+              "Trailer Park Boys S01E01 (SD) named by the source, in a pack whose last seasons are 1080p: not a sample")
+        check(want(7, 6).choice(fileNames: series, fileSizes: seriesSizes, torrentName: seriesName) == .file(41), "Trailer Park Boys S07E06 (SD) by its markers")
         let titled = ["Show.S02E01.Pilot.mkv", "Show.S02E02.The.Trailer.mkv", "Show.S02E03.Finale.mkv"]
         check(want(2, 2).choice(fileNames: titled, fileSizes: [5, 5, 9], torrentName: "Show.S02") == .file(1), "an episode called The Trailer")
         let extras = ["Show.S01E01.mkv", "Show.S01E02.mkv", "Extras/Show.S01E02.Trailer.mkv"]
@@ -239,6 +254,16 @@ final class SeasonPackTests: CheckedTestCase {
         let sizes24 = [Int64](repeating: 7, count: 24)
         check(want(1, 5).choice(fileNames: t24, fileSizes: sizes24, torrentName: "24 Season 1") == .file(4), "24 - 05: 05, not the show's 24")
         check(want(1, 24).choice(fileNames: t24, fileSizes: sizes24, torrentName: "24 Season 1") == .file(23), "24 - 24")
+        // A leading number that changes from file to file is the episode's, even the one equal to the show's.
+        let tapes = (1...13).map { String(format: "13 Reasons Why Season 1/%02d - Tape %d.mkv", $0, $0) }
+        check(want(1, 13).choice(fileNames: tapes, fileSizes: [Int64](repeating: 5, count: 13), torrentName: "13 Reasons Why Season 1") == .file(12),
+              "13 Reasons Why: 13 - Tape 13")
+        let nine = (1...18).map { String(format: "9-1-1 Season 3/%02d - Title.mkv", $0) }
+        check(want(3, 9).choice(fileNames: nine, fileSizes: [Int64](repeating: 5, count: 18), torrentName: "9-1-1 Season 3") == .file(8), "9-1-1: 09 - Title")
+        // The same leading number in every file is the show's: a title with other numbers is no episode.
+        let day = (1...24).map { String(format: "24 Season 1/24 - Day 1 - %02d-00 - %02d-00.mkv", ($0 + 23) % 24, $0 % 24) }
+        check(want(1, 24).choice(fileNames: day, fileSizes: (0..<24).map { Int64(5 + $0) }, torrentName: "24 Season 1") == .notInTorrent,
+              "24 - Day 1 - 23-00 - 00-00: not every file as episode 24")
         let chernobyl = (1...5).map { "Chernobyl.Part.\($0).1080p.WEB.H264.mkv" }
         check(want(1, 3).choice(fileNames: chernobyl, fileSizes: [7, 7, 7, 7, 7], torrentName: "Chernobyl.Complete.1080p.WEB.H264") == .file(2),
               "Chernobyl Part.3 in a Complete miniseries")
@@ -255,6 +280,70 @@ final class SeasonPackTests: CheckedTestCase {
         check(want(2, 5).choice(fileNames: batch, fileSizes: sizes28, torrentName: batchName) == .notInTorrent, "not season 2")
         check(ReleaseName.episodeNumberInSeason("Show - 1080p.mkv", season: 1) == nil, "- 1080p is no episode")
         check(ReleaseName.episodeNumberInSeason("Show (2019) - 05 [WEB]", season: 1) == 5, "Show (2019) - 05")
+        check(ReleaseName.episodeNumberInSeason("[SubsPlease] Kaguya-sama wa Kokurasetai - 06.5 (1080p).mkv", season: 1) == nil,
+              "- 06.5 (a recap) is not episode 6")
+        check(ReleaseName.episodeNumberInSeason("Show - 06.mkv", season: 1) == 6 && ReleaseName.episodeNumberInSeason("Show - 06v2.mkv", season: 1) == 6,
+              "- 06.mkv, - 06v2")
+    }
+
+    /// What a pack numbered on its own cannot tell is refused, never played as another episode:
+    /// a later season numbered absolutely, a "Complete" pack whose season folders are not read
+    /// ("Series 2", "Book 3 - Fire"), extras ("Extras/…Part 1"), a recap ("- 06.5").
+    func testWhatNumbersCannotTell() {
+        let mhaName = "[HorribleSubs] Boku no Hero Academia S2 (14-38) [1080p] [Batch]"
+        let mha = (14...38).map { "\(mhaName)/[HorribleSubs] Boku no Hero Academia - \($0) [1080p].mkv" }
+        let mhaSizes = [Int64](repeating: 9, count: mha.count)
+        for e in [1, 13, 14, 20, 25, 26] {
+            check(want(2, e).choice(fileNames: mha, fileSizes: mhaSizes, torrentName: mhaName) == .notInTorrent,
+                  "MHA S2 batch numbered 14-38: S02E\(e) not played blindly")
+        }
+        check(want(2, 14).choice(fileNames: mha, fileSizes: mhaSizes, preferredIndex: 13, torrentName: mhaName) == .file(13),
+              "MHA S02E14 with Torrentio's so= on \"- 27\"")
+        let cour2Name = "[SubsPlease] Show (13-24) (1080p) [Batch]"
+        let cour2 = (13...24).map { "\(cour2Name)/[SubsPlease] Show - \($0) (1080p).mkv" }
+        check(want(1, 13).choice(fileNames: cour2, fileSizes: [Int64](repeating: 5, count: 12), torrentName: cour2Name) == .file(0),
+              "a second-cour batch of season 1 (13-24): S01E13")
+
+        let sherlockName = "Sherlock Complete Series 1-4 + Special"
+        var sherlock: [String] = []
+        for series in 1...4 { for e in 1...3 { sherlock.append("\(sherlockName)/Series \(series)/0\(e) - Title \(series)\(e).mkv") } }
+        sherlock.append("\(sherlockName)/Special/The Abominable Bride.mkv")
+        let sherlockSizes = (0..<sherlock.count).map { Int64(5 + $0) }
+        for e in 1...3 {
+            check(want(1, e).choice(fileNames: sherlock, fileSizes: sherlockSizes, torrentName: sherlockName) == .notInTorrent,
+                  "Sherlock Complete, \"Series N\" folders: S01E0\(e) is not Series 4's")
+        }
+        let avatarName = "Avatar The Last Airbender Complete Series 1080p"
+        var avatar: [String] = []
+        for (book, name) in [(1, "Water"), (2, "Earth"), (3, "Fire")] {
+            for e in 1...20 { avatar.append(String(format: "%@/Book %d - %@/%02d - Title.mkv", avatarName, book, name, e)) }
+        }
+        check(want(1, 10).choice(fileNames: avatar, fileSizes: (0..<avatar.count).map { Int64(5 + $0) }, torrentName: avatarName) == .notInTorrent,
+              "Avatar Complete, \"Book N\" folders: S01E10 is not Book 3's")
+        var office: [String] = []
+        for series in 1...2 { for e in 1...6 { office.append(String(format: "The Office UK Complete/Series %d/%02d - Title.avi", series, e)) } }
+        office += ["The Office UK Complete/Specials/01 - Christmas Special Part 1.avi", "The Office UK Complete/Specials/02 - Christmas Special Part 2.avi"]
+        for e in [1, 3] {
+            check(want(1, e).choice(fileNames: office, fileSizes: (0..<office.count).map { Int64(5 + $0) }, torrentName: "The Office UK Complete") == .notInTorrent,
+                  "The Office UK Complete: S01E0\(e) is neither Series 2's nor a special")
+        }
+        let nested = (1...12).map { String(format: "Show Complete/Show 1080p/[Group] Show - %02d.mkv", $0) } + ["Show Complete/Show 1080p/Extras/NCOP.mkv"]
+        check(want(1, 5).choice(fileNames: nested, fileSizes: [Int64](repeating: 7, count: 13), torrentName: "Show Complete") == .file(4),
+              "a Complete batch one folder deeper (all its episodes in one folder): S01E05")
+
+        let earth = ["Planet.Earth.II.S01/01 - Islands.mkv", "Planet.Earth.II.S01/02 - Mountains.mkv",
+                     "Planet.Earth.II.S01/Extras/Planet Earth II Diaries Part 1.mkv", "Planet.Earth.II.S01/Extras/Planet Earth II Diaries Part 2.mkv"]
+        for e in [1, 2] {
+            check(want(1, e).choice(fileNames: earth, fileSizes: [5, 5, 9, 9], torrentName: "Planet.Earth.II.S01.2160p") == .file(e - 1),
+                  "Planet Earth II S01E0\(e), not the larger diary \"Part \(e)\" in Extras")
+        }
+        let chernobyl = ["Chernobyl.Complete/Chernobyl.Part.1.mkv", "Chernobyl.Complete/Chernobyl.Part.2.mkv",
+                         "Chernobyl.Complete/Bonus/The.Making.of.Chernobyl.Part.3.mkv"]
+        check(want(1, 3).choice(fileNames: chernobyl, fileSizes: [9, 9, 2], torrentName: "Chernobyl.Complete") == .notInTorrent,
+              "Chernobyl without Part 3: not the making-of's \"Part.3\"")
+        let recap = ["B/Show - 06 (1080p).mkv", "B/Show - 06.5 (1080p).mkv", "B/Show - 07 (1080p).mkv"]
+        check(want(1, 6).choice(fileNames: recap, fileSizes: [5, 9, 5], torrentName: "[SubsPlease] Show (01-12) (1080p) [Batch]") == .file(0),
+              "S01E06 is \"- 06\", not the larger recap \"- 06.5\"")
     }
 
     /// Episode titles after the marker are not range ends: "S02E01 - 8 00 A.M." (24),

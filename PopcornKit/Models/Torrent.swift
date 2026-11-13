@@ -442,7 +442,8 @@ public enum ReleaseName {
     /// numbering "102" / "1012" (season × 100 + episode) for `season`. Nil
     /// when there is none. `title`: the pack's own name (its folder or the
     /// torrent's): a leading number that is the show's ("24 - 05 - Title",
-    /// "1923 - 05") is not the episode's.
+    /// "1923 - 05") is not the episode's (`WantedFile.choice` passes none
+    /// when the files' leading numbers differ: "9-1-1 Season 3/09 - Title").
     static func episodeNumberInSeason(_ leaf: String, season: Int, title: String? = nil) -> Int? {
         var text = leaf.lowercased()
         if videoContainerExtension(of: text) != nil, let dot = text.lastIndex(of: ".") { text = String(text[..<dot]) }
@@ -476,6 +477,15 @@ public enum ReleaseName {
         }
         return nil
     }
+    /// A file's leading number as `episodeNumberInSeason` reads it ("09 - Title.mkv": 9,
+    /// "24 - 05 - Title.avi": 24); nil for none.
+    static func leadingNumber(ofLeaf leaf: String) -> Int? {
+        var text = leaf.lowercased()
+        if videoContainerExtension(of: text) != nil, let dot = text.lastIndex(of: ".") { text = String(text[..<dot]) }
+        let ns = text as NSString
+        guard let match = leadingEpisodeNumber.firstMatch(in: text, range: NSRange(location: 0, length: ns.length)) else { return nil }
+        return Int(ns.substring(with: match.range(at: 1)))
+    }
     /// "Episode 2", "Épisode 02", "E02", "EP02", "Ep.2", "Серия 02" (not "1080p", "x264": bounded).
     private static let episodeOnlyMarker = regex("(?<![\\p{L}\\p{N}])(?:episode|épisode|episodio|folge|серия|ep|e)[ ._-]?(\\d{1,3})(?![\\p{L}\\p{N}])")
     /// "02 - Title", "02. Title", "02_Title", "02" alone.
@@ -486,8 +496,8 @@ public enum ReleaseName {
     private static let leadingAfterShow = regex("^\\s*[-._]\\s*(\\d{1,3})(?:\\s*[-._]|\\s|$)")
     /// "[Group] Show - 05 [1080p]", "Show - 05 - Title", "Show - 05v2": a
     /// number between " - " and a space, a bracket, a dot or the end (not
-    /// "- 1080p", "- 720p").
-    private static let dashEpisodeNumber = regex("(?:^|\\s)-\\s+(\\d{1,3})(?:v\\d)?(?=\\s|[\\[(.]|$)")
+    /// "- 1080p", "- 720p", nor a recap's "- 06.5").
+    private static let dashEpisodeNumber = regex("(?:^|\\s)-\\s+(\\d{1,3})(?:v\\d)?(?=\\s|[\\[(]|\\.(?!\\d)|$)")
     /// "Chernobyl.Part.3", "Part 3".
     private static let partNumber = regex("(?<![\\p{L}\\p{N}])part[ ._]?(\\d{1,2})(?![\\p{L}\\p{N}])")
     /// "Planet.Earth.II.3of6", "3 of 6".
@@ -844,7 +854,10 @@ public struct WantedFile: Equatable, Sendable, CustomStringConvertible {
     ///    else a range holding it ("S03E01-E06"); the largest of several;
     /// 4. in a folder or torrent named after one season (`singleSeason`:
     ///    "Show.S03.1080p/", "Season 3"), a file numbered on its own for that
-    ///    season: "Episode 05", "E05", "05 - Title", "305";
+    ///    season: "Episode 05", "E05", "05 - Title", "305" (a pack that names
+    ///    no season, "[Group] Show (01-28) [Batch]", is season 1 for its
+    ///    files at the top or all in one folder; extras never count; a later
+    ///    season whose numbers start above 1 is numbered absolutely: none);
     /// 5. not found: with one video file at most, a single-episode torrent
     ///    (its sample, subtitles…), the usual rule as before; with several,
     ///    a pack when one of them names an episode or a season, or the
@@ -853,8 +866,9 @@ public struct WantedFile: Equatable, Sendable, CustomStringConvertible {
     ///    torrent name that doesn't say pack: the usual rule.
     /// A sample is a file called "sample" / "trailer" (or in a Sample
     /// folder) that is much smaller than the largest video file (under a
-    /// quarter of it; without sizes: unless every video file says so — the
-    /// word is then the show's title, "Trailer Park Boys").
+    /// quarter of it; without sizes: unless every video file says so) —
+    /// never when most video files say so: the word is then the show's
+    /// title, "Trailer Park Boys".
     /// A movie (no numbers) stops after 1.
     public func choice(fileNames: [String], fileSizes: [Int64]? = nil, preferredIndex: Int? = nil,
                        torrentName: String? = nil) -> Choice {
@@ -875,6 +889,9 @@ public struct WantedFile: Equatable, Sendable, CustomStringConvertible {
         let largestVideo = sizes.flatMap { sizes in allVideos.map { sizes[$0] }.max() }
         func isSample(_ index: Int) -> Bool {
             guard calledSample.contains(index) else { return false }
+            // Most video files say it: the word is the show's ("Trailer Park Boys"), even in a
+            // pack whose SD seasons are a tenth of its 1080p ones.
+            if calledSample.count * 2 > allVideos.count { return false }
             if let sizes = sizes, let largestVideo = largestVideo, largestVideo > 0 { return sizes[index] * 4 < largestVideo }
             return calledSample.count < allVideos.count
         }
@@ -913,16 +930,34 @@ public struct WantedFile: Equatable, Sendable, CustomStringConvertible {
             if !ranges.isEmpty { return .file(largest(ranges)) }
             // Numbered within its season: the season is the folder's or the
             // torrent's; a pack that names no season ("[Group] Show (01-28)
-            // [Batch]", "Chernobyl.Complete") is season 1.
-            let numbered = videos.indices.filter { position in
+            // [Batch]", "Chernobyl.Complete") is season 1 for the files at its
+            // top or all in one folder — not "Series 2/01 - …", "Book 3 -
+            // Fire/01 - …" (folders not read as seasons). Extras ("Extras/",
+            // "Bonus/", "Specials/", a featurette's "Part 1") never count.
+            let episodes = videos.indices.filter { !WantedFile.isExtra(fileNames[videos[$0]]) }
+            let oneFolder = Set(episodes.map { WantedFile.folders(of: fileNames[videos[$0]]) }).count <= 1
+            let impliesSeasonOne = torrentName.map(ReleaseName.impliesSeasonOne) == true
+            let inSeason = episodes.filter { position in
                 guard scopes[position] == .unknown || scopes[position] == .pack else { return false }
                 let path = fileNames[videos[position]]
                 let packSeason = WantedFile.seasonOfFolders(path) ?? torrentName.flatMap(ReleaseName.singleSeason(of:))
-                    ?? (torrentName.map(ReleaseName.impliesSeasonOne) == true ? 1 : nil)
-                guard packSeason == season else { return false }
-                return ReleaseName.episodeNumberInSeason(WantedFile.leafName(path), season: season,
-                                                         title: WantedFile.folders(of: path).first ?? torrentName) == episode
-            }.map { videos[$0] }
+                    ?? (impliesSeasonOne && (oneFolder || WantedFile.folders(of: path).count <= 1) ? 1 : nil)
+                return packSeason == season
+            }
+            // A leading number that changes from file to file is the episode's
+            // ("9-1-1 Season 3/09 - Title"); the same in every file, the show's
+            // ("24 Season 1/24 - 05 - Title").
+            let leaves = inSeason.map { WantedFile.leafName(fileNames[videos[$0]]) }
+            let showNumberLeads = Set(leaves.compactMap(ReleaseName.leadingNumber(ofLeaf:))).count < 2
+            let numbers = zip(inSeason, leaves).compactMap { position, leaf -> (position: Int, number: Int)? in
+                let title = showNumberLeads ? (WantedFile.folders(of: fileNames[videos[position]]).first ?? torrentName) : nil
+                return ReleaseName.episodeNumberInSeason(leaf, season: season, title: title).map { (position, $0) }
+            }
+            // A later season numbered from above 1 is numbered absolutely
+            // ("[HorribleSubs] Boku no Hero Academia S2 (14-38)": "- 14" is
+            // S02E01): no number is trusted then (the magnet's so= is, step 2).
+            let absolute = season > 1 && (numbers.map { $0.number }.min() ?? 1) > 1
+            let numbered = absolute ? [] : numbers.filter { $0.number == episode }.map { videos[$0.position] }
             if !numbered.isEmpty { return .file(largest(numbered)) }
         }
 
@@ -963,6 +998,22 @@ public struct WantedFile: Equatable, Sendable, CustomStringConvertible {
         let folders = path.split(whereSeparator: { $0 == "/" || $0 == "\\" }).dropLast()
         return folders.contains { ["sample", "samples"].contains($0.lowercased()) }
     }
+
+    /// A pack's extra: a file in an "Extras", "Featurettes", "Bonus", "Specials",
+    /// "Behind the Scenes"… folder, or a featurette / "Making of" / "Behind the
+    /// Scenes" by its name ("Planet Earth II Diaries Part 1", "The.Making.of.
+    /// Chernobyl.Part.3" are not episodes 1 and 3).
+    static func isExtra(_ path: String) -> Bool {
+        if folders(of: path).contains(where: { extraFolders.contains($0.lowercased()) }) { return true }
+        let t = ReleaseName.tokens(leafName(path))
+        if t.contains("featurette") || t.contains("featurettes") { return true }
+        return zip(t, t.dropFirst()).contains { $0 == "making" && $1 == "of" }
+            || zip(t, zip(t.dropFirst(), t.dropFirst(2))).contains { $0 == "behind" && $1.0 == "the" && $1.1 == "scenes" }
+    }
+    private static let extraFolders: Set<String> = [
+        "extras", "extra", "featurettes", "featurette", "bonus", "bonus features", "bonuses", "behind the scenes",
+        "specials", "special features", "deleted scenes",
+    ]
 
     /// The one season a file's folders name ("Show.S02.1080p/02 - Title.mkv"),
     /// the nearest folder first; nil when none does.
