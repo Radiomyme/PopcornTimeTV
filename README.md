@@ -48,12 +48,15 @@ The same notes are shown once in the app after the update (`WhatsNewRelease.curr
   folder or torrent named after the season (or a batch that names none, "(01-28) [Batch]", a
   "Complete" miniseries), the file numbered on its own ("Episode 03", "03 - Title", "Show -
   03", "Part 3", "3of6", "Серия 03", "103"). A `so=` file numbered absolutely is played when it
-  is the episode's place in the season ("S03 - 50" for S03E13 in a pack from 38). Samples are
+  is the episode's place in the season ("S03 - 50" for S03E13 in a pack from 38); without it, a
+  later season's batch numbered absolutely ("S2 (14-38)") is not guessed, nor are the files of a
+  "Complete" pack in folders not read as seasons ("Series 2", "Book 3 - Fire"), extras
+  ("Extras/… Part 1", a making-of) and recaps ("- 06.5"): those fail as below. Samples are
   left out when they are much smaller than the episodes, also when the source names one (a
   show called *Trailer Park Boys* is not a trailer). A pack without the episode now fails with
   "This torrent does not contain the requested episode. Please choose another source." instead
-  of playing its largest file, another episode, and offers *Choose another source* (on Apple
-  TV that pack is also left out of the title's automatic picks). Two episodes downloaded from one pack each keep
+  of playing its largest file, another episode, and offers *Choose another source* when another
+  source is known (on Apple TV that pack is also left out of the title's automatic picks). Two episodes downloaded from one pack each keep
   their own folder. Single-file torrents and movies play as before.
 - A quieter console (GCDWebServer and libvlc errors only).
 
@@ -64,7 +67,9 @@ The same notes are shown once in the app after the update (`WhatsNewRelease.curr
   high priority, a deadline is set only on a piece a reader waits for once it is late, peers no
   longer take whole pieces each, and requests held by peers far slower than the rest are
   cancelled when they would make a needed piece late. After a forward seek or a resume, the
-  pieces ahead of the reader come before the part skipped behind it.
+  pieces ahead of the reader come before the part skipped behind it; the progress a stream or a
+  download reports counts the file's own pieces, so it no longer jumps back and forth then, and
+  a torrent counts as finished only with its whole file.
 - **More of the swarm**: more peers and connections (Apple TV 100 per torrent / 200 in all,
   iPhone / iPad 80 / 160, Mac 100 / 400; the app's limit of open files is raised so these apply),
   faster connection attempts and timeouts (kept moderate for home routers), every
@@ -86,7 +91,8 @@ The same notes are shown once in the app after the update (`WhatsNewRelease.curr
   chooser for a page you left).
 - **The Top 100 comes back in place**: coming back from a page no longer lays the grid out four
   posters wide before six, nor reloads every poster; the poster you opened keeps the focus, at
-  the same place. The grids reload only when their content changed.
+  the same place. The grids reload only when their content changed. A grid's title and Sort /
+  Genre scroll away with the posters, and the tab bar follows the scroll.
 - Play/Pause on a poster opens the title and plays it, also on a Continue Watching card (on a
   page: the focused episode, a related title, or what Play plays); holding Select on a poster
   offers Play, Watchlist and Watched. Search shows its
@@ -321,7 +327,7 @@ Then pick a scheme:
 
 **⌘U**: pick the **PopcornTimeTests** scheme (or PopcornTimeMac), destination *My Mac*. The
 macOS unit-test target runs in about 8 seconds, offline, in English whatever the Mac's
-language: 32 tests, 3,257 checks of the extra sources (apibay, Knaben, Cinemeta, TVMaze, the
+language: 37 tests, 3,320 checks of the extra sources (apibay, Knaben, Cinemeta, TVMaze, the
 Top 100), the season-pack file choice, the bandwidth estimate and the lighter-release offer,
 the loading phases, bounded storage, the remux eviction and `FarTargetWatch` rules, the
 GCDWebServer log filter. The
@@ -349,7 +355,7 @@ repository) they are skipped, and the summary says so.
 |---|---|---|
 | PopcornTimeTests (macOS) | quick | ~8 s (+ ~20 s when a source changed, ~70 s from scratch) |
 | PopcornTorrentLogicTests, PopcornTorrent-Tests (offline, sandboxed) | quick | ~8 s |
-| PopcornTorrent SessionHarness: 10 modes and the network settings of the 3 profiles, in parallel (sandboxed) | full | ~3 min |
+| PopcornTorrent SessionHarness: 11 modes and the network settings of the 3 profiles, in parallel (sandboxed) | full | ~3 min |
 | P10 / B6: a real AVPlayer on a 20 s clip (local benches, not in the repository: skipped without them) | full | ~3 min |
 | Remux e2e engine, then the F3 bench (local benches, not in the repository; `PT_FORMAT_BENCH`) | full | ~17 min + ~90 min |
 | Bounded-storage disk-image runs (`PT_BOUNDED_RUNS=1`) | full | ~5 min |
@@ -366,7 +372,9 @@ drives the tvOS app on an Apple TV simulator with the remote (`XCUIRemote`): Bac
 in, on a slow loading screen and on a load error, a page's summary and shelves, a show's
 episodes, the quality chooser, the poster menu, Settings, Search (Up from its results back to
 the tab bar), Downloads, the Watchlist and What's New, Menu pressed twice or three times in
-quick succession, and Menu with the focus in the tab bar. 21 tests, about 6 minutes. They read the public catalog APIs, never press Play, and
+quick succession, Menu with the focus in the tab bar, and a grid's title and Sort / Genre
+scrolling away with the posters (Up from the first row reaches them, then the tab bar). 24
+tests, about 8 minutes. They read the public catalog APIs, never press Play, and
 set the app up with DEBUG launch arguments, so they are built with the DEBUG condition (the app
 for x86_64, the test runner for arm64):
 

@@ -11,7 +11,7 @@
 #                               xctest directly (xcodebuild alone costs ~15 s per run).
 #   tools/run-tests.sh full     quick, then the long benches, the independent ones in parallel; a
 #                               bench whose kit is not on this Mac is skipped with a note:
-#                               - PopcornTorrent's SessionHarness, 10 modes and the network settings
+#                               - PopcornTorrent's SessionHarness, 11 modes and the network settings
 #                                 of the tvOS / iOS / Mac profiles (offline, sandboxed)          ~2.5 min
 #                               - P10 and B6 (a real AVPlayer on a 20 s clip; format-coverage-wip, a
 #                                 local bench folder, not in the repository)                    ~3 min
@@ -143,7 +143,7 @@ fork_tests() {
 # MARK: - Full: SessionHarness (PopcornTorrent), its runs in parallel
 
 # The session modes, and the network settings of each platform's profile (mode:profile).
-SESSION_MODES=(zombie starve guest background legacy premetadata nofile packs restart trackers network:tv network:ios network:mac)
+SESSION_MODES=(zombie starve guest background legacy premetadata nofile packs restart trackers finish network:tv network:ios network:mac)
 
 session_harness() {
   local start=$EPOCHREALTIME f=$(fork_dir) build=$CACHE/harness-build
