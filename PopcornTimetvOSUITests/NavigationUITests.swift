@@ -2,7 +2,9 @@ import XCTest
 
 /// The Siri Remote on the tvOS app: Menu (Back) goes one level back from every
 /// screen (also while a screen still slides in), on a tab's first screen it
-/// leaves the app, and a grid comes back exactly as it was left.
+/// leaves the app, and a grid comes back exactly as it was left. A grid's
+/// title and Sort / Genre scroll with its posters, the tab bar follows the
+/// scroll, and Up goes from the first row to Sort / Genre, then the tab bar.
 ///
 /// Runs on the tvOS 26.5 simulator against a DEBUG build of the app (its
 /// launch hooks: build with `SWIFT_ACTIVE_COMPILATION_CONDITIONS=DEBUG`).
@@ -115,6 +117,77 @@ final class NavigationUITests: XCTestCase {
         launch(["-PTDebugTab", "1"])
         _ = try focusPoster(in: grid(named: "ShowsViewController"))
         expectMenuLeavesTheApp("Shows grid")
+    }
+
+    // MARK: - The grid's header
+
+    /// Movies (Top 100): the page title and Sort / Genre are part of the
+    /// page, as on every tvOS screen. Two rows down they have scrolled away
+    /// with the first row (they stayed and were drawn over the posters) and
+    /// the tab bar is out of the way; back on the first row, the title,
+    /// Sort / Genre and the tab bar are back where they were.
+    func testTheGridHeaderScrollsWithThePosters() throws {
+        launch(["-PTDebugTab", "0", "-PTDebugFilter", "top100"])
+        try checkHeaderScrollsWithThePosters(of: "MoviesViewController", title: "Movies", shotsLabel: "header-movies")
+    }
+
+    /// The same on the Shows tab (its default list, paginated).
+    func testTheShowsGridHeaderScrollsWithThePosters() throws {
+        launch(["-PTDebugTab", "1"])
+        try checkHeaderScrollsWithThePosters(of: "ShowsViewController", title: "Shows", shotsLabel: "header-shows")
+    }
+
+    /// Up from the first row reaches Sort / Genre, even from the first
+    /// column (the farthest from them), then the tab bar on the tab that was
+    /// selected; Down from the tab bar goes back into the page. A genre
+    /// picked with Genre becomes the page title.
+    func testUpFromTheFirstRowReachesSortGenreThenTheTabBar() throws {
+        launch(["-PTDebugTab", "0"])
+        let grid = grid(named: "MoviesViewController")
+        let sort = element("GridHeader.Sort"), genre = element("GridHeader.Genre"), title = element("GridHeader.Title")
+        _ = try focusPoster(in: grid)
+        for _ in 0..<6 {
+            guard let cell = focusedCell(in: grid), cell.frame.minX > 200 else { break }
+            remote.press(.left)
+            pause(0.6)
+        }
+        guard let first = focusedCell(in: grid), first.frame.minX < 200 else { return XCTFail("the first column never got the focus") }
+        let firstRowMinY = first.frame.minY
+        remote.press(.up)
+        pause(1.2)
+        XCTAssertTrue(sort.hasFocus || genre.hasFocus, "Up from the first row did not reach Sort / Genre: \(focusedLabel)")
+        remote.press(.up)
+        pause(1.2)
+        XCTAssertTrue(tabBarHasFocus, "Up from Sort / Genre did not reach the tab bar: \(focusedLabel)")
+        XCTAssertEqual(focusedLabel, "Movies", "Up from Sort / Genre went to another tab")
+        XCTAssertTrue(grid.exists, "the Movies grid is gone")
+        remote.press(.down)
+        pause(1.5)
+        XCTAssertFalse(tabBarHasFocus, "Down from the tab bar did not go back into the page")
+        XCTAssertTrue(sort.hasFocus || genre.hasFocus || focusedCell(in: grid) != nil,
+                      "Down from the tab bar went outside the page: \(focusedLabel)")
+        if let cell = focusedCell(in: grid) {
+            XCTAssertEqual(cell.frame.minY, firstRowMinY, accuracy: 2, "Down from the tab bar did not land on the first row")
+        }
+
+        // Genre: the genre picked becomes the title.
+        for _ in 0..<3 where !genre.hasFocus {
+            remote.press(sort.hasFocus ? .right : .up)
+            pause(1)
+        }
+        guard genre.hasFocus else { return XCTFail("Genre never got the focus: \(focusedLabel)") }
+        remote.press(.select)
+        let cancel = app.buttons["Cancel"]
+        XCTAssertTrue(cancel.waitForExistence(timeout: 5), "the genres did not open")
+        pause(1)
+        remote.press(.down)
+        pause(1)
+        let picked = focusedLabel
+        XCTAssertFalse(["none", "All", "Cancel"].contains(picked), "no genre has the focus: \(picked)")
+        remote.press(.select)
+        pause(2)
+        XCTAssertFalse(cancel.exists, "the genres did not close")
+        XCTAssertEqual(title.label, picked, "the title is not the genre picked")
     }
 
     // MARK: - Detail page
@@ -494,6 +567,81 @@ final class NavigationUITests: XCTestCase {
         XCTAssertFalse(detailTitle.exists)
     }
 
+    /// The grid's header at the top, two rows down and back at the top (see
+    /// `testTheGridHeaderScrollsWithThePosters`).
+    private func checkHeaderScrollsWithThePosters(of name: String, title text: String, shotsLabel: String) throws {
+        let grid = grid(named: name)
+        _ = try focusPoster(in: grid)
+        pause(1.5)
+        let top = try screenLayout(of: name)
+        save(XCUIScreen.main.screenshot(), "\(shotsLabel)-0-top")
+        XCTAssertEqual(element("GridHeader.Title").label, text, "not the page title")
+        for identifier in Self.headerIdentifiers {
+            guard let frame = top.header[identifier] else { return XCTFail("\(identifier) is not on the screen") }
+            XCTAssertTrue(top.screen.contains(frame), "\(identifier) is not on the screen at the top: \(frame)")
+        }
+        expectHeaderClear(of: top, "at the top")
+        XCTAssertFalse(top.tabs.isEmpty, "the tab bar is not shown at the top of the grid: \(top)")
+
+        // Two rows down.
+        remote.press(.down)
+        pause(1)
+        remote.press(.down)
+        pause(2)
+        let down = try screenLayout(of: name)
+        save(XCUIScreen.main.screenshot(), "\(shotsLabel)-1-two-rows-down")
+        guard down.focusedPoster != nil, down.focused != top.focused else {
+            return XCTFail("the focus did not go two rows down: \(top.focused) → \(down.focused)")
+        }
+        expectHeaderClear(of: down, "two rows down")
+        for (identifier, frame) in down.header {
+            XCTAssertLessThanOrEqual(frame.maxY, down.screen.minY + 1, "\(identifier) did not scroll away with the first row: \(frame)")
+        }
+        for tab in down.tabs {
+            for poster in down.posters where overlap(tab, poster) {
+                XCTFail("the tab bar is over a poster two rows down: tab \(tab), poster \(poster)")
+            }
+        }
+
+        // Back to the first row.
+        remote.press(.up)
+        pause(1)
+        remote.press(.up)
+        pause(2)
+        let back = try screenLayout(of: name)
+        save(XCUIScreen.main.screenshot(), "\(shotsLabel)-2-back-at-top")
+        if let poster = back.focusedPoster, let focusedTop = top.focusedPoster {
+            XCTAssertEqual(poster.minY, focusedTop.minY, accuracy: 2, "the first row is not back at its place")
+        } else {
+            XCTFail("no poster has the focus back at the top: \(back)")
+        }
+        for identifier in Self.headerIdentifiers {
+            guard let frame = back.header[identifier], let before = top.header[identifier] else {
+                XCTFail("\(identifier) is not back at the top")
+                continue
+            }
+            XCTAssertEqual(frame.minY, before.minY, accuracy: 2, "\(identifier) is not back at its place")
+            XCTAssertEqual(frame.minX, before.minX, accuracy: 2, "\(identifier) is not back at its place")
+        }
+        expectHeaderClear(of: back, "back at the top")
+        XCTAssertFalse(back.tabs.isEmpty, "the tab bar is not back at the top of the grid: \(back)")
+    }
+
+    /// Fails when the title or Sort / Genre is drawn over a poster.
+    private func expectHeaderClear(of layout: ScreenLayout, _ when: String) {
+        for (identifier, frame) in layout.header {
+            for poster in layout.posters where overlap(frame, poster) {
+                XCTFail("\(identifier) is over a poster \(when): \(frame) over \(poster)")
+            }
+        }
+    }
+
+    /// Two frames share more than a sliver.
+    private func overlap(_ a: CGRect, _ b: CGRect) -> Bool {
+        let shared = a.intersection(b)
+        return !shared.isNull && shared.width > 2 && shared.height > 2
+    }
+
     /// Focuses a poster of `grid` and opens its page; returns the poster's title.
     private func openPoster(in grid: XCUIElement) throws -> String {
         let cell = try focusPoster(in: grid)
@@ -577,6 +725,48 @@ final class NavigationUITests: XCTestCase {
 
     private var tabBarHasFocus: Bool {
         app.tabBars.descendants(matching: .any).matching(Self.focusedPredicate).firstMatch.exists
+    }
+
+    /// The page title and Sort / Genre of a grid (`MainViewController`).
+    private static let headerIdentifiers = ["GridHeader.Title", "GridHeader.Sort", "GridHeader.Genre"]
+
+    /// What is on the screen, from one snapshot of the app: the grid's
+    /// header, its posters and the tab bar's tabs (only those on the screen).
+    private struct ScreenLayout: CustomStringConvertible {
+        var screen: CGRect = .zero
+        var header: [String: CGRect] = [:]
+        var posters: [CGRect] = []
+        var focusedPoster: CGRect?
+        var tabs: [CGRect] = []
+        var focused = "none"
+
+        var description: String {
+            let r = { (frame: CGRect) in "(\(Int(frame.minX)),\(Int(frame.minY)) \(Int(frame.width))x\(Int(frame.height)))" }
+            return "focused=\(focused) focusedPoster=\(focusedPoster.map(r) ?? "none") "
+                + "header=\(header.keys.sorted().map { "\($0)=\(r(header[$0]!))" }) "
+                + "tabs=\(tabs.map(r)) posters=\(posters.count) firstPosters=\(posters.sorted { ($0.minY, $0.minX) < ($1.minY, $1.minX) }.prefix(3).map(r))"
+        }
+    }
+
+    private func screenLayout(of gridName: String) throws -> ScreenLayout {
+        let root = try app.snapshot()
+        var layout = ScreenLayout()
+        layout.screen = root.frame
+        func walk(_ node: XCUIElementSnapshot, inGrid: Bool, inTabBar: Bool) {
+            let inGrid = inGrid || node.identifier == "MediaGrid.\(gridName)"
+            let inTabBar = inTabBar || node.elementType == .tabBar
+            let onScreen = node.frame.intersects(layout.screen) && !node.frame.isEmpty
+            if Self.headerIdentifiers.contains(node.identifier) { layout.header[node.identifier] = node.frame }
+            if inGrid, node.elementType == .cell, onScreen {
+                layout.posters.append(node.frame)
+                if node.hasFocus { layout.focusedPoster = node.frame }
+            }
+            if inTabBar, node.elementType == .button, onScreen { layout.tabs.append(node.frame) }
+            if node.hasFocus { layout.focused = node.label.isEmpty ? node.identifier : node.label }
+            node.children.forEach { walk($0, inGrid: inGrid, inTabBar: inTabBar) }
+        }
+        walk(root, inGrid: false, inTabBar: false)
+        return layout
     }
 
     /// On a tab's first screen, Menu leaves the app (at once, or after a
