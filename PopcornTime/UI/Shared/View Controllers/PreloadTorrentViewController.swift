@@ -28,12 +28,16 @@ class PreloadTorrentViewController: UIViewController {
         }
     }
 
-    /// Menu (Back) closed this screen (`cancel`).
+    /// Menu (Back) closed this screen (`cancel`), or « Choose another
+    /// source » left it (`chooseAnotherSource`): its stream is abandoned, so
+    /// nothing it had queued (ready to play, a failure) may open a player.
     private(set) var isCancelled = false
 
     /// Presented without animation, the content fades in (tvOS: UIKit drops
     /// the remote's presses while a presentation animates, so Back pressed
-    /// as the screen came in was lost).
+    /// as the screen came in was lost). The screen itself is black at once
+    /// (the page under it is gone from the first frame): a cut to black,
+    /// then the title and spinner, not the window's empty backdrop.
     var fadesInOnAppear = false
 
     /// The movie or episode being loaded, and the source (torrent URL) it
@@ -150,8 +154,12 @@ class PreloadTorrentViewController: UIViewController {
         super.viewWillAppear(animated)
         guard fadesInOnAppear else { return }
         fadesInOnAppear = false
-        view.alpha = 0
-        UIView.animate(withDuration: 0.5, delay: 0, options: [.allowUserInteraction, .curveEaseIn]) { self.view.alpha = 1 }
+        if (view.backgroundColor?.cgColor.alpha ?? 0) < 1 { view.backgroundColor = .black }
+        let content = view.subviews.map { ($0, $0.alpha) }
+        content.forEach { $0.0.alpha = 0 }
+        UIView.animate(withDuration: 0.5, delay: 0, options: [.allowUserInteraction, .curveEaseIn]) {
+            content.forEach { $0.0.alpha = $0.1 }
+        }
     }
 
     override func viewDidAppear(_ animated: Bool) {
@@ -374,6 +382,9 @@ class PreloadTorrentViewController: UIViewController {
     /// opens again for the same movie or episode.
     @objc private func chooseAnotherSource() {
         guard let media = media, !isLeaving else { return }
+        // A « ready to play » the stream queued just before this press must
+        // not open the player for the source left behind.
+        isCancelled = true
         stopPhaseUpdates()
         print("[Loading] \(tracker?.phase.stall.map { "\($0)" } ?? (tracker?.isSlow == true ? "slow" : "?")) — choosing another source than \(sourceURL?.prefix(80) ?? "?")")
         AppDelegate.shared.chooseAnotherSource(for: media, replacing: sourceURL, from: self)

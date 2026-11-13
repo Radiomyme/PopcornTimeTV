@@ -291,6 +291,128 @@ final class NavigationUITests: XCTestCase {
         expectMenuLeavesTheApp("Search")
     }
 
+    /// Search with results: Up from a result goes back to the scope bar, the
+    /// keyboard and the tab bar (a focus guide above the keyboard sent it
+    /// back to the first result, so the tab bar could not be reached and Menu
+    /// left the app); also once the results have scrolled down.
+    func testUpFromSearchResultsReachesTheTabBar() throws {
+        launch(["-PTDebugSearch", "star"])
+        let results = grid(named: "SearchViewController")
+        let deadline = Date().addingTimeInterval(40)
+        while Date() < deadline, !(results.exists && results.cells.count > 3) { pause(1) }
+        guard results.exists, results.cells.count > 3 else { throw XCTSkip("the search found too few results") }
+        var downs: [String] = []
+        for _ in 0..<6 where focusedCell(in: results) == nil {
+            remote.press(.down)
+            pause(1)
+            downs.append(focusedLabel)
+        }
+        XCTAssertNotNil(focusedCell(in: results), "Down never reached the results: \(downs)")
+        var ups: [String] = []
+        for _ in 0..<4 where !tabBarHasFocus {
+            remote.press(.up)
+            pause(1)
+            ups.append(focusedLabel)
+        }
+        XCTAssertTrue(tabBarHasFocus, "Up from a result never reached the tab bar: \(ups)")
+        XCTAssertEqual(app.state, .runningForeground)
+
+        // Two rows further down (the results scroll), then Up again.
+        downs = []
+        for _ in 0..<8 where focusedCell(in: results) == nil {
+            remote.press(.down)
+            pause(1)
+            downs.append(focusedLabel)
+        }
+        guard focusedCell(in: results) != nil else { return XCTFail("Down never went back to the results: \(downs)") }
+        for _ in 0..<2 {
+            remote.press(.down)
+            pause(1)
+        }
+        ups = []
+        for _ in 0..<8 where !tabBarHasFocus {
+            remote.press(.up)
+            pause(1)
+            ups.append(focusedLabel)
+        }
+        XCTAssertTrue(tabBarHasFocus, "Up from the third row of results never reached the tab bar: \(ups)")
+        XCTAssertEqual(app.state, .runningForeground)
+    }
+
+    /// Two pages deep (a page, then one of its related titles), Menu twice
+    /// in quick succession: both pages close, the grid is back with the
+    /// poster focused, and the app stays; Menu at the grid then leaves.
+    func testMenuTwiceQuicklyFromTwoPagesGoesBackToTheGrid() throws {
+        launch(["-PTDebugTab", "0"])
+        let grid = grid(named: "MoviesViewController")
+        let label = try openPoster(in: grid)
+        let firstTitle = detailTitle.label
+        pause(2.5) // related titles arrive after the page
+        var found = false
+        for _ in 0..<5 {
+            remote.press(.down)
+            pause(1.2)
+            let focused = focusedElement
+            // A related title's poster: taller than wide, poster-sized.
+            if focused.exists, focused.frame.height > focused.frame.width * 1.3, focused.frame.width > 150, focused.frame.width < 400 {
+                found = true
+                break
+            }
+        }
+        guard found else { throw XCTSkip("no related title on this page") }
+        remote.press(.select)
+        let deadline = Date().addingTimeInterval(60)
+        while Date() < deadline, !(detailTitle.exists && detailTitle.label != firstTitle) { pause(0.5) }
+        guard detailTitle.exists, detailTitle.label != firstTitle else { throw XCTSkip("the related title's page never opened") }
+        pause(3)
+        remoteControl.press(.menu)
+        pause(0.15)
+        remoteControl.press(.menu)
+        pause(3)
+        XCTAssertEqual(app.state, .runningForeground, "Menu twice from two pages left the app")
+        XCTAssertFalse(detailTitle.exists, "Menu twice from two pages did not reach the grid")
+        XCTAssertEqual(focusedCell(in: grid)?.label, label, "the focus is not back on the poster")
+        pause(1.5)
+        expectMenuLeavesTheApp("the grid after Menu twice")
+    }
+
+    /// Select on a poster, then Menu three times in quick succession while
+    /// the page comes in: the grid stays, with the poster focused, no page
+    /// opens later, and the app stays (5.1.0 crashed here).
+    func testSelectThenMenuThreeTimesQuicklyStaysOnTheGrid() throws {
+        launch(["-PTDebugTab", "0", "-PTDebugFilter", "top100"])
+        let grid = grid(named: "MoviesViewController")
+        let label = try focusPoster(in: grid).label
+        remoteControl.press(.select)
+        for _ in 0..<3 {
+            pause(0.1)
+            remoteControl.press(.menu)
+        }
+        pause(5)
+        XCTAssertEqual(app.state, .runningForeground, "Select then Menu three times left the app")
+        XCTAssertFalse(detailTitle.exists || loadingScreen.exists, "a page or the loading screen is up after Menu")
+        XCTAssertEqual(focusedCell(in: grid)?.label, label, "the focus is not back on the poster")
+        expectMenuLeavesTheApp("the grid after Select then Menu three times")
+    }
+
+    /// The focus on a tab in the tab bar, at a tab's root (Movies, Shows,
+    /// Settings): Menu goes to the Home screen.
+    func testMenuInTheTabBarAtATabsRootLeavesTheApp() throws {
+        for tab in ["0", "1", "5"] {
+            launch(["-PTDebugTab", tab])
+            pause(4)
+            for _ in 0..<4 where !tabBarHasFocus {
+                remote.press(.up)
+                pause(0.8)
+            }
+            XCTAssertTrue(tabBarHasFocus, "tab \(tab): the tab bar never got the focus")
+            remote.press(.menu)
+            XCTAssertTrue(waitUntilLeft(), "tab \(tab): Menu in the tab bar at the tab's root did not go to the Home screen")
+            app.terminate()
+            pause(1)
+        }
+    }
+
     /// Downloads (empty on a fresh simulator) and Watchlist: Menu leaves the app.
     func testMenuOnTheDownloadsAndWatchlistTabsLeavesTheApp() throws {
         for tab in ["4", "2"] {
@@ -441,6 +563,16 @@ final class NavigationUITests: XCTestCase {
     private func focusedCell(in grid: XCUIElement) -> XCUIElement? {
         let cell = grid.cells.matching(Self.focusedPredicate).firstMatch
         return cell.exists ? cell : nil
+    }
+
+    /// The element with the focus (any kind), and its label for a trail.
+    private var focusedElement: XCUIElement {
+        app.descendants(matching: .any).matching(Self.focusedPredicate).firstMatch
+    }
+
+    private var focusedLabel: String {
+        let focused = focusedElement
+        return focused.exists ? focused.label : "none"
     }
 
     private var tabBarHasFocus: Bool {
