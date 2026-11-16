@@ -11,6 +11,7 @@
 // Sections without data are hidden. Scrolled below the hero, the artwork
 // blurs and darkens (GlassBackdropView's dimmed state).
 import SwiftUI
+import NaturalLanguage
 import PopcornKit
 
 /// Mac-only state of the page that GlassDetailModel does not carry. Owned by
@@ -21,9 +22,14 @@ final class MacGlassPageState {
     var busyEpisodeID: String?
     /// Play is preparing (sources, subtitles): spinner in the Play button.
     var isPreparingPlay = false
+    /// A click on Play (or on an episode) made before the page's sources
+    /// were in waits for them: Play shows a spinner and reads "Cancel".
+    var isWaitingForSources = false
     /// The Movie / Show behind each related item (NavigationLink values). Set
     /// before `model.related`, which redraws the shelf.
     @ObservationIgnored var relatedMedia: [String: Media] = [:]
+    /// The title's IMDb id: its facts as the Home tells them (`HomeTitleFacts`).
+    @ObservationIgnored var imdbId: String?
     /// Play's context menu: always show the quality sheet.
     @ObservationIgnored var chooseQuality: () -> Void = {}
     /// An episode's context menu: the same for that episode.
@@ -67,6 +73,7 @@ struct MacGlassDetailView: View {
                                              onExpandSummary: expandSummary)
                                 .frame(width: geo.size.width, alignment: .bottomLeading)
                                 .frame(minHeight: max(400, geo.size.height - MacGlassMetrics.peek), alignment: .bottomLeading)
+                                .background(alignment: .leading) { heroScrim(width: geo.size.width) }
                                 .background { heroTracker }
                                 .id(SectionID.hero)
 
@@ -154,6 +161,28 @@ struct MacGlassDetailView: View {
         }
     }
 
+    /// The text side of the hero: black from 75 % on the left edge to
+    /// nothing past the middle, faded at its top and bottom — the
+    /// synopsis reads on a light, busy artwork too.
+    private func heroScrim(width: CGFloat) -> some View {
+        LinearGradient(stops: [.init(color: .black.opacity(0.75), location: 0),
+                               .init(color: .black.opacity(0.5), location: 0.5),
+                               .init(color: .black.opacity(0), location: 1)],
+                       startPoint: .leading, endPoint: .trailing)
+            .frame(width: max(width * 0.62, 560))
+            .mask {
+                LinearGradient(stops: [.init(color: .clear, location: 0),
+                                       .init(color: .black, location: 0.35),
+                                       .init(color: .black, location: 0.85),
+                                       .init(color: .clear, location: 1)],
+                               startPoint: .top, endPoint: .bottom)
+            }
+            .opacity(isPastHero ? 0 : 1)
+            .animation(.easeOut(duration: 0.25), value: isPastHero)
+            .allowsHitTesting(false)
+            .accessibilityHidden(true)
+    }
+
     // MARK: Scroll → dimmed artwork
 
     private var heroTracker: some View {
@@ -204,6 +233,7 @@ struct MacGlassDetailView: View {
                                              poster: model.posterURL, maxPixelSize: MacGlassMetrics.backdropPixels)
         guard !Task.isCancelled else { return }
         withAnimation(.easeOut(duration: 0.5)) { artwork = loaded }
+        actions.artworkShown()
     }
 
     // MARK: DEBUG scroll hook
@@ -234,7 +264,7 @@ struct MacGlassDetailView: View {
             expandSummary()
         case "episode"?:
             let episodes = model.episodesOfSelectedSeason
-            if let episode = episodes.first(where: { $0.id == model.upNextEpisodeID }) ?? episodes.first {
+            if let episode = episodes.first(where: { $0.id == model.entryEpisodeID }) ?? episodes.first {
                 present(GlassExpandedText(title: episode.title,
                                           subtitle: MacGlassEpisodePanel.subtitle(of: episode),
                                           body: episode.summary))
@@ -293,8 +323,12 @@ struct MacGlassHeroView: View {
                 titleBlock
                     .padding(.bottom, 16)
                 metadataLine
-                    .padding(.bottom, model.badges.isEmpty ? 18 : 12)
-                if !model.badges.isEmpty {
+                    .padding(.bottom, newEpisode == nil ? (showsBadgesRow ? 12 : 18) : 10)
+                if let newEpisode {
+                    newEpisodeLine(newEpisode)
+                        .padding(.bottom, showsBadgesRow ? 12 : 18)
+                }
+                if showsBadgesRow {
                     badgesRow
                         .padding(.bottom, 18)
                 }
@@ -317,12 +351,7 @@ struct MacGlassHeroView: View {
     private var titleBlock: some View {
         ZStack(alignment: .bottomLeading) {
             if let logoURL = model.logoURL {
-                GlassRemoteImage(url: logoURL, maxPixelSize: 900, contentMode: .fit,
-                                 alignment: .bottomLeading,
-                                 onLoad: { _ in logoLoaded = true }) { EmptyView() }
-                    .frame(maxWidth: 420, maxHeight: 150, alignment: .bottomLeading)
-                    .shadow(color: .black.opacity(0.45), radius: 14, y: 4)
-                    .accessibilityHidden(true)
+                MacGlassLogo(url: logoURL, isLoaded: $logoLoaded)
             }
             if model.logoURL == nil || !logoLoaded {
                 Text(verbatim: model.title)
@@ -344,61 +373,156 @@ struct MacGlassHeroView: View {
 
     // MARK: Metadata
 
-    private var metadataLine: some View {
-        HStack(alignment: .center, spacing: 12) {
-            if !model.metadata.isEmpty {
-                Text(verbatim: model.metadata.joined(separator: "  ·  "))
-                    .font(MacGlassFont.metadata)
-                    .foregroundStyle(GlassPalette.primaryText.opacity(0.9))
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.8)
-            }
-            if let certification = model.certification, !certification.isEmpty {
-                GlassChip(text: certification, fontSize: 12)
-            }
-            if let rating = model.rating, rating > 0 {
-                GlassStarRating(stars: rating, size: 13)
-            }
+    /// The episode a show's "NOUVEL ÉPISODE" is about, as the Home lists
+    /// it (`HomeTitleFacts`).
+    private var newEpisode: HomeEpisode? {
+        guard model.kind == .show, let id = page.imdbId else { return nil }
+        return HomeTitleFacts.shared.newEpisode(ofShow: id)
+    }
+
+    /// "NOUVEL ÉPISODE  S2 · É9 · ven. 13 nov.": the Home's pill, then
+    /// which episode and when.
+    private func newEpisodeLine(_ episode: HomeEpisode) -> some View {
+        let text = HomeCardText()
+        return HStack(spacing: 8) {
+            HomeBadgePill(label: text.cardLabel(of: .newEpisode), size: .large)
+            Text(verbatim: [text.number(of: episode), episode.airDate.map(text.day)].compactMap { $0 }.joined(separator: " · "))
+                .font(MacGlassFont.metadata.weight(.semibold))
+                .foregroundStyle(GlassPalette.primaryText)
         }
         .shadow(color: .black.opacity(0.5), radius: 6, y: 1)
+        .accessibilityElement(children: .combine)
+    }
+
+    /// The Home's facts line: the app's rating of the title first (the one
+    /// its cards show, `HomeTitleFacts`), then year, length, genres, and the
+    /// age rating as a French reader knows it ("-12"; nothing for a film
+    /// for all) — "★ 7,6 · 2023 · 2 h 5 min · Action, Drame · -12".
+    private var metadataLine: some View {
+        let score = page.imdbId.flatMap { HomeTitleFacts.shared.facts(of: $0)?.rating } ?? model.score
+        var parts = model.metadata
+        if let certification = model.certification, let age = MacGlassHeroView.ageRating(certification) { parts.append(age) }
+        return HStack(alignment: .center, spacing: 6) {
+            if let score {
+                Image(systemName: "star.fill")
+                    .imageScale(.small)
+                    .foregroundStyle(GlassPalette.star)
+                Text(verbatim: score.formatted(.number.precision(.fractionLength(1))))
+                    .fontWeight(.semibold)
+                if !parts.isEmpty { Text(verbatim: "·") }
+            }
+            if !parts.isEmpty {
+                Text(verbatim: parts.joined(separator: " · "))
+            }
+        }
+        .font(MacGlassFont.metadata)
+        .foregroundStyle(GlassPalette.primaryText.opacity(0.9))
+        .lineLimit(1)
+        .minimumScaleFactor(0.8)
+        .shadow(color: .black.opacity(0.5), radius: 6, y: 1)
+    }
+
+    /// An American rating ("PG-13", "TV-MA") as a French reader knows it
+    /// ("-12", "-16"; nothing for a film for all); unchanged in English.
+    static func ageRating(_ certification: String) -> String? {
+        let value = certification.trimmingCharacters(in: .whitespaces)
+        guard !value.isEmpty, value != "Unrated", value != "NR", value != "Not Rated" else { return nil }
+        let language = Bundle.main.preferredLocalizations.first.map { Locale(identifier: $0).language.languageCode?.identifier ?? $0 }
+        guard language == "fr" else { return value }
+        switch value.uppercased() {
+        case "G", "TV-G", "TV-Y", "TV-Y7", "PG", "TV-PG": return nil
+        case "PG-13", "TV-14": return "-12"
+        case "R", "TV-MA": return "-16"
+        case "NC-17": return "-18"
+        default: return value
+        }
+    }
+
+    /// A capability chip in the Home's words: "DV", "ATMOS", "HDR", as on
+    /// the cards and the carousel (one vocabulary in the whole app).
+    static func chipText(_ text: String) -> String {
+        let card = HomeCardText()
+        switch text {
+        case "Dolby Vision": return card.cardLabel(of: .dolbyVision)
+        case "Dolby Atmos": return card.cardLabel(of: .atmos)
+        case "HDR10", "HDR10+": return card.cardLabel(of: .hdr)
+        default: return text
+        }
+    }
+
+    /// The row of the capability chips. A movie's is there from the first
+    /// frame, before its sources are known ("Looking for sources…", then
+    /// the chips as the sources answer): the hero is laid out from the
+    /// bottom, and a row added later would push the title up.
+    private var showsBadgesRow: Bool {
+        model.loadError != nil || !model.badges.isEmpty || (model.kind == .movie && model.sources != .ready)
     }
 
     private var badgesRow: some View {
         HStack(spacing: 8) {
-            ForEach(Array(model.badges.enumerated()), id: \.element.id) { index, badge in
-                GlassChip(text: badge.text, systemImage: badge.systemImage, emphasized: index == 0, fontSize: 13)
+            if let error = model.loadError {
+                GlassLoadErrorNote(message: error, fontSize: 14)
+            } else {
+                ForEach(Array(model.badges.enumerated()), id: \.element.id) { index, badge in
+                    GlassChip(text: MacGlassHeroView.chipText(badge.text), systemImage: badge.systemImage, emphasized: index == 0, fontSize: 13)
+                        .transition(.opacity)
+                }
+                if model.kind == .movie, model.sources != .ready {
+                    GlassSourcesNote(state: model.sources, fontSize: 13)
+                        .padding(.leading, model.badges.isEmpty ? 0 : 4)
+                }
             }
         }
         .shadow(color: .black.opacity(0.35), radius: 6, y: 1)
+        .animation(.easeOut(duration: 0.25), value: model.badges)
+        .animation(.easeOut(duration: 0.25), value: model.sources)
+        .animation(.easeOut(duration: 0.25), value: model.loadError)
     }
 
     // MARK: Summary
 
-    /// A clickable card with "MORE" (opens the full text) when the summary is
-    /// cut at 3 lines; a plain glass card otherwise.
-    @ViewBuilder
+    /// The synopsis straight on the artwork's shade, not on glass (glass is
+    /// for controls): three lines, then "MORE" (opens the full text) when it
+    /// is cut. One the sources give in English only, under a French app,
+    /// says so above it ("RÉSUMÉ (EN ANGLAIS)").
     private var summaryCard: some View {
-        if summaryTruncated {
-            Button(action: onExpandSummary) {
+        VStack(alignment: .leading, spacing: 6) {
+            if MacGlassHeroView.isForeign(model.summary) {
+                Text("Detail.Summary.InEnglish")
+                    .font(MacGlassFont.small)
+                    .textCase(.uppercase)
+                    .tracking(0.8)
+                    .foregroundStyle(GlassPalette.secondaryText)
+            }
+            Button {
+                if summaryTruncated { onExpandSummary() }
+            } label: {
                 VStack(alignment: .leading, spacing: 6) {
                     summaryText
-                    Text("More")
-                        .font(MacGlassFont.small)
-                        .textCase(.uppercase)
-                        .tracking(0.8)
-                        .foregroundStyle(GlassPalette.secondaryText)
+                        .foregroundStyle(GlassPalette.primaryText.opacity(0.88))
+                    if summaryTruncated {
+                        Text("More")
+                            .font(MacGlassFont.small)
+                            .textCase(.uppercase)
+                            .tracking(0.8)
+                            .foregroundStyle(GlassPalette.primaryText)
+                    }
                 }
-                .padding(.horizontal, 20)
-                .padding(.vertical, 14)
+                .contentShape(Rectangle())
             }
-            .buttonStyle(MacGlassCardButtonStyle())
-        } else {
-            summaryText
-                .foregroundStyle(GlassPalette.primaryText)
-                .padding(.horizontal, 20)
-                .padding(.vertical, 14)
-                .glassPanel(cornerRadius: MacGlassMetrics.cardCorner)
+            .buttonStyle(.plain)
         }
+        .frame(maxWidth: 640, alignment: .leading)
+        .shadow(color: .black.opacity(0.6), radius: 8, y: 1)
+    }
+
+    /// The text is in English while the app is not.
+    static func isForeign(_ text: String) -> Bool {
+        let app = Bundle.main.preferredLocalizations.first.map { Locale(identifier: $0).language.languageCode?.identifier ?? $0 } ?? "en"
+        guard app != "en", text.count > 40 else { return false }
+        let recognizer = NLLanguageRecognizer()
+        recognizer.processString(text)
+        return recognizer.dominantLanguage == .english
     }
 
     private var summaryText: some View {
@@ -422,7 +546,9 @@ struct MacGlassActionRow: View {
 
     var body: some View {
         HStack(alignment: .center, spacing: 12) {
-            if let play = model.play {
+            // "Try Again" takes Play's place on a page that could not load,
+            // show or movie.
+            if let play = model.play ?? (model.loadError == nil ? nil : GlassPlayInfo()) {
                 playButton(play)
             }
             if model.hasTrailer {
@@ -453,32 +579,45 @@ struct MacGlassActionRow: View {
     }
 
     private func playButton(_ play: GlassPlayInfo) -> some View {
-        Button(action: actions.play) {
+        let failed = model.loadError != nil
+        // A click made before the sources waits for them: the button then
+        // cancels it. (The controller's `play` does, on the same action.)
+        let waits = page.isWaitingForSources && !failed
+        return Button(action: failed ? actions.retry : actions.play) {
             VStack(spacing: 4) {
                 HStack(spacing: 8) {
-                    if page.isPreparingPlay {
-                        // Not ProgressView: the glass button scales on hover / press.
-                        MacGlassSpinner(diameter: 16)
+                    if failed {
+                        Image(systemName: "arrow.clockwise")
+                        Text("Try Again")
                     } else {
-                        Image(systemName: "play.fill")
-                    }
-                    Text("Play")
-                    if let s = play.season, let e = play.episode {
-                        Text("S\(s) · E\(e)")
-                            .opacity(0.8)
+                        if page.isPreparingPlay || waits || model.sources == .searching {
+                            // Not ProgressView: the glass button scales on hover / press.
+                            MacGlassSpinner(diameter: 16)
+                        } else {
+                            Image(systemName: "play.fill")
+                        }
+                        if waits {
+                            Text("Cancel")
+                        } else {
+                            Text("Play")
+                            if let s = play.season, let e = play.episode {
+                                Text("S\(s) · E\(e)")
+                                    .opacity(0.8)
+                            }
+                        }
                     }
                 }
                 .font(MacGlassFont.bodyEmphasis)
-                if let progress = play.progress, progress > 0 {
-                    GlassProgressBar(progress: progress, height: 3, tint: .white)
-                        .opacity(0.9)
+                if !failed, !waits, let progress = play.progress, progress > 0 {
+                    GlassProgressBar(progress: progress, height: 3, tint: GlassPalette.accent)
                         .frame(width: 110)
                 }
             }
             .padding(.horizontal, 10)
         }
-        .glassActionStyle(prominent: true)
-        .controlSize(.extraLarge)
+        .help(waits ? Text("Sources.Loading") : Text(verbatim: ""))
+        // The page's main action, as on the Home's carousel: solid white.
+        .buttonStyle(HomePrimaryButtonStyle())
         .fixedSize()
         .contextMenu {
             Button(action: page.chooseQuality) {
@@ -488,5 +627,51 @@ struct MacGlassActionRow: View {
         #if DEBUG
         .macGlassDebugAnchor("play")
         #endif
+    }
+}
+
+// MARK: - Logo
+
+/// A title's logo on its page at the Home carousel's size: its transparent
+/// margins cut off (`HomeMeasuredLogo`), so that a logo drawn small in a
+/// large canvas still fills the 420 × 160 box; a black logo drawn white.
+/// A logo too dark for the artwork is not drawn: the title in type stays.
+private struct MacGlassLogo: View {
+    let url: URL
+    @Binding var isLoaded: Bool
+
+    @Environment(\.displayScale) private var displayScale
+    @State private var logo: HomeMeasuredLogo?
+
+    var body: some View {
+        Group {
+            if let logo, logo.isReadable {
+                Image(glassImage: logo.image)
+                    .renderingMode(logo.isDark ? .template : .original)
+                    .resizable()
+                    .aspectRatio(contentMode: .fit)
+                    .foregroundStyle(Color.white)
+                    .frame(maxWidth: 420, maxHeight: 160, alignment: .bottomLeading)
+                    .transition(.opacity)
+            } else {
+                Color.clear.frame(width: 1, height: 1)
+            }
+        }
+        .shadow(color: .black.opacity(0.45), radius: 14, y: 4)
+        .accessibilityHidden(true)
+        .task(id: url) {
+            if let cached = HomeMeasuredLogo.cached(url) {
+                logo = cached
+                isLoaded = cached.isReadable
+                return
+            }
+            guard let image = await GlassImageCache.shared.image(for: url, maxPixelSize: (420 * max(displayScale, 1)).rounded(.up)),
+                  !Task.isCancelled else { return }
+            let measured = await Task.detached(priority: .userInitiated) { HomeMeasuredLogo.measure(image) }.value
+            guard !Task.isCancelled else { return }
+            HomeMeasuredLogo.store(measured, for: url)
+            withAnimation(.easeOut(duration: 0.25)) { logo = measured }
+            isLoaded = measured.isReadable
+        }
     }
 }

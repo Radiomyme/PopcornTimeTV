@@ -538,17 +538,26 @@ struct MediaSelectionSnapshot {
     /// goes: a late OpenSubtitles list adds a rendition in its language to
     /// the later masters, AVFoundation then offers no translation into it on
     /// items built on them, and the ranking picks that rendition. An
-    /// automatic entry stays automatic.
+    /// automatic entry stays automatic — except, with `picksSubtitlesAnew`
+    /// (an item rebuilt for subtitles the first one's master lacked),
+    /// subtitles nobody chose: they get the app's pick in the preferred
+    /// subtitle language, as on a first start; none: automatic.
     @MainActor
     @discardableResult
-    func apply(to item: AVPlayerItem) async -> [String] {
+    func apply(to item: AVPlayerItem, picksSubtitlesAnew: Bool = false) async -> [String] {
         var applied: [String] = []
         for entry in entries {
             guard let group = try? await item.asset.loadMediaSelectionGroup(for: entry.characteristic) else { continue }
             let kind = entry.characteristic == .audible ? "audio" : "sous-titres"
             if entry.isAutomatic {
-                item.selectMediaOptionAutomatically(in: group)
-                applied.append("\(kind) auto")
+                if picksSubtitlesAnew, entry.characteristic == .legible,
+                   let option = await Self.rankedLegibleOption(in: group, languageTag: nil, of: item) {
+                    item.select(option, in: group)
+                    applied.append("\(kind) \(option.displayName) (classement)")
+                } else {
+                    item.selectMediaOptionAutomatically(in: group)
+                    applied.append("\(kind) auto")
+                }
             } else if entry.propertyList == nil && entry.displayName == nil {
                 item.select(nil, in: group)
                 applied.append("\(kind) off")
@@ -823,6 +832,12 @@ struct HeldSeekWatch {
 /// playlists once the remux has finished (`LiveBornItemWatch`: at the exact
 /// position, left paused when the user had paused).
 ///
+/// `waitForJump(player:at:resumesPlayback:isDataReady:)` runs the same wait
+/// and rebuild without a failure either, for a position the owner's
+/// conversion was moved to (a far seek, a rewind into what a jump skipped)
+/// whose first segment is not written yet: the item that asked for it is
+/// not left waiting on that request (see the function).
+///
 /// Bounded — the owner then falls back to VLC like for any other failure:
 ///  - `handle` returns false after `maxAttemptsWithoutProgress` recoveries
 ///    in a row that didn't move playback past the previous resume point;
@@ -876,6 +891,10 @@ final class PlaybackStarvationRecovery {
     var onItemReplaced: ((_ item: AVPlayerItem, _ restoresSelection: Bool) -> Void)?
     /// The new item sits at `time` (seek done): play when appropriate.
     var onResumed: ((_ time: Double) -> Void)?
+    /// The user navigated while the new item was being put in place
+    /// (`userNavigated`): once it sits at the recovery's position (after
+    /// `onResumed`), the owner seeks to `time` as for any navigation.
+    var onNavigatedDuringRebuild: ((_ time: Double) -> Void)?
     /// The recovery can't continue (no item could be built, the rebuilt item
     /// never became ready, `abandonReason`, stall cap, a user seek to a
     /// `positionUnavailable` position, a user target the download can't
@@ -897,6 +916,12 @@ final class PlaybackStarvationRecovery {
     /// pause or a slowdown of the download right at its start shows against
     /// the pace before. nil = none (the watch learns the pace as it goes).
     var farTargetHistory: (() -> [(time: TimeInterval, progress: Float)])?
+    /// Remux owners: asked, before the recovery gives up on a user target the
+    /// in-order conversion can't reach soon (`FarTargetWatch.reason`), to
+    /// move the conversion there instead (`RemuxPlayback.requestJump`).
+    /// True: it does — the wait goes on natively, the far-target pace
+    /// measured anew. False or nil: the recovery gives up (VLC there).
+    var farTargetJump: ((_ seconds: Double) -> Bool)?
     /// Owner hook. True when `seconds` (player timeline) can never be played
     /// natively again (remux path: the segment was pruned →
     /// `!remux.isAvailable(playerSeconds:)`; direct paths: nil).
@@ -937,6 +962,13 @@ final class PlaybackStarvationRecovery {
     /// on complete data), not download starvation: owners show their
     /// spinner without the "download slower than playback" text.
     private(set) var isRebuildingStuckItem = false
+    /// True while the recovery in progress is a `waitForJump` (the media of
+    /// a position the conversion jumped to is waited for), not a failure:
+    /// owners show « Resuming at … », not the "download slower than
+    /// playback" text. Kept when the old item fails meanwhile (`handle`: the
+    /// wait goes on unchanged); cleared when its rebuilt item fails (a
+    /// starvation recovery at that position).
+    private(set) var isWaitingForJump = false
     /// True while the recovery in progress waits for the user to press play
     /// before it rebuilds (`handle(…resumesPlayback: false…)`: the user had
     /// paused — or paused the dead item while it waited for data) — no
@@ -946,6 +978,18 @@ final class PlaybackStarvationRecovery {
     /// false: it ends paused, without `onResumed` (`rebuildNow`'s
     /// `resumesPlayback`, or a paused user who hasn't pressed play).
     private var rebuildResumesPlayback = true
+    /// The wait in progress rebuilds without waiting for play and leaves the
+    /// new item paused — unless the user plays meanwhile
+    /// (`waitForJump(…rebuildsWhilePaused: true…)`: a paused user who moved
+    /// the playhead gets the picture there, paused, not a wait for a press).
+    private var rebuildsPaused = false
+    /// Where the user's latest navigation came from (`userNavigated`): the
+    /// dead item's `currentTime()` going back there is AVPlayer resetting a
+    /// seek it gave up on, not a user seek.
+    private var navigatedFrom: Double?
+    /// A navigation made while the new item was being put in place, handed
+    /// to the owner once it is (`onNavigatedDuringRebuild`).
+    private var navigationDuringRebuild: Double?
     /// The player's rate changes while a starvation recovery waits (the
     /// user's play / pause on the dead item); removed when released.
     private var rateObserver: ObserverToken?
@@ -965,6 +1009,9 @@ final class PlaybackStarvationRecovery {
     /// The `rebuildNow` in progress seeks exactly to its time, not up to 2 s
     /// before (`exactPosition`).
     private var rebuildSeeksExactly = false
+    /// The rebuild in progress gives subtitles nobody chose the app's pick
+    /// (`rebuildNow`'s `picksSubtitlesAnew`).
+    private var rebuildPicksSubtitlesAnew = false
     /// The position a recovery was recovering when it ended without
     /// resuming (`onGiveUp`, or `handle` returned false while recovering /
     /// after the budget): where the owner's VLC hand-off continues once
@@ -988,6 +1035,9 @@ final class PlaybackStarvationRecovery {
     private var snapshotGeneration = 0
     private var snapshotPending = false
     private var replacement: AVPlayerItem?
+    /// The item this recovery put in place (nil before its rebuild, and once
+    /// it is over) — logs only.
+    var replacementItem: AVPlayerItem? { replacement }
     private var statusObservation: NSKeyValueObservation?
     private var selectionApplied = false
     private var isSeeking = false
@@ -999,7 +1049,12 @@ final class PlaybackStarvationRecovery {
     private var farTargetWatch = FarTargetWatch()
     /// The player's time at the previous look while waiting — a poll or a
     /// play press (the first one at `begin`): only a user seek moves it.
-    private var observedPlayerTime: Double?
+    private var observedPlayerTime: Double? {
+        didSet { observedPlayerTimeAt = ProcessInfo.processInfo.systemUptime }
+    }
+    /// When `observedPlayerTime` was read (uptime): a playing old item's
+    /// time moves by playback meanwhile (`followUserSeek`).
+    private var observedPlayerTimeAt = ProcessInfo.processInfo.systemUptime
 
     init() {}
 
@@ -1040,7 +1095,10 @@ final class PlaybackStarvationRecovery {
         let wasRecovering = isRecovering
         // A rebuilt item that failed again: the user pressed play to get there
         // — or it is a rebuild that ends paused (`rebuildNow`).
-        let waitsForPlay = wasRecovering ? (isWaitingForPlay || !rebuildResumesPlayback) : !resumesPlayback
+        // A paused wait that rebuilds anyway (`rebuildsPaused`) goes on so.
+        let carriesPausedRebuild = wasRecovering && rebuildsPaused && !isWaitingForPlay
+        let waitsForPlay = wasRecovering ? (isWaitingForPlay || (!rebuildResumesPlayback && !carriesPausedRebuild))
+                                         : !resumesPlayback
         var time = wasRecovering ? (resumeTime ?? position) : position
         if !time.isFinite || time < 0 { time = lastResumeTime ?? 0 }
         guard AVPlayerItemFailureObserver.isStarvation(failure, stillDownloading: stillDownloading) else {
@@ -1052,6 +1110,20 @@ final class PlaybackStarvationRecovery {
                 cancel()
             }
             return false
+        }
+        if wasRecovering, isWaitingForJump, replacement == nil {
+            // The old item a jump wait left in place (its held request timed
+            // out): the wait already has its target, its data test and its
+            // player state (a rate it keeps, a paused rebuild) — nothing
+            // starts over, no attempt is spent.
+            print("[Player] jump wait: the old item failed meanwhile (\(failure.reason)) — still waiting for "
+                  + "\(Self.seconds(time)), nothing else changes")
+            // AVPlayer put the failed item's time back where its seek came
+            // from (`position`): that is no user seek (measured, slow seed:
+            // read as « user seek to 697.9 s », the user's 398.2 s lost).
+            if position.isFinite { navigatedFrom = position }
+            observedPlayerTime = player.currentTime().seconds
+            return true
         }
         if StarvationPolicy.madeProgress(position: time, since: lastResumeTime) {
             attemptsWithoutProgress = 0
@@ -1072,7 +1144,9 @@ final class PlaybackStarvationRecovery {
         let userTarget = wasRecovering ? (resumeTimeIsUserTarget && time == resumeTime)
                                        : (positionIsUserTarget && time == position)
         begin(player: player, time: time, startFraction: fraction, captureSelection: !wasRecovering,
-              isDataReady: isDataReady, reason: failure.reason, userTarget: userTarget, waitsForPlay: waitsForPlay)
+              isDataReady: isDataReady, reason: failure.reason, userTarget: userTarget,
+              resumesPlayback: carriesPausedRebuild ? rebuildResumesPlayback : true, waitsForPlay: waitsForPlay,
+              pausedRebuild: carriesPausedRebuild && !rebuildResumesPlayback)
         return true
     }
 
@@ -1092,9 +1166,13 @@ final class PlaybackStarvationRecovery {
         resumeTime = nil
         resumeTimeIsUserTarget = false
         isRebuildingStuckItem = false
+        isWaitingForJump = false
         isWaitingForPlay = false
         isSettlingPlayPress = false
         isSettlingPause = false
+        rebuildsPaused = false
+        navigatedFrom = nil
+        navigationDuringRebuild = nil
         pendingStartFraction = nil
         isDataReady = nil
         observedPlayerTime = nil
@@ -1122,13 +1200,146 @@ final class PlaybackStarvationRecovery {
     /// without `onResumed`; `exactPosition` makes the precise seek land on
     /// `time` itself (no replay of up to 2 s of a picture that was playing
     /// fine).
+    /// And their replacement of an item whose master playlist was read
+    /// before the OpenSubtitles list came (AVPlayer reads it once):
+    /// `picksSubtitlesAnew` gives subtitles nobody chose the app's pick on
+    /// the new item, as on a first start (`MediaSelectionSnapshot.apply`) —
+    /// a choice the user made, off included, is kept like any other.
     @discardableResult
     func rebuildNow(player: AVPlayer, at time: Double, reason: String, resumesPlayback: Bool = true,
-                    exactPosition: Bool = false) -> Bool {
+                    exactPosition: Bool = false, picksSubtitlesAnew: Bool = false) -> Bool {
         guard !isRecovering, player.currentItem != nil, time.isFinite, time >= 0 else { return false }
         begin(player: player, time: time, startFraction: nil, captureSelection: true,
               isDataReady: { _, _ in true }, reason: reason, stuckItem: true, resumesPlayback: resumesPlayback,
-              exactPosition: exactPosition)
+              exactPosition: exactPosition, picksSubtitlesAnew: picksSubtitlesAnew)
+        return true
+    }
+
+    /// Waits for the media at `time` (player timeline, s), then puts a new
+    /// item there — WITHOUT a failure. The owner's conversion was moved to
+    /// that position (a far seek, a rewind into what a jump skipped) and its
+    /// first segment is not written yet: the torrent has to turn to that
+    /// part of the file first. AVPlayer holds a segment request for about
+    /// one target duration (-12889 "No response for media file in 5.84s",
+    /// tvOS 26.5, 6 s segments); on tvOS it then drops the video variant for
+    /// good (-12880 "Can not proceed after removing variants") while the
+    /// audio rendition goes on loading — the item never plays again and
+    /// never fails either, so nothing would ever start a recovery
+    /// (end-to-end run E6: a far seek, its segment 0.1 s too late, a frozen
+    /// picture for the rest of the run). The item is therefore not left
+    /// waiting on that request: the starvation wait takes its place — the
+    /// player paused, `isDataReady` polled, the user's seeks and play /
+    /// pause followed as on a dead item (a paused item's time only moves
+    /// when the user moves it) — then the rebuild, a new item PRE-POSITIONED
+    /// at `time`, and `onResumed`. `time` is the user's target
+    /// (`resumeTimeIsUserTarget`: a give-up hands VLC that position).
+    /// The starvation attempt budget and `recoveryCount` are untouched:
+    /// nothing failed. `resumesPlayback` false (the user had paused): it
+    /// waits for play first, as `handle` does — or, with
+    /// `rebuildsWhilePaused`, it waits for the media and rebuilds as above,
+    /// the new item left PAUSED at `time` (no `onResumed`) unless the user
+    /// pressed play on the item meanwhile (a pause again keeps it paused):
+    /// the user moved while paused, the picture there is what they asked
+    /// for, a press they have no reason to give is not.
+    /// `keepsPlayerRate` (with `resumesPlayback`): the player is NOT paused
+    /// while the media is waited for — tvOS: AVKit takes the Siri Remote's
+    /// left / right presses on a paused player as a scrub it commits only
+    /// later (measured: 16 presses during a jump's wait, committed at the
+    /// new item as a seek to 0:00), on a playing one as skips it reports
+    /// (`timeToSeekAfterUserNavigatedFrom` → `userNavigated`). The rebuild
+    /// pauses it as always before the new item goes in.
+    /// `seekOrigin`: where the move that led to `time` came from (tvOS: the
+    /// navigation's `from`); else the player's time now, when it does not
+    /// read `time` yet (its seek is still held). AVPlayer that gives up on
+    /// such a seek puts its time back THERE, with or without failing the
+    /// item (measured, run X2: 42 s after a paused move 91.8 → 151.8 s, the
+    /// clock went back to 91.8 s and the item did not fail) — that is no
+    /// user seek: the wait stays at `time` (`followUserSeek`).
+    /// Returns false — nothing done — while a recovery runs, without a
+    /// current item, or for a time that isn't finite and ≥ 0.
+    @discardableResult
+    func waitForJump(player: AVPlayer, at time: Double, resumesPlayback: Bool = true, rebuildsWhilePaused: Bool = false,
+                     keepsPlayerRate: Bool = false, seekOrigin: Double? = nil,
+                     isDataReady: @escaping (_ time: Double, _ waited: TimeInterval) -> Bool) -> Bool {
+        guard !isRecovering, player.currentItem != nil, time.isFinite, time >= 0 else { return false }
+        let pausedRebuild = !resumesPlayback && rebuildsWhilePaused
+        let origin = StarvationPolicy.seekResetOrigin(target: time, seekOrigin: seekOrigin,
+                                                      playerTime: player.currentTime().seconds)
+        begin(player: player, time: time, startFraction: nil, captureSelection: true,
+              isDataReady: isDataReady, reason: "jump", userTarget: true, resumesPlayback: resumesPlayback,
+              waitsForPlay: !resumesPlayback && !pausedRebuild, pausedRebuild: pausedRebuild,
+              keepsRate: keepsPlayerRate && resumesPlayback, jump: true)
+        // (`begin` forgets any earlier origin.)
+        navigatedFrom = origin
+        return true
+    }
+
+    /// Where a look at the player's time that finds it back is AVPlayer
+    /// resetting a seek it gave up on, not a user seek (`navigatedFrom`):
+    /// the latest navigation's origin, or the origin of the jump wait's move.
+    var seekResetOrigin: Double? { navigatedFrom }
+
+    /// The user navigated to `time` (player timeline, s) from `from` while
+    /// the recovery waits — tvOS: AVKit's transport bar, confirmed
+    /// (`timeToSeekAfterUserNavigatedFrom`), which on the dead item may
+    /// never show in `currentTime()`. It is the new target, as a user seek
+    /// seen by the poll is (`onRetarget`; a give-up there at once when it can
+    /// never be played natively again, `positionUnavailable`).
+    /// `resumesPlayback`: AVKit resumes playback after such a move — a wait
+    /// for play becomes a wait for data, and the rebuild plays. A later look
+    /// at the dead item's time that finds `from` again is AVPlayer resetting
+    /// the seek it gave up on, not a user seek. Returns false — nothing done
+    /// — when no recovery waits (none, a stuck item's rebuild) or for a time
+    /// that isn't finite and ≥ 0.
+    /// A new item being put in place (`rebuild`): the recovery's precise
+    /// seek would cancel AVKit's (or AVKit's cancels it, and the conversion
+    /// never hears of the move) — the move is kept and handed to the owner
+    /// once the new item sits at the recovery's position
+    /// (`onNavigatedDuringRebuild`, after `onResumed`), which seeks there as
+    /// for any navigation.
+    @discardableResult
+    func userNavigated(to time: Double, from: Double?, resumesPlayback: Bool) -> Bool {
+        guard isRecovering, !isRebuildingStuckItem, time.isFinite, time >= 0 else { return false }
+        if replacement != nil {
+            print("[Player] starvation recovery: the user navigated to \(Self.seconds(time)) while the new item is put "
+                  + "in place — it goes there once it is" + (resumesPlayback ? ", playback resumes there" : ""))
+            navigationDuringRebuild = time
+            if resumesPlayback, !rebuildResumesPlayback {
+                rebuildResumesPlayback = true
+                onUserPlaybackChanged?(true)
+            }
+            return true
+        }
+        navigatedFrom = from.flatMap { $0.isFinite ? $0 : nil }
+        observedPlayerTime = player?.currentTime().seconds
+        print("[Player] starvation recovery: the user navigated to \(Self.seconds(time))"
+              + (resumesPlayback ? " — playback resumes there" : ""))
+        if let current = resumeTime, abs(current - time) <= StarvationPolicy.userSeekThresholdSeconds {
+            // Where the wait already is.
+        } else {
+            retarget(to: time)
+            if positionUnavailable?(time) == true {
+                giveUp(ResumePolicy.rewindPastBufferReason)
+                return true
+            }
+        }
+        guard resumesPlayback else { return true }
+        playPressCount += 1
+        isSettlingPause = false
+        isSettlingPlayPress = false
+        rebuildsPaused = false
+        rebuildResumesPlayback = true
+        onUserPlaybackChanged?(true)
+        if isWaitingForPlay {
+            isWaitingForPlay = false
+            failureDate = Date()
+            loggedWaitSteps = 0
+            stallWatch = RemuxStallWatch(cap: stallCapSeconds)
+            farTargetWatch = FarTargetWatch(downloadHistory: farTargetHistory?() ?? [])
+            onWaitingChanged?(true)
+            // The poll chain goes on (it only followed the playhead): the
+            // checks of the wait for data run from its next turn.
+        }
         return true
     }
 
@@ -1137,7 +1348,8 @@ final class PlaybackStarvationRecovery {
     private func begin(player: AVPlayer, time: Double, startFraction: Float?, captureSelection: Bool,
                        isDataReady: @escaping (Double, TimeInterval) -> Bool, reason: String,
                        stuckItem: Bool = false, userTarget: Bool = false, resumesPlayback: Bool = true,
-                       exactPosition: Bool = false, waitsForPlay: Bool = false) {
+                       exactPosition: Bool = false, picksSubtitlesAnew: Bool = false, waitsForPlay: Bool = false,
+                       pausedRebuild: Bool = false, keepsRate: Bool = false, jump: Bool = false) {
         generation += 1
         let current = generation
         statusObservation?.invalidate()
@@ -1150,11 +1362,16 @@ final class PlaybackStarvationRecovery {
         self.isDataReady = isDataReady
         isRecovering = true
         isRebuildingStuckItem = stuckItem
+        isWaitingForJump = jump
         isWaitingForPlay = waitsForPlay
         isSettlingPlayPress = false
         isSettlingPause = false
         rebuildResumesPlayback = resumesPlayback && !waitsForPlay
+        rebuildsPaused = pausedRebuild
+        navigatedFrom = nil
+        navigationDuringRebuild = nil
         rebuildSeeksExactly = exactPosition
+        rebuildPicksSubtitlesAnew = picksSubtitlesAnew
         resumeTime = time
         resumeTimeIsUserTarget = userTarget
         abandonedTime = nil
@@ -1163,8 +1380,18 @@ final class PlaybackStarvationRecovery {
         loggedWaitSteps = 0
         stallWatch = RemuxStallWatch(cap: stallCapSeconds)
         farTargetWatch = FarTargetWatch(downloadHistory: farTargetHistory?() ?? [])
-        // Paused: the next item must not start at 0 before the seek.
-        player.pause()
+        // Paused: the next item must not start at 0 before the seek (a
+        // jump wait that `keepsRate` is paused by the rebuild instead).
+        if !keepsRate {
+            player.pause()
+        } else if player.rate == 0 {
+            // A user who wants playback on a paused player (paused, then
+            // navigated: AVKit plays only once its held seek completes) —
+            // played now, as AVKit would, so presses stay skips. It plays
+            // nothing before its seek's media is there (read below: no
+            // transition for `userPlaybackChanged`).
+            player.play()
+        }
         observedPlayerTime = player.currentTime().seconds
         observedPlaying = player.rate != 0
         if captureSelection, let item = player.currentItem {
@@ -1187,11 +1414,18 @@ final class PlaybackStarvationRecovery {
         if stuckItem {
             print("[Player] native item stuck at \(Self.seconds(time)) on complete data (\(reason)) — rebuilding it there")
         } else {
-            let pending = pendingStartFraction.map { ", pending resume at \(Int(($0 * 100).rounded())) %" } ?? ""
-            let target = userTarget ? ", the user's seek target" : ""
-            print("[Player] download starvation at \(Self.seconds(time))\(pending)\(target) (\(reason)) — keeping the native player, "
-                  + (waitsForPlay ? "paused by the user: rebuilding once play is pressed" : "waiting for data")
-                  + " (attempt \(attemptsWithoutProgress)/\(maxAttemptsWithoutProgress))")
+            if jump {
+                print("[Player] jump to \(Self.seconds(time)): its media is not written yet — the item no longer waits on it, "
+                      + (waitsForPlay ? "paused by the user: a new one is put there once play is pressed"
+                         : pausedRebuild ? "paused by the user: a new one is put there once it is, left paused"
+                                         : "a new one is put there once it is"))
+            } else {
+                let pending = pendingStartFraction.map { ", pending resume at \(Int(($0 * 100).rounded())) %" } ?? ""
+                let target = userTarget ? ", the user's seek target" : ""
+                print("[Player] download starvation at \(Self.seconds(time))\(pending)\(target) (\(reason)) — keeping the native player, "
+                      + (waitsForPlay ? "paused by the user: rebuilding once play is pressed" : "waiting for data")
+                      + " (attempt \(attemptsWithoutProgress)/\(maxAttemptsWithoutProgress))")
+            }
             // The user's play / pause on the dead item, in both modes: a
             // TRANSITION from the state seen last — first the one the pause
             // above left, so that pause is never taken for theirs — with a
@@ -1242,6 +1476,16 @@ final class PlaybackStarvationRecovery {
         guard isRecovering, current == generation, replacement == nil else { return }
         let changed = playing != observedPlaying
         observedPlaying = playing
+        if rebuildsPaused, !isWaitingForPlay {
+            // A paused wait that rebuilds anyway: a play press makes the new
+            // item play, a pause again leaves it paused.
+            guard byUser, changed else { return }
+            playPressCount += 1
+            rebuildResumesPlayback = playing
+            onUserPlaybackChanged?(playing)
+            print("[Player] jump wait: \(playing ? "play pressed — the new item plays once it is there" : "paused again — the new item stays paused")")
+            return
+        }
         guard byUser, changed, playing == isWaitingForPlay else { return }
         // Only the latest press settles.
         playPressCount += 1
@@ -1325,9 +1569,24 @@ final class PlaybackStarvationRecovery {
     /// again (`positionUnavailable`). True when the recovery gave up.
     private func followUserSeek() -> Bool {
         guard let observed = player?.currentTime().seconds else { return false }
-        let userTarget = StarvationPolicy.userSeekTarget(observed: observed, lastObserved: observedPlayerTime)
+        // A jump wait that keeps the rate: the old item may play (its held
+        // request answered) — its playback is no user seek.
+        let userTarget = StarvationPolicy.userSeekTarget(observed: observed, lastObserved: observedPlayerTime,
+                                                         playing: (player?.rate ?? 0) != 0,
+                                                         elapsed: ProcessInfo.processInfo.systemUptime - observedPlayerTimeAt)
         observedPlayerTime = observed
         guard let target = userTarget else { return false }
+        if let from = navigatedFrom, abs(target - from) <= StarvationPolicy.userSeekThresholdSeconds {
+            // AVPlayer gave up on the navigation's seek and put its time back.
+            print("[Player] starvation recovery: the player's time went back to \(Self.seconds(target)), where the move "
+                  + "came from — AVPlayer gave up on its seek, no user seek: still waiting for \(Self.seconds(resumeTime ?? .nan))")
+            return false
+        }
+        if let current = resumeTime, abs(target - current) <= StarvationPolicy.userSeekThresholdSeconds {
+            // A seek showing late (a navigation's, the start of the jump
+            // wait): where the wait already is — nothing starts over.
+            return false
+        }
         retarget(to: target)
         guard positionUnavailable?(target) == true else { return false }
         giveUp(ResumePolicy.rewindPastBufferReason)
@@ -1337,7 +1596,8 @@ final class PlaybackStarvationRecovery {
     /// The checks of the wait for data: the data will never come (abandon),
     /// the stall cap, the data is there (→ rebuild), a user target the
     /// in-order download or the remux pump can't bring soon (`FarTargetWatch`
-    /// → VLC there).
+    /// → the conversion jumps there when it can, `farTargetJump`, else VLC
+    /// there).
     /// True when the recovery rebuilt or gave up.
     private func proceed(_ current: Int) -> Bool {
         guard let time = resumeTime else { return false }
@@ -1371,13 +1631,23 @@ final class PlaybackStarvationRecovery {
                                         now: ProcessInfo.processInfo.systemUptime) {
             print("[Player] starvation recovery: the remux frontier (\(Self.seconds(sample.frontierSeconds))) would need "
                   + "~\(Int((farTargetWatch.estimatedSecondsToTarget ?? 0).rounded())) s to reach the user's target")
+            // The conversion jumps there when it can: the wait stays native.
+            if farTargetJump?(time) == true {
+                print("[Player] starvation recovery: the conversion jumps to \(Self.seconds(time)) — still waiting, natively")
+                farTargetWatch = FarTargetWatch(downloadHistory: farTargetHistory?() ?? [])
+                return false
+            }
             giveUp(FarTargetWatch.reason)
             return true
         }
         let step = Int(waited / 15)
         if step > loggedWaitSteps {
             loggedWaitSteps = step
-            print("[Player] starvation recovery: still waiting for data at \(Self.seconds(time)) after \(Int(waited)) s")
+            // A jump's wait is no download slower than playback: it waits
+            // for the media the conversion writes at the jump's target.
+            print(isWaitingForJump
+                  ? "[Player] jump wait: still waiting for the media at \(Self.seconds(time)) after \(Int(waited)) s"
+                  : "[Player] starvation recovery: still waiting for data at \(Self.seconds(time)) after \(Int(waited)) s")
         }
         return false
     }
@@ -1403,10 +1673,50 @@ final class PlaybackStarvationRecovery {
         onRetarget?(time)
     }
 
+    /// The jump's navigation came about this long (s) before its wait moved
+    /// here (the jump's grace, plus a margin): the old item's errors since
+    /// then are the jump's.
+    static let jumpLogMarginSeconds: TimeInterval = 2
+
+    /// "[Player] jump wait: the old item before its replacement — playing at
+    /// 1352.0 s, rate 1.0, item ready, picture 3840×2160, errors since the
+    /// jump: -12880 ×1" (the error log's codes since `since`).
+    static func oldItemLine(player: AVPlayer, since: Date) -> String {
+        let item = player.currentItem
+        let state: String
+        switch player.timeControlStatus {
+        case .playing: state = "playing"
+        case .paused: state = "paused"
+        case .waitingToPlayAtSpecifiedRate: state = "waiting"
+        @unknown default: state = "?"
+        }
+        var line = "[Player] jump wait: the old item before its replacement — \(state) at "
+            + String(format: "%.1f s, rate %.1f", player.currentTime().seconds, player.rate)
+        guard let item = item else { return line + ", no item" }
+        switch item.status {
+        case .readyToPlay: line += ", item ready"
+        case .failed: line += ", item failed"
+        default: line += ", item unknown"
+        }
+        let size = item.presentationSize
+        line += size.width > 0 ? String(format: ", picture %.0f×%.0f", size.width, size.height) : ", no picture size"
+        var counts: [Int: Int] = [:]
+        for event in item.errorLog()?.events ?? [] where (event.date ?? .distantPast) >= since {
+            counts[event.errorStatusCode, default: 0] += 1
+        }
+        let codes = counts.keys.sorted().map { "\($0) ×\(counts[$0] ?? 0)" }
+        return line + ", errors since the jump: " + (codes.isEmpty ? "none" : codes.joined(separator: ", "))
+    }
+
     private func rebuild(_ current: Int) {
         guard let player = player, let item = makeItem?() else {
             giveUp("Reprise après famine impossible")
             return
+        }
+        if isWaitingForJump {
+            // Logs only: was the old item already playing at the target, with
+            // a picture — or picture-dead (-12880) while its audio ran on?
+            print(Self.oldItemLine(player: player, since: failureDate.addingTimeInterval(-Self.jumpLogMarginSeconds)))
         }
         // The pause below is the recovery's, not the user's.
         rateObserver = nil
@@ -1430,8 +1740,9 @@ final class PlaybackStarvationRecovery {
         let snapshot = self.snapshot
         onItemReplaced?(item, snapshot != nil)
         if let snapshot = snapshot {
+            let picksSubtitlesAnew = rebuildPicksSubtitlesAnew
             Task { @MainActor [weak self] in
-                let applied = await snapshot.apply(to: item)
+                let applied = await snapshot.apply(to: item, picksSubtitlesAnew: picksSubtitlesAnew)
                 guard let self = self, current == self.generation else { return }
                 print("[Player] starvation recovery: selection restored — \(applied.joined(separator: ", "))")
                 self.selectionApplied = true
@@ -1492,12 +1803,14 @@ final class PlaybackStarvationRecovery {
     private func seekDidFinish(_ current: Int, finished: Bool) {
         guard isRecovering, current == generation, let time = resumeTime else { return }
         let stuckItem = isRebuildingStuckItem
+        let jump = isWaitingForJump
         isRecovering = false
         isSeeking = false
         replacement = nil
         resumeTime = nil
         resumeTimeIsUserTarget = false
         isRebuildingStuckItem = false
+        isWaitingForJump = false
         isWaitingForPlay = false
         pendingStartFraction = nil
         isDataReady = nil
@@ -1505,12 +1818,23 @@ final class PlaybackStarvationRecovery {
         lastResumeTime = time
         let resumes = rebuildResumesPlayback
         rebuildResumesPlayback = true
+        rebuildsPaused = false
+        navigatedFrom = nil
+        let navigation = navigationDuringRebuild
+        navigationDuringRebuild = nil
         rebuildSeeksExactly = false
-        print("[Player] \(stuckItem ? "stuck item rebuilt" : "starvation recovery #\(recoveryCount)"): "
+        rebuildPicksSubtitlesAnew = false
+        print("[Player] \(stuckItem ? "stuck item rebuilt" : jump ? "jump" : "starvation recovery #\(recoveryCount)"): "
               + "native playback \(resumes ? "resumes" : "stays paused") at \(Self.seconds(time))"
               + (finished ? "" : " (seek interrupted)"))
+        if jump {
+            // The device log's timing of a jump the item did not wait on.
+            print("[Resume] jump: a new item \(resumes ? "plays" : "sits paused") at \(Self.seconds(time)), "
+                  + "\(String(format: "%.1f", Date().timeIntervalSince(failureDate))) s after the wait moved to it")
+        }
         onWaitingChanged?(false)
         if resumes { onResumed?(time) }
+        if let navigation = navigation { onNavigatedDuringRebuild?(navigation) }
     }
 
     /// Ends the recovery without resuming (→ the owner's VLC fallback).

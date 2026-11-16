@@ -1,4 +1,5 @@
-import Foundation
+import UIKit
+import PopcornKit
 
 
 class TVTabBarController: UITabBarController {
@@ -14,7 +15,17 @@ class TVTabBarController: UITabBarController {
         guard !environmentsToFocus.isEmpty else { return super.preferredFocusEnvironments }
         // The selected screen next, never the tab bar: a target with nothing
         // focusable yet must not send the focus to a tab.
-        return environmentsToFocus + [selectedViewController].compactMap { $0 }
+        var environments = environmentsToFocus + [selectedViewController].compactMap { $0 }
+        // Last, the tab that has the focus: it stays there until the target
+        // can take it. With nothing focusable in this list (a page that
+        // replaced its loading screen at once, its content not laid out
+        // yet), the focus engine went to the first tab, and the focus on a
+        // tab selects it: now and then the app showed the first tab instead
+        // of the page a link had just opened on another one.
+        if let tab = UIFocusSystem.focusSystem(for: self)?.focusedItem as? UIView, tab.isDescendant(of: tabBar) {
+            environments.append(tab)
+        }
+        return environments
     }
 
     override func didUpdateFocus(in context: UIFocusUpdateContext, with coordinator: UIFocusAnimationCoordinator) {
@@ -24,8 +35,88 @@ class TVTabBarController: UITabBarController {
 
     override func viewDidLoad() {
         super.viewDidLoad()
+        // Behind the grids (Movies, Shows, Watchlist, Search), which draw no
+        // background of their own: the Home's black, not the system's grey.
+        view.backgroundColor = .black
         installGlassSettings()
+        installDownloadsIcon()
+        installHome()
         installBackFromTabBar()
+        noteSelectedTab()
+    }
+
+    // MARK: - Tabs by name
+
+    /// The tabs added in code (`insert(_:as:at:)`), which say their name; the
+    /// storyboard's tabs are recognised by their first screen.
+    private var addedTabs: [DeepLink.Tab: UIViewController] = [:]
+
+    /// The name of a tab (one of `viewControllers`): what a link
+    /// (`popcorntime://tab/movies`), the DEBUG launch hooks and the UI tests
+    /// call it. Never its index: a tab inserted before the others (Home)
+    /// moves them all.
+    func name(of viewController: UIViewController) -> DeepLink.Tab? {
+        if let added = addedTabs.first(where: { $0.value === viewController }) { return added.key }
+        let root = (viewController as? UINavigationController)?.viewControllers.first ?? viewController
+        switch root {
+        case is MoviesViewController: return .movies
+        case is ShowsViewController: return .shows
+        case is WatchlistViewController: return .watchlist
+        case is SearchViewController: return .search
+        case is DownloadViewController: return .downloads
+        case is GlassSettingsHostingController: return .settings
+        default: return nil
+        }
+    }
+
+    /// The tab of that name; nil when the app has none.
+    func viewController(for tab: DeepLink.Tab) -> UIViewController? {
+        // Settings gets its first screen in `viewDidLoad`.
+        loadViewIfNeeded()
+        return viewControllers?.first { name(of: $0) == tab }
+    }
+
+    /// The selected tab's name (`selectedTab` is UIKit's own, a UITab).
+    var selectedTabName: DeepLink.Tab? {
+        return selectedViewController.flatMap(name(of:))
+    }
+
+    override var selectedViewController: UIViewController? {
+        didSet { noteSelectedTab() }
+    }
+
+    override var selectedIndex: Int {
+        didSet { noteSelectedTab() }
+    }
+
+    /// The tab bar's identifier says which tab is selected ("TabBar.shows"),
+    /// for VoiceOver tools and the UI tests: the tvOS 26 tab bar does not
+    /// mark the selected tab for them.
+    private func noteSelectedTab() {
+        guard isViewLoaded else { return }
+        tabBar.accessibilityIdentifier = "TabBar." + (selectedTabName?.rawValue ?? "other")
+        #if DEBUG
+        // The detail page hides the tab bar: the tests read the tab here then.
+        HomeDebug.noteSelectedTab(selectedTabName?.rawValue ?? "other")
+        #endif
+    }
+
+    /// Selects the tab of that name, as it was left. False without such a tab.
+    @discardableResult
+    func select(_ tab: DeepLink.Tab) -> Bool {
+        guard let viewController = viewController(for: tab) else { return false }
+        selectedViewController = viewController
+        return true
+    }
+
+    /// Adds a tab made in code at `index` (0: before the others), under the
+    /// name `tab`. The selected tab stays selected.
+    func insert(_ viewController: UIViewController, as tab: DeepLink.Tab, at index: Int) {
+        addedTabs[tab] = viewController
+        var tabs = viewControllers ?? []
+        tabs.insert(viewController, at: min(max(index, 0), tabs.count))
+        setViewControllers(tabs, animated: false)
+        noteSelectedTab()
     }
 
     // MARK: - Menu (Back) with the focus in the tab bar
@@ -106,12 +197,73 @@ class TVTabBarController: UITabBarController {
             }
         guard let settingsTab else { return }
         settingsTab.setViewControllers([GlassSettingsHostingController()], animated: false)
-        // Sized like the Search glyph (the default symbol size is much smaller).
-        let gear = UIImage(systemName: "gearshape.fill",
-                           withConfiguration: UIImage.SymbolConfiguration(pointSize: 32, weight: .bold))
-        let item = UITabBarItem(title: nil, image: gear, selectedImage: nil)
-        item.accessibilityLabel = glassSettingsLocalized("Settings")
-        settingsTab.tabBarItem = item
+        settingsTab.tabBarItem = TVTabBarController.iconItem("gearshape.fill", label: glassSettingsLocalized("Settings"))
+    }
+
+    /// Downloads is an icon too (it was the system item, a text):
+    /// "Téléchargements" took the place of two tabs, and the bar has to hold
+    /// one more title, Home. VoiceOver still reads "Downloads".
+    private func installDownloadsIcon() {
+        guard let downloadsTab = viewControllers?.first(where: { name(of: $0) == .downloads }) else { return }
+        downloadsTab.tabBarItem = TVTabBarController.iconItem("arrow.down.circle.fill", label: "Downloads".localized)
+    }
+
+    /// A tab shown as a symbol, sized like the Search glyph (the default
+    /// symbol size is much smaller); `label` is what VoiceOver reads.
+    private static func iconItem(_ symbol: String, label: String) -> UITabBarItem {
+        let image = UIImage(systemName: symbol,
+                            withConfiguration: UIImage.SymbolConfiguration(pointSize: 32, weight: .bold))
+        let item = UITabBarItem(title: nil, image: image, selectedImage: nil)
+        item.accessibilityLabel = label
+        return item
+    }
+
+    // MARK: - Home
+
+    /// Home is the first tab, selected at launch: the hub's page
+    /// (`HomeHostingController`), made in code like the Settings page, in a
+    /// navigation controller of its own — a title's page opens over it as
+    /// over a grid. Its title is a text: Downloads and Settings are icons so
+    /// that it fits the bar in every language.
+    private func installHome() {
+        #if DEBUG
+        // `-PTDebugHomeFixtures`: recorded answers instead of the network.
+        let state = HomeDebug.makeState()
+        #else
+        let state = HomeState.shared
+        #endif
+        let home = TVNavigationController(rootViewController: HomeHostingController(home: state))
+        home.tabBarItem = UITabBarItem(title: "Home".localized, image: nil, selectedImage: nil)
+        insert(home, as: .home, at: 0)
+        select(.home)
+    }
+
+    /// What a Home shelf's See All card opens: the Movies or Shows tab on
+    /// that shelf's sort and genre, at its first screen, or the Watchlist.
+    /// The focus, which was on the card, follows into the grid. False
+    /// without such a tab.
+    @discardableResult
+    func showCatalogue(_ seeAll: HomeSeeAll) -> Bool {
+        guard let tab = viewController(for: seeAll.tab) else { return false }
+        let navigation = tab as? UINavigationController
+        _ = navigation?.popToRootViewController(animated: false)
+        let root = navigation?.viewControllers.first ?? tab
+        // A grid never shown yet reads its sort and genre at its first load;
+        // one on screen reloads when either changes (their `didSet`).
+        if let movies = root as? MoviesViewController {
+            if let filter = seeAll.movieFilter, movies.currentFilter != filter { movies.currentFilter = filter }
+            if movies.currentGenre != seeAll.genreFilter { movies.currentGenre = seeAll.genreFilter }
+        } else if let shows = root as? ShowsViewController {
+            if let filter = seeAll.showFilter, shows.currentFilter != filter { shows.currentFilter = filter }
+            if shows.currentGenre != seeAll.genreFilter { shows.currentGenre = seeAll.genreFilter }
+        }
+        selectedViewController = tab
+        root.loadViewIfNeeded()
+        moveFocus(to: (root as? MainViewController)?.collectionView ?? root)
+        #if DEBUG
+        HomeDebug.noteCatalogue(shown: root, for: seeAll)
+        #endif
+        return true
     }
 
     override func shouldUpdateFocus(in context: UIFocusUpdateContext) -> Bool {

@@ -3,6 +3,7 @@
 import UIKit
 import func PopcornKit.loadMovies
 import class PopcornKit.MovieManager
+import struct PopcornKit.Movie
 
 class MoviesViewController: MediaViewController {
     
@@ -12,10 +13,28 @@ class MoviesViewController: MediaViewController {
     
     var currentFilter: MovieManager.Filters = .trending {
         didSet {
+            // Set before the grid exists (a tab never shown yet): its first
+            // load reads the filter.
+            guard let collectionView else { return }
             collectionViewController.currentPage = 1
-            didRefresh(collectionView: collectionView!)
+            #if os(tvOS)
+            updateHeaderControls()
+            #endif
+            didRefresh(collectionView: collectionView)
         }
     }
+
+    #if os(tvOS)
+    override var currentFilterName: String { return currentFilter.string }
+
+    override var sortChoices: [UIAction] {
+        return MovieManager.Filters.array.map { filter in
+            UIAction(title: filter.string, state: filter == currentFilter ? .on : .off) { [weak self] _ in
+                self?.currentFilter = filter
+            }
+        }
+    }
+    #endif
     
     @IBAction func showFilters(_ sender: Any) {
         let controller = UIAlertController(title: "Select a filter to sort by".localized, message: nil, preferredStyle: .actionSheet, blurStyle: .dark)
@@ -47,24 +66,48 @@ class MoviesViewController: MediaViewController {
         collectionViewController.isLoading = true
         collectionViewController.hasNextPage = false
         let filter = currentFilter, genre = currentGenre, generation = loadGeneration
-        PopcornKit.loadMovies(page, filterBy: filter, genre: genre) { [unowned self] (movies, error) in
+        let completion: ([Movie]?, NSError?) -> Void = { [weak self] (movies, error) in
             print("[Movies] callback movies=\(movies?.count ?? -1) error=\(error?.localizedDescription ?? "nil")")
             // Another list was asked for meanwhile (a filter or genre, even the
             // same one again): its own load (`didRefresh`) fills the grid.
-            guard generation == self.loadGeneration else { return }
+            guard let self = self, generation == self.loadGeneration else { return }
             self.collectionViewController.isLoading = false
 
-            guard let movies = movies else { self.collectionViewController.error = error; self.collectionView?.reloadData(); return }
+            // A grid with titles keeps them (its footer offers Retry for
+            // the page); an empty one shows the error and Retry.
+            guard let movies = movies else { return self.collectionViewController.loadFailed(error) }
 
-            self.collectionViewController.dataSources[0] += movies as [AnyHashable]
-            self.collectionViewController.dataSources[0].unique()
-
-            if movies.isEmpty {
-                self.collectionView?.contentInset.bottom = self.tabBarController?.tabBar.frame.height ?? 0
-            } else {
-                self.collectionViewController.hasNextPage = true
-            }
-            self.collectionView?.reloadData()
+            self.show(page: page, items: movies as [AnyHashable])
         }
+        #if DEBUG
+        // `-PTDebugFailPages`: this page fails once, as offline.
+        if GridDebugHooks.fails(page: page) {
+            return DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { completion(nil, GridDebugHooks.failure) }
+        }
+        #endif
+        guard page <= 1 else {
+            return PopcornKit.loadMovies(page, filterBy: filter, genre: genre, completion: completion)
+        }
+        #if DEBUG
+        // `-PTDebugStaleSnapshot`, `-PTDebugFirstPageDelay` (GridDebugHooks).
+        GridDebugHooks.prepareFirstPage()
+        let firstPage: ([Movie]?, NSError?) -> Void = { items, error in
+            GridDebugHooks.afterFirstPageDelay { completion(items, error) }
+        }
+        #else
+        let firstPage = completion
+        #endif
+        // The first page: the list saved by the last load at once (a launch,
+        // a sort picked again), then the network's.
+        PopcornKit.loadMovies(page, filterBy: filter, genre: genre, snapshot: { [weak self] movies in
+            guard let self = self, generation == self.loadGeneration else { return }
+            print("[Movies] snapshot movies=\(movies.count)")
+            #if DEBUG
+            // `-PTDebugStaleSnapshot`: a saved list the network's differs from.
+            return self.showSnapshot(GridDebugHooks.snapshot(movies) as [AnyHashable])
+            #else
+            self.showSnapshot(movies as [AnyHashable])
+            #endif
+        }, completion: firstPage)
     }
 }

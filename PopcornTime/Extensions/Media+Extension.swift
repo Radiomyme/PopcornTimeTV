@@ -14,6 +14,7 @@ extension Media {
      Start playing movie or episode locally.
      
      - Parameter fromFileOrMagnetLink:  The url pointing to a .torrent file, a web adress pointing to a .torrent file to be downloaded or a magnet link.
+     - Parameter torrent:               The release `url` belongs to, when the caller has it (`AppDelegate.play`): « Resume » plays the remembered release by a short magnet that the title's list does not hold — its quality, size, tags and file name come from here (`PlaybackStreamContext.playingRelease`).
      - Parameter nextEpisodeInSeries:   If media is an episode, pass in the next episode of the series, if applicable, for a better UX for the user.
      - Parameter loadingViewController: The view controller that will be presented while the torrent is processing to display updates to the user.
      - Parameter playViewController:    View controller to be presented to start playing the movie when loading is complete.
@@ -25,6 +26,7 @@ extension Media {
      */
     func play(
         fromFileOrMagnetLink url: String,
+        torrent: Torrent? = nil,
         nextEpisodeInSeries nextEpisode: Episode? = nil,
         loadingViewController: PreloadTorrentViewController,
         playViewController: UIViewController,
@@ -60,6 +62,7 @@ extension Media {
             loadingViewController.sourceURL = url
         }
         if let download = completedDownload {
+            download.startTrace = loadingViewController.startTrace
             return download.play { (videoFileURL, videoFilePath) in
                 // The SPM PopcornTorrent answers a finished download at once,
                 // with its file URL (no web server): keep the asynchronous
@@ -67,7 +70,8 @@ extension Media {
                 DispatchQueue.main.async {
                     guard !loadingViewController.isCancelled else { return }
                     loadingViewController.streamer = download
-                    playBlock(videoFileURL, videoFilePath, self, nextEpisode, progress, playViewController, download)
+                    download.noteStartBuffered(fileName: videoFilePath.lastPathComponent)
+                    playBlock(videoFileURL, videoFilePath, self.withSubtitlesFound(), nextEpisode, progress, playViewController, download)
                     finishedLoadingBlock(loadingViewController, playViewController)
                 }
             }
@@ -94,6 +98,7 @@ extension Media {
             // A new streamer per stream (the SPM PopcornTorrent has no
             // singleton); it is the current one until the next stream.
             let streamer = PTTorrentStreamer.startNew()
+            streamer.startTrace = loadingViewController.startTrace
             loadingViewController.streamer = streamer
             // The release, this title's other releases (an episode's are the
             // augmented list `chooseQuality` merged) and how to switch: the
@@ -102,7 +107,7 @@ extension Media {
             // then plays the release through the normal flow, starting where
             // the other one was (taken by the new stream's context).
             let context = PlaybackStreamContext.attach(to: streamer, media: self,
-                                                       sourceURL: loadingViewController.sourceURL ?? url)
+                                                       sourceURL: loadingViewController.sourceURL ?? url, torrent: torrent)
             context.onSwitch = { [media = self] torrent, fraction in
                 PlaybackStreamContext.requestStart(fraction, forURL: torrent.url)
                 AppDelegate.shared.play(media, torrent: torrent)
@@ -140,6 +145,7 @@ extension Media {
                 DispatchQueue.main.async { loadingBlock(status, loadingViewController) }
                 }, readyToPlay: { (videoFileURL, videoFilePath) in
                     print("[Streamer] readyToPlay url=\(videoFileURL)")
+                    streamer.noteStartBuffered(fileName: videoFilePath.lastPathComponent)
                     // The streamer reports `http://0.0.0.0:<port>/`: the
                     // players get 127.0.0.1 and the payload's name, as on
                     // macOS (VLC opens it directly).
@@ -147,7 +153,9 @@ extension Media {
                     DispatchQueue.main.async {
                         // Ready as Back was pressed: no player (the stream is stopped by `cancel`).
                         guard !loadingViewController.isCancelled else { return }
-                        playBlock(playableURL, videoFilePath, self, nextEpisode, progress, playViewController, streamer)
+                        // With the subtitles found while the stream prepared
+                        // (the search runs alongside it: `AppDelegate.play`).
+                        playBlock(playableURL, videoFilePath, self.withSubtitlesFound(), nextEpisode, progress, playViewController, streamer)
                         finishedLoadingBlock(loadingViewController, playViewController)
                     }
                 }, failure: { error in
@@ -166,14 +174,14 @@ extension Media {
                             errorBlock(message)
                         }
                     }
-            }, selectFileToStream: PTTorrentStreamer.fileSelection(for: url, media: self, torrent: context.torrent))
+            }, selectFileToStream: streamer.measuringSelection(PTTorrentStreamer.fileSelection(for: url, media: self, torrent: context.torrent)))
         } else {
             PopcornKit.downloadTorrentFile(url, completion: { (url, error) in
                 // Alamofire hands the response back on its own queue too.
                 DispatchQueue.main.async {
                     guard !loadingViewController.isCancelled else { return }
                     guard let url = url, error == nil else { errorBlock(error!.localizedDescription); return }
-                    self.play(fromFileOrMagnetLink: url, nextEpisodeInSeries: nextEpisode, loadingViewController: loadingViewController, playViewController: playViewController, progress: progress, loadingBlock: loadingBlock, playBlock: playBlock, errorBlock: errorBlock, streamFailureBlock: streamFailureBlock, finishedLoadingBlock: finishedLoadingBlock)
+                    self.play(fromFileOrMagnetLink: url, torrent: torrent, nextEpisodeInSeries: nextEpisode, loadingViewController: loadingViewController, playViewController: playViewController, progress: progress, loadingBlock: loadingBlock, playBlock: playBlock, errorBlock: errorBlock, streamFailureBlock: streamFailureBlock, finishedLoadingBlock: finishedLoadingBlock)
                 }
             })
         }
@@ -187,19 +195,25 @@ extension Media {
      - Parameter completion: The completion handler for the request containing an array of subtitles
      */
     func getSubtitles(forId id: String? = nil, completion: @escaping ([Subtitle]) -> Void) {
-        let id = id ?? self.id
-        if let episode = self as? Episode {
-            // OpenSubtitles indexes episodes by SHOW imdb id + season +
-            // episode — no Trakt roundtrip needed to resolve the episode's
-            // own imdb id.
-            SubtitlesManager.shared.search(episode, imdbId: episode.show?.id) { (subtitles, _) in
-                completion(subtitles)
-            }
-        } else {
+        if let id = id, id != self.id, !(self is Episode) {
             SubtitlesManager.shared.search(imdbId: id) { (subtitles, _) in
                 completion(subtitles)
             }
+            return
         }
+        // The shared search (`SubtitleSearch`): one request per title, its
+        // answer kept — OpenSubtitles indexes episodes by SHOW imdb id +
+        // season + episode.
+        SubtitleSearch.shared.search(for: self, completion: completion)
+    }
+
+    /// This movie or episode with the OpenSubtitles list the search has
+    /// found (`SubtitleSearch`), when it has none of its own yet.
+    func withSubtitlesFound() -> Media {
+        guard subtitles.isEmpty, let found = SubtitleSearch.shared.answer(for: self), !found.isEmpty else { return self }
+        var media: Media = self
+        media.subtitles = found
+        return media
     }
     
     /// The download, either completed or downloading, that is associated with this media object.

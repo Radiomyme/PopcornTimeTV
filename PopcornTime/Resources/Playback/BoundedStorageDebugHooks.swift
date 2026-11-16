@@ -20,7 +20,9 @@ import AVKit
 ///   bounded storage assumes; default unknown = 2 h);
 /// - `-PTDebugDownloadDir <dir>`: the torrent's directory (PopcornTorrent
 ///   `downloadDirectoryOverride`) — and the remux's output too, so the whole
-///   stream lives on that volume (e.g. a small APFS disk image);
+///   stream lives on that volume (e.g. a small APFS disk image). On the Mac
+///   such a run does not purge the temporary folder, which it does not use
+///   and shares with the installed app (`leavesTemporaryFolderAlone`);
 /// - `-PTDebugLoopbackPort <port>`: PopcornTorrent's shared session listens
 ///   on 127.0.0.1:<port> only (0 = any), no DHT / LSD / UPnP / NAT-PMP
 ///   (`PTTorrentsSession+Testing.h`); set up before anything touches the
@@ -76,6 +78,38 @@ import AVKit
 ///   runs once per volume before it allows bounded storage) in the streams'
 ///   folder and, on tvOS / iOS, the offline downloads' folder, and the free
 ///   space by every key the platform has: "[HoleProbe]" lines.
+/// Resume hooks (the resume of a film that is still downloading, native or
+/// through VLC):
+/// - `-PTDebugResumeAnswer <resume|start>`: the players' resume question
+///   answers itself — « Resume at … » or « Start from the beginning » —
+///   `-PTDebugResumeAnswerAfter <s>` seconds after it shows (default 3; 0:
+///   at once): the native players' question and the tvOS VLC player's own
+///   (`resumeAnswer`);
+/// - `-PTDebugDecidedStart <0…1>`: the native players start as after a
+///   switch to a lighter release that was at that share of the film — a
+///   decided start: resumed there without the question (`decidedStart`);
+/// - `-PTDebugResumeTrace 1`: every second while a stream lives, a
+///   "[ResumeDebug] torrent" line — the storage mode, what of the file is on
+///   disk (a 64-bucket map: # whole, + partly, . none), the first missing
+///   byte, the torrent's read position and the HTTP server's, the download
+///   rate and the peers: where the torrent downloads, second by second —
+///   and, in the tvOS VLC player, a "[ResumeDebug] … vlc" line: VLC's state
+///   and clock, the resume state and its offer
+///   (`PCTPlayerViewController.startDebugResumeTrace`; `-PTDebugKeepControls
+///   1` keeps its transport bar on screen);
+/// - `-PTDebugVLCDemux <mkv|avformat|a VLC demux module>` and
+///   `-PTDebugVLCOptions ":opt,:opt=value"`: the demuxer and the media
+///   options VLC opens a Matroska stream with, forced, in both storage
+///   modes (`BoundedStorageUX.vlcMediaOptions`); `-PTDebugVLCLog "word,…"`:
+///   more of libvlc's log lines, by the words they hold (tvOS);
+/// - `-PTDebugVLCResumeOffer "<wait|start>@<s>"`: a VLC player's slow-resume
+///   offer answers itself (`VLCResumeDebugHooks`);
+/// - `-PTDebugRemuxOutputDir <dir>`: the remux writes its HLS copy under
+///   that directory (`RemuxPlayback.outputParentOverride`; it wins over
+///   `-PTDebugDownloadDir` for the copy) and LEAVES it there when the player
+///   closes (`RemuxPlayback.keepsOutputAfterStop`), so the segments of two
+///   builds can be compared file by file.
+/// (The hidden switch of the native jumps is no debug hook: `-PTNativeJumpsDisabled YES`.)
 /// Every step logs a "[BoundedDebug]" line. Nothing happens without these
 /// arguments.
 enum BoundedStorageDebugHooks {
@@ -91,7 +125,33 @@ enum BoundedStorageDebugHooks {
         ["PTDebugPlayTorrent", "PTDebugDownloadDir", "PTDebugLoopbackPort", "PTDebugSeek", "PTDebugPause",
          "PTDebugQuitAfter", "PTDebugClosePlayer", "PTDebugFailPlayer", "PTDebugRawSeek", "PTDebugReopenNetwork",
          "PTDebugDownloadTorrent", "PTDebugSnapshotAt", "PTDebugPlayerStateEvery", "PTDebugLaunchSnapshotAt",
-         "PTDebugHTTPTrace"].contains { defaults.object(forKey: $0) != nil }
+         "PTDebugHTTPTrace", "PTDebugResumeTrace", "PTDebugResumeAnswer", "PTDebugDecidedStart",
+         "PTDebugRemuxOutputDir"].contains { defaults.object(forKey: $0) != nil }
+    }
+
+    /// A run whose stream lives in `-PTDebugDownloadDir` (the torrent's folder
+    /// and the remux's copy are both there) leaves the temporary folder
+    /// alone. On the Mac that folder is shared with every other copy of the
+    /// app — the installed one too — and the purge before a stream (and at
+    /// launch) would delete what that copy left there, or is streaming.
+    static var leavesTemporaryFolderAlone: Bool {
+        !(defaults.string(forKey: "PTDebugDownloadDir") ?? "").isEmpty
+    }
+
+    /// `-PTDebugDecidedStart <0…1>`: where the user "already chose" to start
+    /// (what a switch to a lighter release hands the next player); nil: none.
+    static var decidedStart: Float? {
+        defaults.string(forKey: "PTDebugDecidedStart").flatMap(Float.init).flatMap { $0 > 0 && $0 < 1 ? $0 : nil }
+    }
+
+    /// `-PTDebugResumeAnswer resume|start` (with `-PTDebugResumeAnswerAfter
+    /// <s>`, default 3): how, and how long after it shows, the resume
+    /// question answers itself. nil: it waits for the user.
+    static var resumeAnswer: (resume: Bool, after: Double)? {
+        guard let answer = defaults.string(forKey: "PTDebugResumeAnswer")?.lowercased(),
+              answer == "resume" || answer == "start" else { return nil }
+        let after = defaults.string(forKey: "PTDebugResumeAnswerAfter").flatMap(Double.init) ?? 3
+        return (answer == "resume", max(0, after))
     }
 
     /// First thing at launch: the loopback session and the download
@@ -109,10 +169,18 @@ enum BoundedStorageDebugHooks {
             RemuxPlayback.outputParentOverride = URL(fileURLWithPath: directory, isDirectory: true)
             print("[BoundedDebug] download directory \(directory) (remux output there too)")
         }
+        if let directory = defaults.string(forKey: "PTDebugRemuxOutputDir"), !directory.isEmpty {
+            try? FileManager.default.createDirectory(atPath: directory, withIntermediateDirectories: true)
+            RemuxPlayback.outputParentOverride = URL(fileURLWithPath: directory, isDirectory: true)
+            RemuxPlayback.keepsOutputAfterStop = true
+            print("[BoundedDebug] remux output under \(directory), kept when the player closes")
+        }
         if let port = defaults.string(forKey: "PTDebugLoopbackPort").flatMap(Int32.init) {
             prepareLoopbackSession(port: port)
         }
         startOfflineDownloadIfRequested()
+        // The episode-chaining bench: its seeded sources (`-PTDebugEpisodeSources`).
+        UpNextDebugHooks.prepareAtLaunch()
         if defaults.bool(forKey: "PTDebugHTTPTrace") { HTTPTrace.install() }
         if defaults.bool(forKey: "PTDebugHoleProbe") { runHoleProbe() }
         #if os(macOS)
@@ -253,9 +321,64 @@ enum BoundedStorageDebugHooks {
     /// The streams to cancel at quit (weak: the players own them).
     private static var streamers = NSHashTable<PTTorrentStreamer>.weakObjects()
 
+    private static var resumeTraceTimer: Timer?
+
+    /// `-PTDebugResumeTrace 1`: where the torrent of `streamer` downloads,
+    /// once a second (the latest stream's; it stops with it).
+    private static func startResumeTrace(_ streamer: PTTorrentStreamer) {
+        guard defaults.object(forKey: "PTDebugResumeTrace") != nil else { return }
+        let started = ProcessInfo.processInfo.systemUptime
+        DispatchQueue.main.async { [weak streamer] in
+            resumeTraceTimer?.invalidate()
+            resumeTraceTimer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak streamer] timer in
+                guard let streamer = streamer else { timer.invalidate(); return }
+                let since = ProcessInfo.processInfo.systemUptime - started
+                let size = streamer.fileSize.longLongValue
+                guard size > 0 else {
+                    print(String(format: "[ResumeDebug] torrent +%.0fs no metadata yet", since))
+                    return
+                }
+                // 64 buckets of the file: whole, partly (one of 8 probes of
+                // 64 KiB is there), or nothing.
+                let buckets: Int64 = 64
+                let step = max(1, size / buckets)
+                var map = ""
+                for index in 0..<buckets {
+                    let start = index * step
+                    let length = index == buckets - 1 ? size - start : step
+                    if streamer.isRangeAvailable(start, length: length) {
+                        map += "#"
+                        continue
+                    }
+                    var some = false
+                    var offset = start
+                    while offset < start + length, !some {
+                        some = streamer.isRangeAvailable(offset, length: min(65_536, start + length - offset))
+                        offset += max(1, length / 8)
+                    }
+                    map += some ? "+" : "."
+                }
+                let status = streamer.torrentStatus
+                let mode: String
+                switch streamer.storageMode {
+                case .bounded: mode = "bounded"
+                case .full: mode = "full"
+                default: mode = "undetermined"
+                }
+                func mib(_ bytes: Int64) -> Double { Double(bytes) / 1_048_576 }
+                print(String(format: "[ResumeDebug] torrent +%.0fs %@ sizeMiB=%.1f onDiskMiB=%.1f firstMissingMiB=%.1f "
+                             + "readPosMiB=%.1f servedMiB=%.1f lowestMiB=%.1f progress=%.3f downKBs=%ld peers=%ld seeds=%ld map=[%@]",
+                             since, mode, mib(size), mib(streamer.bytesOnDisk), mib(streamer.firstMissingOffset(from: 0)),
+                             mib(streamer.readPosition), mib(streamer.servedOffset), mib(streamer.lowestAvailableOffset),
+                             status.totalProgress, Int(status.downloadSpeed / 1000), Int(status.peers), Int(status.seeds), map))
+            }
+        }
+    }
+
     /// A stream started by the app (`BoundedStorageSession.prepare`).
     static func noteStreamer(_ streamer: PTTorrentStreamer) {
         streamers.add(streamer)
+        startResumeTrace(streamer)
         // `-PTDebugHTTPTrace`: verbose again once a stream starts, in case
         // something lowered GCDWebServer's level since launch (the apps call
         // `GCDWebServerLogging.configure()` before `prepareAtLaunch`).

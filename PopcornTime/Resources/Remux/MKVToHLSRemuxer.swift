@@ -48,6 +48,14 @@ import Foundation
 // movie length becomes Duration − first time (`segmentCountSeconds`);
 // mkvmerge and unknown writers keep the Duration as the length.
 //
+// Bounds: `pump` reads at most `pumpInputBudget` bytes of input per call
+// (`stoppedAtInputBudget` tells the caller there is more), and the video
+// waiting for a cut is bounded in time and bytes (`stopIfVideoCannotBeCut`):
+// a stream that can't be cut (a single keyframe) stops the session — the
+// caller falls back to VLC — instead of piling up in memory to the end of
+// the file. Timestamps no real movie has never reach the timeline
+// (`MatroskaDemuxer.isPlausibleClusterTimestamp`, `plausible`, `units`).
+//
 // Disk writes: every file of a segment index (vseg + every a{i}seg + every
 // s{j}seg) is written before the segment is published (`progress`,
 // `segmentDurations()`, EVENT playlists). A failed write (disk
@@ -55,9 +63,18 @@ import Foundation
 // cutting anything else, and after `maxWriteAttempts` failures in a row (at
 // once during `finish`) the session stops for good with `writeFailure` set.
 //
-// Threading: `prepare`, `pump` and `finish` run on ONE serial queue (the
-// caller's pump queue). `progress`, `segmentDurations()`, the renditions and
-// the other read-only accessors may be called from any thread (lock).
+// Threading: `prepare`, `pump`, `finish` and `jump` run on ONE serial queue
+// (the caller's pump queue). `progress`, `segmentDurations()`, the renditions
+// and the other read-only accessors may be called from any thread (lock).
+//
+// Jumps: the session reads the file in order, one pass, unless `jump` moves
+// that pass to another segment of the keyframe-index plan (see "Jumping to
+// another segment of the plan"): forward over segments that are then
+// published as holes (their planned duration, the real offset of their
+// Cluster, 0 byte, listed by `missingSegments()`), or back into a hole, which
+// the pass then fills. Without a jump nothing here differs from a session
+// that could not: `nextSegmentIndex` is `progress.segmentsWritten`, no index
+// is missing, the same files are written (RemuxSequentialGoldenTests).
 //
 // Empty audio windows (a commentary track that ends early, a late-starting
 // track…): the playlist of every audio rendition lists every segment index,
@@ -104,6 +121,12 @@ final class MKVToHLSRemuxSession {
         case unsupported(String)
     }
 
+    /// `segmentsWritten`: the high-water mark — 1 + the highest segment index ever
+    /// published; after a `jump` forward some of the indexes below it are holes
+    /// (`missingSegments()`), and the segment the pass writes next is
+    /// `nextSegmentIndex`. `mediaSeconds`: the media up to that mark (the planned
+    /// durations of the indexes a jump skipped). Both only grow. `finished`:
+    /// `finish()` ran; it stays true when a later `jump` goes back to fill a hole.
     struct Progress: Equatable {
         var segmentsWritten = 0
         var mediaSeconds = 0.0
@@ -242,7 +265,7 @@ final class MKVToHLSRemuxSession {
             let gotCluster: Bool = autoreleasepool {
                 defer { noteInputConsumed() }
                 guard let frames = demuxer.readNextCluster() else { return false }
-                bufferPrepareFrames(frames)
+                bufferPrepareFrames(plausible(frames))
                 return true
             }
             if !gotCluster {
@@ -272,7 +295,9 @@ final class MKVToHLSRemuxSession {
     /// absorbs counts as one, see `appendOverflowFragment`).
     @discardableResult
     func pump(maxNewSegments: Int = Int.max) -> Int {
-        guard outcome == .ready, !isFinished, maxNewSegments > 0, writeFailure == nil else { return 0 }
+        stoppedAtInputBudget = false
+        guard outcome == .ready, !isFinished, maxNewSegments > 0, writeFailure == nil, !jumpFailed else { return 0 }
+        defer { refreshJumpState() }
         // Until the VOD list is frozen: the keyframe index, once downloaded.
         loadCueIndexIfNeeded()
         activatePlanIfPossible()
@@ -286,29 +311,142 @@ final class MKVToHLSRemuxSession {
         if written < maxNewSegments {
             written += autoreleasepool { cutReadySegments(limit: maxNewSegments - written) }
         }
-        while written < maxNewSegments && pendingWrite == nil {
+        let inputStart = demuxer.reader.offset
+        while written < maxNewSegments && pendingWrite == nil && !isParked {
+            // The call's input budget: it used to read on for as long as no
+            // segment was cut — the whole file in one call when the video
+            // has a single keyframe. The caller pumps again (its own time
+            // budget and stop checks in between).
+            let offset = demuxer.reader.offset
+            if offset > inputStart, offset - inputStart >= UInt64(max(0, pumpInputBudget)) {
+                stoppedAtInputBudget = true
+                break
+            }
             // One pool per cluster: file reads hand back autoreleased NSData;
             // without draining, every cluster read stays resident until the
             // caller's pool drains (memory grew with the file size — measured).
             let produced: Int? = autoreleasepool {
                 defer { noteInputConsumed() }
-                guard let frames = demuxer.readNextCluster() else { return nil }
-                for frame in frames { route(frame) }
+                guard let frames = demuxer.readNextCluster() else {
+                    if hasJumpedOnPump, let reason = demuxer.jumpFailure { failJump(reason) }
+                    return nil
+                }
+                for frame in plausible(frames) { route(frame) }
+                if jumpKeyframe90k != nil { checkJumpSearch() }
                 return cutReadySegments(limit: maxNewSegments - written)
             }
             guard let count = produced else { break }
             written += count
+            if stopIfVideoCannotBeCut() || jumpFailed { break }
         }
         return written
     }
 
-    /// Flush trailing samples (end of file).
+    /// Input bytes one `pump` call reads at most before it returns (64 MiB:
+    /// about a tenth of a second of work on an Apple TV). Pump-queue only.
+    var pumpInputBudget: Int64 = 64 << 20
+
+    /// The last `pump` returned because it had read `pumpInputBudget`, not
+    /// because the input ran out: there is more to read, and a call that
+    /// wrote nothing was not idle. Pump-queue only.
+    private(set) var stoppedAtInputBudget = false
+
+    /// The video waiting for a cut may span this much media (s) before the
+    /// first segment is cut — its end is the first keyframe 6 s in, and
+    /// nothing has played yet: VLC takes over at no cost — …
+    static let maxFirstSegmentSeconds: Double = 60
+    /// … this much once the stream has proved it can be cut (the longest
+    /// wait of one that can: a 20 s slot, a keyframe interval the target
+    /// still covers and the 10 s audio wait, 50 s) …
+    static let maxPendingVideoSeconds: Double = 120
+    /// … and this many bytes at any time (those 50 s at 80 Mb/s). Pump-queue
+    /// only.
+    var maxPendingVideoBytes = 512 << 20
+
+    /// The reason given when the video can't be cut (`stopIfVideoCannotBeCut`).
+    static let uncuttableVideoReason = "Remux : images clés trop espacées"
+
+    /// Stops the session when the video waiting for a cut passes the bounds
+    /// above: no keyframe to cut at (a stream with a single keyframe:
+    /// infinite GOP, periodic intra refresh, missing keyframe flags), or
+    /// media running on long after the last planned segment. Before, every
+    /// frame demuxed stayed in memory until the end of the input — a whole
+    /// film: the app was killed for its memory, or trapped past 4 GiB when
+    /// that one segment was assembled — and `onReady` never came while the
+    /// file downloaded. Now `writeFailure` is set (the caller's way to VLC:
+    /// `onFailure` before `onReady`, `onHalted` after it) and the frames
+    /// are released. Returns true when it stopped. Pump-queue only.
+    private func stopIfVideoCannotBeCut() -> Bool {
+        guard let video = videoOutput, let first = video.pending.first, pendingWrite == nil else { return false }
+        let seconds = Double(video.latestPTS - units(first.timestamp, 90_000)) / 90_000
+        let limit = segmentIndex == 0 ? Self.maxFirstSegmentSeconds : Self.maxPendingVideoSeconds
+        guard seconds > limit || video.pendingBytes > maxPendingVideoBytes else { return false }
+        log(String(format: "segment %d can't be cut: %.0f s of video (%.1f MB, %d frames) demuxed since its keyframe "
+                   + "without one to end it on — stopped", segmentIndex, seconds,
+                   Double(video.pendingBytes) / 1_048_576, video.pending.count))
+        video.pending.removeAll()
+        video.pendingBytes = 0
+        for output in audioOutputs { output.pending.removeAll() }
+        for output in subtitleOutputs { output.cues.removeAll() }
+        lock.withLock { if lockedWriteFailure == nil { lockedWriteFailure = Self.uncuttableVideoReason } }
+        return true
+    }
+
+    /// `frames` without those whose timestamp no real movie has (beyond
+    /// `MatroskaDemuxer.maxClusterTimestampSeconds`, e.g. laced frames of a
+    /// track with a forged DefaultDuration): they would put the whole
+    /// timeline's arithmetic out of range. The demuxer already skips a
+    /// cluster with such a timestamp.
+    private func plausible(_ frames: [MKVFrame]) -> [MKVFrame] {
+        let scale = Double(demuxer.timestampScale) / 1e9
+        func isPlausible(_ frame: MKVFrame) -> Bool {
+            abs(Double(frame.timestamp) * scale) <= MatroskaDemuxer.maxFrameTimestampSeconds
+        }
+        guard !frames.allSatisfy(isPlausible) else { return frames }
+        let kept = frames.filter(isPlausible)
+        implausibleFrames += frames.count - kept.count
+        if !loggedImplausibleFrames {
+            loggedImplausibleFrames = true
+            log("frames with an implausible timestamp dropped (first: \(frames.count - kept.count) in one cluster)")
+        }
+        return kept
+    }
+
+    /// Clusters the demuxer skipped for a timestamp no real movie has
+    /// (`MatroskaDemuxer.isPlausibleClusterTimestamp`). Pump-queue only.
+    var implausibleClusters: Int { demuxer.implausibleClusters }
+
+    /// Frames dropped by `plausible`. Pump-queue only.
+    private(set) var implausibleFrames = 0
+    private var loggedImplausibleFrames = false
+
+    /// Flush trailing samples (end of file): the last segment and the tail
+    /// units the playlists need, written once (`isTailWritten`). After a
+    /// `jump`, this is for the pass that reached the end of the input at the
+    /// high-water mark: a pass below it (filling a hole), or one called again
+    /// once the tail exists, writes nothing — what it had demuxed is dropped.
     func finish() {
         guard !isFinished else { return }
         // From here on a failed write is final (no more `pump` to retry it).
         isFinished = true
         lock.withLock { lockedFinishing = true }
-        if outcome == .ready, let video = videoOutput, writeFailure == nil {
+        defer { refreshJumpState() }
+        var endsTheFilm = !hasJumpedOnPump
+            || (!tailWritten && !jumpFailed && segmentIndex >= lock.withLock({ lockedDurations.count }))
+        if endsTheFilm, let wanted = jumpKeyframe90k {
+            // The input ended before the keyframe the jump was sent to: the
+            // index does not describe this stream (or its end), and a tail
+            // written now would end the film with the jump's segment missing.
+            failJump(String(format: "the input ends before the indexed keyframe at %.3f s",
+                            Double(wanted - (videoOutput?.originPTS ?? 0)) / 90_000))
+            endsTheFilm = false
+        } else if !endsTheFilm {
+            discardPendingMedia()
+            log("finish: the pass is at segment \(segmentIndex), "
+                + (tailWritten ? "the end of the film is already written" : "below the high-water mark")
+                + " — nothing more is written")
+        }
+        if outcome == .ready, let video = videoOutput, writeFailure == nil, endsTheFilm {
             // A segment still waiting to be written: last attempt.
             if let pending = pendingWrite { commit(pending) }
             if writeFailure == nil {
@@ -339,10 +477,15 @@ final class MKVToHLSRemuxSession {
                 writeSegment(videoCount: video.pending.count, cutPTS: nil, extendTo: isLastListed ? announcedEnd90k : nil)
             }
             if writeFailure == nil { writeTailFillers() }
+            if writeFailure == nil {
+                tailWritten = true
+                lock.withLock { lockedTailWritten = true }
+            }
             let published = lock.withLock { (lockedProgress.segmentsWritten, lockedProgress.mediaSeconds) }
             log("finished: \(published.0) segments, \(String(format: "%.1f", published.1)) s"
                 + (writeFailure.map { " · stopped by a write failure (\($0))" } ?? "")
                 + (video.nudgedPTS > 0 ? " · \(video.nudgedPTS) duplicate video timestamp(s) nudged" : "")
+                + (implausibleClusters > 0 ? " · \(implausibleClusters) cluster(s) skipped for an implausible timestamp" : "")
                 + audioOutputs.map { a in
                     (a.resyncs > 0 || a.dropped > 0 || a.fillerWindows > 0)
                         ? " · a\(a.index): \(a.resyncs) resync(s), \(a.dropped) dropped, \(a.fillerWindows) filled window(s)" : ""
@@ -583,33 +726,46 @@ final class MKVToHLSRemuxSession {
     var subtitleSegmentsWritten: Int { lock.withLock { lockedProgress.segmentsWritten } }
 
     /// Bytes of the media segment files published so far (video, audio,
-    /// WebVTT, tail fillers; init segments excluded). Thread-safe.
+    /// WebVTT, tail fillers; init segments excluded). Only grows: a segment
+    /// taken back (`markMissing`) and written again is counted twice.
+    /// Thread-safe.
     var bytesWritten: Int64 { lock.withLock { lockedBytesWritten } }
 
     /// Bytes on disk of each published segment index (vseg + every a{i}seg +
     /// every s{j}seg), aligned with
     /// `segmentDurations()` — what RemuxPlayback sizes its rewind window
-    /// with (output rate, bytes kept behind the playhead). Thread-safe.
+    /// with (output rate, bytes kept behind the playhead). 0 for a hole
+    /// (`missingSegments()`): an output rate must leave them out. Thread-safe.
     func segmentBytes() -> [Int64] { lock.withLock { lockedSegmentBytes } }
 
     /// Source file offset of each published segment index, aligned with
     /// `segmentDurations()`: the start of the Matroska Cluster holding the
     /// segment's first video frame (its keyframe) — where a player resuming
-    /// in that segment (VLC at that time) starts reading the file. Tail
-    /// fillers and an absorbing last segment repeat the last real offset (a
-    /// lower bound). Non-decreasing. Thread-safe.
+    /// in that segment (VLC at that time) starts reading the file. An index a
+    /// `jump` skipped carries the offset of ITS OWN Cluster (from the keyframe
+    /// index), not the jump's destination. Tail fillers and an absorbing last
+    /// segment repeat the last real offset (a lower bound). Non-decreasing.
+    /// Thread-safe.
     func segmentSourceOffsets() -> [Int64] { lock.withLock { lockedSourceOffsets } }
 
     /// The demuxer's position in the input file once the header is parsed:
-    /// the next byte it will read, below which it never reads again (it
-    /// only moves forward; a cluster that isn't complete yet is retried from
-    /// its start, which this offset does not pass). 0 before the header is
-    /// parsed. Bounded storage releases the file below it (minus what a
-    /// hand-off at the playhead needs). Thread-safe.
+    /// the next byte the pass will read, below which it never reads again —
+    /// until a `jump`, which sets it to where the pass now reads from (lower
+    /// than before when it goes back). Between jumps it only moves forward (a
+    /// cluster that isn't complete yet is retried from its start, which this
+    /// offset does not pass). 0 before the header is parsed. Bounded storage
+    /// releases the file below it (minus what a hand-off at the playhead
+    /// needs). Thread-safe.
     var consumedInputOffset: Int64 { lock.withLock { lockedConsumedInput } }
 
-    /// Publishes the demuxer's position (`consumedInputOffset`, strictly
-    /// forward). Pump queue.
+    /// Where the demuxer last found zeros (bytes not downloaded yet) and gave
+    /// up its Cluster, while they are still zeros as far as it knows; nil
+    /// when it is not blocked so. A late jump's wait asks the engine for them
+    /// (`RemuxWaitNudge`). Pump queue.
+    var demuxerBlockedOffset: Int64? { demuxer.blockedOffset.map { Int64(clamping: $0) } }
+
+    /// Publishes the demuxer's position (`consumedInputOffset`, forward only
+    /// between two jumps). Pump queue.
     private func noteInputConsumed() {
         guard headerParsed else { return }
         let offset = Int64(clamping: demuxer.reader.offset)
@@ -626,7 +782,8 @@ final class MKVToHLSRemuxSession {
     var headerDurationKind: HeaderDurationKind { lock.withLock { lockedDurationKind } }
 
     /// Set when a segment's files could not be written `maxWriteAttempts`
-    /// times in a row (or once during `finish`): the session then stops
+    /// times in a row (or once during `finish`), or when the video can't be
+    /// cut into segments (`stopIfVideoCannotBeCut`): the session then stops
     /// producing — `pump` / `finish` do nothing more. User-facing reason
     /// ("Espace disque insuffisant"…), nil while healthy. Thread-safe.
     var writeFailure: String? { lock.withLock { lockedWriteFailure } }
@@ -655,11 +812,18 @@ final class MKVToHLSRemuxSession {
     /// Tells the session the input file is fully downloaded: `prepare()`
     /// then stops waiting for frames that will never come (tiny files, audio
     /// tracks without data). Pump-queue only.
-    func markInputComplete() {
-        inputComplete = true
-        // Zeros are now real data (e.g. digital silence in a PCM track), not
-        // regions of a preallocated file still waiting to be downloaded.
-        demuxer.assumeFullyDownloaded = true
+    func markInputComplete() { setInputComplete(true) }
+
+    /// Whether everything the pass has left to read is downloaded. True:
+    /// zeros are real data (e.g. digital silence in a PCM track) and the end
+    /// of the file is final. False: zeros are regions of a preallocated file
+    /// still waiting to be downloaded. A `jump` sets it back to false — the
+    /// pass reads another part of the file, which may not be there — and the
+    /// caller says so again when it is. Pump-queue only.
+    func setInputComplete(_ complete: Bool) {
+        guard inputComplete != complete else { return }
+        inputComplete = complete
+        demuxer.assumeFullyDownloaded = complete
     }
 
     /// True once the EBML header + Tracks have been parsed.
@@ -807,6 +971,429 @@ final class MKVToHLSRemuxSession {
         return list
     }
 
+    // MARK: - Jumping to another segment of the plan
+    //
+    // The session has ONE pass: it reads the file in order and writes the
+    // segment `nextSegmentIndex`. `jump(toSegment:)` moves that pass to any
+    // real segment of the keyframe-index plan, before or after where it was:
+    // a resume, a far seek, a return into what a jump skipped, the hop back
+    // to the high-water mark are the same call. What the pass skipped going
+    // forward is published as HOLES — the planned duration, the real offset
+    // of the segment's Cluster, 0 byte, listed by `missingSegments()` — which
+    // a later pass fills (`pump` then stops at the first segment that
+    // exists: a segment is written once, and so is the film's end).
+    //
+    // A jump needs the frozen list to be the planned one (the cuts are then
+    // known in advance, and a segment written out of order is the one a pass
+    // in file order writes there, byte for byte — RemuxJumpIdentityTests),
+    // and every audio track to be copied (an encoder's state can't be
+    // re-entered). What it restarts: the video at the planned keyframe; each
+    // audio track's clock at the first frame read, on the track's frame grid;
+    // for AAC and laced audio the pass reads from the indexed Cluster before
+    // the keyframe's (the lead-in: the frames a pass in file order takes from
+    // there — AAC's two priming frames, the end of a lace).
+
+    /// Whether `jump` can be used on this file.
+    enum JumpCapability: Equatable {
+        /// Not known yet: the keyframe index is not read, or segment 0 is
+        /// not cut (the plan is made right after it).
+        case pending
+        /// A keyframe-index plan is in force and every planned segment has
+        /// the offset of its Cluster.
+        case available
+        /// Never for this session (the reason, for the logs): no Duration
+        /// (EVENT playlists), no Cues, an index the stream contradicts,
+        /// playlists frozen on estimates, a transcoded (PCM) track, an
+        /// absorbing last segment, a plan abandoned, a write failure, a jump
+        /// that failed.
+        case unavailable(String)
+    }
+
+    /// Known when the plan is activated — once segment 0 is published, before
+    /// the two segments `RemuxPlayback` waits for — or as soon as something
+    /// rules a plan out; `.pending` until then. Thread-safe.
+    var jumpCapability: JumpCapability { lock.withLock { lockedJumpCapability } }
+
+    /// Where a segment of the plan is.
+    struct JumpTarget: Equatable {
+        let segment: Int
+        /// Its start on the frozen list: the player's timeline (s).
+        let playerStartSeconds: Double
+        /// The Cluster holding its keyframe (`segmentSourceOffsets()[segment]`).
+        let keyframeOffset: Int64
+        /// Where a pass that starts it reads from: `keyframeOffset`, or the
+        /// indexed Cluster before it (the lead-in).
+        let readOffset: Int64
+    }
+
+    /// Where segment `index` is, as `jump(toSegment: index)` would read it
+    /// now (`.automatic` lead-in). nil unless `jumpCapability` is
+    /// `.available`, the list is frozen from the plan
+    /// (`freezePlaylistFromPlan`) and 2 ≤ index < the plan's real segments.
+    /// Thread-safe.
+    func jumpTarget(forSegment index: Int) -> JumpTarget? {
+        lock.withLock { jumpTargetLocked(index, leadIn: lockedLeadInWanted) }
+    }
+
+    /// The highest segment `jumpTarget(forSegment:)` answers for — the plan's
+    /// last real segment —, nil when it answers for none. A position at or
+    /// past the end of the list (the film's last frame unit, a scrub to the
+    /// very end) is served by a jump there. Thread-safe.
+    var lastJumpableSegment: Int? {
+        lock.withLock {
+            guard lockedJumpCapability == .available, lockedPlanFrozen, let list = lockedVODDurations,
+                  let points = lockedJumpPoints else { return nil }
+            let last = min(points.count, list.count) - 1
+            return last >= Self.leadingGridSlots ? last : nil
+        }
+    }
+
+    /// The same for the segment that holds `seconds` of the player's
+    /// timeline. A position less than `jumpBoundaryTolerance` before a
+    /// segment's start belongs to that segment (a player reports the start
+    /// it seeked to a hair early); past the last real segment, to that one.
+    /// Thread-safe.
+    func jumpTarget(forPlayerSeconds seconds: Double) -> JumpTarget? {
+        lock.withLock {
+            guard lockedPlanFrozen, let list = lockedVODDurations, let points = lockedJumpPoints, !list.isEmpty,
+                  seconds.isFinite else { return nil }
+            let last = min(points.count, list.count) - 1
+            let position = seconds + Self.jumpBoundaryTolerance
+            var index = 0
+            var end = list[0]
+            while index < last, position >= end {
+                index += 1
+                end += list[index]
+            }
+            return jumpTargetLocked(index, leadIn: lockedLeadInWanted)
+        }
+    }
+
+    /// See `jumpTarget(forPlayerSeconds:)` (s).
+    static let jumpBoundaryTolerance = 0.05
+
+    /// Under `lock`.
+    private func jumpTargetLocked(_ index: Int, leadIn: Bool) -> JumpTarget? {
+        guard lockedJumpCapability == .available, lockedPlanFrozen, let list = lockedVODDurations,
+              let points = lockedJumpPoints, index >= Self.leadingGridSlots, index < points.count, index < list.count else {
+            return nil
+        }
+        var start = 0.0
+        for k in 0..<index { start += list[k] }
+        let point = points[index]
+        return JumpTarget(segment: index, playerStartSeconds: start, keyframeOffset: point.keyframeOffset,
+                          readOffset: leadIn ? point.leadOffset : point.keyframeOffset)
+    }
+
+    /// Freezes the VOD list on the plan if nothing froze it yet (as the
+    /// first playlist request does): the players' timeline is then known, and
+    /// with it `jumpTarget`. False — and nothing changes — when there is no
+    /// planned list to freeze, or when the list is already frozen on
+    /// estimates. Pump-queue only.
+    @discardableResult
+    func freezePlaylistFromPlan() -> Bool {
+        let (fromPlan, note): (Bool, String?) = lock.withLock {
+            if lockedVODDurations != nil { return (lockedPlanFrozen, nil) }
+            guard plan != nil, !lockedProgress.finished, !lockedDurations.isEmpty, let planned = lockedPlannedList else {
+                return (false, nil)
+            }
+            lockedVODDurations = planned
+            lockedPlanFrozen = true
+            return (true, "VOD playlists frozen: \(planned.count) segments, exact (keyframe index)")
+        }
+        if let note = note { log(note) }
+        refreshJumpState()
+        return fromPlan
+    }
+
+    /// The cursor: the segment the pass writes next. `progress.segmentsWritten`
+    /// in a session that never jumped. After a jump it may be below it: in a
+    /// hole the pass is filling, or on the first segment that exists after
+    /// one, where the pass has stopped (it writes nothing there; `jump` moves
+    /// it on). Once the film's end is written, a pass stopped that way has
+    /// nothing left to write where it is: it is at rest, and the cursor reads
+    /// `progress.segmentsWritten` again — "the end is written and the cursor
+    /// is at the mark" then means the session is idle, whether or not holes
+    /// remain elsewhere (`missingSegments()`). Thread-safe.
+    var nextSegmentIndex: Int {
+        lock.withLock {
+            let atRest = lockedTailWritten && lockedNextSegment < lockedDurations.count
+                && !lockedMissing.contains(lockedNextSegment)
+            return atRest ? lockedDurations.count : lockedNextSegment
+        }
+    }
+
+    /// The holes: the indexes below `progress.segmentsWritten` that are not
+    /// on disk because a `jump` skipped them (or `markMissing` took them
+    /// back), which a pass may still write. Empty in a session that never
+    /// jumped. (A segment the caller deleted is not one: the session does not
+    /// know, and never writes it again.) Thread-safe.
+    func missingSegments() -> IndexSet { lock.withLock { lockedMissing } }
+
+    /// A `jump` was made. Thread-safe.
+    var hasJumped: Bool { lock.withLock { lockedHasJumped } }
+
+    /// `finish()` wrote the end of the film (the last segment and its tail
+    /// units). A later `jump` may only fill holes below it. Thread-safe.
+    var isTailWritten: Bool { lock.withLock { lockedTailWritten } }
+
+    /// Cue points the keyframe index holds for the video track (0 before it
+    /// is read, or without one). Diagnostics; thread-safe.
+    var indexedKeyframeCount: Int { lock.withLock { lockedCueCount } }
+
+    /// Set when a jump could not be followed through: what the index gave is
+    /// not a Cluster, or the planned keyframe is not where it says (a later
+    /// keyframe came first; `maxJumpSearchBytes` read without it; the stream
+    /// contradicts the plan inside a hole). Nothing was written for it, and
+    /// the session produces nothing more (`pump` returns 0, `jump` nil,
+    /// `jumpCapability` is `.unavailable`): the caller plays that position
+    /// another way. nil while healthy. Thread-safe.
+    var jumpFailure: String? { lock.withLock { lockedJumpFailure } }
+
+    /// What a jump reads before the segment it goes to.
+    enum JumpLeadIn {
+        /// The indexed Cluster before the keyframe's, only when an audio
+        /// track needs it for its first segment to be complete: AAC (the
+        /// frames its decoder discards as priming are stored before the
+        /// keyframe) or laced audio (a block stored before the keyframe holds
+        /// frames that play after it). One more Cluster to download.
+        case automatic
+        /// That Cluster whatever the tracks — for a jump nobody waits on
+        /// (the hop back to the high-water mark): a text cue that began
+        /// before the segment and is still shown is then kept too.
+        case always
+    }
+
+    /// The lead-in is read only when it starts within this many bytes of the
+    /// keyframe's Cluster (a sparse index). Pump-queue only, before `prepare`.
+    var jumpLeadInLimit: Int64 = 32 << 20
+
+    /// A jump whose planned keyframe is not met within this many bytes of
+    /// where it started reading has failed (`jumpFailure`): 256 MiB, four of
+    /// the largest Clusters read in one piece. Pump-queue only.
+    var maxJumpSearchBytes: UInt64 = 256 << 20
+
+    /// Moves the pass: the next segment written is `index`, read from the
+    /// Cluster of its keyframe (or from the lead-in). Forward past the
+    /// high-water mark, the indexes in between are published as holes;
+    /// backward, `index` must be a hole. Whatever the pass had demuxed and
+    /// not written is dropped; `setInputComplete(false)` (the caller says
+    /// when what the pass now reads is all there); `consumedInputOffset`
+    /// becomes the offset it reads from. Allowed after `finish()` when the
+    /// film's end is written. Returns where the pass now reads — or nil, and
+    /// NOTHING changed, when the jump can't be made: not `.ready`; a segment
+    /// waiting for its files; an absorbing last segment; a write or jump
+    /// failure; no plan in force, or a frozen list that is not the planned
+    /// one (`freezePlaylistFromPlan` first); a transcoded audio track;
+    /// segments 0 and 1 not both written; `index` below 2, not a real segment
+    /// of the plan, the cursor itself, or a segment that exists; a session
+    /// finished without the film's end. Pump-queue only.
+    @discardableResult
+    func jump(toSegment index: Int, leadIn: JumpLeadIn = .automatic) -> JumpTarget? {
+        guard outcome == .ready, pendingWrite == nil, overflow == nil, writeFailure == nil, !jumpFailed,
+              let plan = plan, let points = jumpPoints, let video = videoOutput,
+              !audioOutputs.contains(where: { $0.transcoder != nil }),
+              !isFinished || tailWritten else { return nil }
+        let (list, highWater, isHole): ([Double]?, Int, Bool) = lock.withLock {
+            (lockedPlanFrozen ? lockedVODDurations : nil, lockedDurations.count, lockedMissing.contains(index))
+        }
+        // Segments 0 and 1 always exist: a rebuilt player item reads them again.
+        guard let frozen = list, segmentIndex >= Self.leadingGridSlots, highWater >= Self.leadingGridSlots,
+              index >= Self.leadingGridSlots, index < plan.realCount, index < points.count, index < frozen.count,
+              index != segmentIndex, index >= highWater || isHole else { return nil }
+        let keyframe = plan.cuts90k[index - 1]
+        let point = points[index]
+        let readOffset = leadIn == .always || automaticLeadIn ? point.leadOffset : point.keyframeOffset
+        guard readOffset >= 0 else { return nil }
+        let previousReader = Int64(clamping: demuxer.reader.offset)
+        let previousCursor = segmentIndex
+
+        // Nothing demuxed so far belongs to the segment jumped to.
+        discardPendingMedia()
+        video.lastDTS = nil
+        video.previousSegmentPTS = []
+        // Not left at the highest time ever demuxed: the cutter would take
+        // the video for far ahead of the audio and cut without waiting for
+        // it (and, 120 s back, stop for good: `stopIfVideoCannotBeCut`).
+        video.latestPTS = keyframe
+        for output in audioOutputs {
+            output.nextDTS = nil
+            output.lastSourceTicks = nil
+            output.catchingUp = false
+            output.writtenEnd = nil
+            output.discardBelowFloor = true
+        }
+        // The cuts made before `index`, as a pass in file order has them
+        // there (the grid of the subtitle windows is anchored on them).
+        cutKeyframes90k = Array(plan.cuts90k.prefix(index))
+        while segmentStarts90k.count < index { segmentStarts90k.append(plan.cuts90k[segmentStarts90k.count - 1]) }
+        var start = 0.0
+        for k in 0..<index { start += frozen[k] }
+        lock.withLock {
+            if index > highWater {
+                // The indexes passed over: listed, never written.
+                for k in highWater..<index {
+                    lockedDurations.append(frozen[k])
+                    lockedSourceOffsets.append(max(points[k].keyframeOffset, lockedSourceOffsets.last ?? 0))
+                    lockedSegmentBytes.append(0)
+                    lockedMissing.insert(k)
+                    lockedProgress.mediaSeconds += frozen[k]
+                }
+                lockedProgress.segmentsWritten = index
+                lockedPublishedEnd90k = keyframe
+            }
+            lockedCutCount = max(lockedCutCount, index + 1)
+            lockedNextSegment = index
+            lockedHasJumped = true
+            lockedConsumedInput = readOffset
+            lockedFinishing = false
+        }
+        segmentIndex = index
+        hasJumpedOnPump = true
+        // After `finish()`: the pass runs again, below the film's end.
+        isFinished = false
+        stoppedAtInputBudget = false
+        setInputComplete(false)
+        demuxer.jump(toClusterAt: UInt64(readOffset))
+        jumpKeyframe90k = keyframe
+        jumpFloor90k = keyframe
+        jumpReadStart = UInt64(readOffset)
+        // A cue is written in segment `index` when it ends after the start of
+        // its window — at most one second (the bound of an open GOP's leading
+        // pictures) before the earlier of its grid slot and its keyframe.
+        let origin = video.originPTS ?? 0
+        jumpCueFloorSeconds = Double(min(gridBoundary(index, origin: origin), keyframe) - 90_000) / 90_000
+        refreshJumpState()
+        log("jump: " + (index > highWater ? "segments \(highWater)…\(index - 1) skipped (holes), " : "")
+            + "segment \(index) from read offset \(readOffset)"
+            + (readOffset != point.keyframeOffset ? " (lead-in: \(point.keyframeOffset - readOffset) bytes before its keyframe's Cluster)" : "")
+            + " — the pass was at segment \(previousCursor), reader \(previousReader)")
+        return JumpTarget(segment: index, playerStartSeconds: start, keyframeOffset: point.keyframeOffset, readOffset: readOffset)
+    }
+
+    /// What lies where a jump to segment `index` would read: its keyframe's
+    /// Cluster, then the lead-in when one would be read. `.notACluster` when
+    /// the index is wrong about this file — and when no jump can go there at
+    /// all (no plan, not a real segment of it). Reads a few bytes, moves
+    /// nothing. `knownDownloaded`: the caller knows the first bytes at both
+    /// offsets are on disk (`JumpTarget.keyframeOffset`, `.readOffset`): a
+    /// zero byte there is data, so an index that points into zeros is told
+    /// from bytes still to come. Pump-queue only.
+    func probeJump(toSegment index: Int, knownDownloaded: Bool = false) -> MatroskaDemuxer.ClusterProbe {
+        guard let points = jumpPoints, index >= 1, index < points.count else { return .notACluster }
+        let point = points[index]
+        let keyframe = demuxer.probeCluster(at: UInt64(clamping: point.keyframeOffset), knownDownloaded: knownDownloaded)
+        guard keyframe == .cluster, automaticLeadIn, point.leadOffset != point.keyframeOffset else { return keyframe }
+        return demuxer.probeCluster(at: UInt64(clamping: point.leadOffset), knownDownloaded: knownDownloaded)
+    }
+
+    /// Takes segments back: the caller deleted (or is about to delete) their
+    /// files, and they are holes again — 0 byte, in `missingSegments()` —
+    /// that a pass may write anew (`segmentBytes()` says 0 for them;
+    /// `bytesWritten` keeps what was written). For a jump that is undone
+    /// (bounded storage: the playhead went back before playback reached the
+    /// jump's destination). Returns the indexes that became holes: those that were
+    /// written, from 2 up, below the high-water mark — and, once the film's
+    /// end is written, below the last real segment (only `finish()` writes
+    /// it and its tail units, once). None without a plan to jump through.
+    /// The caller must not delete the files of an index this does not
+    /// return. Pump-queue only.
+    @discardableResult
+    func markMissing(_ indexes: IndexSet) -> IndexSet {
+        guard let plan = plan, jumpPoints != nil, !jumpFailed else { return IndexSet() }
+        let limit = tailWritten ? plan.realCount - 1 : Int.max
+        var marked = IndexSet()
+        lock.withLock {
+            for index in indexes where index >= Self.leadingGridSlots && index < lockedDurations.count && index < limit
+                && !lockedMissing.contains(index) {
+                lockedSegmentBytes[index] = 0
+                lockedMissing.insert(index)
+                marked.insert(index)
+            }
+        }
+        return marked
+    }
+
+    /// A jump reads the lead-in: an audio track in use is AAC, or laced.
+    private var automaticLeadIn: Bool {
+        audioOutputs.contains { $0.decodeOffset > 0 || demuxer.lacedTracks.contains($0.track.number) }
+    }
+
+    /// The pass sits on a segment that exists (below the high-water mark and
+    /// not a hole): it writes nothing until `jump` moves it. Never in a
+    /// session that did not jump.
+    private var isParked: Bool {
+        guard hasJumpedOnPump else { return false }
+        return lock.withLock { segmentIndex < lockedDurations.count && !lockedMissing.contains(segmentIndex) }
+    }
+
+    /// The frames and cues demuxed and not written.
+    private func discardPendingMedia() {
+        videoOutput?.pending.removeAll()
+        videoOutput?.pendingBytes = 0
+        for output in audioOutputs { output.pending.removeAll() }
+        for output in subtitleOutputs { output.cues.removeAll() }
+    }
+
+    /// The jump can't be followed through (`jumpFailure`): nothing of it is
+    /// kept, nothing more is produced.
+    private func failJump(_ reason: String) {
+        guard !jumpFailed else { return }
+        jumpFailed = true
+        jumpKeyframe90k = nil
+        discardPendingMedia()
+        lock.withLock { if lockedJumpFailure == nil { lockedJumpFailure = reason } }
+        log("jump to segment \(segmentIndex) failed: \(reason) — stopped")
+        refreshJumpState()
+    }
+
+    /// While a jump looks for its keyframe: not further than
+    /// `maxJumpSearchBytes` from where it started reading.
+    private func checkJumpSearch() {
+        let offset = demuxer.reader.offset
+        guard jumpKeyframe90k != nil, offset > jumpReadStart, offset - jumpReadStart > maxJumpSearchBytes else { return }
+        failJump("the indexed keyframe was not found within \(maxJumpSearchBytes) bytes of its indexed Cluster")
+    }
+
+    /// Publishes `jumpCapability` and whether a jump would read a lead-in.
+    /// Pump queue: at the end of `prepare`, `pump`, `jump` and `finish`, and
+    /// when the plan comes or goes.
+    private func refreshJumpState() {
+        let capability = currentJumpCapability()
+        let leadIn = automaticLeadIn
+        lock.withLock {
+            lockedJumpCapability = capability
+            lockedLeadInWanted = leadIn
+        }
+    }
+
+    private func currentJumpCapability() -> JumpCapability {
+        switch outcome {
+        case nil, .needMoreData?: return .pending
+        case .unsupported(let reason)?: return .unavailable(reason)
+        case .ready?: break
+        }
+        let (failure, write, isVOD, frozen, fromPlan): (String?, String?, Bool, Bool, Bool) = lock.withLock {
+            (lockedJumpFailure, lockedWriteFailure, lockedDuration > 0, lockedVODDurations != nil, lockedPlanFrozen)
+        }
+        if let reason = failure { return .unavailable(reason) }
+        if let reason = write { return .unavailable(reason) }
+        if audioOutputs.contains(where: { $0.transcoder != nil }) {
+            return .unavailable("an audio track is transcoded (PCM): its encoder can't be re-entered")
+        }
+        guard isVOD else { return .unavailable("no Duration in the header (EVENT playlists)") }
+        if overflow != nil { return .unavailable("the last listed segment absorbs the media past the announced end") }
+        if plan != nil {
+            guard jumpPoints != nil else { return .unavailable(planUnavailableReason ?? "no Cluster offsets for the plan") }
+            if frozen && !fromPlan { return .unavailable("the playlists were frozen on estimates") }
+            if isFinished && !tailWritten { return .unavailable("the conversion ended without the film's end") }
+            return .available
+        }
+        if let reason = planUnavailableReason { return .unavailable(reason) }
+        if isFinished || frozen { return .unavailable("no keyframe-index plan (the playlists are estimated)") }
+        return .pending
+    }
+
     // MARK: - Private: state
 
     private let fileHandle: FileHandle
@@ -862,6 +1449,19 @@ final class MKVToHLSRemuxSession {
     /// keyframe that started segment `leadingGridSlots` (`gridBoundary`).
     private var lockedGridAnchorSeconds: Double?
     private var lockedVideoAvailable: Bool { lock.withLock { lockedVideo != nil } }
+    /// `jumpCapability`, `jumpFailure`, `missingSegments()`, `nextSegmentIndex`,
+    /// `hasJumped`, `isTailWritten`, `indexedKeyframeCount`.
+    private var lockedJumpCapability: JumpCapability = .pending
+    private var lockedJumpFailure: String?
+    private var lockedMissing = IndexSet()
+    private var lockedNextSegment = 0
+    private var lockedHasJumped = false
+    private var lockedTailWritten = false
+    private var lockedCueCount = 0
+    /// `jumpPoints`, for `jumpTarget`; and whether a jump made now would read
+    /// a lead-in (`automaticLeadIn`, as of the last `pump`).
+    private var lockedJumpPoints: [JumpPoint]?
+    private var lockedLeadInWanted = false
 
     // Pump-queue-only state below.
     private var outcome: PrepareResult?
@@ -914,6 +1514,41 @@ final class MKVToHLSRemuxSession {
     /// The keyframe-index plan the cutter follows (`makeCutPlan`); nil: the
     /// grid rule (`gridBoundary`).
     private var plan: CutPlan?
+    /// For every real segment of `plan`, where a pass that starts it reads
+    /// from (`makeJumpPoints`); nil without a plan, or when a planned
+    /// keyframe has no known Cluster.
+    private var jumpPoints: [JumpPoint]?
+    /// Why there is no plan to jump through (the index was not there, was
+    /// rejected, came too late; the plan was abandoned); nil while one may
+    /// still come, or is in force.
+    private var planUnavailableReason: String?
+    /// A `jump` was made (the pump queue's copy of `lockedHasJumped`).
+    private var hasJumpedOnPump = false
+    /// The pump queue's copies of `lockedTailWritten` and of
+    /// `lockedJumpFailure != nil`.
+    private var tailWritten = false
+    private var jumpFailed = false
+    /// After a jump, until its keyframe is met: the PTS (90 kHz) of the
+    /// planned keyframe that starts the segment jumped to — every video frame
+    /// before it is dropped (`handleVideo`).
+    private var jumpKeyframe90k: Int64?
+    /// That PTS, kept: the audio of each track below it (decode time) is
+    /// dropped until the track's first frame at or after it (`handleAudio`).
+    private var jumpFloor90k: Int64?
+    /// Text cues that end before this (s) belong to nothing the pass will
+    /// write after the last jump (`handleSubtitle`).
+    private var jumpCueFloorSeconds: Double?
+    /// Where the pass started reading after the last jump (`checkJumpSearch`).
+    private var jumpReadStart: UInt64 = 0
+
+    /// Where a pass that starts a segment of the plan reads from.
+    private struct JumpPoint {
+        /// The Cluster holding the keyframe that starts the segment.
+        let keyframeOffset: Int64
+        /// The nearest indexed Cluster before it, when it is within
+        /// `jumpLeadInLimit` (else `keyframeOffset`): the lead-in.
+        let leadOffset: Int64
+    }
 
     private enum CueIndexState {
         /// Not loaded yet (not downloaded, or not tried).
@@ -1035,6 +1670,8 @@ final class MKVToHLSRemuxSession {
         let config: FMP4Muxer.TrackConfig
         /// Frames of the segment being built, decode order, [0] is a keyframe.
         var pending: [MKVFrame] = []
+        /// Bytes of `pending` (`stopIfVideoCannotBeCut`).
+        var pendingBytes = 0
         /// Grid origin: PTS (90 kHz) of the first keyframe.
         var originPTS: Int64?
         /// Highest PTS demuxed so far (90 kHz).
@@ -1118,6 +1755,17 @@ final class MKVToHLSRemuxSession {
         var dropped = 0
         var fillerWindows = 0
 
+        // What a jump needs to restart this track's clock where a pass in
+        // file order would have it (`handleAudio`).
+        /// Decode time (media timeline) of the first frame ever kept.
+        var originDTS: Int64?
+        /// The one duration every frame had before the first jump; nil when
+        /// they differed (or before the first frame).
+        var uniformDuration: Int64?
+        /// After a jump: frames below `jumpFloor90k` advance the clock without
+        /// being kept, until the first one at or after it.
+        var discardBelowFloor = false
+
         init(index: Int, track: MKVTrack, plan: RemuxAudioPlan, config: FMP4Muxer.TrackConfig,
              transcoder: RemuxAudioTranscoder?, decodeOffset: Int64) {
             self.index = index
@@ -1149,6 +1797,7 @@ final class MKVToHLSRemuxSession {
     private func conclude(_ result: PrepareResult) -> PrepareResult {
         outcome = result
         if case .unsupported(let reason) = result { log("unsupported: \(reason)") }
+        refreshJumpState()
         return result
     }
 
@@ -1311,6 +1960,13 @@ final class MKVToHLSRemuxSession {
             case .failure(let error):
                 failures.append("#\(track.number) \(track.codecID): \(error.reason)")
             }
+        }
+        // A sample rate no audio has (a forged or damaged header): the
+        // track's timescale would put the timeline's products out of range.
+        choices.removeAll { choice in
+            guard choice.plan.timescale > Self.maxAudioTimescale else { return false }
+            failures.append("#\(choice.track.number) \(choice.track.codecID): sample rate \(choice.plan.timescale) Hz")
+            return true
         }
         if !failures.isEmpty { log("audio plans failed: " + failures.joined(separator: " | ")) }
         guard !choices.isEmpty else {
@@ -1475,6 +2131,8 @@ final class MKVToHLSRemuxSession {
     // MARK: - Private: routing
 
     private func route(_ frame: MKVFrame) {
+        // A jump that failed keeps nothing of what it reads.
+        if jumpFailed { return }
         switch routes[frame.trackNumber] {
         case .video?: handleVideo(frame)
         case .audio(let index)?: handleAudio(frame, output: audioOutputs[index])
@@ -1492,7 +2150,27 @@ final class MKVToHLSRemuxSession {
         if frame.keyframe, !cueIndex.isDone, seenKeyframeTicks.count < Self.maxSeenKeyframes {
             seenKeyframeTicks.append(frame.timestamp)
         }
+        if let wanted = jumpKeyframe90k {
+            // After a jump: nothing before the planned keyframe of the
+            // segment jumped to (the end of the GOP before it, stored in the
+            // same Cluster; the whole lead-in). A keyframe past it without
+            // one AT it: the index does not describe this stream, and nothing
+            // says which segment this would be.
+            let pts = units(frame.timestamp, 90_000)
+            guard frame.keyframe, pts == wanted else {
+                if frame.keyframe, pts > wanted {
+                    failJump(String(format: "no keyframe at the indexed %.3f s (the next one is at %.3f s)",
+                                    Double(wanted - (video.originPTS ?? 0)) / 90_000,
+                                    Double(pts - (video.originPTS ?? 0)) / 90_000))
+                }
+                return
+            }
+            jumpKeyframe90k = nil
+            log("jump: the keyframe of segment \(segmentIndex) is \(Int64(clamping: frame.clusterOffset) - Int64(clamping: jumpReadStart)) "
+                + "byte(s) after the read offset")
+        }
         video.pending.append(frame)
+        video.pendingBytes += frame.data.count
         video.latestPTS = max(video.latestPTS, units(frame.timestamp, 90_000))
     }
 
@@ -1509,7 +2187,19 @@ final class MKVToHLSRemuxSession {
         let laceContinuation = output.lastSourceTicks == frame.timestamp
         output.lastSourceTicks = frame.timestamp
 
-        if output.nextDTS == nil {
+        if output.nextDTS == nil, output.discardBelowFloor {
+            // First frame demuxed after a jump: the running decode time
+            // restarts here — on the track's own frame grid (origin + n
+            // frames) when every frame had one duration, which is where a
+            // pass in file order has it: the Matroska timestamp alone is
+            // rounded (a third of a millisecond off at 48 kHz, enough for a
+            // frame to be doubled or lost where two runs of segments meet).
+            var start = source
+            if let origin = output.originDTS, let step = output.uniformDuration, step > 0 {
+                start = origin + Int64((Double(source - origin) / Double(step)).rounded()) * step
+            }
+            output.nextDTS = start
+        } else if output.nextDTS == nil {
             // Audio that ends before the first video frame would start the
             // rendition before the video: trim it. Judged on the decode
             // timeline: AAC keeps the ~2 frames before the video that its
@@ -1543,6 +2233,25 @@ final class MKVToHLSRemuxSession {
             }
         }
         guard let dts = output.nextDTS else { return }
+        if output.originDTS == nil {
+            output.originDTS = dts
+            output.uniformDuration = duration
+        } else if !hasJumpedOnPump, output.uniformDuration != duration {
+            // Judged before the first jump only: after it, the last frame of
+            // the file (often shorter) may be read before the others.
+            output.uniformDuration = nil
+        }
+        if output.discardBelowFloor, let floor = jumpFloor90k {
+            // What the pass read before the segment jumped to (the lead-in,
+            // the start of the keyframe's Cluster): the clock runs, the
+            // frames are not kept — the segment starts with the frame a pass
+            // in file order starts it with.
+            if output.tfdt(dts) * 90_000 < floor * output.timescale {
+                output.nextDTS = dts + duration
+                return
+            }
+            output.discardBelowFloor = false
+        }
         let data = output.plan.transform?(frame.data) ?? frame.data
         output.noteFrame(data)
         output.pending.append(AudioSample(dts: dts, duration: duration, data: data))
@@ -1681,6 +2390,8 @@ final class MKVToHLSRemuxSession {
                                                duration: duration,
                                                additions: additions) else { return }
         guard cue.end > 0 else { return }
+        // Read on the way to the segment jumped to, and over before it.
+        if let floor = jumpCueFloorSeconds, cue.end <= floor { return }
         cue.start = max(0, cue.start)
         guard cue.end > cue.start else { return }
         output.cues.append(cue)
@@ -1698,6 +2409,9 @@ final class MKVToHLSRemuxSession {
         guard let video = videoOutput, let origin = video.originPTS else { return 0 }
         var written = 0
         while written < limit {
+            // A pass moved by `jump` writes holes and what lies past the
+            // high-water mark, never a segment that exists.
+            if isParked { break }
             // The session target, before the first cut.
             if gridTarget == nil, !decideTarget(final: !waitForAudio) { break }
             let cut: Int
@@ -1750,7 +2464,7 @@ final class MKVToHLSRemuxSession {
             // check (playlists are frozen on the HTTP threads).
             let absorb: Bool = lock.withLock {
                 if let frozen = lockedVODDurations, segmentIndex >= frozen.count - 1 { return true }
-                lockedCutCount = segmentIndex + 1
+                lockedCutCount = max(lockedCutCount, segmentIndex + 1)
                 return false
             }
             // Not on disk yet (disk full…): kept pending, retried by `pump`.
@@ -1857,6 +2571,8 @@ final class MKVToHLSRemuxSession {
         let (isVOD, frozen) = lock.withLock { (lockedDuration > 0, lockedVODDurations != nil) }
         guard isVOD, !frozen else {
             abandonCueIndex()
+            planUnavailableReason = isVOD ? "the playlists were frozen on estimates before the keyframe index was read"
+                                          : "no Duration in the header (EVENT playlists)"
             return
         }
         let now = ProcessInfo.processInfo.systemUptime
@@ -1864,11 +2580,13 @@ final class MKVToHLSRemuxSession {
         switch demuxer.loadCueIndex(trackNumber: track.number) {
         case .available(let ticks):
             cueIndex = .available(ticks)
+            lock.withLock { lockedCueCount = ticks.count }
             log("keyframe index: \(ticks.count) cue point(s) for video track #\(track.number)")
         case .notYet(let readBody):
             if readBody { cueRetryAt = now + 1 }
         case .unavailable(let reason):
             abandonCueIndex()
+            planUnavailableReason = "no keyframe index (\(reason))"
             log("no keyframe index (\(reason)): the VOD playlists will estimate the segments not cut yet")
         }
     }
@@ -1889,11 +2607,15 @@ final class MKVToHLSRemuxSession {
         let (published, frozen) = lock.withLock { (lockedDurations.count, lockedVODDurations != nil) }
         guard published >= 1 || frozen else { return }
         defer { abandonCueIndex() }
-        guard !frozen else { return }
+        guard !frozen else {
+            planUnavailableReason = "the playlists were frozen on estimates before the keyframe index could be used"
+            return
+        }
         let candidate: CutPlan
         switch makeCutPlan(indexTicks: ticks, target: target) {
         case .success(let made): candidate = made
         case .failure(let rejection):
+            planUnavailableReason = "keyframe index not used (\(rejection.reason))"
             log("keyframe index not used (\(rejection.reason)): the VOD playlists will estimate the segments not cut yet")
             return
         }
@@ -1905,6 +2627,7 @@ final class MKVToHLSRemuxSession {
             return true
         }
         guard accepted else {
+            planUnavailableReason = "keyframe index not used (inconsistent plan)"
             log("keyframe index not used (inconsistent plan): the VOD playlists will estimate the segments not cut yet")
             return
         }
@@ -1912,6 +2635,63 @@ final class MKVToHLSRemuxSession {
         log("keyframe index plan from segment \(segmentIndex): \(candidate.realCount) segments"
             + (candidate.fillerCount > 0 ? " + \(candidate.fillerCount) tail filler(s)" : "")
             + String(format: ", up to %.3f s", Double(candidate.movieEnd90k - (segmentStarts90k.first ?? 0)) / 90_000))
+        // Where each planned segment is in the file: what `jump` needs.
+        switch makeJumpPoints(for: candidate, indexTicks: ticks) {
+        case .success(let points):
+            jumpPoints = points
+            lock.withLock { lockedJumpPoints = points }
+        case .failure(let rejection):
+            planUnavailableReason = rejection.reason
+            log("the plan can be followed, not jumped through: \(rejection.reason)")
+        }
+        refreshJumpState()
+    }
+
+    /// For every real segment of `plan`, the Cluster that holds the keyframe
+    /// starting it and the indexed Cluster before that one (the lead-in a
+    /// jump may read from, when it is within `jumpLeadInLimit`). A segment
+    /// already written has the offset noted when it was; the one being built,
+    /// that of its first pending frame; a planned one, the offset the index
+    /// gives for its keyframe. Rejected when a planned keyframe has no offset,
+    /// or when the offsets do not follow the file's order (an index that
+    /// can't be trusted to jump by).
+    private func makeJumpPoints(for plan: CutPlan, indexTicks: [Int64]) -> Result<[JumpPoint], PlanRejection> {
+        var ticksBy90k: [Int64: Int64] = [:]
+        ticksBy90k.reserveCapacity(indexTicks.count)
+        for tick in indexTicks { ticksBy90k[units(tick, 90_000)] = tick }
+        let published = lock.withLock { lockedSourceOffsets }
+        // Segment 0 starts the file: never jumped to, listed so that the
+        // indexes line up.
+        var points = [JumpPoint(keyframeOffset: published.first ?? 0, leadOffset: published.first ?? 0)]
+        points.reserveCapacity(plan.realCount)
+        var previous = points[0].keyframeOffset
+        for k in 1..<plan.realCount {
+            let keyframe = plan.cuts90k[k - 1]
+            var offset: Int64?
+            if k < published.count {
+                offset = published[k]
+            } else if k == segmentIndex, let first = videoOutput?.pending.first, units(first.timestamp, 90_000) == keyframe {
+                offset = Int64(clamping: first.clusterOffset)
+            }
+            if offset == nil, let tick = ticksBy90k[keyframe], let indexed = demuxer.clusterOffset(forCueTicks: tick) {
+                offset = Int64(clamping: indexed)
+            }
+            let seconds = Double(keyframe - (videoOutput?.originPTS ?? 0)) / 90_000
+            guard let found = offset else {
+                return .failure(PlanRejection(reason: String(format: "no Cluster offset for the keyframe at %.3f s", seconds)))
+            }
+            guard found >= previous else {
+                return .failure(PlanRejection(reason: String(format: "the keyframe index is not in file order at %.3f s", seconds)))
+            }
+            var lead = found
+            if let before = demuxer.indexedClusterOffset(before: UInt64(clamping: found)).map({ Int64(clamping: $0) }),
+               found - before <= jumpLeadInLimit {
+                lead = before
+            }
+            points.append(JumpPoint(keyframeOffset: found, leadOffset: lead))
+            previous = found
+        }
+        return .success(points)
     }
 
     /// The cuts the grid rule makes on the indexed keyframes (`ticks`, the
@@ -2034,9 +2814,16 @@ final class MKVToHLSRemuxSession {
             let pts = units(video.pending[index].timestamp, 90_000)
             if pts == wanted { return .at(index) }
             if pts > wanted {
-                dropPlan(reason: String(format: "no keyframe at the planned %.3f s, the next one at %.3f s",
-                                        Double(wanted - (video.originPTS ?? 0)) / 90_000,
-                                        Double(pts - (video.originPTS ?? 0)) / 90_000))
+                let reason = String(format: "no keyframe at the planned %.3f s, the next one at %.3f s",
+                                    Double(wanted - (video.originPTS ?? 0)) / 90_000,
+                                    Double(pts - (video.originPTS ?? 0)) / 90_000)
+                if hasJumpedOnPump, segmentIndex < lock.withLock({ lockedDurations.count }) {
+                    // In a hole, between segments that exist: the grid rule
+                    // would not end this one where the next one starts.
+                    failJump(reason)
+                    return .wait
+                }
+                dropPlan(reason: reason)
                 return .none
             }
         }
@@ -2047,10 +2834,14 @@ final class MKVToHLSRemuxSession {
     /// disagreed with it.
     private func dropPlan(reason: String?) {
         plan = nil
+        jumpPoints = nil
+        planUnavailableReason = "the keyframe-index plan was abandoned (\(reason ?? "the playlists were frozen on estimates"))"
         let frozenFromPlan: Bool = lock.withLock {
             lockedPlannedList = nil
+            lockedJumpPoints = nil
             return lockedPlanFrozen
         }
+        refreshJumpState()
         guard let reason = reason else { return }
         log("keyframe index plan abandoned at segment \(segmentIndex) (\(reason)): cutting on the grid from here; "
             + (frozenFromPlan ? "the frozen VOD playlists keep the planned list" : "the VOD playlists will be estimated"))
@@ -2086,6 +2877,7 @@ final class MKVToHLSRemuxSession {
         guard let video = videoOutput, videoCount > 0, videoCount <= video.pending.count else { return nil }
         let frames = Array(video.pending.prefix(videoCount))
         video.pending.removeFirst(videoCount)
+        video.pendingBytes = max(0, video.pendingBytes - frames.reduce(0) { $0 + $1.data.count })
 
         // Video: PTS from the Matroska timestamps; DTS[i] = i-th smallest PTS
         // of the segment (strictly increasing) → B-frames, open GOPs and
@@ -2218,7 +3010,7 @@ final class MKVToHLSRemuxSession {
                 lockedTimelineStart90k = videoStart
             }
         }
-        segmentStarts90k.append(videoStart)
+        setSegmentStart(videoStart, at: index)
         segmentIndex += 1
         var updatedVideo: VideoRendition?
         if !video.measuredFrameRate, window.frames > 1 {
@@ -2234,22 +3026,51 @@ final class MKVToHLSRemuxSession {
         // rendition lists as many segments as the video (EVENT playlists
         // included). The final segment's is open-ended.
         files += makeSubtitleSegment(index, end: cutPTS == nil ? nil : videoEnd)
-        let count = segmentIndex
         let bytes = Self.totalBytes(files)
         return commit(PendingWrite(files: files) { [weak self] in
             guard let self = self else { return }
             self.lock.withLock {
-                self.lockedDurations.append(duration)
-                self.lockedSourceOffsets.append(max(sourceOffset, self.lockedSourceOffsets.last ?? 0))
-                self.lockedSegmentBytes.append(bytes)
-                self.lockedBytesWritten += bytes
-                self.lockedProgress.segmentsWritten = count
-                self.lockedProgress.mediaSeconds += duration
-                self.lockedPublishedEnd90k = videoEnd
+                self.publishLocked(index: index, duration: duration, sourceOffset: sourceOffset, bytes: bytes,
+                                   end90k: videoEnd, isMedia: true)
                 if let updated = updatedVideo { self.lockedVideo = updated }
                 self.refreshPlannedListLocked()
             }
         })
+    }
+
+    /// Under `lock`: segment `index` is on disk. At the high-water mark it is
+    /// appended, as every segment of a session that never jumped is; below it,
+    /// it is a hole a pass came back to fill, and its entry — the planned
+    /// duration, 0 byte — becomes the real one. `sourceOffset` nil: the last
+    /// real offset again (a tail unit, the absorbing segment). `isMedia`
+    /// false: a tail unit, which `progress.mediaSeconds` does not count.
+    private func publishLocked(index: Int, duration: Double, sourceOffset: Int64?, bytes: Int64, end90k: Int64, isMedia: Bool) {
+        if index >= lockedDurations.count {
+            lockedDurations.append(duration)
+            lockedSourceOffsets.append(max(sourceOffset ?? 0, lockedSourceOffsets.last ?? 0))
+            lockedSegmentBytes.append(bytes)
+            if isMedia { lockedProgress.mediaSeconds += duration }
+            lockedPublishedEnd90k = end90k
+        } else {
+            lockedDurations[index] = duration
+            if let offset = sourceOffset {
+                // Kept between its neighbours' (`segmentSourceOffsets()` never decreases).
+                let low = index > 0 ? lockedSourceOffsets[index - 1] : 0
+                let high = index + 1 < lockedSourceOffsets.count ? lockedSourceOffsets[index + 1] : Int64.max
+                lockedSourceOffsets[index] = min(max(offset, low), high)
+            }
+            lockedSegmentBytes[index] = bytes
+            lockedMissing.remove(index)
+        }
+        lockedBytesWritten += bytes
+        lockedProgress.segmentsWritten = max(lockedProgress.segmentsWritten, index + 1)
+        lockedNextSegment = index + 1
+    }
+
+    /// The tfdt (90 kHz) of video segment `index`: appended, or put in place
+    /// of the planned start a jump left there.
+    private func setSegmentStart(_ start: Int64, at index: Int) {
+        if index < segmentStarts90k.count { segmentStarts90k[index] = start } else { segmentStarts90k.append(start) }
     }
 
     /// Media past the end the frozen VOD playlists announce (a header
@@ -2270,7 +3091,7 @@ final class MKVToHLSRemuxSession {
                                          videoCount: videoCount, cutPTS: cutPTS, extendTo: nil,
                                          suffix: ".part\(state.parts)") else { return false }
         if overflow == nil {
-            segmentStarts90k.append(window.videoStart)
+            setSegmentStart(window.videoStart, at: index)
             log("media past the end the VOD playlists announce: segment \(index), the last one they list, absorbs it")
         }
         state.parts += 1
@@ -2315,18 +3136,12 @@ final class MKVToHLSRemuxSession {
         overflow = nil
         segmentIndex += 1
         let files = makeSubtitleSegment(index, end: nil)
-        let count = segmentIndex
         let bytes = state.bytes + Self.totalBytes(files)
         commit(PendingWrite(files: files) { [weak self] in
             guard let self = self else { return }
             self.lock.withLock {
-                self.lockedDurations.append(state.seconds)
-                self.lockedSourceOffsets.append(self.lockedSourceOffsets.last ?? 0)
-                self.lockedSegmentBytes.append(bytes)
-                self.lockedBytesWritten += bytes
-                self.lockedProgress.segmentsWritten = count
-                self.lockedProgress.mediaSeconds += state.seconds
-                self.lockedPublishedEnd90k = state.end90k
+                self.publishLocked(index: index, duration: state.seconds, sourceOffset: nil, bytes: bytes,
+                                   end90k: state.end90k, isMedia: true)
             }
         })
         log("segment \(index) absorbed \(state.parts) window(s): \(String(format: "%.1f", state.seconds)) s")
@@ -2391,22 +3206,17 @@ final class MKVToHLSRemuxSession {
                 files.append(SegmentFile(name: "s\(output.index)seg\(index).vtt",
                                          data: Data(SubtitleConversion.makeWebVTT([], timestampMap: true).utf8)))
             }
-            segmentStarts90k.append(start)
+            setSegmentStart(start, at: index)
             segmentIndex += 1
             start += duration
-            let count = segmentIndex
             let seconds = Double(duration) / 90_000
             let bytes = Self.totalBytes(files)
             let end = start
             let committed = commit(PendingWrite(files: files) { [weak self] in
                 guard let self = self else { return }
                 self.lock.withLock {
-                    self.lockedDurations.append(seconds)
-                    self.lockedSourceOffsets.append(self.lockedSourceOffsets.last ?? 0)
-                    self.lockedSegmentBytes.append(bytes)
-                    self.lockedBytesWritten += bytes
-                    self.lockedProgress.segmentsWritten = count
-                    self.lockedPublishedEnd90k = end
+                    self.publishLocked(index: index, duration: seconds, sourceOffset: nil, bytes: bytes,
+                                       end90k: end, isMedia: false)
                     self.lockedTailFillers += 1
                 }
             })
@@ -2526,8 +3336,29 @@ final class MKVToHLSRemuxSession {
 
     /// Matroska ticks (+ shift) → `timescale` units, rounded to nearest.
     private func units(_ ticks: Int64, _ timescale: Int64) -> Int64 {
-        let nanoseconds = Double(ticks + shiftTicks) * Double(demuxer.timestampScale)
-        return Int64((nanoseconds * Double(timescale) / 1_000_000_000).rounded())
+        return Self.units(ticks: ticks, shift: shiftTicks, timestampScale: demuxer.timestampScale, timescale: timescale)
+    }
+
+    /// The highest audio timescale (sample rate) taken: 1 MHz, above DXD's
+    /// 768 kHz.
+    static let maxAudioTimescale: UInt32 = 1_000_000
+
+    /// The largest magnitude `units` returns: 2^40 (141 days at 90 kHz).
+    /// Far above any timestamp let through (`plausible`), and small enough
+    /// for the timeline's sums, differences and products with a timescale
+    /// to stay within Int64.
+    static let maxUnits: Int64 = 1 << 40
+
+    /// `units` for any input: the sum saturates and the result is clamped to
+    /// ±`maxUnits`. It used to trap — `ticks + shift` overflowing, or a
+    /// Double beyond Int64 converted — on a timestamp read from a damaged or
+    /// forged file (a cluster Timestamp of 2^57: "Double value cannot be
+    /// converted to Int64", the app gone instead of VLC taking over).
+    static func units(ticks: Int64, shift: Int64, timestampScale: UInt64, timescale: Int64) -> Int64 {
+        let shifted = MatroskaDemuxer.saturatingAdd(ticks, shift)
+        let value = (Double(shifted) * Double(timestampScale) * Double(timescale) / 1_000_000_000).rounded()
+        guard value.isFinite else { return 0 }
+        return Int64(max(-Double(maxUnits), min(Double(maxUnits), value)))
     }
 
     static func median(_ values: [Int64]) -> Int64? {

@@ -27,6 +27,11 @@ class SceneDelegate: UIResponder, UIWindowSceneDelegate {
                options connectionOptions: UIScene.ConnectionOptions) {
         guard let windowScene = scene as? UIWindowScene else { return }
 
+        #if DEBUG
+        // Before the first screen reads what these hooks set.
+        DebugLaunchHooks.prepare()
+        #endif
+
         let window = UIWindow(windowScene: windowScene)
         window.rootViewController = UIStoryboard(name: "tvOS", bundle: nil).instantiateInitialViewController()
         window.tintColor = .app
@@ -38,59 +43,238 @@ class SceneDelegate: UIResponder, UIWindowSceneDelegate {
 
         AppDelegate.shared.presentTermsOfServiceIfNeeded()
 
+        let launchURL = connectionOptions.urlContexts.first?.url
+        #if DEBUG
+        // `-PTDebugLaunchURL <url>`: as if the app had been launched to open
+        // that URL (never with autoplay).
+        let debugLaunchURL = launchURL == nil ? DebugLaunchHooks.launchURL : nil
+        #else
+        let debugLaunchURL: URL? = nil
+        #endif
+
         // Release notes, once per version. A fresh install (Terms of Service
         // not accepted yet) and a launch to open a URL (Top Shelf) skip them.
         if let root = window.rootViewController {
             WhatsNewPresenter.presentAtLaunchIfNeeded(
                 from: root,
                 isFreshInstall: !UserDefaults.standard.bool(forKey: "tosAccepted"),
-                launchedFromURL: !connectionOptions.urlContexts.isEmpty)
+                launchedFromURL: launchURL != nil || debugLaunchURL != nil)
         }
 
-        if let url = connectionOptions.urlContexts.first?.url {
-            _ = AppDelegate.shared.application(.shared, open: url)
+        if let launchURL {
+            AppDelegate.shared.open(launchURL)
+        } else if let debugLaunchURL {
+            AppDelegate.shared.open(debugLaunchURL, allowsAutoPlay: false)
         }
 
         #if DEBUG
         DebugLaunchHooks.run()
+        // `-PTDebugNoDetailWarmUp YES`: the first title page pays SwiftUI's
+        // first layout itself (to measure what the warm-up saves).
+        let warmsUp = !UserDefaults.standard.bool(forKey: "PTDebugNoDetailWarmUp")
+        #else
+        let warmsUp = true
         #endif
+        // A title's page is laid out once ahead, at a still moment: the
+        // first press on a poster then opens its page at once.
+        if warmsUp { GlassDetailWarmUp.schedule(in: window) }
     }
 
     func scene(_ scene: UIScene, openURLContexts URLContexts: Set<UIOpenURLContext>) {
         if let url = URLContexts.first?.url {
-            _ = AppDelegate.shared.application(.shared, open: url)
+            AppDelegate.shared.open(url)
         }
     }
+
+    #if DEBUG
+    func sceneWillEnterForeground(_ scene: UIScene) {
+        DebugLaunchHooks.sceneWillEnterForeground()
+    }
+    #endif
 }
 
 #if DEBUG
 /// Simulator verification hooks, compiled only with DEBUG (the app targets do
 /// not define it: build with `SWIFT_ACTIVE_COMPILATION_CONDITIONS=DEBUG` on the
-/// xcodebuild command line). Launch arguments: `-PTDebugTab <index>` selects
-/// that tab; `-PTDebugOpenMovie <IMDb id>` or `-PTDebugOpenShow <IMDb id>` then
+/// xcodebuild command line). Launch arguments: `-PTDebugTab <name>` selects
+/// that tab, by its name (`DeepLink.Tab`: home, movies, shows, watchlist,
+/// search, downloads, settings) — never by its place in the bar, which
+/// changes when a tab is added; an index is still read;
+/// `-PTDebugOpenURL <url>` then hands the URL to the app's link handler
+/// (`AppDelegate.open`), as the Top Shelf or another app would (`simctl
+/// openurl` stops on a system dialog), a `play` link only opening its page,
+/// 1 s later or `-PTDebugOpenURLAfter <seconds>` later, the handler's answer
+/// then shown to the UI tests (`showLinkResult`; `-PTDebugOpenURL2 <url>`
+/// hands a second link `-PTDebugOpenURL2After <seconds>` after the first)
+/// (`-PTDebugLaunchURL <url>` instead: as if the app had been launched to
+/// open it, see `scene(_:willConnectTo:options:)`; `-PTDebugActivationURL
+/// <url>`: as if it had been picked while the app was in the background, each
+/// time the app comes back to the foreground);
+/// `-PTDebugOpenMovie <IMDb id>` or `-PTDebugOpenShow <IMDb id>`
 /// opens the title's page on the selected tab through
-/// `MainViewController.showDetail` (loading screen, then the page), never with
-/// autoplay; `-PTDebugReopenAfter <seconds>` then goes back to the tab's root
-/// and opens the same page again (a show then comes from the provider's cache,
-/// the case that must wait for the loading screen's push);
+/// `MainViewController.showDetail` (the page at once, filled as it loads),
+/// never with autoplay, 1 s after the tab hook or `-PTDebugOpenAfter
+/// <seconds>` after it; `-PTDebugReopenAfter <seconds>` then goes back to the
+/// tab's root and opens the same page again (it then comes from the pages'
+/// cache); `-PTDebugPrewarmMovie <IMDb id>` / `-PTDebugPrewarmShow <IMDb id>`
+/// asks a title's page ahead at launch, as a card that keeps the focus does
+/// (`DetailStore.prewarm`). The states of a page as it loads
+/// (`DetailStore.Tampering`): `-PTDebugDetailMetadataDelay <seconds>` holds
+/// the title's record, `-PTDebugDetailSourcesDelay <seconds>` its sources,
+/// `-PTDebugDetailLastSourceDelay <seconds>` a movie's last source (Play is
+/// live, a source still expected), `-PTDebugDetailSourcesFail YES` makes
+/// every source fail,
+/// `-PTDebugDetailFail YES` the whole load (`-PTDebugDetailHealAfter
+/// <seconds>` ends both failures, then presses "Try Again");
+/// `-PTDebugPressPlay <seconds>` presses Play that long after the page
+/// opened — a dry run: the press waits for the sources as a real one does,
+/// then its chooser only logs a pick — and `-PTDebugCancelPress <seconds>`
+/// cancels it;
 /// `-PTDebugFocusContent YES` moves the focus from the tab bar into the page
 /// shown (as a remote would); `-PTDebugFocusSection <episodes|related|cast|info>`
 /// then moves it down into that section of the detail page once it has loaded
 /// (10 s later). Grids and sources:
 /// `-PTDebugFilter <raw value>` (e.g. top100) sets the Movies / Shows tab's
-/// filter; `-PTDebugSortMenu YES` then opens its Sort menu;
+/// filter and `-PTDebugGenre <raw value>` (e.g. "Science Fiction") its genre;
+/// `-PTDebugSortMenu YES` then opens its Sort menu, `-PTDebugGenreMenu YES`
+/// its Genre menu;
 /// `-PTDebugOpenItem <index>` opens the grid's item at that index once it has
 /// loaded (as a click would, never with autoplay); `-PTDebugQualityPicker YES`
 /// shows the page's quality chooser once loaded (a pick only logs: nothing
 /// plays); `-PTDebugSearch <text>` searches the text on the Search tab;
+/// `-PTDebugOpenPerson "<IMDb id>|<name>"` pushes that person's page on the
+/// selected tab;
 /// `-PTDebugTop100Offline YES` turns The Pirate Bay off and deletes the
-/// cached Top 100 lists (the grid's error state). Nothing happens without
-/// these arguments.
+/// cached Top 100 lists (the grid's error state). Watched progress:
+/// `-PTDebugMovieProgress <id>=<fraction>[,…]` and `-PTDebugEpisodeProgress
+/// <id>=<fraction>[,…]` add started titles (Continue Watching) for this launch
+/// only (`prepare`). The Home tab has its own (`HomeDebug`: recorded answers
+/// instead of the network, a card focused, Play without playing). Nothing
+/// happens without these arguments.
 private enum DebugLaunchHooks {
+    /// Before the window exists. `-PTDebugMovieProgress tt0816692=0.4` (movies,
+    /// by IMDb id) and `-PTDebugEpisodeProgress <episode id>=0.4`: watched
+    /// progress, from 0 to 1, as if the title had been played up to there.
+    /// The entries are added to the stored ones in the argument domain, which
+    /// is read first: nothing is written to the app's preferences, and they
+    /// are gone at the next launch. (A dictionary passed as a launch argument
+    /// has string values, which the progress readers refuse.) `Library.shared`
+    /// keeps its lists in memory for such a launch, as with
+    /// `-PTDebugLibraryInMemory`: the resume entries it makes of them are
+    /// not stored either.
+    static func prepare() {
+        inject(progress: "PTDebugMovieProgress", into: "\(Trakt.MediaType.movies.rawValue)Progress")
+        inject(progress: "PTDebugEpisodeProgress", into: "\(Trakt.MediaType.episodes.rawValue)Progress")
+        tamperWithDetails()
+    }
+
+    /// `-PTDebugDetail…`: the pages' answers come late or fail
+    /// (`DetailStore.Tampering`), so each state of a page can be looked at.
+    private static func tamperWithDetails() {
+        let defaults = UserDefaults.standard
+        var tampering = DetailStore.Tampering()
+        tampering.metadataDelay = defaults.string(forKey: "PTDebugDetailMetadataDelay").flatMap(Double.init) ?? 0
+        tampering.sourcesDelay = defaults.string(forKey: "PTDebugDetailSourcesDelay").flatMap(Double.init) ?? 0
+        tampering.lastSourceDelay = defaults.string(forKey: "PTDebugDetailLastSourceDelay").flatMap(Double.init) ?? 0
+        tampering.sourcesFail = defaults.bool(forKey: "PTDebugDetailSourcesFail")
+        tampering.fails = defaults.bool(forKey: "PTDebugDetailFail")
+        DetailStore.shared.tampering = tampering
+        if let prewarm: Media = defaults.string(forKey: "PTDebugPrewarmMovie").map({ Movie(title: $0, id: $0) })
+            ?? defaults.string(forKey: "PTDebugPrewarmShow").map({ Show(title: $0, id: $0) }) {
+            print("[Debug] prewarm of \(prewarm.id)")
+            DetailStore.shared.prewarm(prewarm)
+        }
+    }
+
+    /// `-PTDebugPressPlay`, `-PTDebugCancelPress`, `-PTDebugDetailHealAfter`:
+    /// on the page the hooks have just opened on `navigationController`,
+    /// that many seconds after it opened.
+    private static func runPageHooks(in navigationController: UINavigationController) {
+        let defaults = UserDefaults.standard
+        let page = { [weak navigationController] in navigationController?.topViewController as? GlassDetailHostingController }
+        if let delay = defaults.string(forKey: "PTDebugPressPlay").flatMap(Double.init) {
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay) { page()?.debugPressPlay() }
+        }
+        if let delay = defaults.string(forKey: "PTDebugCancelPress").flatMap(Double.init) {
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay) { page()?.debugCancelPress() }
+        }
+        if let delay = defaults.string(forKey: "PTDebugDetailHealAfter").flatMap(Double.init) {
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
+                DetailStore.shared.tampering.fails = false
+                DetailStore.shared.tampering.sourcesFail = false
+                page()?.debugRetry()
+            }
+        }
+    }
+
+    /// Whether the scene has entered the foreground once (the launch).
+    private static var hasEnteredForeground = false
+
+    /// `-PTDebugActivationURL`: the URL goes to the app's link handler when
+    /// the app comes back to the foreground (not at launch), where
+    /// `scene(_:openURLContexts:)` is called for a link picked on the Top
+    /// Shelf meanwhile: before the scene is active and has its focus back.
+    /// Never with autoplay.
+    static func sceneWillEnterForeground() {
+        guard let string = UserDefaults.standard.string(forKey: "PTDebugActivationURL"), let url = URL(string: string) else { return }
+        guard hasEnteredForeground else { return hasEnteredForeground = true }
+        DispatchQueue.main.async {
+            let opened = AppDelegate.shared.open(url, allowsAutoPlay: false)
+            print("[Debug] activation URL: \(opened ? "opened" : "refused") \(string.prefix(80))")
+        }
+    }
+
+    /// `-PTDebugLaunchURL`: the URL the app is launched to open.
+    static var launchURL: URL? {
+        return UserDefaults.standard.string(forKey: "PTDebugLaunchURL").flatMap { URL(string: $0) }
+    }
+
+    private static func inject(progress argument: String, into key: String) {
+        let defaults = UserDefaults.standard
+        guard let pairs = defaults.string(forKey: argument) else { return }
+        var progress = defaults.object(forKey: key) as? [String: Float] ?? [:]
+        for pair in pairs.split(separator: ",") {
+            let parts = pair.split(separator: "=", maxSplits: 1).map { $0.trimmingCharacters(in: .whitespaces) }
+            guard parts.count == 2, !parts[0].isEmpty, let fraction = Float(parts[1]), (0...1).contains(fraction) else {
+                print("[Debug] progress: \(pair) is not <id>=<0 to 1>")
+                continue
+            }
+            progress[parts[0]] = fraction
+        }
+        var arguments = defaults.volatileDomain(forName: UserDefaults.argumentDomain)
+        arguments[key] = progress
+        defaults.setVolatileDomain(arguments, forName: UserDefaults.argumentDomain)
+        print("[Debug] \(key) for this launch: \(progress)")
+    }
+
     static func run() {
         let defaults = UserDefaults.standard
+        // `-PTDebugUpNextCard <countdown|postPlay|stillWatching>`
+        // (UpNextTVFixture): the episode card over a stand-in player, for
+        // the UI tests of its focus and buttons. Nothing plays.
+        if UpNextTVFixture.kind != nil {
+            afterFocusSettles(atLeast: 1) {
+                guard let root = AppDelegate.shared.window?.rootViewController else { return }
+                var top = root
+                while let presented = top.presentedViewController { top = presented }
+                UpNextTVFixture.presentIfAsked(over: top)
+            }
+            return
+        }
         // `-PTDebugPlayTorrent <file>` (BoundedStorageDebugHooks): the normal
         // play flow on a local .torrent, once the launch screens are up.
+        // With `-PTDebugPlayEpisode S01E01` (UpNextDebugHooks): that episode
+        // of the made-up show tt0000001, from the same .torrent.
+        // `-PTDebugResumeEpisode S01E02` (UpNextTVResumeHook): « Resume »
+        // on that episode of the made-up show (its remembered release).
+        if UpNextTVResumeHook.runIfAsked() { return }
+        if let (episode, torrent) = UpNextDebugHooks.episodeToPlay {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
+                print("[UpNextDebug] playing \(episode.id) from \(torrent.url)")
+                AppDelegate.shared.play(episode, torrent: torrent)
+            }
+            return
+        }
         if let file = BoundedStorageDebugHooks.torrentFile {
             DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
                 print("[BoundedDebug] playing \(file)")
@@ -99,40 +283,59 @@ private enum DebugLaunchHooks {
             }
             return
         }
-        let tab = defaults.string(forKey: "PTDebugTab").flatMap { Int($0) }
+        let tab = defaults.string(forKey: "PTDebugTab")
+        let url = defaults.string(forKey: "PTDebugOpenURL")
         let media: Media? = defaults.string(forKey: "PTDebugOpenMovie").map { Movie(title: $0, id: $0) }
             ?? defaults.string(forKey: "PTDebugOpenShow").map { Show(title: $0, id: $0) }
         let focusContent = defaults.bool(forKey: "PTDebugFocusContent")
         let filter = defaults.string(forKey: "PTDebugFilter")
         let openItem = defaults.string(forKey: "PTDebugOpenItem").flatMap { Int($0) }
         let search = defaults.string(forKey: "PTDebugSearch")
+        let person = defaults.string(forKey: "PTDebugOpenPerson")
         if defaults.bool(forKey: "PTDebugTop100Offline") { takeTop100Offline() }
-        guard tab != nil || media != nil || search != nil else { return }
+        guard tab != nil || url != nil || media != nil || search != nil || person != nil else { return }
         // After the launch screens (Terms of Service, What's New) are up.
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1) {
-            let tabBarController = AppDelegate.shared.tabBarController
-            if let tab, (0..<(tabBarController.viewControllers?.count ?? 0)).contains(tab) {
-                tabBarController.selectedIndex = tab
+        afterFocusSettles(atLeast: 1) {
+            guard let tabBarController = AppDelegate.shared.mainTabBarController else { return }
+            if let tab { select(tab: tab, in: tabBarController) }
+            if let url {
+                let delay = defaults.string(forKey: "PTDebugOpenURLAfter").flatMap(Double.init) ?? 1
+                open(url: url, in: tabBarController, after: delay, focus: focusContent)
+            } else if let search {
+                return run(search: search, in: tabBarController)
             }
-            if let search { return run(search: search, in: tabBarController) }
             guard let navigationController = tabBarController.selectedViewController as? UINavigationController else { return }
             let root = navigationController.viewControllers.first
             if let filter { apply(filter: filter, to: root) }
+            if let genre = defaults.string(forKey: "PTDebugGenre").flatMap(NetworkManager.Genres.init(rawValue:)) {
+                root?.loadViewIfNeeded()
+                (root as? MediaViewController)?.currentGenre = genre
+            }
             if defaults.bool(forKey: "PTDebugSortMenu") {
                 DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
                     if let movies = root as? MoviesViewController { movies.showFilters(movies) }
                     if let shows = root as? ShowsViewController { shows.showFilters(shows) }
                 }
             }
+            if defaults.bool(forKey: "PTDebugGenreMenu"), let grid = root as? MediaViewController {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 2) { grid.showGenres(grid) }
+            }
+            // The link is what opens a page then, not the hooks below.
+            guard url == nil else { return }
             if let openItem, let grid = root as? MainViewController {
                 return open(item: openItem, of: grid, on: navigationController, in: tabBarController, focus: focusContent)
+            }
+            if let person {
+                return open(person: person, on: navigationController, in: tabBarController, focus: focusContent)
             }
             guard let media else {
                 if focusContent { focus(navigationController.topViewController, in: tabBarController, after: 1) }
                 return
             }
-            DispatchQueue.main.asyncAfter(deadline: .now() + 1) {
+            let openDelay = defaults.string(forKey: "PTDebugOpenAfter").flatMap(Double.init) ?? 1
+            DispatchQueue.main.asyncAfter(deadline: .now() + openDelay) {
                 MainViewController.showDetail(of: media, on: navigationController, autoPlay: false)
+                runPageHooks(in: navigationController)
                 if focusContent { focusPage(in: navigationController, of: tabBarController) }
                 guard let reopen = defaults.string(forKey: "PTDebugReopenAfter").flatMap(Double.init) else { return }
                 DispatchQueue.main.asyncAfter(deadline: .now() + reopen) {
@@ -144,8 +347,85 @@ private enum DebugLaunchHooks {
         }
     }
 
-    /// Once the detail page has replaced the loading screen (checked twice a
-    /// second for 30 s), moves the focus into it.
+    /// `work` once the focus has settled, `seconds` from now at the earliest.
+    /// tvOS selects a tab 0.3 s after the focus lands on it: at launch (the
+    /// first focus goes to a tab) and after a tab was selected in code (the
+    /// focus follows to that tab). A hook that selects a tab in between is
+    /// undone by that selection. The hooks ran exactly 1 s after the launch,
+    /// about 50 ms after the launch's own selection, and before it when the
+    /// launch took a little longer: the app then stayed on its first tab,
+    /// which only showed for the tabs after it. Now: once the same item has
+    /// had the focus for 0.7 s (checked every 0.1 s, for 10 s more at most).
+    private static func afterFocusSettles(atLeast seconds: Double, elapsed: Int = 0, settled: Int = 0,
+                                          on item: AnyObject? = nil, _ work: @escaping () -> Void) {
+        let focused = AppDelegate.shared.mainTabBarController.flatMap { UIFocusSystem.focusSystem(for: $0)?.focusedItem } as AnyObject?
+        let settled = (focused != nil && focused === item) ? settled + 1 : 0
+        let waited = Double(elapsed) / 10
+        guard (waited < seconds || settled < 7) && waited < seconds + 10 else { return work() }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+            afterFocusSettles(atLeast: seconds, elapsed: elapsed + 1, settled: settled, on: focused, work)
+        }
+    }
+
+    /// `-PTDebugTab`: a tab's name or, as before, its index in the bar.
+    private static func select(tab value: String, in tabBarController: TVTabBarController) {
+        if let tab = DeepLink.Tab(name: value) {
+            if !tabBarController.select(tab) { print("[Debug] tab: there is no \(tab.rawValue) tab") }
+        } else if let index = Int(value), (0..<(tabBarController.viewControllers?.count ?? 0)).contains(index) {
+            tabBarController.selectedIndex = index
+        } else {
+            print("[Debug] tab: \(value) is neither a tab's name nor an index")
+        }
+    }
+
+    /// `-PTDebugOpenURL`: the URL goes to the app's link handler `delay`
+    /// seconds after the tab hook, once the focus has followed to that tab
+    /// (the link then comes while that tab, or its Sort menu, is shown).
+    /// Never with autoplay: a `play` link only opens its page.
+    private static func open(url string: String, in tabBarController: TVTabBarController, after delay: Double, focus: Bool) {
+        guard let url = URL(string: string) else { return print("[Debug] open URL: \(string) is not a URL") }
+        afterFocusSettles(atLeast: delay) {
+            let opened = AppDelegate.shared.open(url, allowsAutoPlay: false)
+            print("[Debug] open URL: \(opened ? "opened" : "refused") \(string.prefix(80)), tab \(tabBarController.selectedTabName?.rawValue ?? "?")")
+            showLinkResult(opened ? "opened" : "refused")
+            // `-PTDebugOpenURL2 <url>`: a second link, `-PTDebugOpenURL2After
+            // <seconds>` (5) after the first — a link to the page the first
+            // one opened, for instance. Its answer replaces the first's.
+            if let second = UserDefaults.standard.string(forKey: "PTDebugOpenURL2").flatMap({ URL(string: $0) }) {
+                let delay = UserDefaults.standard.string(forKey: "PTDebugOpenURL2After").flatMap(Double.init) ?? 5
+                DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
+                    let opened = AppDelegate.shared.open(second, allowsAutoPlay: false)
+                    print("[Debug] second URL: \(opened ? "opened" : "refused") \(second.absoluteString.prefix(80))")
+                    showLinkResult(opened ? "opened twice" : "refused")
+                }
+            }
+            guard opened, let navigationController = tabBarController.selectedViewController as? UINavigationController else { return }
+            // The page is pushed once the tab's transition, if any, has ended.
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { runPageHooks(in: navigationController) }
+            if focus { focusPage(in: navigationController, of: tabBarController) }
+        }
+    }
+
+    /// `-PTDebugOpenURL`'s answer, for the UI tests: a text whose identifier
+    /// is `Debug.LinkResult` ("opened" or "refused"), one point in the
+    /// window's corner, over everything. A test that checks that a link did
+    /// nothing waits for it: without it, a link handed over late passed for
+    /// one refused.
+    private static func showLinkResult(_ result: String) {
+        guard let window = AppDelegate.shared.window else { return }
+        let label = window.subviews.compactMap { $0 as? UILabel }.first { $0.accessibilityIdentifier == "Debug.LinkResult" } ?? {
+            let label = UILabel(frame: CGRect(x: 0, y: 0, width: 1, height: 1))
+            label.accessibilityIdentifier = "Debug.LinkResult"
+            label.textColor = .clear
+            window.addSubview(label)
+            return label
+        }()
+        label.text = result
+        window.bringSubviewToFront(label)
+    }
+
+    /// Once the detail page is up (checked twice a second for 30 s), moves
+    /// the focus into it.
     private static func focusPage(in navigationController: UINavigationController,
                                   of tabBarController: UITabBarController, attempt: Int = 0) {
         guard attempt < 60 else { return }
@@ -185,6 +465,7 @@ private enum DebugLaunchHooks {
             }
             print("[Debug] opening grid item \(index): \(media.title) (\(media.id))")
             MainViewController.showDetail(of: media, on: navigationController, autoPlay: false)
+            runPageHooks(in: navigationController)
             if focus { focusPage(in: navigationController, of: tabBarController) }
             if UserDefaults.standard.bool(forKey: "PTDebugQualityPicker") { chooseQuality(in: navigationController) }
         }
@@ -228,6 +509,21 @@ private enum DebugLaunchHooks {
             }
         }
         print("[Debug] The Pirate Bay off, Top 100 cache deleted")
+    }
+
+    /// `-PTDebugOpenPerson "<IMDb id>|<name>"`: a person's page pushed on the
+    /// selected tab, as a detail page's cast opens it (which needs Trakt).
+    private static func open(person value: String, on navigationController: UINavigationController,
+                             in tabBarController: TVTabBarController, focus focusContent: Bool) {
+        let fields = value.split(separator: "|", maxSplits: 1).map(String.init)
+        guard fields.count == 2,
+              let page = UIStoryboard.main.instantiateViewController(withIdentifier: "PersonViewController") as? PersonViewController else {
+            return print("[Debug] open person: \(value) is not <IMDb id>|<name>")
+        }
+        page.currentItem = Actor(name: fields[1], imdbId: fields[0])
+        navigationController.pushViewController(page, animated: true)
+        print("[Debug] open person: \(fields[1]) (\(fields[0]))")
+        if focusContent { focus(page, in: tabBarController, after: 1) }
     }
 
     private static func focus(_ viewController: UIViewController?, in tabBarController: UITabBarController, after delay: Double) {

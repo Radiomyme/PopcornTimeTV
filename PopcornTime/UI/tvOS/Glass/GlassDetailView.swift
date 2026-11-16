@@ -36,6 +36,40 @@ struct GlassDetailView: View {
         GeometryReader { geo in
             ZStack(alignment: .topLeading) {
                 GlassBackdropView(artwork: artwork, dimmed: !heroIsActive, size: geo.size)
+                // Below the first screen, the blurred art turns light on a bright
+                // picture (a taupe under grey roles and labels): half black
+                // more, about 70 % in all with the backdrop's own dim.
+                Color.black
+                    .frame(width: geo.size.width, height: geo.size.height)
+                    .opacity(heroIsActive ? 0 : 0.5)
+                    .animation(.easeInOut(duration: 0.45), value: heroIsActive)
+                    .allowsHitTesting(false)
+                    .accessibilityHidden(true)
+                // With the backdrop's own scrim, the Home billboard's left
+                // veil (`HomeBackdropView`): the page a card opens reads like
+                // the Home, and the text holds on a bright picture.
+                LinearGradient(stops: [.init(color: .black.opacity(0.55), location: 0),
+                                       .init(color: .black.opacity(0.50), location: 0.36),
+                                       .init(color: .black.opacity(0.18), location: 0.60),
+                                       .init(color: .black.opacity(0), location: 0.82)],
+                               startPoint: .leading, endPoint: .trailing)
+                    .frame(width: geo.size.width, height: geo.size.height)
+                    .opacity(heroIsActive ? 1 : 0)
+                    .animation(.easeInOut(duration: 0.45), value: heroIsActive)
+                    .allowsHitTesting(false)
+                    .accessibilityHidden(true)
+                // The top, as on the Home (`HomeBackdropView`): a light sky
+                // was a pale band over the page (60 % and more of black over
+                // the first quarter).
+                LinearGradient(stops: [.init(color: .black.opacity(0.72), location: 0),
+                                       .init(color: .black.opacity(0.60), location: 0.25),
+                                       .init(color: .black.opacity(0), location: 0.42)],
+                               startPoint: .top, endPoint: .bottom)
+                    .frame(width: geo.size.width, height: geo.size.height)
+                    .opacity(heroIsActive ? 1 : 0)
+                    .animation(.easeInOut(duration: 0.45), value: heroIsActive)
+                    .allowsHitTesting(false)
+                    .accessibilityHidden(true)
 
                 ScrollViewReader { proxy in
                     ScrollView(.vertical, showsIndicators: false) {
@@ -108,7 +142,11 @@ struct GlassDetailView: View {
         case .person?, .information?, .accessibility?:
             return
         default:
-            if model.play != nil { actions.play() }
+            if model.loadError != nil {
+                actions.retry()
+            } else if model.play != nil {
+                actions.play()
+            }
         }
     }
 
@@ -148,9 +186,9 @@ struct GlassDetailView: View {
 
     // MARK: Focus
 
-    /// Play, else Watchlist (always present).
+    /// Play (or "Try Again" in its place), else Watchlist (always present).
     private var initialFocus: GlassFocusTarget {
-        model.play != nil ? .play : .watchlist
+        model.play != nil || model.loadError != nil ? .play : .watchlist
     }
 
     private var heroIsActive: Bool {
@@ -200,15 +238,36 @@ struct GlassDetailView: View {
 
     // MARK: Artwork
 
+    /// A landscape backdrop that is a montage, measured off the main thread.
+    private static func isMontage(_ artwork: GlassArtwork) async -> Bool {
+        guard case .landscape(let image, _) = artwork, let cgImage = image.glassCGImage else { return false }
+        return await Task.detached(priority: .userInitiated) { HomeCollage.isCollage(cgImage) }.value
+    }
+
     private struct ArtworkKey: Hashable {
         let backdrop: URL?
         let poster: URL?
     }
 
     private func loadArtwork() async {
-        let loaded = await GlassArtwork.load(backdrop: model.backdropURL, fallbackBackdrop: model.backdropFallbackURL,
+        var loaded = await GlassArtwork.load(backdrop: model.backdropURL, fallbackBackdrop: model.backdropFallbackURL,
                                              poster: model.posterURL)
+        // A backdrop made of tiles (`HomeCollage`): the other source's
+        // backdrop when it is a real one, else the poster as ambient light
+        // (with the crisp poster card).
+        if await GlassDetailView.isMontage(loaded) {
+            var replacement = GlassArtwork.none
+            if let fallback = model.backdropFallbackURL, fallback != model.backdropURL {
+                replacement = await GlassArtwork.load(backdrop: fallback, poster: nil)
+            }
+            let replacementIsMontage = await GlassDetailView.isMontage(replacement)
+            if !replacement.isLandscape || replacementIsMontage {
+                replacement = await GlassArtwork.load(backdrop: nil, poster: model.posterURL)
+            }
+            if replacement != .none { loaded = replacement }
+        }
         guard !Task.isCancelled else { return }
         withAnimation(.easeOut(duration: 0.5)) { artwork = loaded }
+        actions.artworkShown()
     }
 }

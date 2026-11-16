@@ -115,6 +115,29 @@ public struct Movie: Media, Equatable {
     
     /// The genres associated with the movie.
     public var genres = [String]()
+
+    /// The release date, when the source gives one (Cinemeta: the theatrical
+    /// release, which can precede a watchable copy by months). Nil otherwise.
+    public var releaseDate: Date?
+
+    /// The transparent title logo, when the source gives one (Cinemeta).
+    /// `OpenMetadata.logoURL(imdbId:)` builds the same address for any title,
+    /// without saying whether the image exists.
+    public var logoImage: String?
+
+    /// When the catalog listed the movie (YTS: the day its first release
+    /// was uploaded). Nil when the source does not say.
+    public var dateAdded: Date?
+
+    /// A 2160p release is known: one of `torrents`, or what the list said
+    /// when it was saved. (The JSON a list is saved as leaves the torrents
+    /// out: a grid painted from it would lose its 4K badges.)
+    public var hasUHDRelease: Bool {
+        return listedUHD || torrents.contains { $0.qualityValue == .uhd2160 }
+    }
+
+    /// `hasUHDRelease` as read from a saved list.
+    private var listedUHD = false
     
     public init?(map: Map) {
         do { self = try Movie(map) }
@@ -135,8 +158,16 @@ public struct Movie: Media, Equatable {
             self.summary = ((try? map.value("synopsis")) ?? "No summary available.".localized).strippedOfHtml
             self.largeCoverImage = try? map.value("images.poster"); largeCoverImage = ImageProxy.proxied(largeCoverImage?.replacingOccurrences(of: "w500", with: "w1000").replacingOccurrences(of: "SX300", with: "SX1000"))
             self.largeBackgroundImage = try? map.value("images.fanart"); largeBackgroundImage = ImageProxy.proxied(largeBackgroundImage?.replacingOccurrences(of: "w500", with: "w1920").replacingOccurrences(of: "SX300", with: "SX1920"))
+            // The same title's artwork by IMDb id, for a cover that no
+            // longer answers (see the YTS init).
+            ArtworkAlternates.register(imdbID: id, poster: largeCoverImage, backdrop: largeBackgroundImage)
             self.runtime = try map.value("runtime", using: IntTransform())
-
+            self.logoImage = try? map.value("images.logo")
+            let released: String? = try? map.value("released")
+            self.releaseDate = released.flatMap(CatalogDates.date(from:))
+            let added: String? = try? map.value("date_added")
+            self.dateAdded = added.flatMap(CatalogDates.date(from:))
+            self.listedUHD = (try? map.value("uhd")) ?? false
         }
         var title: String = try map.value("title")
         title.removeHtmlEncoding()
@@ -162,9 +193,12 @@ public struct Movie: Media, Equatable {
     /// differs from the legacy Popcorn API (torrents is an Array, quality
     /// strings include "2160p", `imdb_code` instead of `imdb_id`).
     public init?(yts dict: [String: Any]) {
+        // The English title when YTS gives one beside the original
+        // ("title"), as the Home's YTS cards (`HomeParse.ytsEntry`).
+        let english = (dict["title_english"] as? String).flatMap { $0.trimmingCharacters(in: .whitespaces).isEmpty ? nil : $0 }
         guard
             let imdb  = dict["imdb_code"] as? String,
-            let title = dict["title"] as? String
+            let title = english ?? dict["title"] as? String
         else { return nil }
         self.id    = imdb
         self.title = title.removingHtmlEncoding
@@ -184,6 +218,13 @@ public struct Movie: Media, Equatable {
         self.tmdbId = nil
         self.largeCoverImage      = ImageProxy.proxied((dict["large_cover_image"] as? String) ?? (dict["medium_cover_image"] as? String))
         self.largeBackgroundImage = ImageProxy.proxied((dict["background_image_original"] as? String) ?? (dict["background_image"] as? String))
+        // The image proxy only has the covers it once fetched: half of the
+        // older films' large covers never answer. metahub's poster of the
+        // same title, by IMDb id, is where the image loader goes then.
+        ArtworkAlternates.register(imdbID: imdb, poster: largeCoverImage, backdrop: largeBackgroundImage)
+        if let uploaded = (dict["date_uploaded_unix"] as? NSNumber)?.doubleValue, uploaded > 0 {
+            self.dateAdded = Date(timeIntervalSince1970: uploaded)
+        }
         // movie_details?with_cast=true: the top-billed actors with headshots.
         if let cast = dict["cast"] as? [[String: Any]] {
             self.actors = cast.compactMap { entry in
@@ -253,7 +294,9 @@ public struct Movie: Media, Equatable {
     }
 
     /// A Cinemeta (Stremio's public catalog) item: `id` is the IMDb id. Used
-    /// for related titles; the detail page loads the full movie by id.
+    /// for related titles, the Top 100 and search results; the detail page
+    /// loads the full movie by id. Keeps the release date, the trailer and
+    /// the logo when the meta has them.
     public init?(cinemeta dict: [String: Any]) {
         guard let imdb = dict["imdb_id"] as? String ?? dict["id"] as? String, imdb.hasPrefix("tt"),
               let name = dict["name"] as? String, !name.isEmpty else { return nil }
@@ -270,6 +313,12 @@ public struct Movie: Media, Equatable {
         self.tmdbId = nil
         self.largeCoverImage      = (dict["poster"] as? String).map { OpenMetadata.largerPoster($0) }
         self.largeBackgroundImage = dict["background"] as? String
+        self.logoImage   = (dict["logo"] as? String).flatMap { $0.isEmpty ? nil : $0 }
+        self.releaseDate = (dict["released"] as? String).flatMap(CatalogDates.date(from:))
+        // "trailerStreams": [{"title", "ytId"}], the first is the main trailer.
+        if let code = (dict["trailerStreams"] as? [[String: Any]])?.first?["ytId"] as? String, !code.isEmpty {
+            self.trailer = "https://www.youtube.com/watch?v=\(code)"
+        }
     }
 
     /// YTS only exposes torrent hashes; build a standard magnet link with the
@@ -312,6 +361,10 @@ public struct Movie: Media, Equatable {
             summary >>> map["synopsis"]
             largeCoverImage >>> map["images.poster"]
             largeBackgroundImage >>> map["images.fanart"]
+            logoImage >>> map["images.logo"]
+            releaseDate.map(CatalogDates.isoString) >>> map["released"]
+            dateAdded.map(CatalogDates.isoString) >>> map["date_added"]
+            (hasUHDRelease ? true : nil) >>> map["uhd"]
             runtime >>> (map["runtime"], IntTransform())
             title >>> map["title"]
             trailer >>> map["trailer"]

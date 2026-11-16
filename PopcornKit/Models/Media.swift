@@ -101,3 +101,28 @@ class StringTransform: TransformType {
         return nil
     }
 }
+
+/// An episode's id in its JSON ("tvdb_id"). 4.x ids are TVDB numbers, stored
+/// as numbers; since 5.0.0 an id is "<show IMDb id>-s<season>e<number>",
+/// which `StringTransform` could not write (`Int(id)` is nil): the key was
+/// left out and reading the JSON back gave no episode at all. Numbers stay
+/// numbers (an older build reads them), anything else is written as it is.
+class EpisodeIDTransform: TransformType {
+    typealias Object = String
+    typealias JSON = Any
+
+    init() {}
+
+    func transformFromJSON(_ value: Any?) -> Object? {
+        // A negative number lost its sign in 4.x too.
+        if let number = value as? Int { return String(number).replacingOccurrences(of: "-", with: "") }
+        if let string = value as? String, !string.isEmpty { return string }
+        return nil
+    }
+
+    func transformToJSON(_ value: Object?) -> JSON? {
+        guard let id = value else { return nil }
+        if let number = Int(id) { return number }
+        return id
+    }
+}

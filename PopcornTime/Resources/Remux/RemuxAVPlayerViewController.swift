@@ -74,14 +74,23 @@ import PopcornKit
 /// live bookkeeping after ENDLIST and it later stops answering seeks and
 /// audio / subtitle switches (`LiveBornItemWatch`).
 ///
-/// Resume: the remux reads the payload in order and nothing makes the torrent
-/// fetch the pieces at a resume point first, so while the payload is still
-/// downloading a far resume would take minutes natively. The user is then
-/// asked: « Reprendre à … » hands the SAME stream to VLC at that position
-/// (VLC reads over HTTP byte ranges, which PopcornTorrent prioritizes),
-/// « Reprendre du début » plays natively from 0. A payload already on disk
-/// (finished download) and the direct MP4 path (byte ranges too) resume
-/// natively. The saved progress is never replaced by a smaller fraction
+/// Resume, while the payload is still downloading: the user is asked
+/// « Reprendre à … » / « Reprendre du début » (`ResumePolicy.start`). When
+/// the file has a usable keyframe index the remux can move its conversion to
+/// the saved position (`RemuxPlayback.prepareResume` — it turns the torrent
+/// there while the question is up): « Reprendre à … » then plays NATIVELY
+/// there (`commitResume`), under a black cover, a spinner and « Reprise à
+/// 1:40:00… » until the picture at that position plays — never the frozen
+/// first frame of 0:00. Only a file the conversion can't jump in (no index, a
+/// transcoded track, native jumps switched off: `ResumePolicy.resumeEngine`)
+/// hands the SAME stream to VLC at that position, and the question says so.
+/// « Reprendre du début » plays natively from 0 (`cancelResume`). A decided
+/// start (a switch to a lighter release) does the same without the question.
+/// The same jump serves a far seek during playback (`checkFarSeekTarget`,
+/// the starvation recovery's `farTargetJump`): VLC only when the conversion
+/// can't go there. A payload already on disk (finished download) and the
+/// direct MP4 path (byte ranges) resume by a plain seek. The saved progress
+/// is never replaced by a smaller fraction
 /// unless the user restarted on purpose or watched past it. A hand-off to
 /// VLC saves the native part first (at the hand-off position), so a VLC
 /// crash or an immediate close never loses it. The progress is also saved
@@ -89,7 +98,8 @@ import PopcornKit
 /// suspends it at once and may kill it there), so a kill or a crash keeps
 /// what was watched.
 ///
-/// tvOS episodes get "Up Next" (AVKit content proposal, 30 s before the end).
+/// tvOS episodes get "Up Next" (AVKit content proposal, before the end: Settings › Next
+/// Episode Card, 60 s by default, at most a third of the file).
 ///
 /// A toggleable nerd-stats overlay shows the resolved formats — `Audio ec-3`
 /// is the on-screen proof Apple's renderer gets the raw E-AC-3 and performs
@@ -121,6 +131,10 @@ final class RemuxAVPlayerViewController: AVPlayerViewController {
     private(set) var isHandingOff = false
 
     private var remux: RemuxPlayback?
+    /// The file's natural end that AVPlayer did not post (stuck in the last
+    /// segment of a finished remux, `StuckPlaybackWatch`): the iPhone / iPad
+    /// clock of episode chaining (`UpNextRemuxClock`) treats it as the end.
+    var onNaturalEnd: (() -> Void)?
     private var keepAliveStreamer: PTTorrentStreamer?
     private var media: Media?
     /// 0…1 position to resume at, 0 = from the beginning.
@@ -136,10 +150,37 @@ final class RemuxAVPlayerViewController: AVPlayerViewController {
     private var resumePoint: Float = 0
     /// Furthest position (0…1) reached during this session.
     private var highWaterFraction: Float = 0
+    /// When the position was last saved during playback (every 30 s).
+    private var progressCheckpoint = PlaybackCheckpoint()
     /// The user answered « Reprendre du début ».
     private var userChoseStartOver = false
-    /// The user answered « Reprendre à … » (quick resume through VLC).
-    private var userChoseQuickResume = false
+    /// The user answered « Reprendre à … », or had decided where to start
+    /// (a switch to a lighter release): a hand-off to VLC continues there
+    /// without asking again.
+    private var userChoseResume = false
+    /// The hidden switch (`RemuxPlayback.nativeJumpsEnabled`), read when the
+    /// player is configured.
+    private var nativeJumps = true
+    /// A decided start on a payload still downloading
+    /// (`ResumePolicy.Start.nativeResume`): no question — answered « Reprendre
+    /// à … » as soon as the engine of the resume is known.
+    private var resumesWithoutQuestion = false
+    /// When the player started waiting for the remux to say whether the
+    /// resume can be native (`ResumePolicy.resumeEngine`).
+    private var resumeWaitStartedAt: TimeInterval?
+    /// What « Reprendre à … » means in the question on screen.
+    private var questionEngine: ResumePolicy.ResumeEngine?
+    /// A native resume was accepted and the picture at its position does not
+    /// play yet: the black cover, the spinner and « Reprise à … » are up
+    /// (`beginNativeResume` … `finishNativeResume`).
+    private var isResumingNatively = false
+    /// The `[Resume]` log's clocks (uptime): the remux started, it said the
+    /// resume is native (the torrent is turned there from then), the
+    /// question came up, the answer.
+    private var resumeStartedAt: TimeInterval?
+    private var resumeNativeSince: TimeInterval?
+    private var resumeQuestionShownAt: TimeInterval?
+    private var resumeAnsweredAt: TimeInterval?
     /// The payload is entirely on disk (finished download / complete
     /// torrent): the remux can pump ahead to any resume point quickly.
     private var isPayloadLocal = false
@@ -158,7 +199,31 @@ final class RemuxAVPlayerViewController: AVPlayerViewController {
 #if os(tvOS)
     private var upNextObservation: NSKeyValueObservation?
     private var didAcceptUpNext = false
+    /// Episode chaining (5.3.0): this playback's link (`AppDelegate.play`)
+    /// — it follows a hand-off to VLC — and its session. With a session the
+    /// session drives the card (`reconcileUpNextCard`); without one, the
+    /// Up Next of before 5.3 (`nextEpisode` / `onPlayNext`).
+    private(set) var upNextLink: UpNextTVLink?
+    private var upNextSession: UpNextSession?
+    private var upNextCardSubscription: AnyCancellable?
+    private weak var upNextProposal: UpNextProposalViewController?
+    private weak var upNextOverlay: UpNextOverlayViewController?
+    /// When AVKit was asked to present the proposal (it presents it once
+    /// playback crosses its time): past `upNextProposalPatience`, the overlay.
+    private var upNextProposalRequestedAt: TimeInterval?
+    private static let upNextProposalPatience: TimeInterval = 3
+    /// The player closes for the next episode (`closeForNextEpisode`): not
+    /// the user leaving — the session is not told « closed ».
+    private var isClosingForNextEpisode = false
 #endif
+    /// The close is the one for the next episode (tvOS; logs only).
+    private var isClosingForNextEpisodeLog: Bool {
+#if os(tvOS)
+        return isClosingForNextEpisode
+#else
+        return false
+#endif
+    }
 
     /// External subtitles of the direct (MP4) path; the remux path exposes
     /// them as native HLS renditions instead.
@@ -176,6 +241,8 @@ final class RemuxAVPlayerViewController: AVPlayerViewController {
 
     private let statsLabel = UILabel()
     private var statsTimer: Timer?
+    /// The `[Start]` trace's first-frame mark (`attachPlayer`).
+    private var firstFrameWatch: FirstFrameWatch?
     private var engineLine = "préparation…"
     /// The engine line while playing natively (restored after a recovery).
     private var nativeEngineLine = ""
@@ -183,7 +250,21 @@ final class RemuxAVPlayerViewController: AVPlayerViewController {
     /// during a far resume seek and while recovering from starvation.
     private let loadingIndicator = UIActivityIndicatorView(style: .large)
     /// Below the spinner while recovering from download starvation.
-    private let bufferingLabel = UILabel()
+    private let bufferingLabel = StatusCapsuleLabel()
+    /// Below the spinner, instead, while the conversion moves to a position:
+    /// « Reprise à 1:40:00… » (a native resume, a far seek, a rewind into
+    /// what a jump skipped).
+    private let resumingLabel = StatusCapsuleLabel()
+    /// A dark capsule under the spinner and whichever of the two labels
+    /// shows (`layoutStatusCapsule`): the text stays readable over a bright
+    /// picture, and when AVKit's transport bar dims the content overlay
+    /// (it is under AVKit's controls) — dimmed, the capsule is still dark.
+    private let statusCapsule = UIView()
+    /// The capsule's bottom and width, on the label that shows.
+    private var statusCapsuleConstraints: [NSLayoutConstraint] = []
+    /// Under them during a native resume: black over the first frame of the
+    /// item, which loads at 0:00 before its seek.
+    private let resumeCover = UIView()
 
     /// Keeps the native player through download starvation (slow swarm):
     /// rebuilds the item once the data is there instead of falling back.
@@ -205,6 +286,17 @@ final class RemuxAVPlayerViewController: AVPlayerViewController {
     /// failure during the hold recovers — or hands VLC — instead of the reset
     /// `currentTime()` (both routes).
     private var heldSeek = HeldSeekWatch()
+    /// Where a user navigation asked to go, which `currentTime()` may not
+    /// show while the seek is held (`noteUserNavigation`, `wantedPosition`).
+    private var navigation = UserNavigationTarget()
+    /// `logPendingNavigation`: the target seen at the last tick, and how
+    /// many ticks the current one has been pending.
+    private var loggedNavigationTarget: Double?
+    /// `UserNavigationTarget.dropCount` when a drop was last logged.
+    private var loggedDropCount = 0
+    private var pendingNavigationLogs = 0
+    /// When the player's item was last replaced (uptime; `NavigationRebase`).
+    private var lastItemReplacementAt: TimeInterval?
     /// Remux path: the pace of the remux frontier toward that held target
     /// while the user wants playback — a target it can't reach soon goes to
     /// VLC at once (`checkFarSeekTarget`).
@@ -215,6 +307,10 @@ final class RemuxAVPlayerViewController: AVPlayerViewController {
     /// Remux path: the item AVPlayer started on live EVENT playlists, replaced
     /// once when the remux has finished (`rebuildLiveBornItemIfEnded`).
     private var liveBornWatch = LiveBornItemWatch()
+    /// Remux path: an OpenSubtitles list that came after the item read the
+    /// master playlist — the item is rebuilt once for it
+    /// (`rebuildForLateSubtitlesIfDue`).
+    private var lateSubtitles = LateSubtitlesWatch()
     /// Bounded storage, direct path: AVPlayer waiting with the data on disk
     /// (sampled 1 Hz) → the item is rebuilt (`checkDirectStall`).
     private var directStall = BoundedDirectStallWatch()
@@ -252,7 +348,8 @@ final class RemuxAVPlayerViewController: AVPlayerViewController {
                    releaseHintsHDR: Bool = false,
                    startPosition: Float = 0,
                    nextEpisode: Episode? = nil,
-                   onPlayNext: ((Episode) -> Void)? = nil) {
+                   onPlayNext: ((Episode) -> Void)? = nil,
+                   upNext: AnyObject? = nil) {
         // Picture in Picture state (and tvOS "Up Next").
         delegate = self
         keepAliveStreamer = streamer
@@ -264,31 +361,66 @@ final class RemuxAVPlayerViewController: AVPlayerViewController {
         // decided by the user (taken once: a later hand-off to VLC on this
         // stream passes its own position).
         streamContext = PlaybackStreamContext.of(streamer)
+#if os(tvOS)
+        // Episode chaining: the session of this playback (nil: the Up Next
+        // of before 5.3 above).
+        if let link = upNext as? UpNextTVLink {
+            upNextLink = link
+            if let session = link.attach(self, streamer: streamer) { bindUpNext(session) }
+        }
+#endif
+        #if DEBUG
+        // `-PTDebugDecidedStart` (BoundedStorageDebugHooks): as after a switch.
+        let decidedStart = streamContext?.takeDecidedStart() ?? BoundedStorageDebugHooks.decidedStart
+        #else
         let decidedStart = streamContext?.takeDecidedStart()
+        #endif
         // A finished (or nearly finished) title restarts from the beginning.
         self.startPosition = decidedStart.map { ResumePolicy.handOffFraction(reached: $0) }
             ?? ResumePolicy.startPosition(forSavedProgress: startPosition)
         resumePoint = self.startPosition
         isPayloadLocal = Self.isPayloadComplete(streamer)
+        nativeJumps = RemuxPlayback.nativeJumpsEnabled
         attachDeficitMonitor()
         let fileName = localFile.lastPathComponent
         route = PlaybackRouting.route(forFileName: fileName)
         print("[Player] \(fileName) → \(route)")
         switch route {
         case .remux:
-            // Sequential remux + still-downloading payload: a far resume
-            // can't be served natively in reasonable time — ask first.
-            resumeChoicePending = self.startPosition > 0 && !isPayloadLocal
-            if resumeChoicePending, decidedStart != nil {
-                // The user chose where to resume (a lighter release): the
-                // quick resume through VLC, without the question.
-                resumeChoicePending = false
-                userChoseQuickResume = true
-                print("[Player] decided start at \(Int(self.startPosition * 100)) % on a file still downloading — VLC there")
-                requestFallback("Reprise rapide")
+            // A payload still downloading: the conversion reads it in file
+            // order, so a saved position is asked about (or, decided already,
+            // resumed without a question) — natively when the conversion can
+            // jump there, which the remux says a moment after it starts.
+            let start = ResumePolicy.start(savedProgress: startPosition, decidedStart: decidedStart, route: route,
+                                           isPayloadOnDisk: isPayloadLocal, nativeJumps: nativeJumps)
+            switch start {
+            case .fromBeginning, .nativeSeek:
+                break
+            case .askResume(let position), .nativeResume(let position):
+                self.startPosition = position
+                resumePoint = position
+                resumeChoicePending = true
+                if case .nativeResume = start {
+                    resumesWithoutQuestion = true
+                    userChoseResume = true
+                }
+                print("[Resume] " + (resumesWithoutQuestion ? "decided start at \(Int(position * 100)) % — no question"
+                                                             : "saved \(Int(position * 100)) % — question pending")
+                      + ", native jumps \(nativeJumps ? "on" : "off (\(RemuxPlayback.nativeJumpsDisabledKey))")")
+            case .vlc(let position):
+                // Native jumps are off and the user chose where to resume (a
+                // lighter release): VLC there, without the question.
+                self.startPosition = position
+                resumePoint = position
+                userChoseResume = true
+                print("[Resume] decided start at \(Int(position * 100)) % — native jumps off "
+                      + "(\(RemuxPlayback.nativeJumpsDisabledKey)): VLC there")
+                requestFallback(ResumePolicy.vlcResumeReason(RemuxPlayback.nativeJumpsOffReason))
                 return
             }
             startRemux(localFile: localFile, streamer: streamer, isAtmos: isAtmos, releaseHintsHDR: releaseHintsHDR)
+            // A late jump's wait asks the engine's own server (127.0.0.1) for its bytes (`RemuxWaitNudge`).
+            remux?.engineServerURL = PlaybackRouting.playableLocalURL(remoteURL, fileName: fileName)
         case .avPlayer:
             startDirect(url: PlaybackRouting.playableLocalURL(remoteURL, fileName: fileName))
         case .vlc:
@@ -308,12 +440,11 @@ final class RemuxAVPlayerViewController: AVPlayerViewController {
     }
 
     /// Remux path: enough media remuxed past `time` (player timeline) to
-    /// play again after starvation.
+    /// play again after starvation — on disk from that position on, which
+    /// the frontier alone does not say once a jump left holes below it
+    /// (`RemuxPlayback.hasMedia`).
     static func remuxHasData(_ remux: RemuxPlayback?, after time: Double) -> Bool {
-        guard let session = remux?.session else { return false }
-        let progress = session.progress
-        return StarvationPolicy.remuxDataReady(frontierSeconds: progress.mediaSeconds, finished: progress.finished,
-                                               resumeTime: time, durationKnown: session.totalDurationSeconds > 0)
+        remux?.hasMedia(fromPlayerSeconds: time) ?? false
     }
 
     // MARK: - Remux path (MKV / WebM)
@@ -326,6 +457,25 @@ final class RemuxAVPlayerViewController: AVPlayerViewController {
         remux.preferredAudioLanguages = PlaybackLanguagePreferences.preferredAudioLanguageCode.map { [$0] } ?? []
         remux.preferredSubtitleLanguages = PlaybackLanguagePreferences.preferredSubtitleLanguageCode.map { [$0] } ?? []
         remux.releaseHintsHDR = releaseHintsHDR
+        // Native jumps (the hidden switch): a saved position is prepared now —
+        // the remux says whether it can resume there natively
+        // (`resumeReadiness`) and turns the torrent to it while the user is
+        // asked. Its jumps are reported: one somebody waits on, one that failed.
+        remux.allowsNativeJumps = nativeJumps
+        if resumeChoicePending, nativeJumps { remux.prepareResume(atFraction: startPosition, decided: resumesWithoutQuestion) }
+        remux.onResumeReadinessChanged = { [weak self] readiness in
+            self?.resumeReadinessChanged(readiness)
+        }
+        remux.onJumpStateChanged = { [weak self] state in
+            self?.jumpStateChanged(state)
+        }
+        remux.onJumpFailed = { [weak self] reason, playerSeconds in
+            self?.jumpFailed(reason, at: playerSeconds)
+        }
+        remux.onHoleRequested = { [weak self] start, end in
+            self?.holeRequested(start: start, end: end)
+        }
+        resumeStartedAt = ProcessInfo.processInfo.systemUptime
         self.remux = remux
         remux.onReady = { [weak self] playlistURL in
             DispatchQueue.main.async { self?.remuxDidBecomeReady(playlistURL) }
@@ -359,23 +509,40 @@ final class RemuxAVPlayerViewController: AVPlayerViewController {
             return !(self?.limitRecoveringRewind(to: seconds) ?? false)
         }
         // OpenSubtitles surface as native HLS subtitle tracks in AVPlayer's
-        // own picker. Fetched in parallel when the caller had none.
+        // own picker. The play flow started their search with the stream
+        // (`SubtitleSearch`): it has usually answered by now.
         if let media = media {
-            if media.subtitles.isEmpty {
-                // AVPlayer reads the master playlist once: hold `onReady` a
-                // few seconds so the search can land in it. Assigning
-                // `subtitles` (even []) releases the hold.
-                remux.externalSubtitlesPending = true
-                Self.searchSubtitles(for: media) { [weak remux] subtitles in
-                    remux?.subtitles = subtitles
-                }
-            } else {
+            if !media.subtitles.isEmpty {
                 remux.subtitles = media.subtitles
+            } else if let found = SubtitleSearch.shared.answer(for: media) {
+                // Answered while the stream prepared — possibly with nothing:
+                // no hold either way (an empty answer used to be searched
+                // again here, `onReady` held meanwhile).
+                remux.subtitles = found
+            } else {
+                // Still searching (a finished download, a very fast swarm, a
+                // slow OpenSubtitles). AVPlayer reads the master playlist
+                // once: `onReady` is held so the list can land in it, until
+                // it comes or `startHold` after the search began, whichever
+                // is first — assigning `subtitles` (even []) releases the
+                // hold. A list that comes later still is in the masters
+                // served from then on: when a player has already read one,
+                // its item is rebuilt once (`rebuildForLateSubtitlesIfDue`).
+                remux.externalSubtitlesPending = true
+                SubtitleSearch.shared.search(for: media, waitingAtMost: SubtitleSearch.startHold) { [weak self, weak remux] subtitles, isFinal in
+                    if !isFinal { print("[Player] OpenSubtitles has not answered: starting without its list") }
+                    guard let remux = remux else { return }
+                    if isFinal {
+                        self?.lateSubtitles.listArrived(isEmpty: subtitles.isEmpty, masterServed: remux.hasServedMaster)
+                    }
+                    remux.subtitles = subtitles
+                }
             }
         }
         // Started even while the resume question is up: the header gives the
         // exact time to show, an unplayable file goes to VLC without asking,
-        // and « Reprendre du début » then starts at once.
+        // the torrent is turned to the resume point, and « Reprendre du
+        // début » then starts at once.
         remux.start()
     }
 
@@ -383,6 +550,13 @@ final class RemuxAVPlayerViewController: AVPlayerViewController {
         guard !isTornDown, !fallbackRequested else { return }
         if resumeChoicePending {
             pendingPlaylistURL = playlistURL
+            return
+        }
+        if isResumingNatively {
+            // « Reprendre à … » was answered before the remux was ready: the
+            // item is made once the media at the resume point is on disk.
+            pendingPlaylistURL = playlistURL
+            attachNativeResumeWhenReady()
             return
         }
         attachPlayer(to: playlistURL, direct: false)
@@ -444,6 +618,10 @@ final class RemuxAVPlayerViewController: AVPlayerViewController {
     private var boundedRewindCheck: DispatchWorkItem?
     /// tvOS: a time jump happened while paused; checked once playback resumes.
     private var boundedCheckOnPlay = false
+    /// When the playhead was last moved to the earliest point kept
+    /// (`limitRewind`, uptime): a pruned request right after it is that
+    /// blocked seek's leftover.
+    private var lastBoundedLimitAt: TimeInterval?
 
     /// Bounded storage, a time jump of a healthy item (a scrub, a skip, a
     /// remote command, Siri): a playhead that went further back than what is
@@ -488,7 +666,24 @@ final class RemuxAVPlayerViewController: AVPlayerViewController {
         let now = player.currentTime().seconds
         guard let reference = playedPosition.lastPlayedTime, playerSeconds < reference else { return false }
         let earliest = session.earliestRewindTime(fromPlayerTime: reference) ?? reference
-        if now.isFinite, now >= earliest { return true }
+        if now.isFinite, now >= earliest {
+#if os(tvOS)
+            // The player reads a kept time: the leftover of a seek just
+            // blocked (`limitRewind`), or of a navigation AVKit's delegate
+            // already limited — else a seek whose target `currentTime()` does
+            // not show (the Apple TV kept the old time during a held seek, and
+            // no delegate call is assumed): blocked as any rewind past the kept
+            // media, at the earliest point kept.
+            let justLimited = lastBoundedLimitAt.map { ProcessInfo.processInfo.systemUptime - $0 < 10 } ?? false
+            let limitedNavigation = pendingNavigationTarget().map { $0 >= earliest } ?? false
+            if justLimited || limitedNavigation { return true }
+            print("[Player] pruned segment requested at \(Int(playerSeconds)) s, behind what is kept, while the player "
+                  + "reads \(Int(now)) s — a seek there: blocked")
+            let landing = BoundedStorageUX.limitedRewindTarget(playerSeconds, from: reference, session: session) ?? earliest
+            limitRewind(target: playerSeconds, from: reference, landing: landing)
+#endif
+            return true
+        }
 #if !os(tvOS)
         // iOS: AVKit seeks all along a timeline drag, and each pruned segment
         // it asks for lands here — the time-jump check limits the rewind
@@ -520,9 +715,21 @@ final class RemuxAVPlayerViewController: AVPlayerViewController {
 
     /// Moves the playhead to `landing` (a limited rewind) and says why.
     private func limitRewind(target: Double, from reference: Double, landing: Double) {
-        BoundedStorageUX.logLimited(player: "AVPlayer", target: target, playhead: reference, landing: landing)
+        BoundedStorageUX.logLimited(player: "AVPlayer", target: target, playhead: reference, landing: landing,
+                                    session: boundedStorage)
+        logRewindBlockedByJump(target: target, landing: landing)
+        lastBoundedLimitAt = ProcessInfo.processInfo.systemUptime
         player?.seek(to: CMTime(seconds: landing, preferredTimescale: 600), toleranceBefore: .zero, toleranceAfter: .zero)
         showBoundedToast()
+    }
+
+    /// Bounded storage, remux path: the rewind stopped at the edge of what a
+    /// native jump skipped (a resume, a far seek) — never downloaded, which
+    /// is what the message then says (`isRewindFloorNeverDownloaded`).
+    private func logRewindBlockedByJump(target: Double, landing: Double) {
+        guard route == .remux, boundedStorage?.isRewindFloorNeverDownloaded == true else { return }
+        print("[Resume] rewind to \(String(format: "%.1f", target)) s blocked at \(String(format: "%.1f", landing)) s "
+              + "(bounded, never downloaded)")
     }
 
     private func showBoundedToast() {
@@ -589,45 +796,64 @@ final class RemuxAVPlayerViewController: AVPlayerViewController {
         presenter.present(alert, animated: true)
     }
 
-    /// OpenSubtitles search (SubtitlesManager directly — `Media.getSubtitles`
-    /// lives in a tvOS-only extension). Completion on the main queue.
-    static func searchSubtitles(for media: Media, completion: @escaping ([Subtitle]) -> Void) {
-        if let episode = media as? Episode {
-            SubtitlesManager.shared.search(episode, imdbId: episode.show?.id) { subtitles, _ in
-                completion(subtitles)
-            }
-        } else {
-            SubtitlesManager.shared.search(imdbId: media.id) { subtitles, _ in
-                completion(subtitles)
-            }
-        }
-    }
-
     // MARK: - Resume question (remux path, payload still downloading)
 
-    /// Waits briefly (≤ 2.5 s) for the MKV header so the question can show
-    /// the exact clock time, then asks.
-    private func scheduleResumeQuestion(attempt: Int = 0) {
+    /// What « Reprendre à … » means now (`ResumePolicy.resumeEngine`): the
+    /// native player once the remux says its conversion can jump to the saved
+    /// position, VLC when it says it can't, when native jumps are off, or when
+    /// nothing is known `ResumePolicy.readinessWait` after the player started
+    /// waiting. nil: not known yet.
+    private func currentResumeEngine() -> ResumePolicy.ResumeEngine? {
+        let now = ProcessInfo.processInfo.systemUptime
+        return ResumePolicy.resumeEngine(readiness: remux?.resumeReadiness ?? .pending,
+                                         waited: now - (resumeWaitStartedAt ?? now), nativeJumps: nativeJumps,
+                                         indexIsRead: remux?.isKeyframeIndexRead == true)
+    }
+
+    /// Seconds since the remux started (the `[Resume]` lines' clock), to a tenth.
+    private func sinceResumeStart(_ mark: TimeInterval? = nil) -> String {
+        let from = mark ?? resumeStartedAt ?? ProcessInfo.processInfo.systemUptime
+        return String(format: "%.1f", ProcessInfo.processInfo.systemUptime - from)
+    }
+
+    /// The saved position as the user reads it: the clock time once the MKV
+    /// header gave the film's length, the percentage before.
+    private func resumePositionLabel() -> String {
+        ResumePolicy.resumeLabel(fraction: startPosition, durationSeconds: remux?.session?.totalDurationSeconds ?? 0)
+    }
+
+    /// Waits, under the spinner, until the engine of the resume is known
+    /// (≤ `ResumePolicy.readinessWait`; a slow head whose index is read is
+    /// waited for: it will be native) — and briefly (≤ 2.5 s) for the MKV
+    /// header so the question can show the exact clock time — then asks. A
+    /// decided start is not asked about: it resumes, on that engine.
+    private func scheduleResumeQuestion() {
         guard resumeChoicePending, !fallbackRequested, !isTornDown else { return }
+        let now = ProcessInfo.processInfo.systemUptime
+        if resumeWaitStartedAt == nil { resumeWaitStartedAt = now }
+        let waited = now - (resumeWaitStartedAt ?? now)
         let headerParsed = remux?.session?.isHeaderParsed ?? false
-        guard headerParsed || attempt >= 10 else {
+        guard let engine = currentResumeEngine(), headerParsed || waited >= 2.5 else {
+            // A decided start says where it is going while it waits.
+            if resumesWithoutQuestion { showResuming(at: resumePositionLabel()) }
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { [weak self] in
-                self?.scheduleResumeQuestion(attempt: attempt + 1)
+                self?.scheduleResumeQuestion()
             }
             return
         }
-        presentResumeQuestion()
+        if resumesWithoutQuestion {
+            resolveResumeChoice(resume: true)
+        } else {
+            presentResumeQuestion(engine)
+        }
     }
 
-    private func presentResumeQuestion() {
+    private func presentResumeQuestion(_ engine: ResumePolicy.ResumeEngine) {
         guard resumeChoicePending, !fallbackRequested, !isTornDown, resumeAlert == nil else { return }
-        let duration = remux?.session?.totalDurationSeconds ?? 0
-        let position = ResumePolicy.resumeLabel(fraction: startPosition, durationSeconds: duration)
+        let position = resumePositionLabel()
         let alert = UIAlertController(title: NSLocalizedString("Remux.Resume.Title", value: "Resume playback?",
                                                                comment: "Native player: resume question while the file still downloads"),
-                                      message: NSLocalizedString("Remux.Resume.Message",
-                                                                 value: "This file is still downloading: resuming quickly goes through the VLC player. From the beginning, playback stays native (HDR, Dolby Atmos).",
-                                                                 comment: "Native player: why resuming switches to VLC"),
+                                      message: ResumePolicy.resumeQuestionMessage(for: engine),
                                       preferredStyle: .alert)
         let resumeTitle = String(format: NSLocalizedString("Remux.Resume.At", value: "Resume at %@",
                                                            comment: "Native player: resume button; %@ = the position, e.g. 1:02:07"), position)
@@ -647,27 +873,79 @@ final class RemuxAVPlayerViewController: AVPlayerViewController {
         // Initial focus (tvOS) / emphasis (iOS) on « Reprendre ».
         alert.preferredAction = resume
         resumeAlert = alert
+        questionEngine = engine
+        resumeQuestionShownAt = ProcessInfo.processInfo.systemUptime
         loadingIndicator.stopAnimating()
         print("[Player] resume question: \(Int(startPosition * 100)) % (\(position)), payload still downloading")
+        print("[Resume] question shown (\(ResumePolicy.logName(of: engine))) at +\(sinceResumeStart()) s")
+        if case .vlc(let reason) = engine { print("[Resume] not native for the player: \(reason) — the question says VLC") }
         // On top of anything already presented over the player (AVKit sheet).
         var presenter: UIViewController = self
         while let next = presenter.presentedViewController, !next.isBeingDismissed { presenter = next }
         presenter.present(alert, animated: true)
+        #if DEBUG
+        // `-PTDebugResumeAnswer resume|start` (BoundedStorageDebugHooks): the
+        // question answers itself, `-PTDebugResumeAnswerAfter` seconds later.
+        if let answer = BoundedStorageDebugHooks.resumeAnswer {
+            DispatchQueue.main.asyncAfter(deadline: .now() + answer.after) { [weak self, weak alert] in
+                guard let self = self, self.resumeChoicePending else { return }
+                print("[BoundedDebug] resume question answered by the script: \(answer.resume ? "resume" : "start")")
+                let resolve = { self.resolveResumeChoice(resume: answer.resume) }
+                if let alert = alert, alert.presentingViewController != nil {
+                    alert.dismiss(animated: true, completion: resolve)
+                } else {
+                    resolve()
+                }
+            }
+        }
+        #endif
+    }
+
+    /// `RemuxPlayback.onResumeReadinessChanged`. While the question is up its
+    /// message follows what « Reprendre à … » now means: the remux can find,
+    /// from the bytes that arrive at the resume point, that the file's index
+    /// does not say true there (native → VLC).
+    private func resumeReadinessChanged(_ readiness: NativeResumeReadiness) {
+        guard !isTornDown, !fallbackRequested else { return }
+        if readiness == .native, resumeNativeSince == nil { resumeNativeSince = ProcessInfo.processInfo.systemUptime }
+        guard resumeChoicePending, let alert = resumeAlert, let engine = currentResumeEngine(),
+              engine != questionEngine else { return }
+        questionEngine = engine
+        alert.message = ResumePolicy.resumeQuestionMessage(for: engine)
+        print("[Resume] question now says \(ResumePolicy.logName(of: engine)) at +\(sinceResumeStart()) s")
     }
 
     private func resolveResumeChoice(resume: Bool) {
         guard resumeChoicePending, !fallbackRequested, !isTornDown else { return }
         resumeChoicePending = false
         resumeAlert = nil
+        // How long the question was up.
+        let after = sinceResumeStart(resumeQuestionShownAt ?? resumeWaitStartedAt)
         if resume {
-            // Same stream, VLC at the saved position (playback never
-            // started, so the hand-off resumes at `startPosition`) — the
-            // user decided: VLC must not ask again.
-            userChoseQuickResume = true
-            requestFallback("Reprise rapide")
+            // The user decided (here, or before: a lighter release): a
+            // hand-off to VLC, now or later, must not ask again.
+            userChoseResume = true
+            // As the remux says NOW; not known (a slow head whose index is
+            // read): native — the remux takes the answer when it is ready.
+            let engine = currentResumeEngine() ?? .native
+            let how = resumesWithoutQuestion ? "a decided start" : "after \(after) s"
+            switch engine {
+            case .native:
+                print("[Resume] answer: resume at \(resumePositionLabel()) (\(how)) — native")
+                beginNativeResume()
+            case .vlc(let reason):
+                // Same stream, VLC at the saved position (playback never
+                // started, so the hand-off resumes at `startPosition`).
+                print("[Resume] answer: resume at \(resumePositionLabel()) (\(how)) — through VLC (\(reason))")
+                hideResuming()
+                requestFallback(ResumePolicy.vlcResumeReason(reason))
+            }
             return
         }
         print("[Player] resume declined — native playback from the beginning")
+        print("[Resume] answer: from the beginning (after \(after) s)")
+        // The torrent goes back to the head (the remux logs where).
+        remux?.cancelResume()
         userChoseStartOver = true
         startPosition = 0
         if let url = pendingPlaylistURL {
@@ -677,6 +955,281 @@ final class RemuxAVPlayerViewController: AVPlayerViewController {
             // Remux still preparing: `onReady` attaches.
             loadingIndicator.startAnimating()
         }
+    }
+
+    // MARK: - Native resume and jumps (remux path)
+
+    /// « Reprendre à … », natively: the remux moves its conversion to the
+    /// saved position now (`commitResume`; the torrent has been turning there
+    /// since the question came up). Until the picture at that position plays,
+    /// the screen is black with the spinner and « Reprise à 1:40:00… ». The
+    /// item is made only once the media at that position is on disk
+    /// (`attachNativeResumeWhenReady`), positioned there before it is
+    /// attached (`attachPlayer`).
+    private func beginNativeResume() {
+        isResumingNatively = true
+        resumeAnsweredAt = ProcessInfo.processInfo.systemUptime
+        remux?.commitResume()
+        showResuming(at: resumePositionLabel(), covered: true)
+        // The remux hears where the player is going before its item exists.
+        reportPlaybackPositions()
+        attachNativeResumeWhenReady()
+    }
+
+    /// A poll of `attachNativeResumeWhenReady` is scheduled.
+    private var isPollingResumeAttach = false
+
+    /// A native resume makes its item once the media to start at the resume
+    /// point is on disk (`RemuxPlayback.hasMediaToStart`: two segments, as
+    /// at 0:00) — polled every 0.2 s under the cover. An item attached before
+    /// would hold the request for a segment the conversion has yet to write,
+    /// and AVPlayer gives up on a held request after about one target
+    /// duration — on tvOS for good, without ever failing
+    /// (`ResumePolicy.resumeAttach`). The torrent has been turning to that
+    /// position since the question came up: with the answer a few seconds
+    /// later the media is usually there within a second. A resume the remux
+    /// can no longer serve natively goes to VLC at the saved position.
+    private func attachNativeResumeWhenReady() {
+        guard isResumingNatively, player == nil, !isTornDown, !fallbackRequested, let remux = remux else { return }
+        let target = remux.resumeTargetSeconds
+        var refusal = remux.failureReason
+        if refusal == nil, case .vlcOnly(let reason) = remux.resumeReadiness { refusal = reason }
+        let step = ResumePolicy.resumeAttach(isPlaylistReady: pendingPlaylistURL != nil, hasTarget: target != nil,
+                                             hasMedia: target.map { remux.hasMediaToStart(fromPlayerSeconds: $0) } ?? false,
+                                             isAvailable: target.map { remux.isAvailable(playerSeconds: $0) } ?? true,
+                                             refusal: refusal)
+        switch step {
+        case .attach:
+            guard let url = pendingPlaylistURL else { return }
+            pendingPlaylistURL = nil
+            let waited = resumeAnsweredAt.map { String(format: "%.1f", ProcessInfo.processInfo.systemUptime - $0) } ?? "?"
+            print("[Resume] media at the resume point on disk \(waited) s after the answer — the player's item is made")
+            attachPlayer(to: url, direct: false)
+        case .vlc(let reason):
+            print("[Resume] the resume can't be native after all (\(reason)) → VLC at \(resumePositionLabel())")
+            requestFallback(reason)
+        case .wait:
+            guard !isPollingResumeAttach else { return }
+            isPollingResumeAttach = true
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { [weak self] in
+                self?.isPollingResumeAttach = false
+                self?.attachNativeResumeWhenReady()
+            }
+        }
+    }
+
+    /// The picture at the resume position plays (the player's first
+    /// `.playing`, which only comes after the start seek — or after the
+    /// starvation recovery that took it over): the cover and the label go.
+    private func finishNativeResume() {
+        guard isResumingNatively else { return }
+        isResumingNatively = false
+        hideResuming()
+        let now = ProcessInfo.processInfo.systemUptime
+        let time = player?.currentTime().seconds ?? .nan
+        let answered = resumeAnsweredAt.map { String(format: "%.1f", now - $0) } ?? "?"
+        let steered = resumeNativeSince.map { String(format: "%.1f", now - $0) } ?? "?"
+        print("[Resume] first frame at \(String(format: "%.1f", time)) s — \(answered) s after the answer, "
+              + "\(steered) s after steering")
+    }
+
+    /// Safety net (1 Hz): the cover never outlives a resume whose seek is
+    /// over on a player that is no longer waiting (paused by the user right
+    /// at the landing: there is no first `.playing` to wait for).
+    private func checkNativeResumeCover() {
+        guard isResumingNatively, let player = player, didStartPlayback, !awaitingStartSeek, !isSeekingToStart,
+              !starvation.isRecovering, player.currentItem?.status == .readyToPlay,
+              player.timeControlStatus != .waitingToPlayAtSpecifiedRate else { return }
+        finishNativeResume()
+    }
+
+    /// The spinner with « Reprise à <position>… » under it; `covered`: over
+    /// black (a native resume: the item's first frame is hidden). `target`:
+    /// the position on the player's timeline (nil: the start's resume, whose
+    /// position the remux places): once the wait lasts, the label says how
+    /// far the media there is (« Reprise à 22:35 — 45 % · 9,6 Mo/s »,
+    /// `refreshResumingText`).
+    private func showResuming(at position: String, covered: Bool = false, target: Double? = nil) {
+        resumingPosition = position
+        resumingTarget = target
+        resumingLabel.text = currentResumingText(position: position, target: target)
+        resumingLabel.isHidden = false
+        bufferingLabel.isHidden = true
+        if covered { resumeCover.isHidden = false }
+        loadingIndicator.startAnimating()
+    }
+
+    /// 1 Hz, while « Reprise à … » shows: its progress, from the remux's
+    /// latest look (`RemuxPlayback.waitProgress`, refreshed on the remux's
+    /// own 1 s tick — only the formatting runs here).
+    private func refreshResumingText() {
+        guard !resumingLabel.isHidden, let position = resumingPosition else { return }
+        let text = currentResumingText(position: position, target: resumingTarget)
+        if resumingLabel.text != text { resumingLabel.text = text }
+    }
+
+    /// « Reprise à <position> — 45 % · 9,6 Mo/s » from the remux's latest look.
+    private func currentResumingText(position: String, target: Double?) -> String {
+        #if DEBUG
+        if let sample = Self.debugResumingSample { return ResumePolicy.resumingText(position: sample.position, progress: sample.progress) }
+        #endif
+        return ResumePolicy.resumingText(position: position, progress: ResumePolicy.progress(remux?.waitProgress, forTarget: target))
+    }
+
+    #if DEBUG
+    /// `-PTDebugResumingSample "<position>|<percent>|<bytes per second>"` (DEBUG): every « Reprise à … »
+    /// shows that text instead of the wait's — a screenshot of the longest string the label can carry
+    /// (« Reprise à 1:28:20 — 100 % · 1 000 octets/s ») on a real wait of the loopback rig.
+    private static let debugResumingSample: (position: String, progress: JumpWaitProgress)? = {
+        guard let raw = UserDefaults.standard.string(forKey: "PTDebugResumingSample") else { return nil }
+        let parts = raw.split(separator: "|", omittingEmptySubsequences: false).map(String.init)
+        guard parts.count == 3, let percent = Double(parts[1]), let rate = Int(parts[2]) else { return nil }
+        let progress = JumpWaitProgress(targetSeconds: nil, segment: nil, waitedSeconds: 5, isJump: true,
+                                        shownFraction: min(1, max(0, percent / 100)), isMediaReady: percent >= 100,
+                                        bytesPerSecond: rate)
+        return (parts[0], progress)
+    }()
+    #endif
+
+    /// Takes « Reprise à … » (and the cover) away; the spinner stays when
+    /// something else still needs it.
+    private func hideResuming() {
+        resumingLabel.isHidden = true
+        resumingPosition = nil
+        resumingTarget = nil
+        resumeCover.isHidden = true
+        jumpLabelTarget = nil
+        if starvation.isRecovering, !starvation.isWaitingForPlay {
+            // The recovery's own wait shows again as what it is.
+            showStarvationIndicator(true)
+        } else if !isSeekingToStart, player != nil {
+            loadingIndicator.stopAnimating()
+        }
+    }
+
+    /// The dark capsule around the spinner and the label that shows
+    /// (« Reprise à … » or the starvation text); none when neither shows
+    /// (the spinner alone, at the start, stays as it was). Follows the
+    /// labels' `isHidden` (`StatusCapsuleLabel.onVisibilityChange`).
+    private func layoutStatusCapsule() {
+        guard statusCapsule.superview != nil else { return }
+        let shown: UILabel? = !resumingLabel.isHidden ? resumingLabel : (!bufferingLabel.isHidden ? bufferingLabel : nil)
+        NSLayoutConstraint.deactivate(statusCapsuleConstraints)
+        statusCapsuleConstraints = []
+        if let label = shown {
+            let padding = StatusCapsuleLabel.padding
+            statusCapsuleConstraints = [
+                statusCapsule.bottomAnchor.constraint(equalTo: label.bottomAnchor, constant: padding),
+                statusCapsule.widthAnchor.constraint(greaterThanOrEqualTo: label.widthAnchor, constant: 2 * padding),
+            ]
+            NSLayoutConstraint.activate(statusCapsuleConstraints)
+        }
+        statusCapsule.isHidden = shown == nil
+    }
+
+    /// The position of the jump whose « Reprise à … » is up (a far seek, a
+    /// rewind into what a jump skipped — not the start's native resume, which
+    /// has its own life: `isResumingNatively`).
+    private var jumpLabelTarget: Double?
+    /// What « Reprise à … » shows: its position as written, and on the
+    /// player's timeline (nil: the start's resume) — `refreshResumingText`.
+    private var resumingPosition: String?
+    private var resumingTarget: Double?
+
+    /// `RemuxPlayback.onJumpStateChanged`: the conversion was moved to serve
+    /// a position somebody waits on — « Reprise à … » and the spinner until
+    /// playback runs there (the wait is the torrent turning to that part and
+    /// the first segments: seconds), instead of a silent frozen picture.
+    private func jumpStateChanged(_ state: RemuxPlayback.JumpState) {
+        guard !isTornDown, !fallbackRequested else { return }
+        switch state {
+        case .waiting(let playerSeconds):
+            switch ResumePolicy.jumpWaitResponse(isResumingNatively: isResumingNatively, hasItem: player != nil) {
+            case .ignore:
+                // The start's resume already says it, over its cover.
+                return
+            case .armGraceOnly:
+                // A seek under the resume's cover: the cover stays (no
+                // `jumpLabelTarget`: `checkJumpLabel` would take it away),
+                // its text follows the new position.
+                showResuming(at: ResumePolicy.clockString(seconds: playerSeconds), covered: true, target: playerSeconds)
+            case .showAndArmGrace:
+                jumpLabelTarget = playerSeconds
+                showResuming(at: ResumePolicy.clockString(seconds: playerSeconds), target: playerSeconds)
+            }
+            // The item is not left waiting on a segment the torrent has yet
+            // to bring (`moveJumpWaitToNewItemIfNeeded`).
+            jumpWaitCheck += 1
+            let check = jumpWaitCheck
+            DispatchQueue.main.asyncAfter(deadline: .now() + ResumePolicy.jumpGraceSeconds) { [weak self] in
+                self?.moveJumpWaitToNewItemIfNeeded(check)
+            }
+        case .landed:
+            checkJumpLabel()
+        case .failed:
+            guard jumpLabelTarget != nil else { return }
+            hideResuming()
+        }
+    }
+
+    /// The latest jump whose grace is running (only that one is checked).
+    private var jumpWaitCheck = 0
+
+    /// `ResumePolicy.jumpGraceSeconds` after the conversion was moved to a
+    /// position somebody waits on (a far seek, a rewind into what a jump
+    /// skipped): when the first segment there is still not written — the
+    /// torrent has to turn to that part of the file — the wait moves from
+    /// the item to the starvation recovery's (`waitForJump`): the player
+    /// paused under « Reprise à … », a new item pre-positioned there once
+    /// its media is on disk (`RemuxPlayback.hasMediaToStart`). The item
+    /// that asked would give up on its held request after about one target
+    /// duration, and on tvOS never play again nor fail
+    /// (`ResumePolicy.jumpNeedsNewItem`). A jump over data already on disk
+    /// has written its segment by now: that item just plays on.
+    private func moveJumpWaitToNewItemIfNeeded(_ check: Int) {
+        guard check == jumpWaitCheck, !isTornDown, !fallbackRequested, route == .remux, let remux = remux,
+              let player = player, let wanted = wantedPosition() else { return }
+        guard ResumePolicy.jumpNeedsNewItem(isJumpWaiting: remux.isJumpWaiting,
+                                            hasFirstSegment: remux.hasMedia(fromPlayerSeconds: wanted, cushion: 0),
+                                            isRecovering: starvation.isRecovering, isItemHealthy: isItemHealthy) else { return }
+        // The move's origin: where AVPlayer puts its time back if it gives
+        // up on the held seek (not a user seek, the wait stays at `wanted`).
+        let origin = navigation.target.flatMap { abs($0 - wanted) <= UserNavigationTarget.thresholdSeconds ? navigation.from : nil }
+        let started = starvation.waitForJump(player: player, at: wanted, resumesPlayback: playIntent.wantsPlayback,
+                                             rebuildsWhilePaused: true, keepsPlayerRate: true,
+                                             seekOrigin: origin) { [weak remux] time, _ in
+            guard let remux = remux else { return false }
+            // Bounded storage: a deleted segment never comes back (the wait
+            // follows the playhead `limitRecoveringRewind` moved instead).
+            if remux.isStorageBounded, !remux.isAvailable(playerSeconds: time) { return false }
+            return remux.hasMediaToStart(fromPlayerSeconds: time)
+        }
+        guard started else { return }
+        // The target is the recovery's from here on.
+        _ = heldSeek.take()
+        print("[Resume] jump to \(String(format: "%.1f", wanted)) s: its first segment is not written "
+              + "\(String(format: "%.1f", ResumePolicy.jumpGraceSeconds)) s on — the wait moves to a new item, made once its media is on disk"
+              + " (the player reads \(String(format: "%.1f", player.currentTime().seconds)) s, rate \(player.rate))")
+    }
+
+    /// At the jump's end and at 1 Hz: the jump's label goes once the player
+    /// is no longer waiting for media where it is — media to play is on disk
+    /// there and it is not stalled (a paused player never « lands »; one
+    /// that went elsewhere, to media that exists, does not wait either).
+    private func checkJumpLabel() {
+        guard jumpLabelTarget != nil, let remux = remux else { return }
+        let waitingForMedia = player?.timeControlStatus == .waitingToPlayAtSpecifiedRate || starvation.isRecovering
+        guard !waitingForMedia, let wanted = wantedPosition(), remux.hasMedia(fromPlayerSeconds: wanted, cushion: 0) else { return }
+        hideResuming()
+    }
+
+    /// `RemuxPlayback.onJumpFailed`: the conversion can't serve that position
+    /// after all (the file's index does not say true there): VLC there, on
+    /// the same stream (`onHalted` follows; the first of the two hands over).
+    private func jumpFailed(_ reason: String, at playerSeconds: Double) {
+        guard !isTornDown, !fallbackRequested else { return }
+        print("[Player] the conversion could not jump to \(Int(playerSeconds)) s (\(reason)) — VLC there")
+        requestFallback(reason, resumeTime: playerSeconds)
     }
 
     private func cancelFromResumeQuestion() {
@@ -804,6 +1357,19 @@ final class RemuxAVPlayerViewController: AVPlayerViewController {
 
         playbackURL = url
         let item = makePlayerItem(url: url)
+        if isResumingNatively, let target = remux?.resumeTargetSeconds, target > 0 {
+            // A native resume: positioned BEFORE it is attached, as a
+            // starvation recovery's item is — its first media request is the
+            // resume segment (on disk: `attachNativeResumeWhenReady`). An
+            // unpositioned item loads at 0:00 and prefetches segments 2, 3…,
+            // which the jump skipped: requests the server would hold until
+            // AVPlayer gives up on them. (No completion handler: a seek with
+            // one raises on an item that is not ready; the start seek
+            // follows once it is, `applyStartPosition`.) Never past the
+            // saved position: a keyframe before it, not the nearest one.
+            item.seek(to: CMTime(seconds: target, preferredTimescale: 600), toleranceBefore: .positiveInfinity,
+                      toleranceAfter: .zero, completionHandler: nil)
+        }
         let player = AVPlayer(playerItem: item)
         player.allowsExternalPlayback = true
         player.appliesMediaSelectionCriteriaAutomatically = true
@@ -817,9 +1383,17 @@ final class RemuxAVPlayerViewController: AVPlayerViewController {
         PlaybackLanguagePreferences.applyPreferredMediaSelection(to: item)
         installFailureObserver(on: item)
         noteAttachedItem(item)
-        loadingIndicator.stopAnimating()
+        // (A native resume keeps its spinner, label and cover until the
+        // picture at its position plays.)
+        if !isResumingNatively { loadingIndicator.stopAnimating() }
 
         subtitleController?.attach(to: player)
+        // The `[Start]` trace's last phase: the player really playing — and
+        // the end of a native resume's wait.
+        firstFrameWatch = FirstFrameWatch(player: player) { [weak self] in
+            self?.keepAliveStreamer?.noteStartFirstFrame(detail: direct ? "AVPlayer (direct)" : "AVPlayer (remux)")
+            self?.finishNativeResume()
+        }
 #if os(tvOS)
         installUpNextIfNeeded(for: item)
 #endif
@@ -870,6 +1444,18 @@ final class RemuxAVPlayerViewController: AVPlayerViewController {
                 self.scheduleBoundedRewindCheck()
             }
         })
+#if os(tvOS)
+        // Episode chaining: the end of the file (the after-play card, or
+        // the countdown's end).
+        playerObservers.append(center.addObserver(forName: AVPlayerItem.didPlayToEndTimeNotification, object: nil,
+                                                  queue: .main) { [weak self] note in
+            let ended = note.object as AnyObject?
+            MainActor.assumeIsolated {
+                guard let self = self, let item = self.player?.currentItem, ended === item else { return }
+                self.upNextItemEnded(reason: "AVPlayerItemDidPlayToEndTime")
+            }
+        })
+#endif
     }
 
     /// The current item plays normally: playback started, no start seek, no
@@ -927,8 +1513,16 @@ final class RemuxAVPlayerViewController: AVPlayerViewController {
     /// measured on the Mac's controls; it ends on VLC from the recovery's
     /// watch, once AVPlayer fails the item), an item not healthy (start
     /// seek, recovery, hand-off), the direct path, a finished remux.
+    ///
+    /// Native jumps: the remux moves its conversion to a far target by
+    /// itself, on the position reported to it — the frontier is then at the
+    /// target and nothing is measured here. What is left for this watch is a
+    /// target the conversion pumps toward (near, its data on disk) too
+    /// slowly: the conversion is asked to jump there (`requestJump`), and
+    /// only a remux that can't (no usable index, native jumps off) hands the
+    /// target to VLC. While a jump is waited on, nothing is measured.
     private func checkFarSeekTarget() {
-        guard route == .remux, let remux = remux, let session = remux.session else {
+        guard route == .remux, let remux = remux, let session = remux.session, !remux.isJumpWaiting else {
             farTarget.reset()
             return
         }
@@ -938,8 +1532,19 @@ final class RemuxAVPlayerViewController: AVPlayerViewController {
                                       downloadProgress: keepAliveStreamer?.torrentStatus.totalProgress ?? 1,
                                       remuxFinished: remux.isFinished, now: ProcessInfo.processInfo.systemUptime),
               let held = target else { return }
-        print("[Player] seek to \(Int(held)) s held past the remux frontier (\(Int(frontier)) s): "
-              + "~\(Int((farTarget.estimatedSecondsToTarget ?? 0).rounded())) s away at the download's pace — VLC there")
+        let away = "~\(Int((farTarget.estimatedSecondsToTarget ?? 0).rounded())) s away at the download's pace"
+        // The remux hears of the target first: a jump goes where the player
+        // is reported to be.
+        reportPlaybackPositions()
+        if remux.requestJump(toPlayerSeconds: held, reason: .requested) {
+            print("[Player] seek to \(Int(held)) s held past the remux frontier (\(Int(frontier)) s): \(away) — "
+                  + "the conversion jumps there, native playback kept")
+            farTarget.reset()
+            jumpLabelTarget = held
+            showResuming(at: ResumePolicy.clockString(seconds: held), target: held)
+            return
+        }
+        print("[Player] seek to \(Int(held)) s held past the remux frontier (\(Int(frontier)) s): \(away) — VLC there")
         requestFallback(FarTargetWatch.reason, resumeTime: held)
     }
 
@@ -996,7 +1601,7 @@ final class RemuxAVPlayerViewController: AVPlayerViewController {
     private func handlePlaybackFailure(_ failure: AVPlayerItemFailureObserver.Failure) {
         guard !isTornDown, !fallbackRequested else { return }
         // Taken either way; a recovery in progress has its own target.
-        var held = heldSeek.take()
+        var held = heldSeek.take() ?? pendingNavigationTarget()
         if starvation.isRecovering { held = nil }
         // Read before `handle`, which clears it when it ends the recovery.
         let userTarget = (starvation.resumeTimeIsUserTarget ? starvation.resumeTime : nil) ?? held
@@ -1038,7 +1643,10 @@ final class RemuxAVPlayerViewController: AVPlayerViewController {
         switch route {
         case .remux:
             guard let remux = remux, remux.failureReason == nil else { return nil }
-            let finished = remux.session?.progress.finished ?? false
+            // The conversion still has something to write: it has not reached
+            // the film's end, or a jump left holes it fills when playback
+            // goes there.
+            let finished = (remux.session?.progress.finished ?? false) && remux.holeIndexes.isEmpty
             return (!finished, { [weak remux] time, _ in
                 // Bounded storage: a deleted segment never comes back (the
                 // recovery waits for the playhead `limitRecoveringRewind`
@@ -1109,6 +1717,13 @@ final class RemuxAVPlayerViewController: AVPlayerViewController {
         // Its far-target pace starts from the download's pace this player's
         // own watch keeps (fed at every tick).
         recovery.farTargetHistory = { [weak self] in self?.farTarget.downloadHistory ?? [] }
+        // A user target the in-order conversion can't reach soon: the
+        // conversion jumps there when it can (the wait stays native) — VLC
+        // there only when it can't.
+        recovery.farTargetJump = { [weak self] seconds in
+            guard let self = self, self.route == .remux, !self.fallbackRequested, let remux = self.remux else { return false }
+            return remux.requestJump(toPlayerSeconds: seconds, reason: .requested)
+        }
         recovery.makeItem = { [weak self] in
             guard let self = self, !self.isTornDown, let url = self.playbackURL else { return nil }
             return self.makePlayerItem(url: url)
@@ -1118,6 +1733,9 @@ final class RemuxAVPlayerViewController: AVPlayerViewController {
         }
         recovery.onResumed = { [weak self] _ in
             self?.resumeAfterStarvation()
+        }
+        recovery.onNavigatedDuringRebuild = { [weak self] seconds in
+            self?.navigateAfterRebuild(to: seconds)
         }
         recovery.onGiveUp = { [weak self] reason in
             self?.recoveryGaveUp(reason)
@@ -1147,6 +1765,8 @@ final class RemuxAVPlayerViewController: AVPlayerViewController {
     /// The rebuilt item is the player's: same observers as the first one
     /// (its readiness budget is the recovery's: 30 s, no extensions).
     private func didReplaceItem(_ item: AVPlayerItem, restoresSelection: Bool) {
+        navigation.clear()
+        lastItemReplacementAt = ProcessInfo.processInfo.systemUptime
         installFailureObserver(on: item, isReplacement: true)
         noteAttachedItem(item)
         // The user's audio / subtitle choice is re-applied by the recovery;
@@ -1174,13 +1794,37 @@ final class RemuxAVPlayerViewController: AVPlayerViewController {
             engineLine = "\(nativeEngineLine) — lecture bloquée, nouvel élément"
             loadingIndicator.startAnimating()
             bufferingLabel.isHidden = true
+        } else if waiting, isResumingNatively || remux?.isJumpWaiting == true {
+            // The wait is a jump's (the conversion was moved to that
+            // position: the torrent turns there, the first segments come),
+            // not a download slower than the film: « Reprise à … ».
+            engineLine = "\(nativeEngineLine) — reprise à la position demandée (saut de la conversion)"
+            if !isResumingNatively {
+                let time = starvation.resumeTime ?? jumpLabelTarget ?? 0
+                jumpLabelTarget = time
+                showResuming(at: ResumePolicy.clockString(seconds: time), target: time)
+            }
+            loadingIndicator.startAnimating()
+            bufferingLabel.isHidden = true
         } else if waiting {
             engineLine = "\(nativeEngineLine) — attente des données (téléchargement plus lent que la lecture)"
             loadingIndicator.startAnimating()
+            // (Never both texts: a jump's label that outlived its jump goes.)
+            resumingLabel.isHidden = true
+            jumpLabelTarget = nil
             bufferingLabel.isHidden = false
         } else {
             engineLine = nativeEngineLine
-            if !isSeekingToStart { loadingIndicator.stopAnimating() }
+            if ResumePolicy.hidesJumpLabelOnPause(isWaitingForPlay: starvation.isRecovering && starvation.isWaitingForPlay,
+                                                  isResumingNatively: isResumingNatively,
+                                                  isLabelShown: !resumingLabel.isHidden) {
+                // Paused by the user during a jump's wait: shown as a pause (AVKit's bar), not
+                // as a spinner with « Reprise à … — 100 % » that says it still loads. Play
+                // brings the wait's label back (`showStarvationIndicator(true)`).
+                print("[Player] jump wait paused by the user — « Reprise à … » hidden until play is pressed")
+                hideResuming()
+            }
+            if !isSeekingToStart, resumingLabel.isHidden { loadingIndicator.stopAnimating() }
             bufferingLabel.isHidden = true
         }
     }
@@ -1236,10 +1880,11 @@ final class RemuxAVPlayerViewController: AVPlayerViewController {
 
     /// Seek to `startPosition` once the item is ready and its duration known,
     /// then start playing. Direct MP4: AVPlayer reads over HTTP byte ranges
-    /// (the torrent fetches those pieces first). Remux: only reached with
-    /// the payload fully on disk (otherwise the user was asked) — the
-    /// requested segment is held by the server's long-poll while the remux
-    /// pumps ahead to it.
+    /// (the torrent fetches those pieces first). Remux: with the payload
+    /// fully on disk, the requested segment is held by the server's
+    /// long-poll while the remux pumps ahead to it; a native resume of a
+    /// payload still downloading (`beginNativeResume`): held the same way
+    /// until the conversion, moved there, has written it.
     private func prepareStartPosition(for item: AVPlayerItem, direct: Bool) {
         guard startPosition > 0 else { return }
         awaitingStartSeek = true
@@ -1275,8 +1920,12 @@ final class RemuxAVPlayerViewController: AVPlayerViewController {
             return
         }
         cancelStartSeek()
-        let target = Double(startPosition) * duration
-        if !direct {
+        // A native resume seeks where the remux sent its conversion (the same
+        // share of the playlists' length: the segment the jump writes first).
+        let target = (isResumingNatively ? remux?.resumeTargetSeconds : nil) ?? Double(startPosition) * duration
+        if isResumingNatively {
+            print("[Resume] seek issued to \(String(format: "%.1f", target)) s")
+        } else if !direct {
             let remuxed = remux?.session?.progress.mediaSeconds ?? 0
             print("[Player] remux at \(Int(remuxed)) s, payload on disk — pumping ahead to the resume point")
         }
@@ -1284,13 +1933,20 @@ final class RemuxAVPlayerViewController: AVPlayerViewController {
         isSeekingToStart = true
         startSeekTarget = target
         loadingIndicator.startAnimating()
-        player.seek(to: CMTime(seconds: target, preferredTimescale: 600)) { [weak self] _ in
+        // A native resume never starts past the saved position (its item was
+        // put at a keyframe before it, `attachPlayer`: the nearest one could
+        // be the next); the other starts keep AVPlayer's default tolerance.
+        let after: CMTime = isResumingNatively ? .zero : .positiveInfinity
+        player.seek(to: CMTime(seconds: target, preferredTimescale: 600), toleranceBefore: .positiveInfinity,
+                    toleranceAfter: after) { [weak self] _ in
             DispatchQueue.main.async {
                 // Superseded when a starvation recovery took over the item.
                 guard let self = self, self.isSeekingToStart, self.player?.currentItem === item else { return }
                 self.isSeekingToStart = false
                 self.startSeekTarget = nil
-                self.loadingIndicator.stopAnimating()
+                // (A native resume's spinner, label and cover go with the
+                // first picture that plays: `finishNativeResume`.)
+                if !self.isResumingNatively { self.loadingIndicator.stopAnimating() }
                 self.startPlaybackIfPossible()
             }
         }
@@ -1344,9 +2000,7 @@ final class RemuxAVPlayerViewController: AVPlayerViewController {
                 } else {
                     print("[Player] no audible media-selection group (muxed audio / single track)")
                 }
-                for track in await PlayerTrackSummary.load(from: item) where track.mediaType == .audio {
-                    print("[Player] resolved audio track: '\(track.fourCC)' \(track.channels)ch")
-                }
+                await self.logResolvedAudioTracks(of: item, retry: true)
                 // Output-side proof of Atmos on iOS: whether the current audio
                 // route is actually rendering Spatial Audio (AirPods / built-in
                 // speakers). `true` = the DD+/Atmos is being spatialized right now.
@@ -1354,6 +2008,25 @@ final class RemuxAVPlayerViewController: AVPlayerViewController {
                     print("[Player] output '\(output.portName)' [\(output.portType.rawValue)] spatialAudioEnabled=\(output.isSpatialAudioEnabled)")
                 }
             }
+        }
+    }
+
+    /// The resolved audio track lines; none yet (the item's tracks may not
+    /// list the audio before its first audio segment is parsed): said so,
+    /// and one more look 1 s later — on the same item, not torn down.
+    @MainActor
+    private func logResolvedAudioTracks(of item: AVPlayerItem, retry: Bool) async {
+        let audio = await PlayerTrackSummary.load(from: item).filter { $0.mediaType == .audio }
+        for track in audio {
+            print("[Player] resolved audio track: '\(track.fourCC)' \(track.channels)ch")
+        }
+        guard audio.isEmpty else { return }
+        print("[Player] audio track not resolved yet (item.tracks \(item.tracks.count))"
+              + (retry ? " — one more look in 1 s" : " — not after 1 s either"))
+        guard retry else { return }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1) { [weak self] in
+            guard let self = self, !self.isTornDown, self.player?.currentItem === item else { return }
+            Task { @MainActor in await self.logResolvedAudioTracks(of: item, retry: false) }
         }
     }
 
@@ -1395,10 +2068,13 @@ final class RemuxAVPlayerViewController: AVPlayerViewController {
             duration = length
         }
         let waiting = player.timeControlStatus == .waitingToPlayAtSpecifiedRate && playIntent.wantsPlayback
+        // A wait for a jump of the conversion (a resume, a far seek) is not a
+        // download slower than the film: the torrent is turning to that part.
+        let jumping = isResumingNatively || remux?.isJumpWaiting == true
         return BandwidthDeficitMonitor.PlaybackState(playhead: time, duration: duration.isFinite ? duration : nil,
                                                      hasStarted: didStartPlayback && playedPosition.lastPlayedTime != nil,
                                                      wantsPlayback: playIntent.wantsPlayback,
-                                                     isStalled: (recovering && !starvation.isRebuildingStuckItem) || waiting)
+                                                     isStalled: !jumping && ((recovering && !starvation.isRebuildingStuckItem) || waiting))
     }
 
     /// « Lighter version »: this player closes (progress saved, stream
@@ -1470,13 +2146,14 @@ final class RemuxAVPlayerViewController: AVPlayerViewController {
         fallbackRequested = true
         resumeChoicePending = false
         pendingPlaylistURL = nil
+        isResumingNatively = false
         var resume = currentResumeFraction()
         if let time = resumeTime, let fraction = fraction(ofPlayerTime: time) {
             resume = ResumePolicy.handOffFraction(reached: fraction)
         }
         // VLC asks « Reprendre / Depuis le début » unless the user chose
         // « Reprendre » here or was already watching.
-        let decided = ResumePolicy.handOffResumeDecided(userChoseQuickResume: userChoseQuickResume,
+        let decided = ResumePolicy.handOffResumeDecided(userChoseResume: userChoseResume,
                                                         playbackStarted: didStartPlayback)
         print("[Player] native playback unavailable (\(reason)) — handing over to VLC at \(Int(resume * 100)) %"
               + (decided ? "" : " (VLC asks whether to resume)"))
@@ -1538,6 +2215,8 @@ final class RemuxAVPlayerViewController: AVPlayerViewController {
         starvation.cancel()
         failureObserver?.invalidate()
         failureObserver = nil
+        firstFrameWatch?.invalidate()
+        firstFrameWatch = nil
         cancelStartSeek()
 #if os(tvOS)
         upNextObservation?.invalidate()
@@ -1554,6 +2233,11 @@ final class RemuxAVPlayerViewController: AVPlayerViewController {
         remux?.stop()
         boundedRewindCheck?.cancel()
         BoundedStorageSession.session(for: keepAliveStreamer)?.detachHTTPPlayer(self)
+        // Nothing resumes natively any more.
+        isResumingNatively = false
+        jumpLabelTarget = nil
+        resumingLabel.isHidden = true
+        resumeCover.isHidden = true
     }
 
 #if DEBUG
@@ -1582,7 +2266,15 @@ final class RemuxAVPlayerViewController: AVPlayerViewController {
     /// unless it is being handed over to VLC. Idempotent.
     func tearDown() {
         guard !isTornDown else { return }
+#if os(tvOS)
+        // The user left the player: nothing of the next episode starts
+        // (not a close for the next episode, not a hand-off to VLC — the
+        // session goes on there).
+        if !isClosingForNextEpisode && !isHandingOff { upNextSession?.playerClosed() }
+        upNextCardSubscription = nil
+#endif
         if !isHandingOff { saveProgress(status: .finished) }
+        let closedAt = String(format: "%.1f", player?.currentTime().seconds ?? .nan)
         isTornDown = true
         NotificationCenter.default.removeObserver(self, name: UIApplication.didEnterBackgroundNotification, object: nil)
         resumeChoicePending = false
@@ -1601,7 +2293,12 @@ final class RemuxAVPlayerViewController: AVPlayerViewController {
 #else
             let wipe = false
 #endif
+            print("[Player] closed at \(closedAt) s — "
+                  + (keepAliveStreamer == nil ? "no stream to cancel" : "stream cancelled, data deleted=\(wipe)")
+                  + (isClosingForNextEpisodeLog ? " (the next episode starts)" : ""))
             keepAliveStreamer?.cancelStreamingAndDeleteData(wipe)
+        } else {
+            print("[Player] closed at \(closedAt) s — handed off to VLC: the stream is not cancelled, it plays on there")
         }
         keepAliveStreamer = nil
     }
@@ -1626,11 +2323,16 @@ final class RemuxAVPlayerViewController: AVPlayerViewController {
             print("[Player] progress \(Int(fraction * 100)) % not saved — keeps the resume point at \(Int(resumePoint * 100)) %")
             return
         }
-        if let movie = media as? Movie {
-            WatchedlistManager<Movie>.movie.setCurrentProgress(value, for: movie.id, with: status)
-        } else if let episode = media as? Episode {
-            WatchedlistManager<Episode>.episode.setCurrentProgress(value, for: episode.id, with: status)
-        }
+        // With the titles and the length: the Continue Watching card.
+        PlaybackRecorder.save(value, of: media, duration: lastKnownDuration, status: status)
+    }
+
+    /// From the 1 Hz tick, while playing: the position every 30 s
+    /// (`PlaybackCheckpoint`), so a crash, a kill or a power cut loses half a
+    /// minute of an uninterrupted session, not all of it.
+    private func checkpointProgressIfDue() {
+        guard player?.timeControlStatus == .playing, progressCheckpoint.isDue() else { return }
+        saveProgress(status: .watching)
     }
 
     // MARK: - View lifecycle
@@ -1660,21 +2362,69 @@ final class RemuxAVPlayerViewController: AVPlayerViewController {
         }
         installSubtitleOverlayIfNeeded()
         if let overlay = contentOverlayView {
+            // Under everything else in the overlay: black over the video
+            // during a native resume.
+            resumeCover.backgroundColor = .black
+            resumeCover.isUserInteractionEnabled = false
+            resumeCover.isHidden = !isResumingNatively
+            resumeCover.translatesAutoresizingMaskIntoConstraints = false
+            overlay.insertSubview(resumeCover, at: 0)
+            NSLayoutConstraint.activate([
+                resumeCover.topAnchor.constraint(equalTo: overlay.topAnchor),
+                resumeCover.bottomAnchor.constraint(equalTo: overlay.bottomAnchor),
+                resumeCover.leadingAnchor.constraint(equalTo: overlay.leadingAnchor),
+                resumeCover.trailingAnchor.constraint(equalTo: overlay.trailingAnchor),
+            ])
+            // Above the cover, under the spinner and the labels.
+            statusCapsule.backgroundColor = StatusCapsuleLabel.capsuleColor
+            statusCapsule.layer.cornerRadius = StatusCapsuleLabel.cornerRadius
+            statusCapsule.layer.cornerCurve = .continuous
+            statusCapsule.isUserInteractionEnabled = false
+            statusCapsule.isHidden = true
+            statusCapsule.translatesAutoresizingMaskIntoConstraints = false
+            overlay.addSubview(statusCapsule)
             loadingIndicator.translatesAutoresizingMaskIntoConstraints = false
             loadingIndicator.color = .white
             loadingIndicator.hidesWhenStopped = true
             overlay.addSubview(loadingIndicator)
             // Download starvation: say why the picture is frozen.
-            bufferingLabel.text = "Mise en mémoire tampon…\nLe téléchargement est plus lent que la lecture"
+            bufferingLabel.text = "Buffering…".localized + "\n" + "The download is slower than playback".localized
             bufferingLabel.numberOfLines = 2
             bufferingLabel.textAlignment = .center
             bufferingLabel.textColor = .white
-            bufferingLabel.font = .preferredFont(forTextStyle: .callout)
-            bufferingLabel.shadowColor = UIColor.black.withAlphaComponent(0.8)
-            bufferingLabel.shadowOffset = CGSize(width: 0, height: 1)
+            bufferingLabel.font = StatusCapsuleLabel.textFont
+            bufferingLabel.adjustsFontForContentSizeCategory = true
             bufferingLabel.isHidden = true
             bufferingLabel.translatesAutoresizingMaskIntoConstraints = false
             overlay.addSubview(bufferingLabel)
+            // A jump of the conversion: where playback resumes (its text is
+            // set when it shows: `showResuming`). Same place, never both.
+            resumingLabel.numberOfLines = 1
+            // The longest French text (« Reprise à 1:28:20 — 100 % · 1 000 octets/s ») fits Apple TV's
+            // width; on a 375-point iPhone in portrait it may not: smaller rather than cut with « … ».
+            resumingLabel.adjustsFontSizeToFitWidth = true
+            resumingLabel.minimumScaleFactor = 0.7
+            resumingLabel.textAlignment = .center
+            resumingLabel.textColor = .white
+            resumingLabel.font = StatusCapsuleLabel.textFont
+            resumingLabel.adjustsFontForContentSizeCategory = true
+            resumingLabel.isHidden = resumingLabel.text?.isEmpty ?? true
+            resumingLabel.translatesAutoresizingMaskIntoConstraints = false
+            overlay.addSubview(resumingLabel)
+            let padding = StatusCapsuleLabel.padding
+            NSLayoutConstraint.activate([
+                statusCapsule.centerXAnchor.constraint(equalTo: overlay.centerXAnchor),
+                statusCapsule.topAnchor.constraint(equalTo: loadingIndicator.topAnchor, constant: -padding),
+                statusCapsule.widthAnchor.constraint(greaterThanOrEqualTo: loadingIndicator.widthAnchor, constant: 2 * padding),
+            ])
+            // As small as its contents allow (and a size while hidden).
+            let hugWidth = statusCapsule.widthAnchor.constraint(equalToConstant: 0)
+            let hugHeight = statusCapsule.heightAnchor.constraint(equalToConstant: 0)
+            hugWidth.priority = .fittingSizeLevel
+            hugHeight.priority = .fittingSizeLevel
+            NSLayoutConstraint.activate([hugWidth, hugHeight])
+            bufferingLabel.onVisibilityChange = { [weak self] in self?.layoutStatusCapsule() }
+            resumingLabel.onVisibilityChange = { [weak self] in self?.layoutStatusCapsule() }
             NSLayoutConstraint.activate([
                 loadingIndicator.centerXAnchor.constraint(equalTo: overlay.centerXAnchor),
                 loadingIndicator.centerYAnchor.constraint(equalTo: overlay.centerYAnchor),
@@ -1682,9 +2432,15 @@ final class RemuxAVPlayerViewController: AVPlayerViewController {
                 bufferingLabel.topAnchor.constraint(equalTo: loadingIndicator.bottomAnchor, constant: 16),
                 bufferingLabel.leadingAnchor.constraint(greaterThanOrEqualTo: overlay.safeAreaLayoutGuide.leadingAnchor, constant: 20),
                 bufferingLabel.trailingAnchor.constraint(lessThanOrEqualTo: overlay.safeAreaLayoutGuide.trailingAnchor, constant: -20),
+                resumingLabel.centerXAnchor.constraint(equalTo: overlay.centerXAnchor),
+                resumingLabel.topAnchor.constraint(equalTo: loadingIndicator.bottomAnchor, constant: 16),
+                resumingLabel.leadingAnchor.constraint(greaterThanOrEqualTo: overlay.safeAreaLayoutGuide.leadingAnchor, constant: 20),
+                resumingLabel.trailingAnchor.constraint(lessThanOrEqualTo: overlay.safeAreaLayoutGuide.trailingAnchor, constant: -20),
             ])
             if player == nil && !fallbackRequested && !isTornDown { loadingIndicator.startAnimating() }
+            if !resumingLabel.isHidden { loadingIndicator.startAnimating() }
             if starvation.isRecovering { showStarvationIndicator(true) }
+            layoutStatusCapsule()
         }
         statsTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] timer in
             guard let self = self else { timer.invalidate(); return }
@@ -1699,21 +2455,31 @@ final class RemuxAVPlayerViewController: AVPlayerViewController {
     }
 
     /// 1 Hz: stats, known / played position, a held seek target (and the
-    /// far-target hand-off), high-water mark, the positions reported to the
-    /// remux, the stuck-playback safety net, the one-time replacement of an
-    /// item started on live EVENT playlists.
+    /// far-target jump or hand-off), high-water mark, the positions reported
+    /// to the remux, the end of a jump's « Reprise à … », the stuck-playback
+    /// safety net, the one-time replacement of an item started on live EVENT
+    /// playlists.
     private func statsTick() {
         noteKnownPosition()
         notePlayedPosition()
         noteHeldSeek(isJump: false)
+        logPendingNavigation()
         checkFarSeekTarget()
         refreshStats()
         noteHighWater()
+        checkpointProgressIfDue()
         reportPlaybackPositions()
+        checkNativeResumeCover()
+        checkJumpLabel()
+        refreshResumingText()
         checkStuckPlayback()
         checkDirectStall()
         checkBoundedReverseScan()
         rebuildLiveBornItemIfEnded()
+        rebuildForLateSubtitlesIfDue()
+#if os(tvOS)
+        upNextTick()
+#endif
     }
 
     /// Bounded storage, 1 Hz: a reverse scan (a held rewind) stops at the
@@ -1766,7 +2532,8 @@ final class RemuxAVPlayerViewController: AVPlayerViewController {
     /// starvation recovery runs, the position it recovers (the user's target
     /// after a seek during the wait); during the start seek, its target
     /// (right after `seek(to:)` is issued `currentTime()` still reads the old
-    /// time — measured: 0.0 —, AVPlayer moves it a few ms later); else
+    /// time — measured: 0.0 —, AVPlayer moves it a few ms later); before the
+    /// start seek of a native resume, the resume point; else
     /// `currentTime()` — the playhead, or a pending seek target. nil while
     /// unknown.
     private func wantedPosition() -> Double? {
@@ -1775,8 +2542,15 @@ final class RemuxAVPlayerViewController: AVPlayerViewController {
             time = starvation.resumeTime
         } else if isSeekingToStart, let target = startSeekTarget {
             time = target
+        } else if isResumingNatively, player == nil || awaitingStartSeek, let target = remux?.resumeTargetSeconds {
+            // A native resume before its seek is issued: the item is not
+            // there yet, or still loads at 0:00 — the remux must not be told
+            // the player needs 0:00 (its conversion would go back there).
+            time = target
         } else {
-            time = player?.currentTime().seconds
+            // A user navigation the playhead does not show yet: its target.
+            time = navigation.wanted(current: player?.currentTime().seconds, played: playedPosition.lastPlayedTime,
+                                     clock: ProcessInfo.processInfo.systemUptime)
         }
         guard let time = time, time.isFinite, time >= 0 else { return nil }
         return time
@@ -1790,16 +2564,32 @@ final class RemuxAVPlayerViewController: AVPlayerViewController {
     /// as AVPlayer does at an item's end — progress is saved at the close
     /// as after one. Elsewhere the item is rebuilt in place (at the stuck
     /// position, i.e. a pending seek target too), at most twice for one
-    /// position, then VLC there. Never during a starvation recovery, before
-    /// the remux has finished, in the background, over AirPlay or in
-    /// Picture in Picture.
+    /// position, then VLC there. Never during a starvation recovery, in the
+    /// background, over AirPlay or in Picture in Picture.
+    ///
+    /// The same holds before the remux has finished once playback has run
+    /// and the media to play at the frozen position is on disk
+    /// (`RemuxPlayback.hasMedia`: 10 s of it): an item whose request for a
+    /// segment was held too long — a jump's first segments, a download about
+    /// as fast as the film — has dropped its video variant on tvOS, goes on
+    /// loading audio and never fails (`ResumePolicy.jumpNeedsNewItem`). It
+    /// is rebuilt the same way. (Not before playback ever ran: a start waits
+    /// for its first segments, and for the TV's switch to the film's
+    /// dynamic range, without being stuck.)
     private func checkStuckPlayback() {
         guard let player = player else { return }
         let remux = route == .remux ? self.remux : nil
-        let eligible = remux?.isFinished == true && hasAppeared && !starvation.isRecovering && !fallbackRequested
+        // A navigation still pending is where the player wants to be, not
+        // the old time a held seek may leave in `currentTime()` (a stuck
+        // item is rebuilt THERE, and never for media at the old time).
+        let time = (route == .remux ? pendingNavigationTarget() : nil) ?? player.currentTime().seconds
+        let isFinished = remux?.isFinished == true
+        let hasMediaThere = playedPosition.lastPlayedTime != nil && time.isFinite
+            && remux?.hasMedia(fromPlayerSeconds: time) == true
+        let eligible = (isFinished || hasMediaThere) && hasAppeared && !starvation.isRecovering && !fallbackRequested
             && !isTornDown && !isPictureInPictureActive && !player.isExternalPlaybackActive
             && UIApplication.shared.applicationState == .active
-        guard let stuckAt = stuckWatch.note(time: player.currentTime().seconds, clock: ProcessInfo.processInfo.systemUptime,
+        guard let stuckAt = stuckWatch.note(time: time, clock: ProcessInfo.processInfo.systemUptime,
                                             wantsPlayback: player.rate != 0,
                                             isItemReady: player.currentItem?.status == .readyToPlay,
                                             isEligible: eligible),
@@ -1811,11 +2601,18 @@ final class RemuxAVPlayerViewController: AVPlayerViewController {
                                                                         ?? session?.segmentDurations() ?? [],
                                                       itemDuration: player.currentItem?.duration.seconds)
         let action = stuckWatch.decide(at: stuckAt, endZoneStart: endZone)
-        print("[Player] AVPlayer stuck at \(String(format: "%.3f", stuckAt)) s on a finished remux "
-              + "(end zone from \(endZone.map { String(format: "%.3f", $0) } ?? "?") s) → \(action)")
+        print("[Player] AVPlayer stuck at \(String(format: "%.3f", stuckAt)) s on "
+              + (isFinished ? "a finished remux" : "media that is on disk")
+              + " (end zone from \(endZone.map { String(format: "%.3f", $0) } ?? "?") s) → \(action)")
         switch action {
         case .naturalEnd:
             player.pause()
+#if os(tvOS)
+            upNextItemEnded(reason: "natural end (stuck at the end)")
+#endif
+            // No end notification comes: the iPhone / iPad's episode
+            // chaining (`UpNextRemuxClock`) is told here.
+            onNaturalEnd?()
         case .rebuild:
             if starvation.rebuildNow(player: player, at: stuckAt, reason: StuckPlaybackWatch.reason) {
                 // The recovery seeks itself: a pending resume seek is moot.
@@ -1837,6 +2634,8 @@ final class RemuxAVPlayerViewController: AVPlayerViewController {
         liveBornWatch.attached(ObjectIdentifier(item),
                                isEventSession: (remux?.session?.totalDurationSeconds ?? 1) <= 0,
                                remuxFinished: remux?.isFinished ?? true)
+        // Its master playlist has every OpenSubtitles list known so far.
+        lateSubtitles.attached()
     }
 
     /// Remux path, 1 Hz: AVFoundation keeps the live bookkeeping of an item
@@ -1855,17 +2654,43 @@ final class RemuxAVPlayerViewController: AVPlayerViewController {
     private func rebuildLiveBornItemIfEnded() {
         guard let player = player, route == .remux, let remux = remux else { return }
         let time = player.currentTime().seconds
-        let eligible = hasAppeared && !starvation.isRecovering && !fallbackRequested && !isTornDown
-            && !resumeChoicePending && !awaitingStartSeek && !isSeekingToStart && time.isFinite && time >= 0
-            && !isPictureInPictureActive && !player.isExternalPlaybackActive
-            && UIApplication.shared.applicationState == .active
         guard liveBornWatch.shouldRebuild(current: player.currentItem.map { ObjectIdentifier($0) },
-                                          remuxFinished: remux.isFinished, isEligible: eligible) else { return }
+                                          remuxFinished: remux.isFinished,
+                                          isEligible: canRebuildInPlace(player, at: time)) else { return }
         let playing = playIntent.wantsPlayback
         print("[Player] remux finished: replacing the item AVPlayer started on live EVENT playlists at "
               + "\(String(format: "%.3f", time)) s (\(playing ? "playing" : "paused"))")
         starvation.rebuildNow(player: player, at: time, reason: LiveBornItemWatch.reason,
                               resumesPlayback: playing, exactPosition: true)
+    }
+
+    /// The current item can be replaced in place at `time` now
+    /// (`rebuildNow`): on screen and active, no recovery, hand-off, resume
+    /// question nor start seek in the way, not over AirPlay nor in Picture
+    /// in Picture.
+    private func canRebuildInPlace(_ player: AVPlayer, at time: Double) -> Bool {
+        return hasAppeared && !starvation.isRecovering && !fallbackRequested && !isTornDown
+            && !resumeChoicePending && !awaitingStartSeek && !isSeekingToStart && time.isFinite && time >= 0
+            && !isPictureInPictureActive && !player.isExternalPlaybackActive
+            && UIApplication.shared.applicationState == .active
+    }
+
+    /// Remux path, 1 Hz: the OpenSubtitles list came after AVPlayer read the
+    /// master playlist (`LateSubtitlesWatch`: it reads it once). The item is
+    /// rebuilt once in place on a master that lists it, the way a live-born
+    /// one is (selection and position kept, playing on only if the user
+    /// wants playback); subtitles the user did not choose get the preferred
+    /// language's, as on a first start. Waits for the next tick as
+    /// `rebuildLiveBornItemIfEnded` does, and until playback has started.
+    private func rebuildForLateSubtitlesIfDue() {
+        guard let player = player, route == .remux, remux != nil, player.currentItem != nil else { return }
+        let time = player.currentTime().seconds
+        guard lateSubtitles.shouldRebuild(isEligible: didStartPlayback && canRebuildInPlace(player, at: time)) else { return }
+        let playing = playIntent.wantsPlayback
+        print("[Player] OpenSubtitles answered after the master playlist was read: replacing the item at "
+              + "\(String(format: "%.3f", time)) s (\(playing ? "playing" : "paused")) for its subtitles")
+        starvation.rebuildNow(player: player, at: time, reason: LateSubtitlesWatch.reason,
+                              resumesPlayback: playing, exactPosition: true, picksSubtitlesAnew: true)
     }
 
     override var canBecomeFirstResponder: Bool { return true }
@@ -1927,6 +2752,8 @@ final class RemuxAVPlayerViewController: AVPlayerViewController {
 
     @objc private func toggleStatsOverlay() {
         statsLabel.isHidden.toggle()
+        // Its text is only kept up to date while it shows.
+        refreshStats()
     }
 
     /// Formats AVPlayer resolved, refreshed asynchronously by the stats timer.
@@ -1944,7 +2771,12 @@ final class RemuxAVPlayerViewController: AVPlayerViewController {
         }
     }
 
+    /// The stats overlay's text — only while it shows: it is hidden 10 s
+    /// after the start, and this used to reload every track's format
+    /// description and rebuild the text once a second for the whole film,
+    /// for a hidden label.
     private func refreshStats() {
+        guard !statsLabel.isHidden else { return }
         reloadTrackSummaries()
         var lines = ["Engine  \(engineLine)"]
         if player?.currentItem != nil {
@@ -1982,11 +2814,14 @@ final class RemuxAVPlayerViewController: AVPlayerViewController {
 #if os(tvOS)
     // MARK: - Up Next (tvOS episodes)
 
-    /// Proposes the next episode 30 s before the end — the native
-    /// counterpart of the VLC player's "Up Next" (AVKit content proposal:
-    /// the video keeps playing in a frame while a 30 s countdown runs).
+    /// Proposes the next episode before the end — the native counterpart
+    /// of the VLC player's "Up Next" (AVKit content proposal: the video
+    /// keeps playing in a frame while the countdown runs). As early as the
+    /// session's card: the setting « Next Episode Card », at most a third
+    /// of the file (`UpNextPreferences.legacyCardLead`).
     private func installUpNextIfNeeded(for item: AVPlayerItem) {
-        guard nextEpisode != nil, onPlayNext != nil else { return }
+        // With a session, the session says when (`reconcileUpNextCard`).
+        guard upNextSession == nil, nextEpisode != nil, onPlayNext != nil else { return }
         upNextObservation = item.observe(\.duration, options: [.initial, .new]) { [weak self] observed, _ in
             DispatchQueue.main.async { self?.configureUpNextProposal(on: observed) }
         }
@@ -2001,13 +2836,14 @@ final class RemuxAVPlayerViewController: AVPlayerViewController {
         guard duration.isFinite, duration > 60 else { return }
         upNextObservation?.invalidate()
         upNextObservation = nil
-        let proposal = AVContentProposal(contentTimeForTransition: CMTime(seconds: duration - 30, preferredTimescale: 600),
+        let lead = UpNextPreferences.legacyCardLead(duration: duration)
+        let proposal = AVContentProposal(contentTimeForTransition: CMTime(seconds: duration - lead, preferredTimescale: 600),
                                          title: UpNextProposalViewController.displayTitle(for: episode),
                                          previewImage: nil)
         // Our own countdown (UpNextProposalViewController), not AVKit's.
         proposal.automaticAcceptanceInterval = .nan
         item.nextContentProposal = proposal
-        print("[Player] Up Next: S\(episode.season)E\(episode.episode) proposed at \(Int(duration - 30)) s")
+        print("[Player] Up Next: S\(episode.season)E\(episode.episode) proposed at \(Int(duration - lead)) s")
     }
 
     private func makeUpNextViewController(for episode: Episode) -> UpNextProposalViewController {
@@ -2030,8 +2866,151 @@ final class RemuxAVPlayerViewController: AVPlayerViewController {
         tearDown()
         dismissPlayer(animated: true) { onPlayNext(episode) }
     }
+
+    // MARK: - Episode chaining (5.3.0): the session drives the card
+
+    private func bindUpNext(_ session: UpNextSession) {
+        upNextSession = session
+        // Async: the session publishes before it starts the next episode,
+        // which closes this player first (`closeForNextEpisode`).
+        upNextCardSubscription = session.$card.receive(on: DispatchQueue.main).sink { [weak self] card in
+            self?.reconcileUpNextCard(card)
+        }
+    }
+
+    /// 1 Hz: where the file is, to the session — its length when known (a
+    /// remux still writing an EVENT playlist: its header's length when it
+    /// has one, else none: the card comes after the file, never on a guess).
+    private func upNextTick() {
+        guard let session = upNextSession, !isTornDown, !fallbackRequested, !isHandingOff,
+              let player = player, let item = player.currentItem, item.status == .readyToPlay,
+              !starvation.isRecovering, !isResumingNatively, !awaitingStartSeek, !isSeekingToStart else { return }
+        // A navigation still pending is where the user is (`wantedPosition`:
+        // its target), not the old time a held seek leaves in `currentTime()`
+        // — a rewind before the card takes the card away at once.
+        guard let position = wantedPosition() else { return }
+        var duration: Double? = item.duration.seconds
+        if let known = duration, !known.isFinite || known <= 0 { duration = nil }
+        if duration == nil, route == .remux, let total = remux?.session?.totalDurationSeconds, total > 0 { duration = total }
+        #if DEBUG
+        // `-PTDebugUpNextNoDuration YES` (bench): the length is never told,
+        // as on an EVENT playlist to its end — the after-play card.
+        if UserDefaults.standard.bool(forKey: "PTDebugUpNextNoDuration") { duration = nil }
+        #endif
+        session.tick(position: position, duration: duration, isPlaying: playIntent.wantsPlayback)
+        reconcileUpNextCard(session.card)
+    }
+
+    /// The file ended (AVPlayer's notification, or the stuck-at-the-end
+    /// safety net): the session takes the end over (after-play card, start,
+    /// or the close) — nothing else here.
+    private func upNextItemEnded(reason: String) {
+        guard let session = upNextSession, !isTornDown, !fallbackRequested, !isHandingOff else { return }
+        // Not while the user is elsewhere: a recovery (a jump's wait keeps
+        // the old item at its rate), a navigation pending to well before the
+        // end (`UpNextNavigationRule`; the Mac's end observer skips a
+        // recovering player too).
+        let pending = pendingNavigationTarget()
+        var duration: Double? = player?.currentItem?.duration.seconds
+        if let known = duration, !known.isFinite || known <= 0 { duration = nil }
+        if duration == nil, route == .remux, let total = remux?.session?.totalDurationSeconds, total > 0 { duration = total }
+        guard UpNextNavigationRule.isFileEnd(isRecovering: starvation.isRecovering, pendingTarget: pending,
+                                             duration: duration) else {
+            print("[UpNext] native player: an end of the item (\(reason)) ignored — "
+                  + (starvation.isRecovering ? "a recovery runs" : "a navigation to \(String(format: "%.1f", pending ?? .nan)) s is pending"))
+            return
+        }
+        print("[UpNext] native player: end of the file (\(reason))")
+        if session.itemEnded() { reconcileUpNextCard(session.card) }
+    }
+
+    /// Shows, keeps or hides the card as the session says. A countdown on
+    /// a healthy item: AVKit's content proposal (the video shrunk at the
+    /// top), asked to present one second ahead; AVKit not presenting it in
+    /// `upNextProposalPatience` s, or any other card (after the file, « Still
+    /// watching? »): the overlay over the player.
+    private func reconcileUpNextCard(_ card: UpNextCardState?) {
+        guard upNextSession != nil, !isTornDown, !isClosingForNextEpisode, !isHandingOff, !fallbackRequested else { return }
+        guard let card = card else {
+            hideUpNextCard()
+            return
+        }
+        if upNextProposal?.isShowing == true { return }
+        if let overlay = upNextOverlay, overlay.presentingViewController != nil, !overlay.isBeingDismissed { return }
+        guard hasAppeared, viewIfLoaded?.window != nil else { return }
+        let now = ProcessInfo.processInfo.systemUptime
+        if card.kind == .countdown, let player = player, let item = player.currentItem, item.status == .readyToPlay,
+           presentedViewController == nil {
+            if let asked = upNextProposalRequestedAt {
+                guard now - asked >= Self.upNextProposalPatience else { return }
+                print("[UpNext] AVKit did not present the proposal in \(Int(Self.upNextProposalPatience)) s — the overlay instead")
+            } else {
+                // Not while a navigation's seek is held: its proposal would
+                // be timed on the old position (« AVKit proposal at 92 s »
+                // for a move to 151.8 s); asked at a later tick, once the
+                // player's time is where the user is (`wantedPosition`).
+                let current = player.currentTime().seconds
+                guard current.isFinite, let wanted = wantedPosition(),
+                      abs(current - wanted) <= UserNavigationTarget.thresholdSeconds else { return }
+                let at = current + 1
+                upNextProposalRequestedAt = now
+                item.nextContentProposal = nil
+                let proposal = AVContentProposal(contentTimeForTransition: CMTime(seconds: at, preferredTimescale: 600),
+                                                 title: card.title, previewImage: nil)
+                // The session's countdown, not AVKit's.
+                proposal.automaticAcceptanceInterval = .nan
+                item.nextContentProposal = proposal
+                print("[UpNext] native card: AVKit proposal at \(Int(at)) s")
+                return
+            }
+        }
+        presentUpNextOverlay(card)
+    }
+
+    private func presentUpNextOverlay(_ card: UpNextCardState) {
+        guard let session = upNextSession else { return }
+        // Not over another presentation (the resume question, the deficit
+        // toast, the chooser): tried again at the next tick.
+        guard presentedViewController == nil, transitionCoordinator == nil else { return }
+        player?.currentItem?.nextContentProposal = nil
+        let overlay = UpNextOverlayViewController(session: session, summary: session.next.summary)
+        upNextOverlay = overlay
+        print("[UpNext] native card: overlay (\(card.kind.rawValue))")
+        present(overlay, animated: true)
+    }
+
+    private func hideUpNextCard() {
+        upNextProposalRequestedAt = nil
+        player?.currentItem?.nextContentProposal = nil
+        if let proposal = upNextProposal, proposal.isShowing {
+            proposal.dismissForSession()
+        }
+        upNextProposal = nil
+        if let overlay = upNextOverlay, overlay.presentingViewController != nil, !overlay.isBeingDismissed {
+            overlay.dismiss(animated: true)
+        }
+        upNextOverlay = nil
+    }
 #endif
 }
+
+#if os(tvOS)
+extension RemuxAVPlayerViewController: UpNextTVPlayer {
+
+    /// The next episode (or today's flow): this player closes as at the
+    /// end of an episode — progress saved, stream cancelled and its data
+    /// deleted (`tearDown`) — before `then` starts anything.
+    func closeForNextEpisode(then: @escaping () -> Void) {
+        guard !isTornDown else { return then() }
+        isClosingForNextEpisode = true
+        print("[UpNext] native player closes at the session's request (next episode, fallback or end) — stream cancelled, its data deleted")
+        tearDown()
+        dismissPlayer(animated: true, completion: then)
+    }
+
+    var upNextPresenter: UIViewController { self }
+}
+#endif
 
 extension RemuxAVPlayerViewController: AVPlayerViewControllerDelegate {
 
@@ -2057,21 +3036,69 @@ extension RemuxAVPlayerViewController: AVPlayerViewControllerDelegate {
     /// available instead, with the message. Forward moves, rewinds within
     /// what is kept and full mode: as the user asked.
     func playerViewController(_ playerViewController: AVPlayerViewController,
-                              timeToSeekAfterUserNavigatedFrom oldTime: CMTime, to targetTime: CMTime) -> CMTime {
-        let target = targetTime.seconds
+                              timeToSeekAfterUserNavigatedFrom oldTime: CMTime, to proposedTime: CMTime) -> CMTime {
+        // A press while the native resume's item is put in place, before its start seek: no
+        // move (the player has no clock yet) — AVKit's own seek goes to the resume point too.
+        if let resume = ResumePolicy.startSeekOverride(isResumingNatively: isResumingNatively, awaitingStartSeek: awaitingStartSeek,
+                                                       isItemReady: player?.currentItem?.status == .readyToPlay,
+                                                       resumeTarget: remux?.resumeTargetSeconds) {
+            print("[Resume] navigation to \(String(format: "%.1f", proposedTime.seconds)) s while the resume's item is put in place "
+                  + "— ignored, AVKit is sent to the resume point \(String(format: "%.1f", resume)) s")
+            return CMTime(seconds: resume, preferredTimescale: 600)
+        }
+        // Counted from a new item's start while the player is elsewhere: the
+        // same step from where it is (`NavigationRebase`).
+        let target = rebasedNavigationTarget(old: oldTime.seconds, target: proposedTime.seconds)
+        let targetTime = target == proposedTime.seconds ? proposedTime : CMTime(seconds: target, preferredTimescale: 600)
         guard !isTornDown, !fallbackRequested, let session = boundedStorage, session.isBounded,
               let reference = playedPosition.lastPlayedTime ?? (oldTime.seconds.isFinite ? oldTime.seconds : nil),
               let landing = BoundedStorageUX.limitedRewindTarget(target, from: reference, session: session) else {
+            noteUserNavigation(from: oldTime.seconds, to: target)
             return targetTime
         }
-        BoundedStorageUX.logLimited(player: "AVPlayer (navigation)", target: target, playhead: reference, landing: landing)
+        BoundedStorageUX.logLimited(player: "AVPlayer (navigation)", target: target, playhead: reference, landing: landing,
+                                    session: boundedStorage)
+        logRewindBlockedByJump(target: target, landing: landing)
         showBoundedToast()
+        noteUserNavigation(from: oldTime.seconds, to: landing)
         return CMTime(seconds: landing, preferredTimescale: 600)
+    }
+
+    /// AVKit's seek for a navigation completed and it plays on (it calls
+    /// `setRate:` itself right after): only logged — the intent was taken
+    /// at the navigation (`noteUserNavigation`).
+    func playerViewController(_ playerViewController: AVPlayerViewController,
+                              willResumePlaybackAfterUserNavigatedFrom oldTime: CMTime, to targetTime: CMTime) {
+        // What the player is at that moment decides what a target far from
+        // the navigation's means (a held seek AVKit counted from a new item's
+        // start, or a real seek): logs only, never acted on.
+        let now = ProcessInfo.processInfo.systemUptime
+        let item = player?.currentItem
+        let isReplacement = item != nil && item === starvation.replacementItem
+        let since = lastItemReplacementAt.map { String(format: "last item replacement %.1f s ago", now - $0) }
+            ?? "no item replacement yet"
+        print("[Player] AVKit resumes playback after the navigation to \(String(format: "%.1f", targetTime.seconds)) s"
+              + " (from \(String(format: "%.1f", oldTime.seconds)) s; item: "
+              + (item == nil ? "none" : isReplacement ? "the recovery's new one" : "not a recovery's")
+              + ", \(since), rate \(player?.rate ?? 0)"
+              + ", item \(item.map { Self.describe($0.status) } ?? "none")"
+              + ", the player reads \(String(format: "%.1f", player?.currentTime().seconds ?? .nan)) s"
+              + (starvation.isRecovering ? ", recovery running" : "") + ")")
     }
 
     // "Up Next" (tvOS episodes).
 
     func playerViewController(_ playerViewController: AVPlayerViewController, shouldPresent proposal: AVContentProposal) -> Bool {
+        if let session = upNextSession {
+            // The session's card, while it still wants one.
+            guard session.card != nil, !isTornDown, !fallbackRequested, !isClosingForNextEpisode,
+                  presentedViewController == nil else { return false }
+            let controller = UpNextProposalViewController(session: session)
+            upNextProposal = controller
+            playerViewController.contentProposalViewController = controller
+            print("[UpNext] native card: AVKit presents the proposal")
+            return true
+        }
         guard let episode = nextEpisode, onPlayNext != nil, !isTornDown, !fallbackRequested, !didAcceptUpNext else {
             return false
         }
@@ -2080,6 +3107,12 @@ extension RemuxAVPlayerViewController: AVPlayerViewControllerDelegate {
     }
 
     func playerViewController(_ playerViewController: AVPlayerViewController, didAccept proposal: AVContentProposal) {
+        if let session = upNextSession {
+            // Only AVKit itself accepts (the session's card answers the
+            // session directly); its automatic acceptance is off (NaN).
+            if session.card != nil { session.accept(source: .avkit(cardUp: upNextProposal?.cardUp)) }
+            return
+        }
         // The card's own completion normally gets there first (once it is
         // hidden); this is the safety net.
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.75) { [weak self] in
@@ -2089,37 +3122,265 @@ extension RemuxAVPlayerViewController: AVPlayerViewControllerDelegate {
 
     func playerViewController(_ playerViewController: AVPlayerViewController, didReject proposal: AVContentProposal) {
         player?.currentItem?.nextContentProposal = nil
+        // Menu on AVKit's card: « Back to the Video ».
+        if let session = upNextSession, session.card?.kind == .countdown { session.cancel() }
     }
 #endif
 }
 
+// MARK: - User navigation the playhead does not show
+
+extension RemuxAVPlayerViewController {
+
+    /// tvOS: AVKit's navigation (transport bar, Siri Remote), confirmed —
+    /// the final target, after the bounded-storage limit. It is where the
+    /// player wants data from now on (`wantedPosition`), whatever
+    /// `currentTime()` reads: on the Apple TV it kept the time from before
+    /// a seek held for a segment the resume's jump skipped, so the
+    /// conversion never jumped and the item failed (-12889). Reported to
+    /// the remux at once: a target that is not on disk makes it jump there,
+    /// and the jump's wait (« Reprise à … », a new item there once its media
+    /// is written) takes over. AVKit resumes playback after a confirmed
+    /// navigation, paused before or not (measured, tvOS 26.5 simulator) —
+    /// but only once its own seek completes, which a held one may never
+    /// do: the intent is taken now. During a recovery the move is the
+    /// recovery's new target (`userNavigated`).
+    private func noteUserNavigation(from old: Double, to target: Double) {
+        guard !isTornDown, !fallbackRequested, target.isFinite, target >= 0, let player = player else { return }
+        let current = player.currentTime().seconds
+        // (Read BEFORE AVKit issues its seek: it says nothing of what
+        // `currentTime()` shows during it — `logPendingNavigation` does.)
+        print("[Player] navigation \(String(format: "%.1f", old)) → \(String(format: "%.1f", target)) s ("
+              + "\(playIntent.wantsPlayback ? "playing" : "paused"), before AVKit's seek the player reads "
+              + "\(String(format: "%.1f", current)) s, \(Self.describe(player.timeControlStatus)))")
+        if starvation.isRecovering {
+            starvation.userNavigated(to: target, from: old.isFinite ? old : current, resumesPlayback: true)
+            return
+        }
+        if route == .remux, isSeekingToStart, startSeekTarget != nil {
+            // During a native resume's start seek (under its cover): AVKit's
+            // seek supersedes it — the move is the new start, and the
+            // resume's start lock must not keep the conversion at the old one.
+            print("[Resume] navigation during the start seek: \(String(format: "%.1f", target)) s is the new start")
+            startSeekTarget = target
+            remux?.releaseStartPin()
+            navigation.navigated(from: old.isFinite ? old : current, to: target, played: playedPosition.lastPlayedTime,
+                                 clock: ProcessInfo.processInfo.systemUptime)
+            reportPlaybackPositions()
+            return
+        }
+        guard isItemHealthy else { return }
+        // AVKit resumes playback itself once its seek completes (the rate
+        // observer takes the intent then); a seek it holds for media still to
+        // be written may never complete: the intent is taken now (remux: only
+        // then — a paused skip over media on disk keeps the intent AVKit's).
+        if route != .remux || remux?.hasMedia(fromPlayerSeconds: target, cushion: 0) != true {
+            playIntent.noteUserPlayback(playing: true)
+        }
+        // A press chained on a move still pending (AVKit counts it from that
+        // move's target): the move's origin is kept, read before `navigated`
+        // replaces it (`UserNavigationTarget.origin(ofMoveFrom:current:)`).
+        let origin = navigation.origin(ofMoveFrom: old.isFinite ? old : current, current: current)
+        if let origin = origin, old.isFinite, origin != old {
+            print("[Player] navigation chained on the pending one: from \(String(format: "%.1f", origin)) s, where the player still reads")
+        }
+        navigation.navigated(from: origin, to: target, played: playedPosition.lastPlayedTime,
+                             clock: ProcessInfo.processInfo.systemUptime)
+        pendingNavigationLogs = 0
+        reportPlaybackPositions()
+        noteHeldSeek(isJump: false)
 #if os(tvOS)
-/// tvOS "Up Next" card presented by AVKit 30 s before the end of an episode:
+        // The « next episode » countdown hears the move now, not at the next
+        // tick: a jump's wait (`ResumePolicy.jumpGraceSeconds` on) stops the
+        // ticks, and the card would stay up over « Reprise à … ».
+        upNextTick()
+#endif
+    }
+
+    /// `PlaybackStarvationRecovery.onNavigatedDuringRebuild`: the user moved
+    /// while the recovery's new item was put in place; it now sits at the
+    /// recovery's position — the move is made now, as any navigation.
+    private func navigateAfterRebuild(to target: Double) {
+        guard !isTornDown, !fallbackRequested, let player = player else { return }
+        print("[Player] the navigation made while the new item was put in place: seeking to \(String(format: "%.1f", target)) s")
+        let from = player.currentTime().seconds
+        player.seek(to: CMTime(seconds: target, preferredTimescale: 600), toleranceBefore: .zero, toleranceAfter: .zero)
+        noteUserNavigation(from: from, to: target)
+    }
+
+    /// The delegate's target, re-based when AVKit counts from a new item's
+    /// start (`NavigationRebase`), logged when it is.
+    private func rebasedNavigationTarget(old: Double, target: Double) -> Double {
+        let now = ProcessInfo.processInfo.systemUptime
+        let current = player?.currentTime().seconds
+        let rebased = NavigationRebase.target(old: old, target: target, current: current,
+                                              sinceReplacement: lastItemReplacementAt.map { now - $0 })
+        if rebased != target {
+            print("[Player] navigation \(String(format: "%.1f", old)) → \(String(format: "%.1f", target)) s counted from the new "
+                  + "item's start while the player reads \(String(format: "%.1f", current ?? .nan)) s — "
+                  + "\(String(format: "%.1f", rebased)) s instead")
+        }
+        return rebased
+    }
+
+    /// 1 Hz: while a navigation is pending, what the player shows — the
+    /// question the device must answer (does `currentTime()` show a held
+    /// seek?) — a few times, not every second; and why a target was dropped.
+    private func logPendingNavigation() {
+        guard let player = player else { return }
+        let seen = loggedNavigationTarget
+        let pending = pendingNavigationTarget()
+        loggedNavigationTarget = pending
+        if navigation.dropCount != loggedDropCount, let drop = navigation.lastDrop,
+           let dropped = navigation.lastDroppedTarget ?? seen {
+            // The target really dropped (a move made and dropped between two
+            // ticks is told too, with its own position).
+            loggedDropCount = navigation.dropCount
+            print("[Player] navigation to \(String(format: "%.1f", dropped)) s no longer pending: \(drop.rawValue) "
+                  + "(the player reads \(String(format: "%.1f", player.currentTime().seconds)) s)")
+            if pending == nil { return }
+        }
+        guard let pending = pending else { return }
+        pendingNavigationLogs += 1
+        guard [1, 3, 10, 30].contains(pendingNavigationLogs) else { return }
+        let age = navigation.age(clock: ProcessInfo.processInfo.systemUptime) ?? 0
+        print("[Player] navigation to \(String(format: "%.1f", pending)) s pending for \(String(format: "%.1f", age)) s: "
+              + "the player reads \(String(format: "%.1f", player.currentTime().seconds)) s, "
+              + "\(Self.describe(player.timeControlStatus)), rate \(player.rate)"
+              + ", item \(player.currentItem.map { Self.describe($0.status) } ?? "none")")
+    }
+
+    private static func describe(_ status: AVPlayer.TimeControlStatus) -> String {
+        switch status {
+        case .paused: return "paused"
+        case .waitingToPlayAtSpecifiedRate: return "waiting"
+        case .playing: return "playing"
+        @unknown default: return "status \(status.rawValue)"
+        }
+    }
+
+    private static func describe(_ status: AVPlayerItem.Status) -> String {
+        switch status {
+        case .readyToPlay: return "ready"
+        case .failed: return "failed"
+        case .unknown: return "not ready"
+        @unknown default: return "status \(status.rawValue)"
+        }
+    }
+
+    /// `RemuxPlayback.onHoleRequested`: AVPlayer asks for a segment a jump
+    /// skipped, behind the position reported — it is seeking there. When
+    /// the position wanted does not say so already (`HoleRequestRule`), the
+    /// segment (2.5 s into it at most) becomes the wanted position (`UserNavigationTarget`),
+    /// reported at once: the conversion jumps there instead of leaving the
+    /// request to time out. tvOS: the play intent becomes playing — AVKit
+    /// issues no seek on a paused player before the move is confirmed (rig:
+    /// presses, a held press, no seek until the click), and it resumes after
+    /// a confirmed one; iOS / Mac: left as it is (a timeline drag is no
+    /// confirmation; a paused user gets the picture there, paused:
+    /// `waitForJump(…rebuildsWhilePaused…)`). Never over a target AVKit's
+    /// delegate gave (the user's own word, `isConfirmed`), nor on an item
+    /// that is not healthy (start seek, recovery, hand-off). Bounded
+    /// storage: a hole is media never downloaded — a rewind there is
+    /// blocked at the earliest point kept, with the message, as the
+    /// delegate's limit does.
+    private func holeRequested(start: Double, end: Double) {
+        guard !isTornDown, !fallbackRequested, route == .remux, let remux = remux,
+              isItemHealthy, let player = player else { return }
+        if pendingNavigationTarget() != nil, navigation.isConfirmed { return }
+        let current = player.currentTime().seconds
+        if remux.isStorageBounded {
+#if os(tvOS)
+            guard let session = boundedStorage, session.isBounded, let reference = playedPosition.lastPlayedTime,
+                  start < reference,
+                  let landing = BoundedStorageUX.limitedRewindTarget(start, from: reference, session: session),
+                  !(current.isFinite && abs(current - landing) <= UserNavigationTarget.thresholdSeconds) else { return }
+            print("[Player] AVPlayer asks for \(String(format: "%.1f", start))–\(String(format: "%.1f", end)) s, which a jump "
+                  + "skipped (bounded storage): a rewind past what is kept — blocked")
+            limitRewind(target: start, from: reference, landing: landing)
+#endif
+            // (iOS: AVKit seeks all along a timeline drag and `currentTime()`
+            // shows it — the time-jump check limits the rewind after the drag.)
+            return
+        }
+        let wanted = wantedPosition()
+        guard HoleRequestRule.movesPlayer(segmentStart: start, segmentEnd: end, wanted: wanted) else { return }
+        print("[Player] AVPlayer asks for \(String(format: "%.1f", start))–\(String(format: "%.1f", end)) s, which a jump "
+              + "skipped, while the position wanted reads \(wanted.map { String(format: "%.1f", $0) } ?? "?") s — a seek there")
+        // A little inside the segment: a target on its very start would put
+        // the new item (pre-positioned, then up to 2 s before) in the hole
+        // before it (measured: never ready, VLC after 30 s).
+        let target = start + min(2.5, max(0, end - start) / 2)
+#if os(tvOS)
+        playIntent.noteUserPlayback(playing: true)
+#endif
+        navigation.navigated(from: current, to: target, played: playedPosition.lastPlayedTime,
+                             clock: ProcessInfo.processInfo.systemUptime, confirmed: false)
+        pendingNavigationLogs = 0
+        reportPlaybackPositions()
+        noteHeldSeek(isJump: false)
+    }
+
+    /// The navigation's target while it is still pending (a stale one is
+    /// dropped first, as `wantedPosition` does): what a failure of the item
+    /// recovers when no held seek was seen.
+    private func pendingNavigationTarget() -> Double? {
+        _ = navigation.wanted(current: player?.currentTime().seconds, played: playedPosition.lastPlayedTime,
+                              clock: ProcessInfo.processInfo.systemUptime)
+        return navigation.target
+    }
+}
+
+#if os(tvOS)
+/// tvOS "Up Next" card presented by AVKit before the end of an episode (Settings › Next
+/// Episode Card: 60 s by default, at most a third of the file):
 /// the current episode keeps playing in a frame at the top, the next one is
-/// shown below with a countdown — like the VLC player's Up Next screen.
-/// « Lire maintenant » or the end of the countdown → next episode;
-/// « Revenir à la vidéo » → keep watching.
+/// shown below (`UpNextCardContentView`) — like the VLC player's Up Next.
+///
+/// Two modes:
+/// - with an `UpNextSession` (5.3.0): the session's card — version line,
+///   countdown to the end of the file, « Still watching? » — and three
+///   buttons answering the session (« Play Now », « Back to the Video »,
+///   « Choose Version »); the player hides it when the session's card goes;
+/// - without one (no next episode the session can offer): the card of
+///   before 5.3, its own countdown (the same lead, counted on the file's
+///   time), two buttons.
 final class UpNextProposalViewController: AVContentProposalViewController {
 
     var onAccept: (() -> Void)?
     var onDefer: (() -> Void)?
 
     private let episode: Episode
+    private weak var session: UpNextSession?
+    private var subscription: AnyCancellable?
+    /// Set by `startCountdown` (30: only if the player has no item then).
     private var secondsLeft = 30
+    /// The card of before 5.3: its countdown's length (the setting, at most
+    /// a third of the file; `startCountdown`).
+    private var legacyTotal = 30
     private var countdownTimer: Timer?
     private var didFinish = false
+    private let content = UpNextCardContentView()
+    /// When the card was on screen (`viewDidAppear`): the session's « Play
+    /// Now » / « Continue » count one second later (`UpNextPressGuard`: a
+    /// click meant for the player as the card slid in).
+    private var appearedAt: TimeInterval?
 
-    private let imageView = UIImageView()
-    private let captionLabel = UILabel()
-    private let titleLabel = UILabel()
-    private let detailLabel = UILabel()
-    private let summaryLabel = UILabel()
-    private let countdownLabel = UILabel()
-    private let playButton = UIButton(type: .system)
-    private let backButton = UIButton(type: .system)
+    /// How long the card has been on screen (nil: not yet).
+    var cardUp: TimeInterval? {
+        UpNextPressGuard.cardUp(appearedAt: appearedAt, now: ProcessInfo.processInfo.systemUptime)
+    }
 
+    /// The card of before 5.3 (no session).
     init(episode: Episode) {
         self.episode = episode
+        super.init(nibName: nil, bundle: nil)
+    }
+
+    /// The session's card.
+    init(session: UpNextSession) {
+        self.episode = session.next
+        self.session = session
         super.init(nibName: nil, bundle: nil)
     }
 
@@ -2127,10 +3388,17 @@ final class UpNextProposalViewController: AVContentProposalViewController {
         return nil
     }
 
-    /// "S2 · É3 — Title" (proposal title, logs).
+    /// The card is up (not leaving).
+    var isShowing: Bool { !didFinish && viewIfLoaded?.window != nil }
+
+    /// "S2 · E3 — Title" (proposal title, logs).
     static func displayTitle(for episode: Episode) -> String {
-        let name = episode.title.isEmpty ? "Épisode \(episode.episode)" : episode.title
-        return "S\(episode.season) · É\(episode.episode) — \(name)"
+        return String(format: "S%lld · E%lld".localized, episode.season, episode.episode) + " — " + name(of: episode)
+    }
+
+    /// The episode's title, else "Episode 3" in the app's language.
+    private static func name(of episode: Episode) -> String {
+        episode.title.isEmpty ? String(format: "Episode %lld".localized, episode.episode) : episode.title
     }
 
     /// The playing episode, shrunk to the top centre (≈ 42 % of the width).
@@ -2143,85 +3411,56 @@ final class UpNextProposalViewController: AVContentProposalViewController {
     }
 
     override var preferredFocusEnvironments: [UIFocusEnvironment] {
-        return [playButton]
+        return [content.playButton]
     }
 
     override func viewDidLoad() {
         super.viewDidLoad()
         view.backgroundColor = .clear
-
-        imageView.contentMode = .scaleAspectFill
-        imageView.clipsToBounds = true
-        imageView.layer.cornerRadius = 12
-        imageView.backgroundColor = UIColor(white: 1, alpha: 0.08)
-        imageView.translatesAutoresizingMaskIntoConstraints = false
-        imageView.widthAnchor.constraint(equalTo: imageView.heightAnchor, multiplier: 16.0 / 9.0).isActive = true
-
-        captionLabel.text = "Épisode suivant"
-        captionLabel.font = .preferredFont(forTextStyle: .headline)
-        captionLabel.textColor = UIColor(white: 1, alpha: 0.7)
-
-        let name = episode.title.isEmpty ? "Épisode \(episode.episode)" : episode.title
-        titleLabel.text = name
-        titleLabel.font = .preferredFont(forTextStyle: .title2)
-        titleLabel.textColor = .white
-        titleLabel.numberOfLines = 2
-
-        var details = "Saison \(episode.season) · Épisode \(episode.episode)"
-        if let show = episode.show?.title, !show.isEmpty { details = show + " — " + details }
-        detailLabel.text = details
-        detailLabel.font = .preferredFont(forTextStyle: .callout)
-        detailLabel.textColor = UIColor(white: 1, alpha: 0.7)
-
-        let summary = episode.summary.trimmingCharacters(in: .whitespacesAndNewlines)
-        summaryLabel.text = summary == "No summary available.".localized ? "" : summary
-        summaryLabel.font = .preferredFont(forTextStyle: .callout)
-        summaryLabel.textColor = UIColor(white: 1, alpha: 0.85)
-        // Fits below the shrunk player on a 1080-point screen.
-        summaryLabel.numberOfLines = 3
-
-        countdownLabel.font = .monospacedDigitSystemFont(ofSize: UIFont.preferredFont(forTextStyle: .headline).pointSize,
-                                                         weight: .semibold)
-        countdownLabel.textColor = .white
-        updateCountdownLabel()
-
-        let textStack = UIStackView(arrangedSubviews: [captionLabel, titleLabel, detailLabel, summaryLabel, countdownLabel])
-        textStack.axis = .vertical
-        textStack.spacing = 10
-        textStack.alignment = .leading
-        textStack.setCustomSpacing(24, after: summaryLabel)
-
-        playButton.setTitle("Lire maintenant", for: .normal)
-        playButton.addTarget(self, action: #selector(playNow), for: .primaryActionTriggered)
-        backButton.setTitle("Revenir à la vidéo", for: .normal)
-        backButton.addTarget(self, action: #selector(backToVideo), for: .primaryActionTriggered)
-        let buttonStack = UIStackView(arrangedSubviews: [playButton, backButton])
-        buttonStack.axis = .vertical
-        buttonStack.spacing = 24
-        buttonStack.alignment = .fill
-
-        let row = UIStackView(arrangedSubviews: [imageView, textStack, buttonStack])
-        row.axis = .horizontal
-        row.spacing = 48
-        row.alignment = .top
-        row.translatesAutoresizingMaskIntoConstraints = false
-        view.addSubview(row)
+        view.accessibilityIdentifier = "UpNext.Card"
+        content.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(content)
         NSLayoutConstraint.activate([
             // Below the shrunk player (7 % + 42 % × 9/16 × 16/9 of the height ≈ 49 %).
-            NSLayoutConstraint(item: row, attribute: .top, relatedBy: .equal,
+            NSLayoutConstraint(item: content, attribute: .top, relatedBy: .equal,
                                toItem: view, attribute: .bottom, multiplier: 0.56, constant: 0),
-            row.leadingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.leadingAnchor, constant: 40),
-            row.trailingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.trailingAnchor, constant: -40),
-            row.bottomAnchor.constraint(lessThanOrEqualTo: view.safeAreaLayoutGuide.bottomAnchor),
-            imageView.widthAnchor.constraint(equalTo: view.widthAnchor, multiplier: 0.24),
-            buttonStack.widthAnchor.constraint(equalTo: view.widthAnchor, multiplier: 0.26),
+            content.leadingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.leadingAnchor, constant: 40),
+            content.trailingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.trailingAnchor, constant: -40),
+            content.bottomAnchor.constraint(lessThanOrEqualTo: view.safeAreaLayoutGuide.bottomAnchor),
         ])
-        loadImage()
+        if let session = session {
+            content.onPlay = { [weak self, weak session] in
+                guard let self = self, let session = session else { return }
+                let button = session.card?.kind == .stillWatching ? "Continue" : "Play Now"
+                guard let up = UpNextPressGuard.check(appearedAt: self.appearedAt, button: button) else { return }
+                session.accept(source: .playNow(cardUp: up))
+            }
+            content.onBack = { [weak session] in session?.cancel() }
+            content.onChoose = { [weak session] in session?.chooseVersion() }
+            if let card = session.card { content.apply(card, summary: episode.summary) }
+            subscription = session.$card.receive(on: DispatchQueue.main).sink { [weak self] card in
+                guard let self = self, let card = card else { return }
+                self.content.apply(card, summary: self.episode.summary)
+            }
+        } else {
+            content.onPlay = { [weak self] in
+                // The same one-second guard as the session's card (U1).
+                guard let self = self, UpNextPressGuard.check(appearedAt: self.appearedAt, button: "Play Now") != nil else { return }
+                self.finish(accept: true)
+            }
+            content.onBack = { [weak self] in self?.finish(accept: false) }
+            applyLegacyCard()
+        }
     }
 
     override func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)
-        startCountdown()
+        if appearedAt == nil {
+            appearedAt = ProcessInfo.processInfo.systemUptime
+            // « Play Now » counts a second from here (`UpNextPressGuard`).
+            if session != nil { print("[UpNext] native card on screen (AVKit proposal)") }
+        }
+        if session == nil { startCountdown() }
     }
 
     override func viewWillDisappear(_ animated: Bool) {
@@ -2230,42 +3469,65 @@ final class UpNextProposalViewController: AVContentProposalViewController {
         countdownTimer = nil
     }
 
-    /// 30 s, or what is left of the episode when less (auto-play as it
-    /// ends, like the VLC player's countdown).
+    /// The session's card went (cancelled, rewound before the card, the next
+    /// episode starting): back to the full-screen video.
+    func dismissForSession() {
+        guard !didFinish else { return }
+        didFinish = true
+        subscription = nil
+        dismissContentProposal(for: .defer, animated: true, completion: nil)
+    }
+
+    // Menu on the session's card: « Back to the Video » (the session decides).
+    override func pressesBegan(_ presses: Set<UIPress>, with event: UIPressesEvent?) {
+        guard let session = session, presses.contains(where: { $0.type == .menu }) else {
+            return super.pressesBegan(presses, with: event)
+        }
+        session.cancel()
+    }
+
+    override func pressesEnded(_ presses: Set<UIPress>, with event: UIPressesEvent?) {
+        guard session != nil, presses.contains(where: { $0.type == .menu }) else { return super.pressesEnded(presses, with: event) }
+    }
+
+    // MARK: The card of before 5.3
+
+    private func applyLegacyCard() {
+        var details = String(format: "Season %lld".localized, episode.season) + " · "
+            + String(format: "Episode %lld".localized, episode.episode)
+        if let show = episode.show?.title, !show.isEmpty { details = show + " — " + details }
+        let image = (episode.largeBackgroundImage ?? episode.show?.largeBackgroundImage).flatMap(URL.init(string:))
+        let card = UpNextCardState(kind: .countdown, episodeID: episode.id, headline: "ContinueWatching.NextEpisode".localized,
+                                   title: Self.name(of: episode), showTitle: details, versionLine: nil, imageURL: image,
+                                   secondsLeft: max(0, secondsLeft), total: legacyTotal, message: nil)
+        content.apply(card, summary: episode.summary, showsChooseVersion: false)
+    }
+
+    /// The setting's lead (at most a third of the file), or what is left
+    /// of the episode when less (auto-play as it ends, like the VLC
+    /// player's countdown).
     private func startCountdown() {
         guard countdownTimer == nil, !didFinish else { return }
         if let player = playerViewController?.player, let item = player.currentItem {
+            legacyTotal = Int(UpNextPreferences.legacyCardLead(duration: item.duration.seconds).rounded())
+            secondsLeft = legacyTotal
             let remaining = item.duration.seconds - player.currentTime().seconds
-            if remaining.isFinite { secondsLeft = min(30, max(5, Int(remaining.rounded()))) }
+            if remaining.isFinite { secondsLeft = min(legacyTotal, max(5, Int(remaining.rounded()))) }
         }
-        updateCountdownLabel()
+        applyLegacyCard()
         countdownTimer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
             guard let self = self else { return }
-            self.secondsLeft -= 1
-            self.updateCountdownLabel()
+            // The file's own time: a pause or a stall holds the count (the next episode starts
+            // at the end of this one, not after 60–90 s of wall clock).
+            let player = self.playerViewController?.player
+            let remaining = player.flatMap { player in
+                player.currentItem.map { $0.duration.seconds - player.currentTime().seconds }
+            }
+            self.secondsLeft = UpNextPreferences.legacySecondsLeft(remaining: remaining, total: self.legacyTotal,
+                                                                   previous: self.secondsLeft)
+            self.applyLegacyCard()
             if self.secondsLeft <= 0 { self.finish(accept: true) }
         }
-    }
-
-    private func updateCountdownLabel() {
-        countdownLabel.text = "Lecture automatique dans \(max(0, secondsLeft)) s"
-    }
-
-    private func loadImage() {
-        guard let string = episode.largeBackgroundImage ?? episode.show?.largeBackgroundImage,
-              let url = URL(string: string) else { return }
-        URLSession.shared.dataTask(with: url) { [weak self] data, _, _ in
-            guard let data = data, let image = UIImage(data: data) else { return }
-            DispatchQueue.main.async { self?.imageView.image = image }
-        }.resume()
-    }
-
-    @objc private func playNow() {
-        finish(accept: true)
-    }
-
-    @objc private func backToVideo() {
-        finish(accept: false)
     }
 
     private func finish(accept: Bool) {
@@ -2305,6 +3567,9 @@ struct RemuxPlayerView: UIViewControllerRepresentable {
         let vc = RemuxAVPlayerViewController()
         vc.onFallback = onFallback
         vc.onCloseRequest = onClose
+        // Episode chaining on iPhone / iPad (5.3.0): the « next episode »
+        // card reads this player once a second.
+        context.coordinator.attach(vc)
         vc.configure(localFile: localFile,
                      remoteURL: remoteURL ?? localFile,
                      streamer: streamer,
@@ -2321,10 +3586,127 @@ struct RemuxPlayerView: UIViewControllerRepresentable {
         vc.onCloseRequest = onClose
     }
 
-    static func dismantleUIViewController(_ vc: RemuxAVPlayerViewController, coordinator: ()) {
+    static func dismantleUIViewController(_ vc: RemuxAVPlayerViewController, coordinator: UpNextRemuxClock) {
+        coordinator.stop()
         // Removed from the hierarchy (cover closed, or the engine swapped to
         // VLC — the controller then keeps the torrent stream alive itself).
         vc.tearDown()
+    }
+
+    func makeCoordinator() -> UpNextRemuxClock { UpNextRemuxClock() }
+}
+
+/// Episode chaining on iPhone / iPad (5.3.0): the iOS cover's remux player
+/// reports to the « next episode » session (`UpNextSession.current`) — its
+/// position and the file's length once a second, and the end of the file.
+/// Its own timer, so the shared player code is unchanged; nothing happens
+/// when no session runs (a movie, the last episode).
+@MainActor
+final class UpNextRemuxClock {
+    private weak var controller: RemuxAVPlayerViewController?
+    private var timer: Timer?
+    private var endObserver: NSObjectProtocol?
+    private weak var observedItem: AVPlayerItem?
+
+    func attach(_ controller: RemuxAVPlayerViewController) {
+        self.controller = controller
+        // A finished remux stuck in its last segment posts no end: the
+        // player's safety net tells it (`onNaturalEnd`), as the Apple TV's
+        // and the Mac's players tell their sessions.
+        controller.onNaturalEnd = { [weak self] in
+            MainActor.assumeIsolated { self?.itemEnded(reason: "stuck at the end of a finished remux") }
+        }
+        timer?.invalidate()
+        timer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated { self?.tick() }
+        }
+    }
+
+    func stop() {
+        timer?.invalidate()
+        timer = nil
+        if let endObserver { NotificationCenter.default.removeObserver(endObserver) }
+        endObserver = nil
+    }
+
+    private func tick() {
+        guard let session = UpNextSession.current, let sample = controller?.upNextSample() else { return }
+        watchEnd(of: sample.item)
+        session.tick(position: sample.position, duration: sample.duration, isPlaying: sample.isPlaying)
+    }
+
+    /// The end of the CURRENT item (a starvation rebuild or the live-born
+    /// item's replacement swaps it).
+    private func watchEnd(of item: AVPlayerItem?) {
+        guard let item, item !== observedItem else { return }
+        if let endObserver { NotificationCenter.default.removeObserver(endObserver) }
+        observedItem = item
+        endObserver = NotificationCenter.default.addObserver(forName: AVPlayerItem.didPlayToEndTimeNotification, object: item,
+                                                             queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated { self?.itemEnded(reason: "end of the item") }
+        }
+    }
+
+    private func itemEnded(reason: String) {
+        guard let session = UpNextSession.current, let sample = controller?.upNextSample() else { return }
+        // Only the file's own end (a jump's playlist ends there too).
+        if let duration = sample.duration, sample.position < duration - 60 { return }
+        print("[UpNext] iOS remux: \(reason) at \(String(format: "%.1f", sample.position)) s")
+        session.tick(position: sample.position, duration: sample.duration, isPlaying: sample.isPlaying)
+        session.itemEnded()
+    }
+}
+
+extension RemuxAVPlayerViewController {
+    /// Where the file stands, for `UpNextRemuxClock`: the position (the one
+    /// a starvation recovery returns to while it runs), the file's length —
+    /// the remux's (the MKV's own) or a VOD item's; nil while neither is
+    /// known, never a growing EVENT playlist's —, and whether the user
+    /// wants playback. nil before playback started (the resume question),
+    /// once torn down or handed to VLC.
+    func upNextSample() -> (position: Double, duration: Double?, isPlaying: Bool, item: AVPlayerItem?)? {
+        guard !isTornDown, !fallbackRequested, !isHandingOff, didStartPlayback, let player = player else { return nil }
+        let time = starvation.isRecovering ? (starvation.resumeTime ?? .nan) : player.currentTime().seconds
+        guard time.isFinite, time >= 0 else { return nil }
+        var duration: Double?
+        if let total = remux?.session?.totalDurationSeconds, total > 0 {
+            duration = total
+        } else if let seconds = player.currentItem?.duration.seconds, seconds.isFinite, seconds > 0 {
+            duration = seconds
+        }
+        return (time, duration, playIntent.wantsPlayback, player.currentItem)
+    }
+}
+
+/// A label of the players' wait states (« Reprise à … », the starvation
+/// text) and the look of the dark capsule they sit in, shared by the native
+/// player (`RemuxAVPlayerViewController`) and the VLC state
+/// (`VLCResumeOverlayView`): black at 60 % with rounded corners, the text in
+/// `title3` semibold on Apple TV and `headline` on iPhone / iPad. Dark under
+/// white text, it stays readable over a bright picture and when AVKit dims
+/// the content overlay under its transport bar.
+final class StatusCapsuleLabel: UILabel {
+
+    /// Called when `isHidden` changes (the capsule follows the label).
+    var onVisibilityChange: (() -> Void)?
+
+    override var isHidden: Bool {
+        didSet { if oldValue != isHidden { onVisibilityChange?() } }
+    }
+
+    private static var isTV: Bool { UIDevice.current.userInterfaceIdiom == .tv }
+
+    static let capsuleColor = UIColor.black.withAlphaComponent(0.6)
+    /// 14 pt and 16 pt on iPhone / iPad; Apple TV's 1920-point screen gets
+    /// the same proportions at 20 pt and 24 pt.
+    static var cornerRadius: CGFloat { isTV ? 20 : 14 }
+    static var padding: CGFloat { isTV ? 24 : 16 }
+
+    static var textFont: UIFont {
+        guard isTV else { return .preferredFont(forTextStyle: .headline) }
+        let descriptor = UIFontDescriptor.preferredFontDescriptor(withTextStyle: .title3)
+            .addingAttributes([.traits: [UIFontDescriptor.TraitKey.weight: UIFont.Weight.semibold]])
+        return UIFont(descriptor: descriptor, size: 0)
     }
 }
 #endif

@@ -53,13 +53,9 @@ class PersonViewController: MainViewController {
     }
     
     override func collectionView(isEmptyForUnknownReason collectionView: UICollectionView) {
-        if let background: ErrorBackgroundView = .fromNib() {
-            let openQuote = Locale.current.quotationBeginDelimiter ?? "\""
-            let closeQuote = Locale.current.quotationEndDelimiter ?? "\""
-            
-            background.setUpView(title: "No results".localized, description: .localizedStringWithFormat("We didn't turn anything up for %@. Try something else.".localized, "\(openQuote + currentItem.name + closeQuote)"))
-            
-            collectionView.backgroundView = background
-        }
+        let openQuote = Locale.current.quotationBeginDelimiter ?? "\""
+        let closeQuote = Locale.current.quotationEndDelimiter ?? "\""
+        collectionViewController.showMessage(title: "No results".localized,
+                                             body: .localizedStringWithFormat("We didn't turn anything up for %@. Try something else.".localized, "\(openQuote + currentItem.name + closeQuote)"))
     }
 }

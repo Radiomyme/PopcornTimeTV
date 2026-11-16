@@ -27,6 +27,10 @@ public final class TorrentioClient {
 
     public static let shared = TorrentioClient()
 
+    /// Where the answers are read and parsed (the completions hop to the
+    /// main queue).
+    private static let parsing = DispatchQueue(label: "popcornkit.torrentio.parsing", qos: .userInitiated)
+
     /// Torrentio instances to try in order. The main instance sits behind
     /// Cloudflare and has been stable for years; alternates are community
     /// mirrors running the same code.
@@ -77,6 +81,18 @@ public final class TorrentioClient {
                         season: Int? = nil,
                         episode: Int? = nil,
                         completion: @escaping ([Torrent]) -> Void) {
+        streamsAnswer(imdbId: imdbId, season: season, episode: episode) { completion($0 ?? []) }
+    }
+
+    /// The same, telling a failure from a title Torrentio has nothing for:
+    /// nil when no host answered (timeout, HTTP error — a 429 when it limits
+    /// the rate) or not with JSON, an empty array for an answer without a
+    /// stream. For a caller that keeps the answer (`EpisodeSourceResolver`):
+    /// a failure is asked again, "nothing" is not.
+    public func streamsAnswer(imdbId: String,
+                              season: Int? = nil,
+                              episode: Int? = nil,
+                              completion: @escaping ([Torrent]?) -> Void) {
         guard imdbId.hasPrefix("tt") else {
             DispatchQueue.main.async { completion([]) }
             return
@@ -89,9 +105,8 @@ public final class TorrentioClient {
         }
         attempt(hosts: TorrentioClient.hosts, path: path) { data in
             var result: (torrents: [Torrent], unplayable: [String], packs: [String]) = ([], [], [])
-            if let data = data,
-               let json = try? JSONSerialization.jsonObject(with: data),
-               let root = json as? [String: Any],
+            let json = data.flatMap { try? JSONSerialization.jsonObject(with: $0) }
+            if let root = json as? [String: Any],
                let streams = root["streams"] as? [[String: Any]] {
                 result = TorrentioClient.torrents(fromStreams: streams, season: season, episode: episode)
             }
@@ -102,7 +117,7 @@ public final class TorrentioClient {
                   + sample(result.unplayable)
                   + (season != nil && TorrentioClient.dropsEpisodePacks
                      ? ", \(result.packs.count) multi-episode packs dropped" + sample(result.packs) : ""))
-            DispatchQueue.main.async { completion(result.torrents) }
+            DispatchQueue.main.async { completion(json == nil ? nil : result.torrents) }
         }
     }
 
@@ -385,7 +400,11 @@ public final class TorrentioClient {
                 return
             }
             remaining.removeFirst()
-            session.request(host + path).validate().responseData { response in
+            // Answered off the main queue: a popular movie's answer lists
+            // hundreds of streams, each parsed into a torrent — a tenth of
+            // a second that used to pass behind a loading screen, and
+            // would now freeze the page that is sliding in.
+            session.request(host + path).validate().responseData(queue: TorrentioClient.parsing) { response in
                 switch response.result {
                 case .success(let data):
                     completion(data)

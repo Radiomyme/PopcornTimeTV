@@ -83,7 +83,6 @@
 "Remove from on deck" = "Retirer de « À suivre »";
 "Are you sure you want to remove this item?" = "Voulez-vous vraiment retirer cet élément ?";
 
-"Subtitle Language" = "Langue des sous-titres";
 "Choose a default language for the player subtitles." = "Choisissez la langue par défaut des sous-titres.";
 
 "Subtitle Font Size" = "Taille des sous-titres";
@@ -99,7 +98,7 @@
 "Choose a default font style for the player subtitles." = "Choisissez le style de police par défaut des sous-titres.";
 
 "Subtitle Encoding" = "Encodage des sous-titres";
-"Choose encoding for the player subtitles." = "Choisissez l'encodage des sous-titres.";
+"Choose encoding for the player subtitles." = "Choisissez l’encodage des sous-titres.";
 
 "OK" = "OK";
 "Cancel" = "Annuler";
@@ -118,14 +117,14 @@
 
 "Successfully authenticated with Trakt" = "Connexion à Trakt réussie";
 "Failed to authenticate with Trakt" = "Échec de la connexion à Trakt";
-"Error fetching valid trailer URL from YouTube." = "Impossible d'obtenir la bande-annonce sur YouTube.";
+"Error fetching valid trailer URL from YouTube." = "Impossible d’obtenir la bande-annonce sur YouTube.";
 "No torrents found" = "Aucun torrent trouvé";
 "No devices available" = "Aucun appareil disponible";
-"Torrents could not be found for the specified media." = "Aucun torrent n'a été trouvé pour ce titre.";
+"Torrents could not be found for the specified media." = "Aucun torrent n’a été trouvé pour ce titre.";
 "Error processing torrent." = "Erreur lors du traitement du torrent.";
 "Cellular Data is turned off for streaming" = "Les données cellulaires sont désactivées pour le streaming";
 "Are you sure you want to Sign Out?" = "Voulez-vous vraiment vous déconnecter ?";
-"Cache was already empty, no disk space was reclaimed." = "Le cache était déjà vide, aucun espace n'a été libéré.";
+"Cache was already empty, no disk space was reclaimed." = "Le cache était déjà vide, aucun espace n’a été libéré.";
 
 /* Watch {Show name} on {TV Network} */
 "Watch %@ on %@" = "Regarder %1$@ sur %2$@";
@@ -143,6 +142,7 @@
 "Are you sure you want to delete the download?" = "Voulez-vous vraiment supprimer le téléchargement ?";
 "Stop" = "Arrêter";
 "Download Failed" = "Échec du téléchargement";
+"Downloads" = "Téléchargements";
 "Downloads Empty" = "Aucun téléchargement";
 "Movies and episodes you download will show up here." = "Les films et les épisodes que vous téléchargez apparaîtront ici.";
 "Paused" = "En pause";
@@ -161,7 +161,7 @@
 /* Mark the movie as watched */
 "Watched" = "Vu";
 
-"There are no seasons available for the selected show. Please try again later." = "Aucune saison n'est disponible pour cette série. Réessayez plus tard.";
+"There are no seasons available for the selected show. Please try again later." = "Aucune saison n’est disponible pour cette série. Réessayez plus tard.";
 
 "Information" = "Informations";
 "Genre" = "Genre";
@@ -175,7 +175,7 @@
 "Subtitles for the deaf and Hard of Hearing (SDH) refer to subtitles in the original language with the addition of relevant non-dialog information." = "Les sous-titres pour sourds et malentendants (SDH) reprennent la langue originale et y ajoutent les informations utiles autres que les dialogues.";
 
 "SSL Error" = "Erreur SSL";
-"It looks like your ISP/Network admin is blocking our servers. You can try again with a VPN to hide your internet traffic from them. Please do so at your own risk" = "Votre fournisseur d'accès ou l'administrateur de votre réseau semble bloquer nos serveurs. Vous pouvez réessayer avec un VPN pour masquer votre trafic, à vos propres risques";
+"It looks like your ISP/Network admin is blocking our servers. You can try again with a VPN to hide your internet traffic from them. Please do so at your own risk" = "Votre fournisseur d’accès ou l’administrateur de votre réseau semble bloquer nos serveurs. Vous pouvez réessayer avec un VPN pour masquer votre trafic, à vos propres risques";
 
 "Not found" = "Introuvable";
 "Please check your internet connection and try again." = "Vérifiez votre connexion à Internet et réessayez.";
@@ -194,13 +194,13 @@
 "Error cleaning cache." = "Erreur lors du nettoyage du cache.";
 
 "No Updates Available" = "Aucune mise à jour disponible";
-"There are no updates available for Popcorn Time at this time." = "Aucune mise à jour de Popcorn Time n'est disponible pour le moment.";
+"There are no updates available for Popcorn Time at this time." = "Aucune mise à jour de Popcorn Time n’est disponible pour le moment.";
 
 "Select a filter to sort by" = "Choisissez un critère de tri";
 "Select a genre to filter by" = "Choisissez un genre";
 
-"Mirroring route detected" = "Recopie de l'écran détectée";
-"Would you like to mirror current display to device?" = "Voulez-vous recopier l'écran actuel sur l'appareil ?";
+"Mirroring route detected" = "Recopie de l’écran détectée";
+"Would you like to mirror current display to device?" = "Voulez-vous recopier l’écran actuel sur l’appareil ?";
 
 "Maybe Later" = "Plus tard";
 "Update Available" = "Mise à jour disponible";
@@ -208,9 +208,8 @@
 "%@ version %@ of Popcorn Time is now available." = "La version %1$@ %2$@ de Popcorn Time est disponible.";
 "Skip This Version" = "Ignorer cette version";
 "Update" = "Mettre à jour";
-"OK" = "OK";
-"Sideloading Instructions" = "Instructions d'installation manuelle";
-"Unfortunately, in-app updates are not available for un-jailbroken devices. Please follow the sideloading instructions available in the PopcornTimeTV repo's wiki." = "Les mises à jour depuis l'app ne sont malheureusement pas possibles sur un appareil non jailbreaké. Suivez les instructions d'installation manuelle du wiki du dépôt PopcornTimeTV.";
+"Sideloading Instructions" = "Instructions d’installation manuelle";
+"Unfortunately, in-app updates are not available for un-jailbroken devices. Please follow the sideloading instructions available in the PopcornTimeTV repo's wiki." = "Les mises à jour depuis l’app ne sont malheureusement pas possibles sur un appareil non jailbreaké. Suivez les instructions d’installation manuelle du wiki du dépôt PopcornTimeTV.";
 
 "Popular" = "Populaires";
 "New" = "Nouveautés";
@@ -253,6 +252,80 @@
 "Thriller" = "Thriller";
 "War" = "Guerre";
 "Western" = "Western";
+"Food" = "Cuisine";
+
+/* 5.3: the Home hub (PopcornKit/Managers/Home). Shelf titles (HomeShelf.defaultTitle; "%@ Movies" / "%@ Shows" are a genre shelf's, %@ = the genre) and card badges (HomeBadge.localizationKey). */
+"Featured" = "À la une";
+"Continue Watching" = "Reprendre";
+"New Episodes of Your Shows" = "Nouveaux épisodes de vos séries";
+"Trending Movies" = "Films tendance";
+"New Movies" = "Nouveaux films";
+"New in 4K" = "Nouveautés 4K";
+"Latest Episodes" = "Derniers épisodes diffusés";
+"Trending Shows" = "Séries du moment";
+"New Shows" = "Nouvelles séries";
+"Movies of the Year" = "Les films de l’année";
+"Top Rated of the Year" = "Films bien notés de l’année";
+"Top Shows of the Last 48 Hours" = "Top 48 h : séries";
+"Top 100 Shows" = "Top 100 : séries";
+"Top 100 Movies" = "Top 100 : films";
+"%@ Movies" = "Films : %@";
+"%@ Shows" = "Séries : %@";
+"Biography" = "Biographie";
+"Home.Badge.New" = "Nouveau";
+"Home.Badge.NewEpisode" = "Nouvel épisode";
+"Home.Badge.NewSeason" = "Nouvelle saison";
+"Home.Badge.Premiere" = "Première";
+"Home.Badge.Upcoming" = "À venir";
+
+/* 5.3: the Home tab of Apple TV (PopcornTime/UI/tvOS/Home) and its rows in Settings. "Home": the tab. "Home.Play", "More Info": the billboard's buttons (with "Watchlist"). "See All": the last card of a shelf. "Home.Rating": VoiceOver, %@ = the IMDb rating ("7.8"). "Home.Remaining": what is left of a title being watched, %@ = a duration ("33 min"). "Home.Settings.Shelves.Count": %1$d shelves shown of %2$d. */
+"Home" = "Accueil";
+"Home.Play" = "Lire";
+"More Info" = "Plus d’infos";
+"See All" = "Tout voir";
+"Home.Menu.RemoveFromContinueWatching" = "Retirer de Reprendre";
+"Home.Rating" = "IMDb %@";
+"Home.Remaining" = "Il reste %@";
+"Home.Offline" = "Hors ligne · contenu enregistré";
+"Home.Unavailable.Title" = "L’Accueil ne peut pas se charger";
+"Home.Unavailable.Message" = "Vérifiez la connexion de l’Apple TV, puis réessayez.";
+/* 5.3: Apple TV detail page, above a synopsis the sources give in English only, when the app is in another language. */
+"Detail.Summary.InEnglish" = "Résumé (en anglais)";
+"Content Languages" = "Langues des contenus";
+"All Languages" = "Toutes les langues";
+"Shown Shelves" = "Rangées affichées";
+"Home Shelves" = "Rangées de l’Accueil";
+"Grouped Episode Lookup" = "Nouveaux épisodes en une demande";
+"Home.Settings.All" = "Toutes";
+"Home.Settings.Shelves.Count" = "%1$d sur %2$d";
+"Home.Settings.Languages.Detail" = "L’Accueil ne propose que les titres tournés dans ces langues.";
+"Home.Settings.Languages.Message" = "L’Accueil propose les films et les séries tournés dans les langues cochées.";
+"Home.Settings.Shelves.Detail" = "Les rangées décochées ne s’affichent pas sur l’Accueil.";
+"Home.Settings.Shelves.Message" = "Décochez une rangée pour la masquer.";
+"Home.Settings.Lookup.Detail" = "Les nouveaux épisodes de vos séries suivies, demandés en une fois à Cinemeta (sans compte).";
+/* 5.3: the Home screen of iOS and macOS (PopcornTime/UI/Shared SwiftUI/Home) and its settings. "Home": the tab. Home.Card.Remaining: %@ = a duration ("42 min"); Home.Card.Rank and Home.Card.Rating are read by VoiceOver ("Number 3", "rated 8.1"); Home.Offline.Saved: %@ = a relative date ("2 hours ago"). */
+"Home.SeeAll" = "Tout voir";
+"Home.Card.Remaining" = "Il reste %@";
+"Home.Card.Rank" = "Numéro %lld";
+"Home.Card.Rating" = "note %@";
+"Home.Kind.Movie" = "Film";
+"Home.Kind.Show" = "Série";
+"Home.Menu.Details" = "Voir la fiche";
+"Home.Menu.ShareLink" = "Partager le lien";
+"Home.Menu.CopyLink" = "Copier le lien";
+"Home.Offline.Saved" = "Contenu enregistré %@.";
+"Home.Empty.Title" = "Rien à afficher";
+"Home.Empty.Detail" = "Toutes les rangées de l’accueil sont masquées. Réaffichez-les dans les réglages.";
+"Home.Settings.Languages" = "Langues des contenus";
+"Home.Settings.AllLanguages" = "Toutes les langues";
+"Home.Settings.AllLanguages.Value" = "Toutes";
+"Home.Settings.Languages.Footer" = "L’accueil garde les films et les séries dont la langue d’origine est l’une de celles-ci.";
+"Home.Settings.HiddenShelves" = "Rangées masquées";
+"Home.Settings.Edit" = "Modifier…";
+"Home.Settings.Shelves" = "Rangées";
+"Home.Settings.Shelves.Footer" = "Une rangée désactivée n’apparaît plus sur l’accueil.";
+"Home.Settings.BulkLookup" = "Envoyer mes séries à Cinemeta";
+"Home.Settings.BulkLookup.Footer" = "Pour trouver les nouveaux épisodes, la liste des séries que vous suivez est envoyée à Cinemeta en une seule requête (identifiants publics, sans compte). Désactivé : chaque série est demandée séparément à TVMaze.";
 
 /* 5.1: Keys used in code that had no entry */
 "A - Z" = "A - Z";
@@ -262,13 +335,19 @@
 "No audio tracks available." = "Aucune piste audio disponible.";
 "Settings" = "Réglages";
 "Sort" = "Trier";
+/* 5.3, Apple TV grids: the header's controls say what they are set to (%@ = the sort, the genre); a next page that failed; a list with no title; VoiceOver's rating of a poster (%@ = 8.4). */
+"Sort: %@" = "Trier : %@";
+"Genre: %@" = "Genre : %@";
+"Couldn't load more titles." = "Impossible de charger la suite.";
+"Try another genre or another sort." = "Essayez un autre genre ou un autre tri.";
+"%@ out of 10" = "%@ sur 10";
 "Time remaining" = "Temps restant";
 
 /* 5.1: Settings (GlassSettingsView) */
 "Always Ask" = "Toujours demander";
 "Playback" = "Lecture";
-"Audio and subtitles in these languages are picked automatically when the file or OpenSubtitles offers them." = "L'audio et les sous-titres dans ces langues sont choisis automatiquement quand le fichier ou OpenSubtitles les proposent.";
-"Choose the source every time; the recommended one is starred." = "Vous choisissez la source à chaque fois ; la source recommandée est marquée d'une étoile.";
+"Audio and subtitles in these languages are picked automatically when the file or OpenSubtitles offers them." = "L’audio et les sous-titres dans ces langues sont choisis automatiquement quand le fichier ou OpenSubtitles les proposent.";
+"Choose the source every time; the recommended one is starred." = "Vous choisissez la source à chaque fois ; la source recommandée est marquée d’une étoile.";
 "The best quality that starts quickly." = "La meilleure qualité qui démarre rapidement.";
 "Always the best picture, even if it takes longer to start." = "Toujours la meilleure image, même si le démarrage est plus long.";
 "The smallest file, for the quickest start." = "Le fichier le plus léger, pour démarrer au plus vite.";
@@ -279,7 +358,7 @@
 "Temporary video files, posters and network caches." = "Fichiers vidéo temporaires, affiches et caches réseau.";
 "Clear Cache" = "Vider le cache";
 "About %@ will be freed." = "Environ %@ seront libérés.";
-"A download is in progress. Clear the cache once it has finished." = "Un téléchargement est en cours. Videz le cache une fois qu'il sera terminé.";
+"A download is in progress. Clear the cache once it has finished." = "Un téléchargement est en cours. Videz le cache une fois qu’il sera terminé.";
 "Cache Cleared" = "Cache vidé";
 "%@ reclaimed." = "%@ libérés.";
 "Account" = "Compte";
@@ -295,6 +374,9 @@
 "Remove from Watchlist" = "Retirer de ma liste";
 "Mark as Watched" = "Marquer comme vu";
 "Mark as Unwatched" = "Marquer comme non vu";
+"Play %@" = "Lire %@";
+"Mark %@ as Watched" = "Marquer %@ comme vu";
+"Mark %@ as Unwatched" = "Marquer %@ comme non vu";
 "Download" = "Télécharger";
 "Downloaded" = "Téléchargé";
 "Pause" = "Pause";
@@ -321,6 +403,15 @@
 "Filter" = "Filtre";
 "Movie or show title" = "Titre du film ou de la série";
 
+/* Mac: the Go and Playback menus (MacCommands), the grids' Refresh button, the Search page before anything is typed, the Sources rows of Settings ("Metadata": the iPhone / iPad Sources list too). */
+"Go" = "Aller";
+"Back" = "Retour";
+"Refresh" = "Actualiser";
+"Skip Forward 10 Seconds" = "Avancer de 10 secondes";
+"Skip Back 10 Seconds" = "Reculer de 10 secondes";
+"Find a movie or a show by its title." = "Recherchez un film ou une série par son titre.";
+"Metadata" = "Métadonnées";
+
 /* Mac: Settings window (MacSettingsView). "%@ (+ mirrors)": %@ is the shows API host. */
 "Balanced (quick start)" = "Équilibré (démarrage rapide)";
 "Languages" = "Langues";
@@ -337,6 +428,16 @@
 
 /* Mac: Popcorn Time menu item opening the release notes window. */
 "What's New…" = "Nouveautés…";
+
+/* iPhone / iPad: the grids' empty state and genre reset, Search before anything is typed, the cellular setting and its footer, the Sources list, and the close button of the players (VoiceOver). */
+"Nothing to show for this selection." = "Rien à afficher pour cette sélection.";
+"All Genres" = "Tous les genres";
+"Recent Searches" = "Recherches récentes";
+"Clear" = "Effacer";
+"Browse by Genre" = "Parcourir par genre";
+"Stream on Cellular Data" = "Lire en données cellulaires";
+"When this is off, Popcorn Time asks before it starts a stream on cellular data or a personal hotspot." = "Quand ce réglage est désactivé, Popcorn Time demande confirmation avant de lancer une lecture en données cellulaires ou via un partage de connexion.";
+"Close" = "Fermer";
 
 /* Mac: native player status (MacPlayerView). "Buffering %.0f%% · %d seeds · %d KB/s": buffered percentage, seeds, download speed. "Failed: %@" / "Cannot play: %@": the reason. */
 "Buffering…" = "Mise en mémoire tampon…";
@@ -355,17 +456,35 @@
 "Subtitles" = "Sous-titres";
 "Audio" = "Audio";
 
+/* The players' subtitle menus (iPhone / iPad, Mac, Apple TV): the line shown while no list is known, and the delay of a subtitle — one step earlier or later, then back to none (%@ = the delay, "+0.5 s"). They also use "Off", "Subtitles", "Subtitle Delay" and "Searching for subtitles…". */
+"No subtitles found" = "Aucun sous-titre trouvé";
+"Show Earlier (%@)" = "Afficher plus tôt (%@)";
+"Show Later (%@)" = "Afficher plus tard (%@)";
+"Reset (%@)" = "Réinitialiser (%@)";
+
+/* Apple TV: the next episode proposed near the end of an episode — its two buttons and the countdown (%d = seconds left). */
+"UpNext.PlayNow" = "Lire maintenant";
+"UpNext.BackToVideo" = "Revenir à la vidéo";
+"UpNext.Countdown" = "Lecture automatique dans %d s";
+
 /* Bounded storage: a film larger than the free space streams with only part of it on disk. Loading screen (%d = minutes a rewind can reach), the message over the video when a rewind goes further back than what is still stored, the alert when playback can't continue, and the stream errors (%@ = space to free, e.g. "1.2 GB" / the system's error text). */
 "BoundedStorage.Loading.Minutes" = "Espace limité : retour arrière possible sur environ %d min";
 "BoundedStorage.Loading.Generic" = "Espace limité : le retour arrière sera limité";
-"BoundedStorage.RewindLimited" = "Ce passage n'est plus stocké (espace limité).";
-"BoundedStorage.RewindNotDownloaded" = "Ce passage n'a pas été téléchargé (espace limité).";
+"BoundedStorage.RewindLimited" = "Ce passage n’est plus stocké (espace limité).";
+"BoundedStorage.RewindNotDownloaded" = "Ce passage n’a pas été téléchargé (espace limité).";
 "BoundedStorage.CannotContinue.Title" = "Lecture interrompue";
-"BoundedStorage.CannotContinue.Message" = "Ce passage de la vidéo n'est plus stocké (espace limité) : la lecture ne peut pas continuer ici.";
-"BoundedStorage.NotEnoughSpace.Message" = "Pas assez d'espace libre pour lire cette vidéo, même en mode stockage limité. Libérez au moins %@ et réessayez.";
-"BoundedStorage.NotEnoughSpace.Generic" = "Pas assez d'espace libre pour lire cette vidéo, même en mode stockage limité. Libérez de l'espace et réessayez.";
-"BoundedStorage.FileError.Message" = "Impossible d'enregistrer la vidéo sur l'appareil (%@).";
+"BoundedStorage.CannotContinue.Message" = "Ce passage de la vidéo n’est plus stocké (espace limité) : la lecture ne peut pas continuer ici.";
+"BoundedStorage.NotEnoughSpace.Message" = "Pas assez d’espace libre pour lire cette vidéo, même en mode stockage limité. Libérez au moins %@ et réessayez.";
+"BoundedStorage.NotEnoughSpace.Generic" = "Pas assez d’espace libre pour lire cette vidéo, même en mode stockage limité. Libérez de l’espace et réessayez.";
+"BoundedStorage.FileError.Message" = "Impossible d’enregistrer la vidéo sur l’appareil (%@).";
 "BoundedStorage.TryLowerQuality" = "Essayer une qualité inférieure ?";
+
+/* VLC player (the files the native player does not play, or cannot jump in): the state over the video while it gets to the resume point (%@ = the position, 1:40:00), the offer after 30 s of waiting and its two buttons, and the message of the VLC player's own resume question. */
+"VLC.Resume.At" = "Reprise à %@…";
+"VLC.Resume.Slow" = "La reprise prend plus de temps que prévu.";
+"VLC.Resume.KeepWaiting" = "Continuer d'attendre";
+"VLC.Resume.FromStart" = "Reprendre du début";
+"VLC.Resume.Question.Message" = "Ce fichier se lit avec le lecteur VLC : la reprise passe par VLC.";
 
 /* Quality pickers: estimated bitrate of a release and its warning when recent downloads (the connection, or its swarms) are slower (ConnectionSpeed.swift) */
 "Bandwidth.Bitrate" = "≈ %d Mb/s";
@@ -377,13 +496,13 @@
 "LoadingPhase.GettingDetails" = "Récupération des informations du torrent…";
 "LoadingPhase.GettingDetails.Connected" = "Récupération des informations du torrent… (pairs connectés : %d)";
 "LoadingPhase.NotResponding.NoPeers" = "Cette source ne répond pas (0 pair). Essayez-en une autre.";
-"LoadingPhase.NotResponding.NoDetails" = "Cette source n'envoie pas les informations du torrent. Essayez-en une autre.";
-"LoadingPhase.NotResponding.NoData" = "Cette source n'envoie aucune donnée. Essayez-en une autre.";
+"LoadingPhase.NotResponding.NoDetails" = "Cette source n’envoie pas les informations du torrent. Essayez-en une autre.";
+"LoadingPhase.NotResponding.NoData" = "Cette source n’envoie aucune donnée. Essayez-en une autre.";
 "LoadingPhase.ChooseAnotherSource" = "Choisir une autre source";
-"LoadingPhase.KeepWaiting" = "Continuer d'attendre";
+"LoadingPhase.KeepWaiting" = "Continuer d’attendre";
 
 /* Over the video when the download is slower than the release (BandwidthDeficit.swift): %1$@ = the release's bitrate, %2$@ = the download rate, both in megabits per second ("72", "5.5"); the buttons switch to a lighter release at the same time, or keep this one. */
-"BandwidthDeficit.Message" = "Cette version demande ~%1$@ Mb/s, le téléchargement n'en fournit que ~%2$@ : la lecture va s'interrompre.";
+"BandwidthDeficit.Message" = "Cette version demande ~%1$@ Mb/s, le téléchargement n’en fournit que ~%2$@ : la lecture va s’interrompre.";
 "BandwidthDeficit.Lighter" = "Version plus légère";
 "BandwidthDeficit.Continue" = "Continuer";
 
@@ -394,14 +513,46 @@
 "PlayerLoading.Seeds" = "Seeds : %d";
 "Sources.Loading" = "Recherche des sources…";
 "Picker.Recommended" = "Recommandé";
+/* 5.3: iPhone / iPad detail page, a source of a movie: %lld = the counts of its swarm ("178 seeds"); the list opens on three sources, then "All Sources (15)". */
+"Sources.Seeds" = "%lld sources";
+"Sources.Peers" = "%lld pairs";
+"Sources.ShowAll" = "Toutes les sources (%lld)";
+"Sources.ShowFewer" = "Moins de sources";
 "Spinner.Loading" = "Chargement…";
 
 /* Apple TV: a release that does not fit the app's cache (%@ = its quality, 1080p…; the smaller release's). Native player: resume question while the file still downloads (%@ = the position, 1:02:07). */
 "DiskFull.Title" = "Espace insuffisant pour la version %@";
-"DiskFull.Message" = "L'Apple TV n'a pas assez de place dans le cache de l'app pour télécharger ce torrent. Essayer une qualité inférieure ?";
+"DiskFull.Message" = "L’Apple TV n’a pas assez de place dans le cache de l’app pour télécharger ce torrent. Essayer une qualité inférieure ?";
 "DiskFull.RetryIn" = "Réessayer en %@";
 "DiskFull.RetryLower" = "Essayer une qualité inférieure";
 "Remux.Resume.Title" = "Reprendre la lecture ?";
-"Remux.Resume.Message" = "Ce fichier est encore en téléchargement : la reprise rapide passe par le lecteur VLC. Depuis le début, la lecture reste native (HDR, Dolby Atmos).";
+"Remux.Resume.Message" = "Ce fichier est encore en téléchargement. La lecture reprend à cet endroit en qualité native (HDR, Dolby Atmos).";
 "Remux.Resume.At" = "Reprendre à %@";
 "Remux.Resume.FromStart" = "Reprendre du début";
+"Remux.Resume.Message.VLC" = "Ce fichier ne permet pas de reprendre en qualité native : la reprise à cet endroit passe par le lecteur VLC. Depuis le début, la lecture reste native (HDR, Dolby Atmos).";
+"Player.Resuming.At" = "Reprise à %@…";
+"Player.Resuming.Detail" = "Reprise à %1$@ — %2$@";
+"Player.Resuming.Percent" = "%d %%";
+
+/* Continue Watching row (tvOS): second line of a show's card once the last episode played was finished, before "S2 · E6" and the episode's title. */
+"ContinueWatching.NextEpisode" = "Épisode suivant";
+
+/* Episode chaining (5.3.0), the three platforms: the next episode's card — « Choose Version » and « Cancel », the version line (%@ = the quality label, "1080p HEVC": the same season pack, the same release group, the same resolution and dynamic range, the release remembered for « Resume »), while it is looked for, the after-play card's title, the episode line (season, episode, title), « Still watching? » after episodes played in a row with no action (%d = how many) and its two buttons — and the setting (on by default) with its footer. */
+"UpNext.ChooseVersion" = "Choisir la version";
+"UpNext.Cancel" = "Annuler";
+"UpNext.SamePack" = "%@ · même pack";
+"UpNext.SameGroup" = "%@ · même groupe";
+"UpNext.SameQuality" = "%@ · même qualité";
+"UpNext.SameRelease" = "%@ · même version";
+"UpNext.FindingVersion" = "Recherche de la version…";
+"UpNext.Ended" = "Épisode terminé";
+"UpNext.EpisodeTitle" = "S%1$d · É%2$d — %3$@";
+"UpNext.StillWatching" = "Toujours là ?";
+"UpNext.StillWatching.Message" = "%d épisodes à la suite. Continuer la lecture ?";
+"UpNext.StillWatching.Continue" = "Continuer";
+"UpNext.StillWatching.Stop" = "Arrêter";
+"Settings.AutoPlayNext" = "Enchaîner les épisodes";
+"Settings.AutoPlayNext.Footer" = "Vers la fin d'un épisode, le suivant est proposé avec un compte à rebours, puis démarre seul, dans la même version quand c'est possible.";
+"Settings.UpNextCard" = "Carte Épisode suivant";
+"Settings.UpNextCard.Value" = "%d s avant la fin";
+"Settings.UpNextCard.Message" = "Combien de temps avant la fin d'un épisode sa carte propose le suivant. Avec « Enchaîner les épisodes », le suivant démarre à la fin ; sinon seulement quand vous choisissez Lire maintenant.";

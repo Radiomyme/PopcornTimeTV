@@ -1,7 +1,9 @@
-// MacGlassDetailScreen.swift — the Mac movie / show page. Loads the title
-// (PopcornKit.getMovieInfo / getShowInfo), shows MacGlassDetailView over its
-// artwork and connects every button to the app: quality choice ("Auto
-// Select Quality" setting or the picker sheet), subtitles then the player sheet
+// MacGlassDetailScreen.swift — the Mac movie / show page. Shows
+// MacGlassDetailView over its artwork at once, with what its caller has of
+// the title (a grid's item, a Home card, an id): the title's record, then
+// its sources, fill the page as they arrive (PopcornKit's `DetailSession`).
+// Connects every button to the app: quality choice ("Auto Select Quality"
+// setting or the picker sheet), subtitles then the player sheet
 // (MacPlayerView), episode sources (Time4Popcorn + EZTV + Torrentio),
 // watchlist and watched lists, the trailer in the browser, related titles
 // and cast & crew. The Mac counterpart of GlassDetailHostingController
@@ -16,29 +18,52 @@ struct MacGlassDetailScreen: View {
     @Environment(\.macStackDepth) private var stackDepth
     /// This page's own depth, recorded when it first appears.
     @State private var ownDepth: Int?
+    /// Told when the page is on top (a link to its title comes to it).
+    @EnvironmentObject private var navigator: MacNavigator
 
-    init(media: Media) {
-        _controller = State(initialValue: MacGlassDetailController(media: media))
+    /// What the page was opened for besides showing itself (a Home card
+    /// that plays, a popcorntime:// link): run once, when the title is on
+    /// the page (`MacGlassDetailController.run`, MacHomeView.swift).
+    private let request: MediaPageRequest
+    @State private var didRunRequest = false
+
+    /// `media`: a `Movie` or a `Show`, as much of it as the caller has.
+    /// `season` / `episode`: a link's — the season the page opens on and
+    /// the episode its shelf shows first, when the show has them.
+    /// `autoPlay`: then what the page's Play button does, or with a season
+    /// and an episode what a click on that episode does.
+    init(media: Media, season: Int? = nil, episode: Int? = nil, autoPlay: Bool = false) {
+        self.init(media: media, request: MediaPageRequest(autoPlay: autoPlay, season: season, episode: episode))
+    }
+
+    /// A page opened for `request` as it was asked — a link's included
+    /// (`MediaPageRequest.fromLink`: its Play never picks a release alone).
+    init(media: Media, request: MediaPageRequest) {
+        _controller = State(initialValue: MacGlassDetailController(media: media, season: request.season, episode: request.episode))
+        self.request = request
     }
 
     var body: some View {
-        Group {
-            if let model = controller.model {
-                MacGlassDetailView(model: model, actions: controller.actions, page: controller.page)
-                    #if DEBUG
-                    // `-PTDebugGlassFallback YES`: the macOS 14 / 15 look.
-                    .environment(\.glassFallback, UserDefaults.standard.bool(forKey: "PTDebugGlassFallback"))
-                    #endif
-            } else {
-                placeholder
-            }
-        }
-        .navigationTitle(Text(verbatim: controller.model?.title ?? controller.media.title))
+        MacGlassDetailView(model: controller.model, actions: controller.actions, page: controller.page)
+            #if DEBUG
+            // `-PTDebugGlassFallback YES`: the macOS 14 / 15 look.
+            .environment(\.glassFallback, UserDefaults.standard.bool(forKey: "PTDebugGlassFallback"))
+            #endif
+        .navigationTitle(Text(verbatim: controller.model.title.isEmpty ? controller.media.title : controller.model.title))
         .modifier(MacGlassToolbarStyle())
         .task { controller.load() }
         .onAppear {
             if ownDepth == nil { ownDepth = stackDepth }
             controller.pageAppeared()
+            navigator.pageAppeared(controller, depth: ownDepth ?? stackDepth)
+        }
+        // The page shows at once (detail-fast): a movie's request runs then
+        // (Play holds the click until its sources are in), a show's once
+        // its guide says which seasons and episodes it has.
+        .onChange(of: controller.isReadyForRequest, initial: true) { _, ready in
+            guard ready, !didRunRequest else { return }
+            didRunRequest = true
+            controller.run(request)
         }
         // The stack does not call onDisappear / onAppear on a page that a
         // pushed page covers / uncovers: its depth tells. A related title
@@ -49,12 +74,16 @@ struct MacGlassDetailScreen: View {
             guard let ownDepth else { return }
             if depth == ownDepth {
                 controller.pageAppeared()
+                navigator.pageAppeared(controller, depth: depth)
             } else {
                 controller.pageDisappeared()
             }
         }
         // Popped, or another sidebar section (the stack is emptied).
-        .onDisappear { controller.pageDisappeared() }
+        .onDisappear {
+            controller.pageDisappeared()
+            navigator.pageDisappeared(controller)
+        }
         .sheet(item: $controller.playback, onDismiss: { controller.playerClosed() }) { item in
             MacPlayerView(playback: item)
                 .frame(minWidth: 1024, minHeight: 576)
@@ -74,33 +103,6 @@ struct MacGlassDetailScreen: View {
         } message: {
             Text("Torrents could not be found for the specified media.")
         }
-    }
-
-    /// Before the title's info has arrived: a spinner (or the error) on black.
-    private var placeholder: some View {
-        ZStack {
-            Color.black.ignoresSafeArea()
-            if let error = controller.loadError {
-                VStack(spacing: 12) {
-                    Image(systemName: "exclamationmark.triangle")
-                        .font(.system(size: 34, weight: .semibold))
-                        .foregroundStyle(GlassPalette.secondaryText)
-                    Text("Error")
-                        .font(.title2.bold())
-                    Text(verbatim: error)
-                        .font(.body)
-                        .foregroundStyle(GlassPalette.secondaryText)
-                        .multilineTextAlignment(.center)
-                        .frame(maxWidth: 460)
-                }
-                .foregroundStyle(GlassPalette.primaryText)
-                .padding(40)
-            } else {
-                ProgressView()
-                    .controlSize(.large)
-            }
-        }
-        .environment(\.colorScheme, .dark)
     }
 }
 
@@ -123,9 +125,9 @@ private struct MacGlassToolbarStyle: ViewModifier {
 @Observable
 final class MacGlassDetailController {
     let media: Media
-    /// Nil until the title's info has loaded.
-    private(set) var model: GlassDetailModel?
-    private(set) var loadError: String?
+    /// The page's content: what it was opened with, then the title's
+    /// record and its sources as they arrive.
+    let model: GlassDetailModel
     let page = MacGlassPageState()
 
     /// Non-nil presents the player sheet.
@@ -136,14 +138,35 @@ final class MacGlassDetailController {
     var isShowingNoSources = false
 
     @ObservationIgnored private(set) var actions = GlassDetailActions()
+    /// The page's load, and a click made before the sources are in.
+    @ObservationIgnored private let session: DetailSession
     @ObservationIgnored private var movie: Movie?
     /// Episodes linked to the full show (`Show.linkingEpisodes()`).
     @ObservationIgnored private var show: Show?
     @ObservationIgnored private var didStartLoading = false
-    /// Resolved sources per episode id (Time4Popcorn + EZTV + Torrentio).
+    /// The season and the episode a link names.
+    @ObservationIgnored private var linkedSeason: Int?
+    @ObservationIgnored private var linkedEpisode: Int?
+    /// A link handed to the page while it is on top (`reopen`) before its
+    /// guide said which seasons the show has: acted on once it has.
+    @ObservationIgnored private var handedRequest: MediaPageRequest?
+    /// The cast and crew found, put back on the movie each time the
+    /// session hands a new one.
+    @ObservationIgnored private var loadedPeople: (actors: [Actor], crew: [Crew])?
+    /// Related titles and people are asked once, when the record is in.
+    @ObservationIgnored private var didLoadExtras = false
+    /// The show's guide has been taken in (season chosen, next episode's
+    /// sources asked ahead).
+    @ObservationIgnored private var didTakeGuide = false
+    /// How many episodes the guide handed to the library had.
+    @ObservationIgnored private var notedGuideEpisodes = 0
+    /// Resolved sources per episode id (Time4Popcorn + EZTV + Torrentio):
+    /// the page's cache, only of lists every source answered for.
     @ObservationIgnored private var episodeTorrents: [String: [Torrent]] = [:]
-    /// Seasons whose missing stills were already asked for.
-    @ObservationIgnored private var stillSeasons = Set<Int>()
+    /// The list last resolved per episode id — possibly without a source
+    /// that was not in yet, then replaced by the complete one: what the
+    /// player takes as the title's other releases (`start`).
+    @ObservationIgnored private var resolvedTorrents: [String: [Torrent]] = [:]
     /// The flow in progress started from the Play button (its spinner).
     @ObservationIgnored private var playFromPlayButton = false
     /// The page is on screen (not covered by a pushed page).
@@ -152,82 +175,230 @@ final class MacGlassDetailController {
     /// subtitle answer of an older flow is dropped.
     @ObservationIgnored private var flow = 0
 
-    init(media: Media) {
+    /// The page's request (`run`) can be acted on: a movie at once, a show
+    /// once its guide is in.
+    var isReadyForRequest: Bool {
+        !(media is Show) || !model.isLoadingEpisodes
+    }
+
+    init(media: Media, season: Int? = nil, episode: Int? = nil) {
         self.media = media
+        linkedSeason = season
+        linkedEpisode = episode
+        // Only movies and shows have a page (anything else: its id, as a movie).
+        session = DetailSession(media: media) ?? DetailSession(media: Movie(title: media.title, id: media.id))!
+        if let show = session.show {
+            let linked = show.linkingEpisodes()
+            self.show = linked
+            model = GlassDetailAdapter.model(for: linked, season: nil, isLoaded: false)
+            model.isLoadingEpisodes = true
+        } else {
+            let movie = session.movie ?? Movie(title: media.title, id: media.id)
+            self.movie = movie
+            model = GlassDetailAdapter.model(for: movie, isLoaded: false)
+        }
+        model.isLoadingRelated = true
+        model.isLoadingPeople = true
         actions = makeActions()
+        page.imdbId = media.id
         page.chooseQuality = { [weak self] in self?.play(alwaysAsk: true) }
         page.chooseEpisodeQuality = { [weak self] id in self?.playEpisode(id, alwaysAsk: true) }
+        applyContent()
+    }
+
+    /// Whether this is the page of that title.
+    func shows(id: String, isMovie: Bool) -> Bool {
+        session.id == id && (session.kind == .movie) == isMovie
+    }
+
+    /// A link to this page while it is on top (`MacNavigator.open(url:)`):
+    /// its season and the episode the shelf shows first, and what a `play`
+    /// link plays — as on a page it had opened (`run`).
+    func reopen(_ request: MediaPageRequest) {
+        if let season = request.season {
+            linkedSeason = season
+            linkedEpisode = request.episode
+            if didTakeGuide, let show {
+                model.linkedEpisodeID = request.episode.flatMap { episode in
+                    show.episodes.first { $0.season == season && $0.episode == episode }?.id
+                }
+            }
+        }
+        if isReadyForRequest {
+            run(request)
+        } else {
+            handedRequest = request
+        }
     }
 
     // MARK: Loading
 
+    /// Starts the page's load (once, when the page appears: SwiftUI may
+    /// make a controller it never shows). What a prewarm or an earlier
+    /// opening left is on the page at once.
     func load() {
         guard !didStartLoading else { return }
         didStartLoading = true
-        if media is Movie {
-            PopcornKit.getMovieInfo(media.id) { [weak self] movie, error in
-                DispatchQueue.main.async {
-                    guard let self else { return }
-                    guard let movie else {
-                        self.loadError = error?.localizedDescription ?? "Unknown Error".localized
-                        return
-                    }
-                    self.present(movie)
-                }
+        #if DEBUG
+        MacGlassDetailDebug.applyTamperingOnce()
+        #endif
+        session.onChange = { [weak self] change in self?.sessionChanged(change) }
+        session.start()
+        applyContent()
+        applyState()
+        // The page is on screen: its first frame follows this turn.
+        DispatchQueue.main.async { [session] in session.noteFirstPaint() }
+        #if DEBUG
+        // `-PTDebugPressPlay <seconds>` (only with `-PTDebugHoverBusy YES`,
+        // under which nothing can play): a click on Play that long after
+        // the page appeared — before its sources, when they are held.
+        if MacGlassDebugPointer.isRequested, UserDefaults.standard.double(forKey: "PTDebugPressPlay") > 0 {
+            DispatchQueue.main.asyncAfter(deadline: .now() + UserDefaults.standard.double(forKey: "PTDebugPressPlay")) { [weak self] in
+                print("[MacGlass] debug: Play clicked (dry run)")
+                self?.play(alwaysAsk: false)
             }
-        } else {
-            PopcornKit.getShowInfo(media.id) { [weak self] show, error in
-                DispatchQueue.main.async {
-                    guard let self else { return }
-                    guard let show, !show.seasonNumbers.isEmpty else {
-                        self.loadError = error?.localizedDescription
-                            ?? "There are no seasons available for the selected show. Please try again later.".localized
-                        return
-                    }
-                    self.present(show)
-                }
-            }
+        }
+        #endif
+    }
+
+    private func sessionChanged(_ change: DetailSession.Change) {
+        if !change.isDisjoint(with: [.metadata, .sources]) { applyContent() }
+        if change.contains(.state) { applyState() }
+        if change.contains(.metadata), session.hasRecord { completeWatchlistEntry() }
+    }
+
+    /// The record is in: a title put in the watchlist before it was (the
+    /// page answers from its first frame) gets what its entry lacked — a
+    /// link's title, a Continue Watching card's year and genres.
+    private func completeWatchlistEntry() {
+        if let movie {
+            WatchlistManager<Movie>.movie.complete(movie)
+        } else if let show {
+            WatchlistManager<Show>.show.complete(show)
         }
     }
 
-    private func present(_ movie: Movie) {
-        self.movie = movie
-        // Backdrop: metahub's 1920 px one, YTS's as the fallback (adapter).
-        let model = GlassDetailAdapter.model(for: movie)
-        #if DEBUG
-        // `-PTDebugAmbient YES`: no backdrop (the poster card layout).
-        if UserDefaults.standard.bool(forKey: "PTDebugAmbient") {
-            model.backdropURL = nil
-            model.backdropFallbackURL = nil
+    /// The record, then the sources, are in: the movie or the show and the
+    /// page's fields follow (only what changed is written).
+    private func applyContent() {
+        let isLoaded = session.hasRecord || session.isFinished
+        if var fresh = session.movie {
+            if let loadedPeople {
+                fresh.actors = loadedPeople.actors
+                fresh.crew = loadedPeople.crew
+            }
+            movie = fresh
+            GlassDetailAdapter.update(model, with: fresh, isLoaded: isLoaded)
+            // The Home's length: "2 h 5 min", as on its cards and carousel.
+            if let old = GlassDetailAdapter.runtime(minutes: fresh.runtime),
+               let new = HomeCardText().duration(minutes: fresh.runtime), old != new,
+               let index = model.metadata.firstIndex(of: old) {
+                model.metadata[index] = new
+            }
+            #if DEBUG
+            // `-PTDebugAmbient YES`: no backdrop (the poster card layout).
+            if UserDefaults.standard.bool(forKey: "PTDebugAmbient") {
+                model.backdropURL = nil
+                model.backdropFallbackURL = nil
+            }
+            #endif
+        } else if let fresh = session.show {
+            let linked = fresh.linkingEpisodes()
+            show = linked
+            if session.hasGuide, !didTakeGuide { takeGuide(of: linked) }
+            GlassDetailAdapter.update(model, with: linked, isLoaded: isLoaded)
+            if session.hasGuide || session.isFinished { applyPlayTarget(of: linked) }
+            let waitsForGuide = !session.hasGuide && !session.isFinished
+            // Play is there from the first frame (a spinner until the guide
+            // says which episode it starts): the row does not shift.
+            if waitsForGuide, model.play == nil { model.play = GlassPlayInfo() }
+            if model.isLoadingEpisodes != waitsForGuide { model.isLoadingEpisodes = waitsForGuide }
+            if session.hasGuide, linked.episodes.count != notedGuideEpisodes {
+                // A followed show's guide is what its Continue Watching card
+                // and its new episodes are worked out from.
+                notedGuideEpisodes = linked.episodes.count
+                Library.shared.noteGuide(of: linked)
+            }
         }
-        // `-PTDebugQualitySheet YES`: the quality sheet over the page (never
-        // plays: only a pick in the sheet would).
-        if UserDefaults.standard.bool(forKey: "PTDebugQualitySheet"), !movie.torrents.isEmpty {
+        let sources = GlassDetailAdapter.sourcesState(session.sources)
+        if model.sources != sources { model.sources = sources }
+        if isLoaded, didStartLoading { loadExtrasOnce() }
+        if let handed = handedRequest, isReadyForRequest {
+            handedRequest = nil
+            run(handed)
+        }
+        #if DEBUG
+        if session.isFinished, session.failure == nil { runDebugHooksOnce() }
+        #endif
+    }
+
+    /// A failure (the page keeps what it shows, Play becomes "Try Again"),
+    /// and whether a click waits for the sources.
+    private func applyState() {
+        let error = session.failure?.localizedDescription
+        if model.loadError != error { model.loadError = error }
+        if session.failure != nil, model.isLoadingEpisodes { model.isLoadingEpisodes = false }
+        if page.isWaitingForSources != session.isPressPending { page.isWaitingForSources = session.isPressPending }
+        #if DEBUG
+        if session.isFinished, session.failure == nil { runDebugHooksOnce() }
+        #endif
+    }
+
+    /// The show's guide has arrived: the season the page opens on (a
+    /// link's, else the next episode's), the episode its shelf shows first,
+    /// and the sources of the episode Play starts, asked ahead — the click
+    /// finds them, or joins the request (`EpisodeSourceResolver`).
+    private func takeGuide(of show: Show) {
+        didTakeGuide = true
+        // Opening the page is having seen the new episodes.
+        Library.shared.acknowledgeNewEpisodes(ofShow: show.id)
+        let season = linkedSeason.flatMap { show.seasonNumbers.contains($0) ? $0 : nil }
+            ?? show.latestUnwatchedEpisode()?.season ?? GlassDetailAdapter.firstSeason(of: show)
+        if model.selectedSeason != season { model.selectedSeason = season }
+        if let linkedSeason, let linkedEpisode {
+            model.linkedEpisodeID = show.episodes.first { $0.season == linkedSeason && $0.episode == linkedEpisode }?.id
+        }
+        print("[MacGlass] \(show.title): seasons \(show.seasonNumbers), \(show.episodes.count) episodes")
+        if let next = playTarget(in: show) {
+            EpisodeSourceResolver.shared.prefetch(showId: show.id, showTitle: show.title,
+                                                  season: next.season, episode: next.episode)
+        }
+    }
+
+    /// Related titles and cast & crew, once the record is in: their
+    /// requests need the title's genres, and join the record's own.
+    private func loadExtrasOnce() {
+        guard !didLoadExtras else { return }
+        didLoadExtras = true
+        loadRelated()
+        loadPeople()
+    }
+
+    /// "Try Again": the same title asked again, from scratch.
+    private func retry() {
+        didLoadExtras = false
+        model.isLoadingRelated = true
+        model.isLoadingPeople = true
+        if show != nil, !session.hasGuide { model.isLoadingEpisodes = true }
+        session.retry()
+    }
+
+    #if DEBUG
+    @ObservationIgnored private var didRunDebugHooks = false
+
+    /// `-PTDebugQualitySheet YES`, once the page has loaded: the quality
+    /// sheet over a movie's page (never plays: only a pick in the sheet
+    /// would); on a show, Play's "Choose Quality…" — the next episode's
+    /// sources load (spinners on its still and in Play), then the sheet.
+    private func runDebugHooksOnce() {
+        guard !didRunDebugHooks, UserDefaults.standard.bool(forKey: "PTDebugQualitySheet") else { return }
+        didRunDebugHooks = true
+        if let movie, !movie.torrents.isEmpty {
             DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in
                 self?.qualityChoices = MacEpisodeSources(title: movie.title, media: movie,
                                                          torrents: movie.torrents.withMediaRuntime(of: movie).sorted(by: >))
             }
-        }
-        #endif
-        self.model = model
-        loadRelated()
-        loadPeople()
-    }
-
-    private func present(_ loaded: Show) {
-        let show = loaded.linkingEpisodes()
-        self.show = show
-        let season = show.latestUnwatchedEpisode()?.season ?? GlassDetailAdapter.firstSeason(of: show)
-        model = GlassDetailAdapter.model(for: show, season: season)
-        print("[MacGlass] \(show.title): seasons \(show.seasonNumbers), \(show.episodes.count) episodes")
-        loadRelated()
-        loadPeople()
-        if let season { loadMissingStills(of: season) }
-        #if DEBUG
-        // `-PTDebugQualitySheet YES` on a show: Play's "Choose Quality…" —
-        // the next episode's sources load (spinners on its still and in
-        // Play), then the quality sheet (never plays: only a pick would).
-        if UserDefaults.standard.bool(forKey: "PTDebugQualitySheet") {
+        } else if let show {
             let episodeID = GlassDetailAdapter.nextEpisode(in: show)?.id
             DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in
                 print("[MacGlass] debug: Choose Quality… for \(episodeID ?? "?")")
@@ -239,88 +410,47 @@ final class MacGlassDetailController {
                 }
             }
         }
-        #endif
     }
+    #endif
 
-    /// "Viewers Also Watched": Trakt, else YTS / Cinemeta (OpenMetadata).
+    /// "Viewers Also Watched": the keyless sources (YTS / Cinemeta), Trakt
+    /// only for a connected account (`DetailExtras`).
     private func loadRelated() {
-        guard let model else { return }
         model.isLoadingRelated = true
         let finish: ([Media]) -> Void = { [weak self] related in
             DispatchQueue.main.async {
-                guard let self, let model = self.model else { return }
+                guard let self else { return }
                 self.page.relatedMedia = Dictionary(related.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
-                model.related = GlassDetailAdapter.related(related)
-                model.isLoadingRelated = false
+                self.model.related = GlassDetailAdapter.related(related)
+                self.model.isLoadingRelated = false
             }
         }
         if let movie {
-            TraktManager.shared.getRelated(movie) { related, _ in finish(related) }
+            DetailExtras.related(movie) { finish($0) }
         } else if let show {
-            TraktManager.shared.getRelated(show) { related, _ in finish(related) }
+            DetailExtras.related(show) { finish($0) }
         }
     }
 
-    /// Cast & crew (Trakt, else YTS / Cinemeta / TVMaze), also the movie
-    /// Information card's Director(s) and Starring rows.
+    /// Cast & crew (YTS / Cinemeta / TVMaze), also the movie Information
+    /// card's Director(s) and Starring rows.
     private func loadPeople() {
-        guard let model else { return }
         model.isLoadingPeople = true
         let isMovie = movie != nil
-        TraktManager.shared.getPeople(forMediaOfType: isMovie ? .movies : .shows, id: media.id) { [weak self] actors, crew, _ in
+        DetailExtras.people(forMediaOfType: isMovie ? .movies : .shows, id: media.id) { [weak self] actors, crew in
             DispatchQueue.main.async {
-                guard let self, let model = self.model else { return }
-                model.people = GlassDetailAdapter.people(actors: actors, crew: crew).items
-                model.isLoadingPeople = false
+                guard let self else { return }
+                self.model.people = GlassDetailAdapter.people(actors: actors, crew: crew).items
+                self.model.isLoadingPeople = false
                 if var movie = self.movie {
+                    self.loadedPeople = (actors, crew)
                     movie.actors = actors
                     movie.crew = crew
                     self.movie = movie
-                    model.information = GlassDetailAdapter.information(for: movie)
+                    self.model.information = GlassDetailAdapter.information(for: movie)
                 }
             }
         }
-    }
-
-    /// TVMaze already gives most episodes a still; ask TMDB only for the
-    /// missing ones, one season at a time (the season on screen).
-    private func loadMissingStills(of season: Int) {
-        guard let show, stillSeasons.insert(season).inserted else { return }
-        let missing = show.episodes.filter { $0.season == season && $0.largeBackgroundImage == nil }
-        guard !missing.isEmpty else { return }
-        let fetch: (Int) -> Void = { [weak self] tmdbId in
-            for episode in missing {
-                TMDBManager.shared.getEpisodeScreenshots(orTMDBId: tmdbId, season: episode.season, episode: episode.episode) { _, image, _ in
-                    guard let image else { return }
-                    DispatchQueue.main.async { self?.setStill(image, forEpisode: episode.id) }
-                }
-            }
-        }
-        if let tmdbId = show.tmdbId {
-            fetch(tmdbId)
-        } else {
-            TraktManager.shared.getTMDBId(forImdbId: show.id) { [weak self] tmdbId, _ in
-                guard let tmdbId else { return }
-                DispatchQueue.main.async {
-                    self?.show?.tmdbId = tmdbId
-                    fetch(tmdbId)
-                }
-            }
-        }
-    }
-
-    private func setStill(_ image: String, forEpisode id: String) {
-        guard var show, let index = show.episodes.firstIndex(where: { $0.id == id }) else { return }
-        show.episodes[index].largeBackgroundImage = image
-        self.show = show
-        guard let model, let row = model.episodes.firstIndex(where: { $0.id == id }) else { return }
-        let episode = show.episodes[index]
-        let old = model.episodes[row]
-        model.episodes[row] = GlassEpisode(id: old.id, season: old.season, number: old.number,
-                                           title: old.title, summary: old.summary,
-                                           stillURL: GlassDetailAdapter.url(episode.smallBackgroundImage ?? episode.largeBackgroundImage),
-                                           detail: old.detail, isWatched: old.isWatched,
-                                           progress: old.progress, download: old.download)
     }
 
     // MARK: Visibility
@@ -339,6 +469,9 @@ final class MacGlassDetailController {
         guard playback == nil, qualityChoices == nil else { return }
         isVisible = false
         flow += 1
+        // A click still waiting for the sources starts nothing on a page
+        // that was left.
+        session.cancelPress()
         endBusy()
     }
 
@@ -353,7 +486,6 @@ final class MacGlassDetailController {
     /// when the page comes back and when the player closes. Only changed
     /// values are written, so unchanged controls don't redraw.
     func refreshLiveState() {
-        guard let model else { return }
         if let movie {
             let inWatchlist = movie.isAddedToWatchlist
             if inWatchlist != model.isInWatchlist { model.isInWatchlist = inWatchlist }
@@ -372,11 +504,34 @@ final class MacGlassDetailController {
 
     /// Play's episode and the shelf's up-next episode, after a watched change.
     private func refreshShowProgress(_ show: Show) {
-        guard let model else { return }
-        let play = GlassDetailAdapter.nextEpisode(in: show).map(GlassDetailAdapter.playInfo(for:))
+        // Before the guide Play is a placeholder: nothing to work out yet.
+        guard session.hasGuide || session.isFinished else { return }
+        let (play, upNext) = GlassDetailAdapter.showProgress(of: show)
         if play != model.play { model.play = play }
-        let upNext = show.latestUnwatchedEpisode()?.id
         if upNext != model.upNextEpisodeID { model.upNextEpisodeID = upNext }
+        applyPlayTarget(of: show)
+    }
+
+    /// The episode Play starts: the one the page was opened for — a Home
+    /// card's new episode or season premiere, a link's — while it is not
+    /// watched; else the one the user's history leads to. A card that says
+    /// « S6 · É1 » opens a page whose Play reads « Lire S6 · É1 », not the
+    /// pilot.
+    private func playTarget(in show: Show) -> Episode? {
+        if let linkedSeason, let linkedEpisode,
+           let linked = show.episodes.first(where: { $0.season == linkedSeason && $0.episode == linkedEpisode }),
+           !Library.shared.isWatched(linked.id) {
+            return linked
+        }
+        return GlassDetailAdapter.nextEpisode(in: show)
+    }
+
+    /// Play's label follows `playTarget` when it is not the history's.
+    private func applyPlayTarget(of show: Show) {
+        guard linkedSeason != nil, let target = playTarget(in: show),
+              target.id != GlassDetailAdapter.nextEpisode(in: show)?.id else { return }
+        let play = GlassDetailAdapter.playInfo(for: target)
+        if play != model.play { model.play = play }
     }
 
     /// The player sheet closed (it saves the progress): Play, the stills and
@@ -395,12 +550,13 @@ final class MacGlassDetailController {
     private func makeActions() -> GlassDetailActions {
         var actions = GlassDetailActions()
         actions.play = { [weak self] in self?.play(alwaysAsk: false) }
+        actions.retry = { [weak self] in self?.retry() }
+        actions.artworkShown = { [weak self] in self?.session.noteArtwork() }
         actions.playEpisode = { [weak self] id in self?.playEpisode(id, alwaysAsk: false) }
         actions.playTrailer = { [weak self] in self?.openTrailer() }
         actions.toggleWatchlist = { [weak self] in self?.toggleWatchlist() }
         actions.toggleWatched = { [weak self] in self?.toggleWatched() }
         actions.toggleEpisodeWatched = { [weak self] id in self?.toggleEpisodeWatched(id) }
-        actions.selectSeason = { [weak self] season in self?.loadMissingStills(of: season) }
         return actions
     }
 
@@ -414,14 +570,61 @@ final class MacGlassDetailController {
         page.isPreparingPlay = false
     }
 
+    /// Runs `action` once the page's sources are in — at once when they
+    /// are (`DetailSession.press`). Meanwhile Play shows a spinner and
+    /// reads "Cancel": a click on it drops the click that waits. Nothing
+    /// runs on a page that failed to load ("Try Again" is what it offers).
+    /// - Parameter picksAlone: a release will be played without asking: it
+    ///   waits for every source that may still bring a better one.
+    private func whenSourcesAreIn(picksAlone: Bool, _ action: @escaping () -> Void) {
+        guard !isBusy else { return }
+        session.press(picksAlone: picksAlone, action)
+    }
+
     /// Play: the movie, or the show's next episode (`GlassDetailAdapter.nextEpisode`).
     /// `alwaysAsk` (Play's context menu): the quality sheet whatever the setting.
     func play(alwaysAsk: Bool) {
-        if let movie {
-            playMovie(movie, alwaysAsk: alwaysAsk)
-        } else if let show, let episode = GlassDetailAdapter.nextEpisode(in: show) {
-            playEpisode(episode.id, alwaysAsk: alwaysAsk, fromPlayButton: true)
+        // Play reads "Cancel" while a click waits for the sources.
+        if session.isPressPending { return session.cancelPress() }
+        // « Resume » (and a Home card that plays): the release remembered,
+        // at once (decisions D2, D4).
+        if !alwaysAsk, resumeRememberedRelease() { return }
+        whenSourcesAreIn(picksAlone: !alwaysAsk && MacAutoQuality.picksAlone) { [weak self] in
+            guard let self else { return }
+            if let movie = self.movie {
+                self.playMovie(movie, alwaysAsk: alwaysAsk)
+            } else if let show = self.show, let episode = self.playTarget(in: show) {
+                self.resolveAndPlay(episode.id, alwaysAsk: alwaysAsk, fromPlayButton: true)
+            }
         }
+    }
+
+    /// « Resume » replays the release the title was played from, without
+    /// the sources, the picker or the « Resume at … ? » question: its saved
+    /// position is a decided start, resumed natively by a jump of the
+    /// conversion (`MacUpNextResume`, decision D2); an episode not started
+    /// whose season pack the show was played from holds it plays from that
+    /// pack (D4). False: nothing remembered — the usual flow.
+    private func resumeRememberedRelease() -> Bool {
+        guard !isBusy else { return false }
+        let media: Media
+        let title: String
+        if let movie {
+            media = movie
+            title = movie.title
+        } else if let show, let episode = playTarget(in: show) {
+            media = episode
+            title = "\(show.title) — S\(String(format: "%02d", episode.season))E\(String(format: "%02d", episode.episode))"
+        } else {
+            return false
+        }
+        let resolved = (media as? Episode).flatMap { resolvedTorrents[$0.id] }
+        let sources = resolved ?? media.torrents
+        guard let pending = MacUpNextResume.playback(for: media, title: title, sources: sources, candidates: resolved) else { return false }
+        flow += 1
+        playFromPlayButton = true
+        start(pending.torrent, media: media, title: title, startFraction: pending.startFraction, patience: pending.patience)
+        return true
     }
 
     private func playMovie(_ movie: Movie, alwaysAsk: Bool) {
@@ -442,9 +645,18 @@ final class MacGlassDetailController {
         }
     }
 
+    /// An episode card: once the page's sources are in (EZTV's torrents
+    /// are part of its choice), its own sources, then the automatic quality
+    /// or the picker, then subtitles and the player.
+    func playEpisode(_ id: String, alwaysAsk: Bool) {
+        whenSourcesAreIn(picksAlone: !alwaysAsk && MacAutoQuality.picksAlone) { [weak self] in
+            self?.resolveAndPlay(id, alwaysAsk: alwaysAsk, fromPlayButton: false)
+        }
+    }
+
     /// An episode: its sources (cached), then the automatic quality or the
     /// picker, then subtitles and the player.
-    func playEpisode(_ id: String, alwaysAsk: Bool, fromPlayButton: Bool = false) {
+    private func resolveAndPlay(_ id: String, alwaysAsk: Bool, fromPlayButton: Bool) {
         guard !isBusy, let show, let episode = show.episodes.first(where: { $0.id == id }) else { return }
         flow += 1
         let token = flow
@@ -452,7 +664,7 @@ final class MacGlassDetailController {
         page.busyEpisodeID = id
         if fromPlayButton { page.isPreparingPlay = true }
         let title = "\(show.title) — S\(String(format: "%02d", episode.season))E\(String(format: "%02d", episode.episode))"
-        resolveSources(of: episode, in: show) { [weak self] torrents in
+        resolveSources(of: episode, in: show, picksAlone: !alwaysAsk && MacAutoQuality.picksAlone) { [weak self] torrents in
             // Dropped once the page has gone (its busy state was ended then).
             guard let self, self.isCurrent(token) else { return }
             let sorted = torrents.withMediaRuntime(of: episode, show: show).sorted(by: >)
@@ -461,7 +673,13 @@ final class MacGlassDetailController {
                 self.isShowingNoSources = true
                 return
             }
-            if !alwaysAsk, let pick = MacAutoQuality.pick(from: sorted) {
+            // Play / a Home card on an episode not started: the release in
+            // clear continuity with the show's last one, or its pack (D4).
+            if !alwaysAsk, fromPlayButton,
+               let pending = MacUpNextResume.playback(for: episode, title: title, sources: sorted, candidates: sorted) {
+                self.start(pending.torrent, media: episode, title: title, startFraction: pending.startFraction,
+                           patience: pending.patience)
+            } else if !alwaysAsk, let pick = MacAutoQuality.pick(from: sorted) {
                 self.start(pick, media: episode, title: title)
             } else {
                 self.endBusy()
@@ -471,8 +689,10 @@ final class MacGlassDetailController {
     }
 
     /// Time4Popcorn first, then EZTV / Torrentio — the iOS / tvOS play flow.
-    /// Calls back on the main queue.
-    private func resolveSources(of episode: Episode, in show: Show, completion answer: @escaping ([Torrent]) -> Void) {
+    /// `picksAlone`: a release will be played without asking (the automatic
+    /// quality). Calls back on the main queue.
+    private func resolveSources(of episode: Episode, in show: Show, picksAlone: Bool,
+                                completion answer: @escaping ([Torrent]) -> Void) {
         #if DEBUG
         let completion = MacGlassDebugPointer.delayedSources(answer)
         #else
@@ -481,30 +701,14 @@ final class MacGlassDetailController {
         if let cached = episodeTorrents[episode.id] { return completion(cached) }
         guard show.id.hasPrefix("tt") else { return completion(episode.torrents) }
         let base = episode.torrents
-        let group = DispatchGroup()
-        var aggregated: [Torrent] = []
-        var t4p: [Torrent] = []
-        var extra: [Torrent] = []
-        group.enter()
-        TorrentioClient.shared.streams(imdbId: show.id, season: episode.season, episode: episode.episode) { torrents in
-            aggregated = torrents
-            group.leave()
-        }
-        group.enter()
-        Time4PopcornClient.shared.episodeTorrents(imdbId: show.id, season: episode.season, episode: episode.episode) { torrents in
-            t4p = torrents
-            group.leave()
-        }
-        // The Pirate Bay + Knaben, exact episode only (`ExtraTorrentSources`).
-        group.enter()
-        ExtraTorrentSources.shared.episodeTorrents(imdbId: show.id, showTitle: show.title,
-                                                   season: episode.season, episode: episode.episode) { torrents in
-            extra = torrents
-            group.leave()
-        }
-        group.notify(queue: .main) { [weak self] in
-            var merged = t4p + base
-            for torrent in aggregated where !merged.contains(where: { $0.url == torrent.url }) {
+        // The three extra sources behind one deadline (`EpisodeSourceResolver`):
+        // the list comes with what answered in time — a source that is down
+        // no longer holds the click for its 10 s timeout. A list completed
+        // afterwards replaces it (the next click, the player's other
+        // sources).
+        let merge: (EpisodeSourceResolver.Sources) -> [Torrent] = { sources in
+            var merged = sources.time4Popcorn + base
+            for torrent in sources.torrentio where !merged.contains(where: { $0.url == torrent.url }) {
                 merged.append(torrent)
             }
             // TPB / Knaben (seeded, `ExtraTorrentSources.minSeeders`): only
@@ -515,17 +719,43 @@ final class MacGlassDetailController {
                 return url[range.upperBound...].prefix { $0 != "&" }.lowercased()
             }
             var seen = Set(merged.map { infoHash($0.url) })
-            for torrent in ExtraTorrentSources.novel(extra, beside: merged) where torrent.seeds > 0 && seen.insert(infoHash(torrent.url)).inserted {
+            for torrent in ExtraTorrentSources.novel(sources.extra, beside: merged) where torrent.seeds > 0 && seen.insert(infoHash(torrent.url)).inserted {
                 merged.append(torrent)
             }
-            self?.episodeTorrents[episode.id] = merged
-            completion(merged)
+            return merged
         }
+        // Kept for the page only once every source has answered, and none
+        // with a failure (the resolver asks that one again at the next click).
+        let keep: (EpisodeSourceResolver.Sources) -> [Torrent] = { [weak self] sources in
+            let merged = merge(sources)
+            self?.resolvedTorrents[episode.id] = merged
+            if sources.isComplete, sources.failed.isEmpty { self?.episodeTorrents[episode.id] = merged }
+            return merged
+        }
+        EpisodeSourceResolver.shared.resolve(showId: show.id, showTitle: show.title,
+                                             season: episode.season, episode: episode.episode,
+                                             // A list a source may still complete is good for the
+                                             // sheet, where the user picks. The automatic quality
+                                             // waits for every source still expected (not one on
+                                             // the bench), « No torrents found » for all of them.
+                                             isEnough: { sources in
+            !merge(sources).isEmpty && (!picksAlone || sources.awaited.isEmpty)
+        }, completion: { sources in
+            completion(keep(sources))
+        }, late: { sources in
+            _ = keep(sources)
+        })
     }
 
-    /// Subtitles first (the player offers them), then the player sheet —
-    /// unless the page has gone in the meantime (`pageDisappeared`).
-    func start(_ torrent: Torrent, media: Media, title: String) {
+    /// The player sheet at once — unless the page has gone in the meantime
+    /// (`pageDisappeared`). The OpenSubtitles search starts here and runs
+    /// alongside the stream (`SubtitleSearch`): the sheet used to wait for
+    /// its answer before the torrent was even added.
+    /// - Parameters:
+    ///   - startFraction: a decided start (« Resume » of a remembered
+    ///     release): no question, a native resume there.
+    ///   - patience: a remembered release's patience (D5).
+    func start(_ torrent: Torrent, media: Media, title: String, startFraction: Float = 0, patience: TimeInterval? = nil) {
         #if DEBUG
         // The spinner hooks click the page: nothing may play in those runs.
         if MacGlassDebugPointer.isRequested {
@@ -537,26 +767,30 @@ final class MacGlassDetailController {
         let token = flow
         if let episode = media as? Episode { page.busyEpisodeID = episode.id }
         if playFromPlayButton { page.isPreparingPlay = true }
+        SubtitleSearch.shared.prefetch(for: media, showId: show?.id)
         var target = media
-        let finish: ([Subtitle]) -> Void = { [weak self] subtitles in
-            DispatchQueue.main.async {
-                guard let self, self.isCurrent(token) else { return }
-                target.subtitles = subtitles
-                self.endBusy()
-                // The title's releases go with it: the player offers another
-                // source (one that does not answer) or a lighter release
-                // (a download slower than the video) from them.
-                // Runtimes attached: bitrates for the lighter-release search
-                // and the « Choose another source » sheet.
-                let sources = ((media as? Episode).flatMap { self.episodeTorrents[$0.id] } ?? media.torrents)
-                    .withMediaRuntime(of: media, show: self.show)
-                self.playback = MacPendingPlayback(torrent: torrent, media: target, title: title, sources: sources)
-            }
+        // A title searched in the last half hour has its list at once.
+        target.subtitles = SubtitleSearch.shared.answer(for: media, showId: show?.id) ?? []
+        // An episode carries its show and its guide: the player offers the
+        // next episode (episode chaining).
+        if var episode = target as? Episode, episode.show?.episodes.isEmpty ?? true, let show {
+            episode.show = show
+            target = episode
         }
-        if let episode = media as? Episode {
-            SubtitlesManager.shared.search(episode, imdbId: show?.id) { subtitles, _ in finish(subtitles) }
-        } else {
-            SubtitlesManager.shared.search(imdbId: media.id) { subtitles, _ in finish(subtitles) }
+        DispatchQueue.main.async { [weak self] in
+            guard let self, self.isCurrent(token) else { return }
+            self.endBusy()
+            // The title's releases go with it: the player offers another
+            // source (one that does not answer) or a lighter release
+            // (a download slower than the video) from them.
+            // Runtimes attached: bitrates for the lighter-release search
+            // and the « Choose another source » sheet. An episode: the list
+            // its release was picked from (`resolvedTorrents` — the bare
+            // episode only has EZTV's).
+            let sources = ((media as? Episode).flatMap { self.resolvedTorrents[$0.id] } ?? media.torrents)
+                .withMediaRuntime(of: media, show: self.show)
+            self.playback = MacPendingPlayback(torrent: torrent, media: target, title: title, sources: sources,
+                                               startFraction: startFraction, patience: patience)
         }
     }
 
@@ -569,7 +803,6 @@ final class MacGlassDetailController {
     }
 
     private func toggleWatchlist() {
-        guard let model else { return }
         if var movie {
             movie.isAddedToWatchlist.toggle()
             self.movie = movie
@@ -584,7 +817,7 @@ final class MacGlassDetailController {
     /// Unwatching also deletes the saved progress (WatchedlistManager.remove),
     /// so Play's progress bar is read again too.
     private func toggleWatched() {
-        guard var movie, let model else { return }
+        guard var movie else { return }
         movie.isWatched.toggle()
         self.movie = movie
         model.isWatched = movie.isWatched
@@ -593,7 +826,7 @@ final class MacGlassDetailController {
     }
 
     private func toggleEpisodeWatched(_ id: String) {
-        guard let show, let model, let row = model.episodes.firstIndex(where: { $0.id == id }) else { return }
+        guard let show, let row = model.episodes.firstIndex(where: { $0.id == id }) else { return }
         WatchedlistManager<Episode>.episode.toggle(id)
         model.episodes[row] = GlassDetailAdapter.refreshed([model.episodes[row]])[0]
         refreshShowProgress(show)
@@ -601,6 +834,32 @@ final class MacGlassDetailController {
 }
 
 #if DEBUG
+// MARK: - DEBUG: the states of a page as it loads
+
+/// `-PTDebugDetailMetadataDelay <s>`, `-PTDebugDetailSourcesDelay <s>`,
+/// `-PTDebugDetailLastSourceDelay <s>`, `-PTDebugDetailSourcesFail YES`,
+/// `-PTDebugDetailFail YES`: the title's record and its sources come late,
+/// or fail (`DetailStore.Tampering`), so that each state of the page can
+/// be looked at. `-PTDebugPressPlay <s>` clicks Play that long after the
+/// page appeared (with `-PTDebugHoverBusy YES` nothing can play: `start`
+/// refuses).
+enum MacGlassDetailDebug {
+    private static var didApply = false
+
+    static func applyTamperingOnce() {
+        guard !didApply else { return }
+        didApply = true
+        let defaults = UserDefaults.standard
+        var tampering = DetailStore.Tampering()
+        tampering.metadataDelay = defaults.double(forKey: "PTDebugDetailMetadataDelay")
+        tampering.sourcesDelay = defaults.double(forKey: "PTDebugDetailSourcesDelay")
+        tampering.lastSourceDelay = defaults.double(forKey: "PTDebugDetailLastSourceDelay")
+        tampering.sourcesFail = defaults.bool(forKey: "PTDebugDetailSourcesFail")
+        tampering.fails = defaults.bool(forKey: "PTDebugDetailFail")
+        DetailStore.shared.tampering = tampering
+    }
+}
+
 // MARK: - DEBUG: spinners under the pointer
 
 /// Verification hooks of the page's spinners (with `-PTDebugOpenShow <id>

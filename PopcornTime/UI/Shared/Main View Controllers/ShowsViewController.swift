@@ -13,10 +13,28 @@ class ShowsViewController: MediaViewController {
 
     var currentFilter = ShowManager.Filters.trending {
         didSet {
+            // Set before the grid exists (a tab never shown yet): its first
+            // load reads the filter.
+            guard let collectionView else { return }
             collectionViewController.currentPage = 1
-            didRefresh(collectionView: collectionView!)
+            #if os(tvOS)
+            updateHeaderControls()
+            #endif
+            didRefresh(collectionView: collectionView)
         }
     }
+
+    #if os(tvOS)
+    override var currentFilterName: String { return currentFilter.string }
+
+    override var sortChoices: [UIAction] {
+        return ShowManager.Filters.array.map { filter in
+            UIAction(title: filter.string, state: filter == currentFilter ? .on : .off) { [weak self] _ in
+                self?.currentFilter = filter
+            }
+        }
+    }
+    #endif
     
     @IBAction func showFilters(_ sender: Any) {
         let controller = UIAlertController(title: "Select a filter to sort by".localized, message: nil, preferredStyle: .actionSheet, blurStyle: .dark)
@@ -44,34 +62,57 @@ class ShowsViewController: MediaViewController {
         collectionViewController.isLoading = true
         collectionViewController.hasNextPage = false
         let filter = currentFilter, genre = currentGenre, generation = loadGeneration
-        PopcornKit.loadShows(page, filterBy: filter, genre: genre) { [unowned self] (shows, error) in
+        let completion: ([Show]?, NSError?) -> Void = { [weak self] (shows, error) in
+            print("[Shows] callback shows=\(shows?.count ?? -1) error=\(error?.localizedDescription ?? "nil")")
             // Another list was asked for meanwhile (a filter or genre, even the
             // same one again): its own load (`didRefresh`) fills the grid.
-            guard generation == self.loadGeneration else { return }
+            guard let self = self, generation == self.loadGeneration else { return }
             self.collectionViewController.isLoading = false
             
-            guard let shows = shows else { self.collectionViewController.error = error; self.collectionView?.reloadData(); return }
-            
-            self.collectionViewController.dataSources[0] += shows as [AnyHashable]
-            self.collectionViewController.dataSources[0].unique()
+            // A grid with titles keeps them (its footer offers Retry for
+            // the page); an empty one shows the error and Retry.
+            guard let shows = shows else { return self.collectionViewController.loadFailed(error) }
 
-            // Each EZTV page brings an unordered batch of shows; for the
-            // "A - Z" filter re-sort the accumulated list so the grid stays
+            // Each page of "A - Z" is a page of the popular catalog sorted by
+            // title: the accumulated list is sorted again so the grid stays
             // alphabetical as the user scrolls.
-            if self.currentFilter == .name {
-                self.collectionViewController.dataSources[0].sort {
+            self.show(page: page, items: shows as [AnyHashable], merge: filter != .name ? nil : { items in
+                items.sorted {
                     guard let lhs = ($0 as? Show)?.title, let rhs = ($1 as? Show)?.title else { return false }
                     return lhs.localizedCaseInsensitiveCompare(rhs) == .orderedAscending
                 }
-            }
-
-            if shows.isEmpty // If the array passed in is empty, there are no more results so the content inset of the collection view is reset.
-            {
-                self.collectionView?.contentInset.bottom = self.tabBarController?.tabBar.frame.height ?? 0
-            } else {
-                self.collectionViewController.hasNextPage = true
-            }
-            self.collectionView?.reloadData()
+            })
         }
+        print("[Shows] load(page: \(page)) filter=\(filter) genre=\(genre)")
+        #if DEBUG
+        // `-PTDebugFailPages`: this page fails once, as offline.
+        if GridDebugHooks.fails(page: page) {
+            return DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { completion(nil, GridDebugHooks.failure) }
+        }
+        #endif
+        guard page <= 1 else {
+            return PopcornKit.loadShows(page, filterBy: filter, genre: genre, completion: completion)
+        }
+        #if DEBUG
+        // `-PTDebugStaleSnapshot`, `-PTDebugFirstPageDelay` (GridDebugHooks).
+        GridDebugHooks.prepareFirstPage()
+        let firstPage: ([Show]?, NSError?) -> Void = { items, error in
+            GridDebugHooks.afterFirstPageDelay { completion(items, error) }
+        }
+        #else
+        let firstPage = completion
+        #endif
+        // The first page: the list saved by the last load at once (a launch,
+        // a sort picked again), then the network's.
+        PopcornKit.loadShows(page, filterBy: filter, genre: genre, snapshot: { [weak self] shows in
+            guard let self = self, generation == self.loadGeneration else { return }
+            print("[Shows] snapshot shows=\(shows.count)")
+            #if DEBUG
+            // `-PTDebugStaleSnapshot`: a saved list the network's differs from.
+            return self.showSnapshot(GridDebugHooks.snapshot(shows) as [AnyHashable])
+            #else
+            self.showSnapshot(shows as [AnyHashable])
+            #endif
+        }, completion: firstPage)
     }
 }

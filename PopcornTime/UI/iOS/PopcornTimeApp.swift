@@ -21,6 +21,15 @@ struct PopcornTimeApp: App {
         // on tvOS for the full rationale).
         VLCLibrary.sharedEventsConfiguration = VLCEventsLegacyConfiguration()
 
+        #if DEBUG
+        IOSDebugHooks.applySourceSwitches()
+        // The offline end-to-end runs (`-PTDebugPlayTorrent` with
+        // `-PTDebugLoopbackPort`): the loopback-only torrent session and the
+        // download directory, before anything uses them — as the tvOS and
+        // Mac apps do at launch.
+        BoundedStorageDebugHooks.prepareAtLaunch()
+        #endif
+
         // The first MovieManager / ShowManager call triggers
         // `MediaProviders.shared = YTSEZTVProvider()` lazy init. Pre-warm it
         // here so the UI doesn't pay the cost on first cell render.
@@ -31,6 +40,10 @@ struct PopcornTimeApp: App {
         // AppDelegate runs at launch; without it a crashed 4K stream can
         // strand ~2× the movie size on disk.
         purgeOrphanTorrentDownloads()
+
+        // Known before the first Play: is the connection cellular data or a
+        // personal hotspot (`CellularStreamingPolicy`)?
+        NetworkPathObserver.shared.start()
     }
 
     var body: some Scene {
@@ -42,6 +55,8 @@ struct PopcornTimeApp: App {
                     // Trakt's web auth flow finishes by redirecting to
                     // popcorntime://trakt?code=…&state=… — hand it off to
                     // PopcornKit and tell SettingsView to refresh its UI.
+                    // (Nothing offers to sign in any more: Trakt refuses the
+                    // app's key. Kept for a redirect that still arrives.)
                     if url.scheme == "popcorntime", url.host == "trakt" {
                         TraktManager.shared.authenticate(url)
                         DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {

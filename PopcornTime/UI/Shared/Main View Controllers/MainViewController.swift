@@ -32,6 +32,13 @@ class MainViewController: UIViewController, CollectionViewControllerDelegate {
     
     var environmentsToFocus: [UIFocusEnvironment] = []
 
+    /// Whether the focused view is in this screen (a poster, a Continue
+    /// Watching card, Sort or Genre), not in the tab bar or elsewhere.
+    private var focusIsInScreen: Bool {
+        guard isViewLoaded, let focused = UIFocusSystem.focusSystem(for: view)?.focusedItem as? UIView else { return false }
+        return focused.isDescendant(of: view)
+    }
+
     override var preferredFocusEnvironments: [UIFocusEnvironment] {
         return environmentsToFocus.isEmpty ? super.preferredFocusEnvironments : environmentsToFocus
     }
@@ -42,43 +49,35 @@ class MainViewController: UIViewController, CollectionViewControllerDelegate {
     /// + memory pressure), so we de-dup.
     private var didInstallInBodyHeader: Bool = false
 
-    /// Reference to the in-body title label so subclasses can update it
-    /// (e.g. `MediaViewController.showGenres` rewrites the title to the
-    /// current genre when the user filters).
-    var bodyTitleLabel: UILabel?
-
     /// The in-body header (title + Sort / Genre): a subview of the grid,
     /// placed in its top content inset by `layoutInBodyHeader`.
-    private var bodyHeader: UIView?
+    private(set) var bodyHeader: GridHeaderView?
 
-    /// Over the header, left of Sort / Genre: Up from any poster of the
-    /// first row goes to Sort (the focus engine went straight to the tab bar
-    /// from the columns far from the buttons). On only while the focus is in
-    /// the grid (`didUpdateFocus`): Down from the tab bar still goes to the
-    /// poster below.
-    private var bodyHeaderFocusGuide: UIFocusGuide?
+    /// The header's controls, for the subclasses that have them: they write
+    /// what the control is set to on it (`updateHeaderControls`).
+    private(set) var sortButton: UIButton?
+    private(set) var genreButton: UIButton?
 
-    /// The header's height, and its distance from the top of the grid's
-    /// content inset (which starts just below the tab bar).
-    private static let bodyHeaderHeight: CGFloat = 100
-    private static let bodyHeaderTop: CGFloat = 16
+    /// The page title (the tab's name; a person's).
+    var bodyTitleLabel: UILabel? { return bodyHeader?.titleLabel }
 
     /// On tvOS 26 the centered tab-bar pills live in the same vertical strip
     /// as `navigationItem.leftBarButtonItem` and `rightBarButtonItems`,
-    /// hiding the giant page title + Sort/Genre under them. The Downloads
-    /// page never had this problem — its "Downloads" label is laid out as a
-    /// regular subview at body y≈190, well below the pills. We mirror that
-    /// approach for every `MainViewController` subclass: read the page
-    /// title from `navigationItem.title` (set via storyboard or by the
-    /// subclass), clear it so the system doesn't render its own copy
-    /// alongside the pills, and inject a fresh body header above the grid's
-    /// first row with the title + Sort/Genre buttons.
+    /// hiding the page title + Sort/Genre under them. So the header is part
+    /// of the page, as on every tvOS screen: read the page title from
+    /// `navigationItem.title` (set via storyboard or by the subclass), clear
+    /// it so the system doesn't render its own copy alongside the pills, and
+    /// put a header above the grid's first row.
     ///
-    /// The header is part of the page, as on every tvOS screen: it lives in
-    /// the grid (its top content inset) and scrolls away with the first row,
-    /// and the tab bar follows the grid's scroll (`setContentScrollView`).
-    /// Pinned on the view, it stayed while the posters slid under the title,
-    /// Sort / Genre and the tab bar.
+    /// It is one line (`GridHeaderView`): the title on the rows' left edge,
+    /// Sort / Genre on the right, each saying what it is set to. (It was a
+    /// 75 pt title that repeated the tab's name over two bare "Sort" /
+    /// "Genre" buttons, in 150 pt: with it and six columns of posters the
+    /// screen showed one row and a half.) It lives in the grid (its top
+    /// content inset) and scrolls away with the first row, and the tab bar
+    /// follows the grid's scroll (`setContentScrollView`). Pinned on the
+    /// view, it stayed while the posters slid under the title, Sort / Genre
+    /// and the tab bar.
     ///
     /// `responds(to:)` filters: Movies & Shows expose `showFilters:` and
     /// `showGenres:`; Watchlist / Person have neither so they get the
@@ -107,88 +106,47 @@ class MainViewController: UIViewController, CollectionViewControllerDelegate {
         navigationItem.leftBarButtonItem = nil
         navigationItem.rightBarButtonItems = nil
 
-        // 3) Push the collection view's content below the header.
-        //    Header (100) + breathing room above (16) and below (~30) +
-        //    extra padding so the focus zoom on the first row clears
-        //    the header → 150pt.
-        let topInset: CGFloat = 150
-        collectionView?.contentInset.top = topInset
-        collectionView?.verticalScrollIndicatorInsets.top = topInset
+        let sortSel = NSSelectorFromString("showFilters:"), genreSel = NSSelectorFromString("showGenres:")
+        guard let collectionView, titleText != nil || responds(to: sortSel) || responds(to: genreSel) else { return }
 
-        var rightButtons: [UIButton] = []
-        let sortSel = NSSelectorFromString("showFilters:")
-        if responds(to: sortSel) { rightButtons.append(makeCapsuleButton(title: "Sort".localized, action: sortSel, identifier: "GridHeader.Sort")) }
-        let genreSel = NSSelectorFromString("showGenres:")
-        if responds(to: genreSel) { rightButtons.append(makeCapsuleButton(title: "Genre".localized, action: genreSel, identifier: "GridHeader.Genre")) }
+        // 3) The header, in the grid's top content inset: placed by frame
+        //    (`layoutInBodyHeader`), its title and controls by constraints.
+        //    The first row starts `GridStyle.sectionTop` below it.
+        collectionView.contentInset.top = GridStyle.headerHeight - GridStyle.headerLift
+        collectionView.verticalScrollIndicatorInsets.top = collectionView.contentInset.top
 
-        guard let collectionView, titleText != nil || !rightButtons.isEmpty else { return }
-
-        // 4) Build the in-body header: placed by frame in the grid's content
-        //    (`layoutInBodyHeader`), its title and buttons by constraints.
-        let header = UIView()
+        let header = GridHeaderView()
+        header.titleLabel.text = titleText
+        header.titleLabel.isHidden = titleText == nil
+        if responds(to: sortSel) { sortButton = header.addControl(identifier: "GridHeader.Sort", target: self, action: sortSel) }
+        if responds(to: genreSel) { genreButton = header.addControl(identifier: "GridHeader.Genre", target: self, action: genreSel) }
         collectionView.addSubview(header)
         bodyHeader = header
-
-        if let text = titleText {
-            let titleLabel = UILabel()
-            titleLabel.translatesAutoresizingMaskIntoConstraints = false
-            titleLabel.text = text
-            titleLabel.font = .systemFont(ofSize: 75, weight: .heavy)
-            titleLabel.textColor = .white
-            titleLabel.adjustsFontSizeToFitWidth = false
-            titleLabel.accessibilityIdentifier = "GridHeader.Title"
-            header.addSubview(titleLabel)
-            NSLayoutConstraint.activate([
-                titleLabel.leadingAnchor.constraint(equalTo: header.leadingAnchor),
-                titleLabel.centerYAnchor.constraint(equalTo: header.centerYAnchor),
-            ])
-            self.bodyTitleLabel = titleLabel
-        }
-
-        if let firstButton = rightButtons.first {
-            let stack = UIStackView(arrangedSubviews: rightButtons)
-            stack.axis = .horizontal
-            stack.spacing = 28
-            stack.alignment = .center
-            stack.translatesAutoresizingMaskIntoConstraints = false
-            header.addSubview(stack)
-
-            let guide = UIFocusGuide()
-            guide.isEnabled = false
-            guide.preferredFocusEnvironments = [firstButton]
-            header.addLayoutGuide(guide)
-            bodyHeaderFocusGuide = guide
-
-            NSLayoutConstraint.activate([
-                stack.trailingAnchor.constraint(equalTo: header.trailingAnchor),
-                stack.centerYAnchor.constraint(equalTo: header.centerYAnchor),
-                guide.leadingAnchor.constraint(equalTo: header.leadingAnchor),
-                guide.trailingAnchor.constraint(equalTo: stack.leadingAnchor),
-                guide.topAnchor.constraint(equalTo: header.topAnchor),
-                guide.bottomAnchor.constraint(equalTo: header.bottomAnchor),
-            ])
-        }
+        updateHeaderControls()
 
         layoutInBodyHeader()
 
-        // 5) The tab bar follows the grid: it goes away as the posters
+        // 4) The tab bar follows the grid: it goes away as the posters
         //    scroll up and comes back at the top.
         setContentScrollView(collectionView, for: .top)
+
+        installMenuToTheTop()
     }
 
-    /// The header in the 150 pt content inset reserved for it above the
-    /// grid's content, `bodyHeaderTop` below that inset's top edge, between
-    /// the view's safe area margins + 90: at the top of the grid, exactly
-    /// where it was when pinned on the view, under the tab bar. Being in the
-    /// content, it scrolls with the posters.
+    /// Writes on Sort / Genre what they are set to ("Sort: Trending").
+    /// Movies and Shows override it; called when the header is made and
+    /// after each choice.
+    func updateHeaderControls() {}
+
+    /// The header in the content inset reserved for it above the grid's
+    /// content, between the rows' side insets: the page title starts on the
+    /// posters' left edge. Being in the content, it scrolls with the posters.
     private func layoutInBodyHeader() {
         guard let header = bodyHeader, let collectionView = header.superview as? UICollectionView else { return }
-        let leading = view.safeAreaInsets.left + 90
-        let trailing = view.safeAreaInsets.right + 90
-        let frame = CGRect(x: leading,
-                           y: Self.bodyHeaderTop - collectionView.contentInset.top,
-                           width: max(0, collectionView.bounds.width - leading - trailing),
-                           height: Self.bodyHeaderHeight)
+        let frame = CGRect(x: GridStyle.sideInset,
+                           y: -collectionView.contentInset.top - GridStyle.headerLift,
+                           width: max(0, collectionView.bounds.width - GridStyle.sideInset * 2),
+                           height: GridStyle.headerHeight)
         if header.frame != frame { header.frame = frame }
     }
 
@@ -204,52 +162,103 @@ class MainViewController: UIViewController, CollectionViewControllerDelegate {
         // the header itself) the focus engine decides alone.
         guard let next = context.nextFocusedView,
               next.isDescendant(of: collectionView), !next.isDescendant(of: header) else {
-            bodyHeaderFocusGuide?.isEnabled = false
+            header.focusGuide.isEnabled = false
             return
         }
-        bodyHeaderFocusGuide?.isEnabled = true
+        header.focusGuide.isEnabled = !header.buttons.isEmpty
         revealHeaderIfAtTheTop(next, in: collectionView)
     }
 
     /// A poster of the first row (or a Continue Watching card) focused: the
     /// grid goes back to its very top, the header and the tab bar in full.
     /// tvOS scrolls only until the poster is clear of the edge, which left
-    /// the page 30 pt short of its top (title and tab bar cut at the top of
-    /// the screen) once the tab bar had gone away with the scroll.
+    /// the page short of its top (title and tab bar cut at the top of the
+    /// screen) once the tab bar had gone away with the scroll.
     private func revealHeaderIfAtTheTop(_ focused: UIView, in collectionView: UICollectionView) {
         let top = -collectionView.adjustedContentInset.top
         guard collectionView.contentOffset.y > top + 1 else { return }
         // Where the grid shows its content when at its top.
         let shownAtTheTop = CGRect(x: collectionView.bounds.minX, y: top,
                                    width: collectionView.bounds.width, height: collectionView.bounds.height)
-        guard shownAtTheTop.contains(focused.convert(focused.bounds, to: collectionView)) else { return }
+        let frame = focused.convert(focused.bounds, to: collectionView)
+        guard shownAtTheTop.contains(frame) else { return }
+        // The first row only. The second one fits the screen at the top
+        // too, now that the header is one line: tvOS scrolls a little when
+        // it gets the focus (the third row comes up), and the grid stays
+        // there — also when it comes back from a page.
+        if let controller = collectionViewController, let section = controller.dataSources.firstIndex(where: { !$0.isEmpty }),
+           let firstRow = collectionView.layoutAttributesForItem(at: IndexPath(item: 0, section: section))?.frame {
+            guard frame.midY < firstRow.maxY else { return }
+        }
         DispatchQueue.main.async {
             collectionView.setContentOffset(CGPoint(x: collectionView.contentOffset.x, y: top), animated: true)
         }
     }
 
-    /// Update the in-body title label. Used by `MediaViewController`
-    /// when the user picks a genre filter.
+    /// Update the in-body title label (a person's name).
     func setBodyTitle(_ text: String) {
         bodyTitleLabel?.text = text
     }
 
-    private func makeCapsuleButton(title: String, action: Selector, identifier: String) -> UIButton {
-        var config = UIButton.Configuration.gray()
-        config.title = title
-        config.cornerStyle = .capsule
-        config.contentInsets = NSDirectionalEdgeInsets(top: 14, leading: 32, bottom: 14, trailing: 32)
-        config.baseForegroundColor = .white
-        config.titleTextAttributesTransformer = UIConfigurationTextAttributesTransformer { incoming in
-            var out = incoming
-            out.font = .systemFont(ofSize: 26, weight: .semibold)
-            return out
+    // MARK: Menu: to the top of the grid, then to the tab bar
+
+    private let menuGate = MenuGate()
+
+    /// Menu on a grid goes up one level at a time, as the user reads the
+    /// page: from the rows below, back to the top of the grid (the first
+    /// row, with the header and the tab bar); from the top, to the tab bar;
+    /// from the tab bar, the system leaves the app. (tvOS 26 leaves the app
+    /// at once from anywhere on a tab's first screen: a long way from the
+    /// fifth page of a list.)
+    private func installMenuToTheTop() {
+        let menu = UITapGestureRecognizer(target: self, action: #selector(menuPressed))
+        menu.allowedPressTypes = [NSNumber(value: UIPress.PressType.menu.rawValue)]
+        menuGate.shouldBegin = { [weak self] in self?.takesMenu ?? false }
+        menu.delegate = menuGate
+        view.addGestureRecognizer(menu)
+    }
+
+    /// Only for a tab's first screen at rest with the focus in it: a page
+    /// being pushed or popped keeps its own Back (`TVNavigationController`),
+    /// a screen pushed on a tab (a person's titles) goes back with one press,
+    /// and from the tab bar Menu leaves the app.
+    private var takesMenu: Bool {
+        guard let navigationController, navigationController.topViewController === self,
+              navigationController.viewControllers.first === self,
+              navigationController.transitionCoordinator == nil, presentedViewController == nil,
+              let tabBarController = tabBarController as? TVTabBarController, !tabBarController.focusIsInTabBar,
+              let focused = UIFocusSystem.focusSystem(for: self)?.focusedItem as? UIView else { return false }
+        return focused.isDescendant(of: view)
+    }
+
+    @objc private func menuPressed() {
+        guard let collectionView, let controller = collectionViewController else { return }
+        let top = -collectionView.adjustedContentInset.top
+        if collectionView.contentOffset.y > top + 1 {
+            // Back to the first row, in the column the focus was in.
+            let section = controller.dataSources.firstIndex { !$0.isEmpty } ?? 0
+            let attributes = collectionView.layoutAttributesForItem(at: IndexPath(item: 0, section: section))
+            let focusedX = (UIFocusSystem.focusSystem(for: self)?.focusedItem as? UIView).map { $0.convert($0.bounds, to: collectionView).midX }
+            var item = 0
+            if let first = attributes?.frame, let x = focusedX, first.width > 0 {
+                let column = Int(max(0, x - first.minX) / (first.width + GridStyle.columnSpacing))
+                item = min(column, max(0, (controller.dataSources[safe: section]?.count ?? 1) - 1))
+            }
+            controller.focusIndexPath = IndexPath(item: item, section: section)
+            UIView.transition(with: collectionView, duration: GridStyle.fadeDuration, options: [.transitionCrossDissolve, .allowUserInteraction]) {
+                collectionView.setContentOffset(CGPoint(x: collectionView.contentOffset.x, y: top), animated: false)
+                collectionView.layoutIfNeeded()
+            }
+            controller.setNeedsFocusUpdate()
+            controller.updateFocusIfNeeded()
+            controller.updateCaption(animated: false)
+        } else if let tabBarController = tabBarController as? TVTabBarController {
+            // At the top: the tab bar, on the tab this screen belongs to.
+            tabBarController.environmentsToFocus = [tabBarController.tabBar]
+            tabBarController.setNeedsFocusUpdate()
+            tabBarController.updateFocusIfNeeded()
+            tabBarController.environmentsToFocus.removeAll()
         }
-        let btn = UIButton(configuration: config)
-        btn.translatesAutoresizingMaskIntoConstraints = false
-        btn.addTarget(self, action: action, for: .primaryActionTriggered)
-        btn.accessibilityIdentifier = identifier
-        return btn
     }
     #endif
     
@@ -263,10 +272,11 @@ class MainViewController: UIViewController, CollectionViewControllerDelegate {
     /// another tab): its items and the Continue Watching titles.
     private var shownWhenLeft: (items: [[AnyHashable]], continueWatching: [String])?
 
-    /// The Continue Watching row's titles (Movies and Shows grids only).
+    /// The Continue Watching row's cards, in order (Movies and Shows grids
+    /// only): the movie or the episode each one plays.
     private var continueWatchingIDs: [String] {
-        if self is MoviesViewController { return WatchedlistManager<Movie>.movie.getOnDeck() }
-        if self is ShowsViewController { return WatchedlistManager<Episode>.episode.getOnDeck() }
+        if self is MoviesViewController { return ContinueWatchingCollectionReusableView.items(for: .movies).map { $0.mediaID } }
+        if self is ShowsViewController { return ContinueWatchingCollectionReusableView.items(for: .episodes).map { $0.mediaID } }
         return []
     }
 
@@ -278,13 +288,20 @@ class MainViewController: UIViewController, CollectionViewControllerDelegate {
     override dynamic func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)
 
-        setNeedsFocusUpdate()
-        updateFocusIfNeeded()
+        // A focus already in the screen stays where it is. A focus update
+        // asked here only moves a focus the screen holds (one in the tab bar
+        // is left alone), and it moved it to the grid's preferred poster: a
+        // Down pressed before the tab had finished appearing reached a
+        // Continue Watching card, then the focus jumped to the first poster
+        // under the row (ContinueWatchingUITests, about 1 s after launch).
+        if !environmentsToFocus.isEmpty || !focusIsInScreen {
+            setNeedsFocusUpdate()
+            updateFocusIfNeeded()
 
+            collectionView?.setNeedsFocusUpdate()
+            collectionView?.updateFocusIfNeeded()
+        }
         environmentsToFocus.removeAll()
-
-        collectionView?.setNeedsFocusUpdate()
-        collectionView?.updateFocusIfNeeded()
 
         refreshShownContent()
     }
@@ -302,7 +319,13 @@ class MainViewController: UIViewController, CollectionViewControllerDelegate {
         guard let left = shownWhenLeft,
               left.items == collectionViewController.dataSources,
               left.continueWatching == continueWatching else {
+            #if os(tvOS)
+            // Not a bare `reloadData`: it took the focus from a Continue
+            // Watching card (a Down pressed while the tab was appearing).
+            collectionViewController.reloadDataKeepingFocus()
+            #else
             collectionView.reloadData()
+            #endif
             return
         }
         collectionViewController.refreshVisibleItemsInPlace()
@@ -318,6 +341,9 @@ class MainViewController: UIViewController, CollectionViewControllerDelegate {
 
         #if os(tvOS)
         installInBodyHeader()
+        #if DEBUG
+        GridHitchMonitor.startIfAsked()
+        #endif
         #endif
     }
     
@@ -328,9 +354,23 @@ class MainViewController: UIViewController, CollectionViewControllerDelegate {
         // a load still running for the last one must not block it (Movies and
         // Shows drop the results of a filter or genre no longer selected).
         collectionViewController.error = nil
+        collectionViewController.loadMoreError = nil
         collectionViewController.isLoading = false
+        #if os(tvOS)
+        // Another list starts at its first poster: Down from the header
+        // went to the place the focus had in the list before.
+        collectionViewController.focusIndexPath = IndexPath(item: 0, section: 0)
+        #endif
         collectionView.reloadData()
         load(page: 1)
+    }
+
+    /// Retry: the whole list again (an empty grid's error), or the page
+    /// that failed under the titles already there.
+    func retryLoading(page: Int?) {
+        guard let collectionView else { return }
+        guard let page = page else { return didRefresh(collectionView: collectionView) }
+        load(page: page)
     }
     
     override func prepare(for segue: UIStoryboardSegue, sender: Any?) {
@@ -340,7 +380,9 @@ class MainViewController: UIViewController, CollectionViewControllerDelegate {
         } else if let segue = segue as? AutoPlayStoryboardSegue,
             segue.identifier == "showMovie" || segue.identifier == "showShow",
             let media: Media = sender as? Movie ?? sender as? Show {
-            MainViewController.loadDetail(of: media, behind: segue.destination, autoPlay: segue.shouldAutoPlay)
+            // The title's page at once, in place of the storyboard's loading
+            // screen (`AutoPlayStoryboardSegue.perform`).
+            segue.page = MainViewController.detailPage(of: media, autoPlay: segue.shouldAutoPlay)
         } else if segue.identifier == "showPerson",
             let vc = segue.destination as? PersonViewController,
             let person: Person = sender as? Crew ?? sender as? Actor {
@@ -353,94 +395,47 @@ class MainViewController: UIViewController, CollectionViewControllerDelegate {
 
 extension MainViewController {
 
-    /// Opens the page of a movie or show from code (e.g. a related title on a
-    /// detail page): pushes the loading screen, which is then replaced by the
-    /// page, exactly like a poster's `showMovie` / `showShow` segue.
-    static func showDetail(of media: Media, on navigationController: UINavigationController, autoPlay: Bool = false) {
-        let loadingViewController = UIStoryboard.main.instantiateViewController(withIdentifier: "LoadingViewController")
-        loadDetail(of: media, behind: loadingViewController, autoPlay: autoPlay)
-        navigationController.push(loadingViewController, animated: true)
+    /// Opens the page of a movie or show: pushed at once, with what the
+    /// caller has of the title (a grid's item, a Home card, a link's id) —
+    /// the title's record, then its sources, fill it as they arrive
+    /// (`GlassDetailHostingController`). There is no loading screen any
+    /// more: the page used to come only once the slowest torrent source had
+    /// answered.
+    ///
+    /// The page of that title already on top is not pushed a second time
+    /// (a link to the page being shown): it takes the link's season and
+    /// episode, and plays for `autoPlay`.
+    ///
+    /// `autoPlay` (a Continue Watching item, a `play` link, Play/Pause on a
+    /// poster) plays what the page's Play button would, once the page is
+    /// on screen and its sources are in. `season` / `episode`: a link's
+    /// (`GlassDetailHostingController.init`).
+    static func showDetail(of media: Media, on navigationController: UINavigationController, autoPlay: Bool = false,
+                           season: Int? = nil, episode: Int? = nil) {
+        if let top = navigationController.topViewController as? GlassDetailHostingController, top.shows(media) {
+            print("[Detail] \(media.id) is the page on top: not opened a second time")
+            top.reopen(autoPlay: autoPlay, season: season, episode: episode)
+            return
+        }
+        navigationController.push(detailPage(of: media, autoPlay: autoPlay, season: season, episode: episode), animated: true)
     }
 
-    /// Fills `loadingViewController` (the TVLoadingViewController a
-    /// `showMovie` / `showShow` segue pushes) with the poster and title,
-    /// loads the movie or show info, then swaps the loading screen for the
-    /// detail page (`GlassDetailHostingController`) with a fade, or for an
-    /// error page. Nothing happens if the user left the loading screen
-    /// meanwhile. `autoPlay` (a Continue Watching item) then plays what
-    /// the page's Play button would.
-    static func loadDetail(of media: Media, behind loadingViewController: UIViewController, autoPlay: Bool) {
-#if os(tvOS)
-        if let destination = loadingViewController as? TVLoadingViewController {
-            destination.loadViewIfNeeded() // Initialize the @IBOutlets
-
-            if let image = media.smallCoverImage, let url = URL(string: image) {
-                destination.backgroundImageView.af.setImage(withURL: url)
-            }
-
-            destination.titleLabel.text = media.title
-        }
-#endif
-
-        /// Replaces the loading screen with the page (or an error page), in
-        /// one change of the navigation stack under a 0.5 s fade. (The page
-        /// used to be pushed over the loading screen, which was taken out of
-        /// the stack 0.5 s later: Back during that fade went to the loading
-        /// screen, then that removal ran in the middle of the pop and could
-        /// leave a spinner that never went away.)
-        func replaceLoadingScreen(with media: Media?, error: NSError?) {
-            guard let navigationController = loadingViewController.navigationController,
-                navigationController.visibleViewController === loadingViewController, // Make sure we're still loading and the user hasn't dismissed the view.
-                (navigationController as? TVNavigationController)?.isGoingBack != true // nor pressed Back while the loading screen slid in
-                else { return }
-            // A transition still running (UIKit would drop this change): after it.
-            if let coordinator = navigationController.transitionCoordinator {
-                let retry = { DispatchQueue.main.async { replaceLoadingScreen(with: media, error: error) } }
-                if !coordinator.animate(alongsideTransition: nil, completion: { _ in retry() }) {
-                    retry()
-                }
-                return
-            }
-            guard let index = navigationController.viewControllers.firstIndex(where: { $0 === loadingViewController }) else { return }
-
-            let page: UIViewController
-            var detailViewController: GlassDetailHostingController?
-            if let error = error {
-                page = TVErrorPageViewController(error: error)
-            } else if let media = media {
-                let vc = GlassDetailHostingController(media: media, autoPlay: autoPlay)
-                detailViewController = vc
-                page = vc
-            } else {
-                return
-            }
-
-            let transition = CATransition()
-            transition.duration = 0.5
-            transition.timingFunction = CAMediaTimingFunction(name: CAMediaTimingFunctionName.easeInEaseOut)
-            transition.type = CATransitionType.fade
-            navigationController.view.layer.add(transition, forKey: nil)
-
-            var viewControllers = navigationController.viewControllers
-            viewControllers[index] = page
-            navigationController.setViewControllers(viewControllers, animated: false)
-
-            if autoPlay, let detailViewController {
-                DispatchQueue.main.asyncAfter(deadline: .now() + transition.duration) {
-                    // Not over another screen if the user left the page meanwhile.
-                    guard detailViewController.navigationController?.topViewController === detailViewController else { return }
-                    detailViewController.startAutoPlay()
-                }
-            }
-        }
-
-        GlassDetailHostingController.loadCore(of: media) { (media, error) in
-            // A cached show answers within a few milliseconds, while the
-            // loading screen's own push (TVNavigationController's 0.6 s
-            // animation) is still running. UIKit drops navigation changes made
-            // during a transition (the page would never open), so the swap
-            // waits for that push to end (`replaceLoadingScreen`).
-            replaceLoadingScreen(with: media, error: error)
-        }
+    /// The page `showDetail` pushes (a `showMovie` / `showShow` segue shows
+    /// it in place of its storyboard destination).
+    static func detailPage(of media: Media, autoPlay: Bool, season: Int? = nil, episode: Int? = nil) -> UIViewController {
+        return GlassDetailHostingController(media: media, autoPlay: autoPlay, season: season, episode: episode)
     }
 }
+
+#if os(tvOS)
+/// Lets a grid's Menu recognizer begin only when the grid takes Menu
+/// (`MainViewController.installMenuToTheTop`); otherwise the press goes on
+/// to the navigation controller or to the system.
+final class MenuGate: NSObject, UIGestureRecognizerDelegate {
+    var shouldBegin: () -> Bool = { false }
+
+    func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
+        return shouldBegin()
+    }
+}
+#endif

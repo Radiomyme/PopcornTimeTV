@@ -3,6 +3,7 @@
 import SwiftUI
 import AVKit
 import PopcornKit
+import PopcornTorrent
 
 /// Wraps `AVPlayerViewController` so SwiftUI can present it full-screen —
 /// the direct path for MP4 / M4V / MOV payloads (Matroska goes through the
@@ -84,6 +85,8 @@ struct VideoPlayerWrapper: UIViewControllerRepresentable {
         /// Picture in Picture is on: playback goes on in the background.
         private var isPictureInPictureActive = false
         private var failureObserver: AVPlayerItemFailureObserver?
+        /// The `[Start]` trace's first-frame mark.
+        var firstFrameWatch: FirstFrameWatch?
         private var startObservations: [NSKeyValueObservation] = []
         private weak var player: AVPlayer?
         private var startPosition: Float = 0
@@ -92,6 +95,8 @@ struct VideoPlayerWrapper: UIViewControllerRepresentable {
         private var resumePoint: Float = 0
         /// Furthest position (0…1) reached during this session.
         private var highWater: Float = 0
+        /// When the position was last saved during playback (every 30 s).
+        private var progressCheckpoint = PlaybackCheckpoint()
         private var timeObserver: Any?
         private var didFallBack = false
         private var didStart = false
@@ -186,6 +191,8 @@ struct VideoPlayerWrapper: UIViewControllerRepresentable {
                     self?.notePlayedPosition()
                     self?.noteHeldSeek(isJump: false)
                     self?.noteHighWater()
+                    self?.checkpointProgressIfDue()
+                    self?.tickUpNext()
                 }
             }
             let center = NotificationCenter.default
@@ -203,6 +210,17 @@ struct VideoPlayerWrapper: UIViewControllerRepresentable {
                     guard let self = self, let item = self.player?.currentItem, jumped === item else { return }
                     self.noteHeldSeek(isJump: true)
                     self.scheduleBoundedRewindCheck()
+                }
+            })
+            // Episode chaining: the file is over (the session takes over the
+            // end, or nothing changes: the player stays on its last frame).
+            observers.append(center.addObserver(forName: AVPlayerItem.didPlayToEndTimeNotification, object: nil,
+                                                queue: .main) { [weak self] note in
+                let ended = note.object as AnyObject?
+                MainActor.assumeIsolated {
+                    guard let self = self, !self.didFallBack, let item = self.player?.currentItem, ended === item else { return }
+                    self.tickUpNext()
+                    UpNextSession.current?.itemEnded()
                 }
             })
             // A kill while suspended (or a crash later) keeps what was watched.
@@ -264,7 +282,7 @@ struct VideoPlayerWrapper: UIViewControllerRepresentable {
             spinner.hidesWhenStopped = true
             spinner.translatesAutoresizingMaskIntoConstraints = false
             let label = UILabel()
-            label.text = "Mise en mémoire tampon…\nLe téléchargement est plus lent que la lecture"
+            label.text = "Buffering…".localized + "\n" + "The download is slower than playback".localized
             label.numberOfLines = 2
             label.textAlignment = .center
             label.textColor = .white
@@ -344,6 +362,7 @@ struct VideoPlayerWrapper: UIViewControllerRepresentable {
         private func playerRateDidChange(reason: AVPlayer.RateDidChangeReason?) {
             guard let player = player else { return }
             let item = player.currentItem
+            defer { tickUpNext() }
             guard playIntent.noteRateChange(rate: player.rate, reason: reason, isHealthy: isItemHealthy,
                                             canCheckpoint: item?.status == .readyToPlay) else { return }
             print("[Player] paused by the user — progress checkpoint")
@@ -409,7 +428,8 @@ struct VideoPlayerWrapper: UIViewControllerRepresentable {
                                                                   session: boundedStorage) else { return }
             player.rate = BoundedStorageUX.resumeRate(after: player)
             BoundedStorageUX.logLimited(player: "AVPlayer (direct)", target: now,
-                                        playhead: playedPosition.lastPlayedTime ?? now, landing: landing)
+                                        playhead: playedPosition.lastPlayedTime ?? now, landing: landing,
+                                        session: boundedStorage)
             player.seek(to: CMTime(seconds: landing, preferredTimescale: 600), toleranceBefore: .zero, toleranceAfter: .zero)
             if let overlay = overlayView {
                 BoundedStorageToastView.show(BoundedStorageUX.rewindLimitedMessage(for: boundedStorage), in: overlay)
@@ -423,7 +443,8 @@ struct VideoPlayerWrapper: UIViewControllerRepresentable {
             // target AVPlayer still holds).
             guard let reference = playedPosition.lastPlayedTime,
                   let landing = BoundedStorageUX.limitedRewindTarget(now, from: reference, session: boundedStorage) else { return }
-            BoundedStorageUX.logLimited(player: "AVPlayer (direct)", target: now, playhead: reference, landing: landing)
+            BoundedStorageUX.logLimited(player: "AVPlayer (direct)", target: now, playhead: reference, landing: landing,
+                                        session: boundedStorage)
             player.seek(to: CMTime(seconds: landing, preferredTimescale: 600), toleranceBefore: .zero, toleranceAfter: .zero)
             if let overlay = overlayView {
                 BoundedStorageToastView.show(BoundedStorageUX.rewindLimitedMessage(for: boundedStorage), in: overlay)
@@ -563,7 +584,7 @@ struct VideoPlayerWrapper: UIViewControllerRepresentable {
                       let landing = BoundedStorageUX.limitedRewindTarget(seconds, from: reference, session: session)
                 else { return false }
                 BoundedStorageUX.logLimited(player: "AVPlayer (direct, recovering)", target: seconds, playhead: reference,
-                                            landing: landing)
+                                            landing: landing, session: session)
                 self.player?.seek(to: CMTime(seconds: landing, preferredTimescale: 600), toleranceBefore: .zero, toleranceAfter: .zero)
                 if let overlay = self.overlayView {
                     BoundedStorageToastView.show(BoundedStorageUX.rewindLimitedMessage(for: session), in: overlay)
@@ -641,7 +662,7 @@ struct VideoPlayerWrapper: UIViewControllerRepresentable {
             if let time = resumeTime, let fraction = fraction(ofPlayerTime: time) {
                 resume = ResumePolicy.handOffFraction(reached: fraction)
             }
-            let decided = ResumePolicy.handOffResumeDecided(userChoseQuickResume: false, playbackStarted: didStart)
+            let decided = ResumePolicy.handOffResumeDecided(userChoseResume: false, playbackStarted: didStart)
             // While `didFallBack` is still false (the save requires it).
             saveProgressIfNeeded(status: .watching)
             didFallBack = true
@@ -729,11 +750,29 @@ struct VideoPlayerWrapper: UIViewControllerRepresentable {
                 print("[Player] progress \(Int(fraction * 100)) % not saved — keeps the resume point at \(Int(resumePoint * 100)) %")
                 return
             }
-            if let movie = media as? Movie {
-                WatchedlistManager<Movie>.movie.setCurrentProgress(value, for: movie.id, with: status)
-            } else if let episode = media as? Episode {
-                WatchedlistManager<Episode>.episode.setCurrentProgress(value, for: episode.id, with: status)
-            }
+            // With the titles and the length: the Continue Watching card.
+            PlaybackRecorder.save(value, of: media, duration: lastKnownDuration, status: status)
+        }
+
+        /// From the 1 Hz tick, while playing: the position every 30 s
+        /// (`PlaybackCheckpoint`), so a crash or a kill loses half a minute
+        /// of an uninterrupted session, not all of it.
+        private func checkpointProgressIfDue() {
+            guard player?.timeControlStatus == .playing, progressCheckpoint.isDue() else { return }
+            saveProgressIfNeeded(status: .watching)
+        }
+
+        /// Episode chaining (5.3.0): where the file stands for the « next
+        /// episode » card — the 1 Hz observer, the user's play / pause. Not
+        /// once VLC took over (it reports itself).
+        private func tickUpNext() {
+            guard didStart, !didFallBack, let player = player, let session = UpNextSession.current else { return }
+            let time = starvation.isRecovering ? (starvation.resumeTime ?? .nan) : player.currentTime().seconds
+            guard time.isFinite, time >= 0 else { return }
+            var duration = player.currentItem?.duration.seconds ?? .nan
+            if !duration.isFinite || duration <= 0 { duration = lastKnownDuration ?? .nan }
+            session.tick(position: time, duration: duration.isFinite && duration > 0 ? duration : nil,
+                         isPlaying: playIntent.wantsPlayback)
         }
 
         /// The player as the deficit watch sees it (nil once VLC took over).
@@ -804,6 +843,11 @@ struct VideoPlayerWrapper: UIViewControllerRepresentable {
                                   readyTimeout: readyTimeout, isWaitingForData: isWaitingForData,
                                   downloadProgress: downloadProgress)
         onPlayerReady?(player)
+        // The `[Start]` trace's last phase (one stream at a time here: the
+        // current one's trace).
+        context.coordinator.firstFrameWatch = FirstFrameWatch(player: player) {
+            PTTorrentStreamer.current?.noteStartFirstFrame(detail: "AVPlayer (direct)")
+        }
         return vc
     }
 

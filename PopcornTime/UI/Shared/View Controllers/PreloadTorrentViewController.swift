@@ -18,8 +18,8 @@ class PreloadTorrentViewController: UIViewController {
     var streamer: PTTorrentStreamer! {
         didSet {
             // Back was pressed before the stream existed (the play flow
-            // fetches the subtitles first, then starts it): the stream it
-            // starts now is not wanted. It is stopped as soon as it started,
+            // starts it a turn after this screen; a .torrent file is
+            // downloaded first): the stream it starts now is not wanted. It is stopped as soon as it started,
             // with its callbacks, so no player opens after the user left.
             guard isCancelled, let streamer = streamer, streamer !== oldValue,
                   !(streamer is PTTorrentDownload) else { return }
@@ -46,6 +46,15 @@ class PreloadTorrentViewController: UIViewController {
     /// `Media.play(fromFileOrMagnetLink:…)`; nil hides that button.
     var media: Media?
     var sourceURL: String?
+
+    /// How long no peer may answer before « Choose another source » (nil:
+    /// `LoadingPhaseTracker.noPeerSeconds`, 45 s). A remembered release
+    /// replayed by « Resume » waits less (`UpNextResume.patience`, decision D5).
+    var noPeerPatience: TimeInterval?
+
+    /// The `[Start]` trace of the playback being prepared (set by the play
+    /// flow): `Media.play(fromFileOrMagnetLink:…)` hands it to the stream.
+    var startTrace: PlaybackStartTrace?
 
     /// What the screen says while the torrent prepares (`LoadingPhase`): the
     /// phase line under the spinner from the first second (« Looking for
@@ -291,13 +300,14 @@ class PreloadTorrentViewController: UIViewController {
     }
 
     /// Updates the phase from the streamer and lays the screen out for it.
-    /// Before the stream starts (subtitles are fetched first: no streamer
-    /// yet) the spinner alone, as before.
+    /// Before the stream starts (a .torrent file being downloaded: no
+    /// streamer yet) the spinner alone.
     private func refreshPhase(fromCallback: Bool) {
         guard isViewLoaded, !isLeaving, let streamer = streamer else { return }
         installETALabelIfNeeded()
         if tracker == nil || trackedStreamer !== streamer {
             tracker = LoadingPhaseTracker()
+            if let patience = noPeerPatience { tracker?.noPeerSeconds = patience }
             trackedStreamer = streamer
         }
         guard let tracker = tracker else { return }
@@ -409,6 +419,7 @@ class PreloadTorrentViewController: UIViewController {
             isCancelled = true
             stopPhaseUpdates()
             // nil until a download's `play` answers (it is set in that handler).
+            print(streamer == nil ? "[Loading] Back: no stream yet to cancel" : "[Loading] Back: stream cancelled, data kept")
             streamer?.cancelStreamingAndDeleteData(false)
         }
         dismissWhenPossible()
@@ -440,6 +451,8 @@ extension AppDelegate {
     /// automatic pick would take it again.
     func chooseAnotherSource(for media: Media, replacing sourceURL: String?, from loadingViewController: PreloadTorrentViewController) {
         loadingViewController.streamer?.cancelStreamingAndDeleteData(false)
+        // A remembered release (« Resume ») that does not answer is forgotten.
+        AppDelegate.forgetRememberedReleaseIfReplayed(mediaID: media.id, url: sourceURL)
         if let sourceURL = sourceURL {
             AppDelegate.unansweredSources[media.id, default: []].insert(AppDelegate.sourceKey(sourceURL))
         }

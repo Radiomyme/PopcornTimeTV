@@ -27,8 +27,8 @@ struct GlassHeroView: View {
                 titleBlock
                     .padding(.bottom, 24)
                 metadataLine
-                    .padding(.bottom, model.badges.isEmpty ? 30 : 20)
-                if !model.badges.isEmpty {
+                    .padding(.bottom, showsBadgesRow ? 20 : 30)
+                if showsBadgesRow {
                     badgesRow
                         .padding(.bottom, 30)
                 }
@@ -48,17 +48,24 @@ struct GlassHeroView: View {
 
     // MARK: Title
 
+    /// The logo, measured and cropped as the Home's billboard draws it
+    /// (`HomeLogoImage`: transparent margins cut off, a dark logo in white)
+    /// and at the same size: from a Home card the page opens on the logo
+    /// the Home had, decoded already. The title in type stands in the same
+    /// slot until the logo is there, then leaves at once: the two are never
+    /// drawn together (two titles, one over the other, offset).
     private var titleBlock: some View {
-        ZStack(alignment: .bottomLeading) {
-            if let logoURL = model.logoURL {
-                GlassRemoteImage(url: logoURL, maxPixelSize: 1000, contentMode: .fit,
-                                 alignment: .bottomLeading,
-                                 onLoad: { _ in logoLoaded = true }) { EmptyView() }
-                    .frame(maxWidth: 680, maxHeight: 230, alignment: .bottomLeading)
+        let logoURL = model.logoURL
+        // A logo too dark for the veil is not drawn: the title stays in type.
+        let logoReady = logoLoaded || logoURL.map { HomeLogoImage.cached($0, maxPixelSize: GlassHeroView.logoPixels)?.fits(minimumAspect: 0) ?? false } ?? false
+        return ZStack(alignment: .bottomLeading) {
+            if let logoURL {
+                HomeLogoImage(url: logoURL, maxPixelSize: GlassHeroView.logoPixels, box: .hero(height: 190)) { logoLoaded = true }
+                    .frame(maxWidth: 680, maxHeight: 190, alignment: .bottomLeading)
                     .shadow(color: .black.opacity(0.45), radius: 18, y: 6)
                     .accessibilityHidden(true)
             }
-            if model.logoURL == nil || !logoLoaded {
+            if logoURL == nil || !logoReady {
                 Text(verbatim: model.title)
                     .font(GlassFont.heroTitle)
                     .foregroundStyle(GlassPalette.primaryText)
@@ -66,16 +73,20 @@ struct GlassHeroView: View {
                     .minimumScaleFactor(0.6)
                     .multilineTextAlignment(.leading)
                     .shadow(color: .black.opacity(0.5), radius: 14, y: 4)
-                    .transition(.opacity)
             }
         }
+        // The slot has the logo's height from the first frame: the lines
+        // under it never move when the logo replaces the title.
+        .frame(height: logoURL == nil ? nil : 190, alignment: .bottomLeading)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(Text(verbatim: model.title))
         .accessibilityAddTraits(.isHeader)
         .accessibilityIdentifier("Detail.Title")
-        .animation(.easeOut(duration: 0.35), value: logoLoaded)
         .onChange(of: model.logoURL) { _, _ in logoLoaded = false }
     }
+
+    /// The Home's hero logo size (`HomeBillboardInfo`): one decoded copy for both.
+    private static var logoPixels: CGFloat { homePixels(680) }
 
     // MARK: Metadata
 
@@ -88,29 +99,75 @@ struct GlassHeroView: View {
                     .lineLimit(1)
                     .minimumScaleFactor(0.8)
             }
-            if let certification = model.certification, !certification.isEmpty {
-                GlassChip(text: certification)
-            }
-            if let rating = model.rating, rating > 0 {
+            // "★ 7,5", as on the Home's billboard and cards.
+            if let score = model.score, score > 0 {
+                HStack(spacing: 7) {
+                    Image(systemName: "star.fill")
+                        .font(.system(size: 22, weight: .bold))
+                        .foregroundStyle(GlassPalette.star)
+                    Text(verbatim: score.formatted(.number.precision(.fractionLength(1))))
+                        .font(GlassFont.metadata)
+                        .foregroundStyle(GlassPalette.primaryText.opacity(0.88))
+                }
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel(Text(String(format: "Home.Rating".localized,
+                                                score.formatted(.number.precision(.fractionLength(1))))))
+            } else if let rating = model.rating, rating > 0 {
                 GlassStarRating(stars: rating, size: 25)
             }
+            // Last on the line: arriving with the record, it moves nothing.
+            // The US ratings ("PG-13", "R") are not France's age labels:
+            // shown in English only.
+            if HomeText.appLanguageIsEnglish, let certification = model.certification, !certification.isEmpty {
+                GlassChip(text: certification)
+                    .transition(.opacity)
+            }
         }
+        .animation(.easeOut(duration: 0.25), value: model.certification)
         .shadow(color: .black.opacity(0.5), radius: 8, y: 2)
+    }
+
+    /// The row of the capability chips. A movie's is there from the first
+    /// frame, before its sources are known ("Looking for sources…", then
+    /// the chips as the sources answer): the hero is laid out from the
+    /// bottom, and a row added later would push the title up.
+    private var showsBadgesRow: Bool {
+        model.loadError != nil || !model.badges.isEmpty || (model.kind == .movie && model.sources != .ready)
     }
 
     private var badgesRow: some View {
         HStack(spacing: 12) {
-            ForEach(Array(model.badges.enumerated()), id: \.element.id) { index, badge in
-                GlassChip(text: badge.text, systemImage: badge.systemImage, emphasized: index == 0)
+            if let error = model.loadError {
+                GlassLoadErrorNote(message: error)
+            } else {
+                ForEach(Array(model.badges.enumerated()), id: \.element.id) { index, badge in
+                    GlassChip(text: badge.text, systemImage: badge.systemImage, emphasized: index == 0)
+                        .transition(.opacity)
+                }
+                // A source may still add a chip: nothing is drawn in its
+                // place (an empty grey chip read as a broken one); the chip
+                // fades in at the end of the row, where it moves nothing,
+                // and Play shows its ring meanwhile.
+                if model.kind == .movie, model.sources != .ready,
+                   !(model.sources.isSearching && !model.badges.isEmpty) {
+                    GlassSourcesNote(state: model.sources)
+                        .padding(.leading, model.badges.isEmpty ? 0 : 6)
+                }
             }
         }
         .shadow(color: .black.opacity(0.35), radius: 8, y: 2)
+        .animation(.easeOut(duration: 0.25), value: model.badges)
+        .animation(.easeOut(duration: 0.25), value: model.sources)
+        .animation(.easeOut(duration: 0.25), value: model.loadError)
     }
 
     // MARK: Summary
 
-    /// A focusable card with "MORE" (opens the full text) when the summary is
-    /// cut at 3 lines; a plain glass card otherwise.
+    /// The synopsis set on the artwork's veil, like the Home's billboard —
+    /// no glass under body text. Cut at 3 lines it is focusable, with
+    /// "MORE" (opens the full text); its focus is a light glass around it.
+    /// The sources' synopses are English: under another language a line
+    /// above it says so ("Résumé (en anglais)").
     @ViewBuilder
     private var summaryCard: some View {
         if summaryTruncated {
@@ -121,32 +178,71 @@ struct GlassHeroView: View {
                         .font(GlassFont.small)
                         .textCase(.uppercase)
                         .tracking(1)
-                        .foregroundStyle(.secondary)
+                        .opacity(0.72)
                 }
-                .padding(.horizontal, 34)
-                .padding(.vertical, 24)
+                .padding(.horizontal, 24)
+                .padding(.vertical, 16)
             }
-            .buttonStyle(GlassCardButtonStyle(focusScale: 1.025))
+            .buttonStyle(GlassSummaryButtonStyle())
+            .padding(.horizontal, -24)
             .focused(focus, equals: .summary)
             .accessibilityIdentifier("Detail.Summary")
         } else {
             summaryText
                 .foregroundStyle(GlassPalette.primaryText)
-                .padding(.horizontal, 34)
-                .padding(.vertical, 24)
-                .glassPanel()
         }
     }
 
     private var summaryText: some View {
-        Text(verbatim: model.summary)
-            .font(GlassFont.body)
-            .lineSpacing(4)
-            .lineLimit(3)
-            .multilineTextAlignment(.leading)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .glassReportsTruncation(of: model.summary, font: GlassFont.body, lineSpacing: 4)
-            .onPreferenceChange(GlassTruncationKey.self) { summaryTruncated = $0 }
+        VStack(alignment: .leading, spacing: 6) {
+            if !HomeText.appLanguageIsEnglish {
+                Text("Detail.Summary.InEnglish")
+                    .font(GlassFont.small)
+                    .opacity(0.62)
+            }
+            Text(verbatim: model.summary)
+                .font(GlassFont.body)
+                .lineSpacing(4)
+                .lineLimit(3)
+                .multilineTextAlignment(.leading)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .glassReportsTruncation(of: model.summary, font: GlassFont.body, lineSpacing: 4)
+                .onPreferenceChange(GlassTruncationKey.self) { summaryTruncated = $0 }
+        }
+        .shadow(color: .black.opacity(0.55), radius: 8, y: 2)
+    }
+}
+
+/// The synopsis's focus: nothing at rest (the text is on the veil), a light
+/// glass around it once focused, with a small lift.
+private struct GlassSummaryButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        StyledBody(configuration: configuration)
+    }
+
+    private struct StyledBody: View {
+        let configuration: ButtonStyleConfiguration
+        @Environment(\.isFocused) private var isFocused
+        @Environment(\.glassFallback) private var fallback
+
+        var body: some View {
+            let shape = RoundedRectangle(cornerRadius: GlassMetrics.cardCorner, style: .continuous)
+            configuration.label
+                .foregroundStyle(isFocused ? Color.black : Color.white)
+                .background { if isFocused { surface(shape) } }
+                .scaleEffect(configuration.isPressed ? 1.0 : (isFocused ? 1.02 : 1))
+                .shadow(color: .black.opacity(isFocused ? 0.4 : 0), radius: 22, y: 14)
+                .animation(.easeOut(duration: 0.18), value: isFocused)
+        }
+
+        @ViewBuilder
+        private func surface(_ shape: RoundedRectangle) -> some View {
+            if #available(tvOS 26.0, *), !fallback {
+                Color.clear.glassEffect(.regular.tint(.white.opacity(0.88)), in: shape)
+            } else {
+                shape.fill(Color.white.opacity(0.92))
+            }
+        }
     }
 }
 
@@ -160,7 +256,9 @@ struct GlassActionRow: View {
 
     var body: some View {
         HStack(alignment: .center, spacing: 30) {
-            if let play = model.play {
+            // "Try Again" takes Play's place (and its focus) on a page that
+            // could not load, show or movie.
+            if let play = model.play ?? (model.loadError == nil ? nil : GlassPlayInfo()) {
                 playButton(play)
             }
             if model.hasTrailer {
@@ -217,25 +315,39 @@ struct GlassActionRow: View {
     }
 
     private func playButton(_ play: GlassPlayInfo) -> some View {
-        SwiftUI.Button(action: actions.play) {
+        let failed = model.loadError != nil
+        return SwiftUI.Button(action: failed ? actions.retry : actions.play) {
             VStack(spacing: 6) {
                 HStack(spacing: 14) {
-                    Image(systemName: "play.fill")
-                    Text("Play")
-                    if let s = play.season, let e = play.episode {
-                        Text("S\(s) · E\(e)")
-                            .opacity(0.78)
+                    if failed {
+                        Image(systemName: "arrow.clockwise")
+                        Text("Try Again")
+                    } else {
+                        // The sources are still searched: a ring in place of
+                        // the triangle. The button stays live — a press is
+                        // kept until a source is in.
+                        ZStack {
+                            Image(systemName: "play.fill").opacity(model.sources == .searching ? 0 : 1)
+                            if model.sources == .searching { GlassSpinner(size: 26) }
+                        }
+                        Text("Play")
+                        if let s = play.season, let e = play.episode {
+                            Text("S\(s) · E\(e)")
+                                .opacity(0.78)
+                        }
                     }
                 }
                 .font(GlassFont.bodyEmphasis)
-                if let progress = play.progress, progress > 0 {
-                    GlassProgressBar(progress: progress, height: 5, tint: .white)
+                if !failed, let progress = play.progress, progress > 0 {
+                    // On the button's white once it is focused: dark.
+                    GlassProgressBar(progress: progress, height: 5, tint: focused == .play ? .black : .white)
                         .opacity(0.9)
                         .frame(width: 150)
                 }
             }
             .padding(.horizontal, 22)
             .padding(.vertical, 4)
+            .animation(.easeOut(duration: 0.2), value: model.sources)
         }
         .glassActionStyle(prominent: true)
         // Its ideal size only: with the progress bar and a Trailer button
@@ -243,6 +355,8 @@ struct GlassActionRow: View {
         // the summary card above (seen on tvOS 27.2).
         .fixedSize()
         .focused(focus, equals: .play)
+        .accessibilityIdentifier(failed ? "Detail.Retry" : "Detail.Play")
+        .accessibilityValue(!failed && model.sources == .searching ? Text("Sources.Loading") : Text(verbatim: ""))
     }
 
     static func downloadSymbol(_ state: GlassDownloadState) -> String {

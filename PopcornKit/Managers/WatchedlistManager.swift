@@ -9,6 +9,12 @@ private struct Static {
 }
 
 /// Class for managing a users watch history. **Only available for movies, and episodes**.
+///
+/// Since 5.3.0 a façade: the lists live in `Library.shared`, which serves the
+/// reads from memory (they used to re-read the whole UserDefaults list on
+/// every call), dates every position saved (the Continue Watching row) and
+/// posts `.libraryDidChange` after a write. The UserDefaults keys and their
+/// shapes are the ones of 4.x / 5.x.
 open class WatchedlistManager<N: Media & Hashable> {
     
     private let currentType: Trakt.MediaType
@@ -56,9 +62,7 @@ open class WatchedlistManager<N: Media & Hashable> {
      */
     open func add(_ id: String) {
         TraktManager.shared.add(id, toWatchedlistOfType: currentType)
-        var array = UserDefaults.standard.object(forKey: "\(currentType.rawValue)Watchedlist") as? [String] ?? [String]()
-        !array.contains(id) ? array.append(id) : ()
-        UserDefaults.standard.set(array, forKey: "\(currentType.rawValue)Watchedlist")
+        Library.shared.setWatched(true, id: id, list: currentType)
     }
     
     /**
@@ -69,15 +73,7 @@ open class WatchedlistManager<N: Media & Hashable> {
     open func remove(_ id: String) {
         TraktManager.shared.remove(id, fromWatchedlistOfType: currentType)
         TraktManager.shared.scrobble(id, progress: 0, type: currentType, status: .finished)
-        var array = UserDefaults.standard.object(forKey: "\(currentType.rawValue)Watchedlist") as? [String] ?? []
-        var dict = UserDefaults.standard.object(forKey: "\(currentType.rawValue)Progress") as? [String: Float] ?? [:]
-        if let index = array.firstIndex(of: id) {
-            array.remove(at: index)
-        }
-        dict.removeValue(forKey: id)
-        UserDefaults.standard.set(dict, forKey: "\(currentType.rawValue)Progress")
-        UserDefaults.standard.set(array, forKey: "\(currentType.rawValue)Watchedlist")
-        
+        Library.shared.setWatched(false, id: id, list: currentType)
     }
     
     /**
@@ -88,10 +84,7 @@ open class WatchedlistManager<N: Media & Hashable> {
      - Returns: Boolean indicating if movie or episode is in watchedlist.
      */
     open func isAdded(_ id: String) -> Bool {
-        if let array = UserDefaults.standard.object(forKey: "\(currentType.rawValue)Watchedlist") as? [String] {
-            return array.contains(id)
-        }
-        return false
+        return Library.shared.isWatched(id, currentType)
     }
     
     /**
@@ -105,14 +98,21 @@ open class WatchedlistManager<N: Media & Hashable> {
         TraktManager.shared.getWatched(forMediaOfType: N.self) { [unowned self] (medias, error) in
             guard error == nil else { return }
             
-            let ids = medias.map({ $0.id })
-            UserDefaults.standard.set(ids, forKey: "\(self.currentType.rawValue)Watchedlist")
+            // Added to the local marks, never in their place: Trakt names
+            // an episode by its TVDB number, the app by "tt…-sXeY".
+            Library.shared.mergeFromTrakt(watched: medias.map({ $0.id }), list: self.currentType)
             
             completion?(medias)
         }
         
-        let watched = UserDefaults.standard.object(forKey: "\(currentType.rawValue)Watchedlist") as? [String] ?? [String]()
-        return watched
+        return storedWatched()
+    }
+
+    /**
+     The locally stored watched imdbId's only, without asking Trakt: what to read again on `.libraryDidChange`.
+     */
+    open func storedWatched() -> [String] {
+        return Library.shared.state.watchedIDs(currentType)
     }
     
     /**
@@ -123,11 +123,19 @@ open class WatchedlistManager<N: Media & Hashable> {
      - Parameter status:    The status of the item.
      */
     open func setCurrentProgress(_ progress: Float, for id: String, with status: Trakt.WatchedStatus) {
+        setCurrentProgress(progress, for: id, with: status, details: nil)
+    }
+
+    /**
+     Stores movie progress like `setCurrentProgress(_:for:with:)`, with what the player knows about the title (`PlaybackRecorder.save` builds it): its titles, the position and the duration in seconds. They go to the title's Continue Watching entry.
+
+     The one place a playback position is written: `Library.setProgress` stores the fraction, dates the entry and marks the title watched from 80 % (`LibraryPolicy.watchedFraction`).
+     */
+    public func setCurrentProgress(_ progress: Float, for id: String, with status: Trakt.WatchedStatus, details: PlaybackDetails?) {
         TraktManager.shared.scrobble(id, progress: progress, type: currentType, status: status)
-        var dict = UserDefaults.standard.object(forKey: "\(currentType.rawValue)Progress") as? [String: Float] ?? [String: Float]()
-        let _ = progress == 0 ? dict.removeValue(forKey: id) : dict.updateValue(progress, forKey: id)
-        progress >= 0.8 ? add(id) : ()
-        UserDefaults.standard.set(dict, forKey: "\(currentType.rawValue)Progress")
+        if Library.shared.setProgress(progress, id: id, list: currentType, details: details) {
+            TraktManager.shared.add(id, toWatchedlistOfType: currentType)
+        }
     }
     
     /**
@@ -143,17 +151,14 @@ open class WatchedlistManager<N: Media & Hashable> {
         TraktManager.shared.getPlaybackProgress(forMediaOfType: N.self) { (dict, error) in
             guard error == nil else { return }
             
-            let media = Array(dict.keys)
-            let ids = media.map({ $0.id })
-            let progress = Array(dict.values)
-            
-            UserDefaults.standard.set(Dictionary<String, Float>(zip(ids, progress)), forKey: "\(self.currentType.rawValue)Progress")
+            var progress: [String: Float] = [:]
+            for (media, value) in dict { progress[media.id] = value }
+            Library.shared.mergeFromTrakt(progress: progress, list: self.currentType)
             
             completion?(dict)
         }
         
-        let progress = UserDefaults.standard.object(forKey: "\(self.currentType.rawValue)Progress") as? [String: Float] ?? [String: Float]()
-        return progress
+        return Library.shared.state.allProgress(currentType)
     }
     
     /**
@@ -164,11 +169,7 @@ open class WatchedlistManager<N: Media & Hashable> {
      - Returns: The users last play position progress from 0.0 to 1.0 (if any).
      */
     open func currentProgress(_ id: String) -> Float {
-        if let dict = UserDefaults.standard.object(forKey: "\(currentType.rawValue)Progress") as? [String: Float],
-            let progress = dict[id] {
-            return progress
-        }
-        return 0.0
+        return Library.shared.progress(id, currentType)
     }
     
     /**
@@ -179,27 +180,33 @@ open class WatchedlistManager<N: Media & Hashable> {
      - Returns: Locally stored on deck media id's (may be out of date if user has authenticated with trakt).
      */
     @discardableResult open func getOnDeck(completion: (([N]) -> Void)? = nil) -> [String] {
+        let local = Set(Library.shared.state.allProgress(currentType).keys).subtracting(Library.shared.state.watchedSet(currentType))
+        // Without a completion there is nothing to wait for. (The group used
+        // to be entered either way: with no Trakt account neither callback
+        // ever ran, and each call leaked the group and its notify block.)
+        guard let completion = completion else { return Array(local) }
+
         let group = DispatchGroup()
         
         var updatedWatched:  [N] = []
         var updatedProgress: [N] = []
         
         group.enter()
-        let watched = getWatched() { updated in
+        getWatched() { updated in
             updatedWatched = updated
             group.leave()
         }
         
         group.enter()
-        let progress = Array(getProgress() { updated in
+        getProgress() { updated in
             updatedProgress = Array(updated.keys)
             group.leave()
-            }.keys)
-        
-        group.notify(queue: .main) {
-            completion?(Array(Set(updatedProgress).subtracting(updatedWatched)))
         }
         
-        return Array(Set(progress).subtracting(watched))
+        group.notify(queue: .main) {
+            completion(Array(Set(updatedProgress).subtracting(updatedWatched)))
+        }
+        
+        return Array(local)
     }
 }

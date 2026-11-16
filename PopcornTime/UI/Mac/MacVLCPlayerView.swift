@@ -25,18 +25,23 @@ struct MacVLCPlayerView: View {
     /// The stream's bounded storage (nil: none): VLC's playhead tells the
     /// torrent what it may delete behind it.
     let boundedStorage: BoundedStorageSession?
-    /// The stream (nil: unknown): bounded storage reads its file's Matroska
-    /// tracks and what is on disk to pick VLC's demuxer
+    /// The stream (nil: unknown): its file's Matroska tracks and what is on
+    /// disk pick VLC's demuxer, in full and bounded storage alike
     /// (`BoundedStorageUX.vlcMediaOptions`).
     let streamer: PTTorrentStreamer?
     /// The stream's deficit watch (nil: none): VLC's position and state feed
     /// it once VLC plays (the sheet shows the offer).
     let deficitMonitor: BandwidthDeficitMonitor?
+    /// Episode chaining: the episode's session (nil: a movie, or none) —
+    /// VLC's position every refresh and the file's end.
+    let upNext: UpNextSession?
     @StateObject private var controller = MacVLCController()
 
     init(url: URL, subtitles: [Subtitle] = [], media: Media? = nil, startPosition: Float = 0,
          resumePoint: Float? = nil, nativeHighWater: Float = 0, boundedStorage: BoundedStorageSession? = nil,
-         streamer: PTTorrentStreamer? = nil, deficitMonitor: BandwidthDeficitMonitor? = nil) {
+         streamer: PTTorrentStreamer? = nil, deficitMonitor: BandwidthDeficitMonitor? = nil,
+         upNext: UpNextSession? = nil) {
+        self.upNext = upNext
         self.streamer = streamer
         self.deficitMonitor = deficitMonitor
         self.url = url
@@ -52,6 +57,14 @@ struct MacVLCPlayerView: View {
         ZStack(alignment: .bottom) {
             MacVLCVideoRepresentable(controller: controller)
                 .background(Color.black)
+
+            // A resume on its way: the picture dimmed, a spinner and
+            // « Resuming at … » until playback runs there; the offer 30 s in.
+            if let resume = controller.resume {
+                MacVLCResumeOverlay(state: resume,
+                                    keepWaiting: { controller.keepWaitingForResume() },
+                                    fromStart: { controller.restartFromBeginning() })
+            }
 
             // Minimal transport bar.
             HStack(spacing: 14) {
@@ -88,12 +101,25 @@ struct MacVLCPlayerView: View {
         }
         // Bounded storage: a rewind stopped at the earliest point still on disk.
         .boundedStorageToast(controller.boundedToast)
+        .animation(.easeInOut(duration: 0.25), value: controller.resume == nil)
         .onAppear {
+            controller.onFirstPlaying = { [streamer] in streamer?.noteStartFirstFrame(detail: "VLC") }
+            // The demuxer a start at a position gets — this one, and 0:00
+            // for « Start from the beginning » (`restartFromBeginning`).
+            let options: (Float) -> [String] = { [url, boundedStorage, streamer] position in
+                BoundedStorageUX.vlcMediaOptions(url: url, session: boundedStorage, startPosition: position,
+                                                 streamer: streamer)
+            }
+            controller.mediaOptions = options
+            controller.upNext = upNext
+            controller.canRestartFromBeginning = { [boundedStorage, streamer] in
+                // Always in full storage; in bounded storage only while
+                // nothing was released (the head is still there to read).
+                boundedStorage?.isBounded != true || streamer?.lowestAvailableOffset == 0
+            }
             controller.play(url, subtitles: subtitles, media: media, startPosition: startPosition,
                             resumePoint: resumePoint, nativeHighWater: nativeHighWater,
-                            extraOptions: BoundedStorageUX.vlcMediaOptions(url: url, session: boundedStorage,
-                                                                           startPosition: startPosition,
-                                                                           streamer: streamer))
+                            extraOptions: options(startPosition))
             controller.attachBoundedStorage(boundedStorage)
             controller.attachDeficitMonitor(deficitMonitor)
         }
@@ -161,6 +187,51 @@ struct MacVLCPlayerView: View {
     }
 }
 
+/// The Mac VLC player's « Resuming at … » state over the video
+/// (`MacVLCController.resume`): the picture dimmed — VLC's first frame at
+/// 0:00 stays under it —, a spinner and the label; after
+/// `VLCResumeWatch.offerDelay` of waiting, the message and its two buttons.
+private struct MacVLCResumeOverlay: View {
+    let state: MacVLCController.ResumeState
+    let keepWaiting: () -> Void
+    let fromStart: () -> Void
+
+    var body: some View {
+        ZStack {
+            // Dimmed, not black: should VLC play under a state that is
+            // still up, the picture shows.
+            Color.black.opacity(0.7)
+            VStack(spacing: 14) {
+                ProgressView()
+                    .controlSize(.large)
+                HStack(spacing: 8) {
+                    if state.pausesAtArrival { Image(systemName: "pause.fill") }
+                    Text(state.label)
+                }
+                .font(.title3.weight(.semibold))
+                if state.isOfferShown {
+                    Text(VLCResumeText.slow)
+                        .font(.callout)
+                        .padding(.top, 8)
+                    HStack(spacing: 12) {
+                        Button(VLCResumeText.keepWaiting, action: keepWaiting)
+                            .keyboardShortcut(.defaultAction)
+                        if state.canRestart {
+                            Button(VLCResumeText.fromStart, action: fromStart)
+                        }
+                    }
+                }
+            }
+            .foregroundStyle(.white)
+            .multilineTextAlignment(.center)
+            .padding(24)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .environment(\.colorScheme, .dark)
+        .transition(.opacity)
+    }
+}
+
 @MainActor
 final class MacVLCController: NSObject, ObservableObject, VLCMediaPlayerDelegate {
     struct TrackItem: Identifiable, Equatable {
@@ -184,8 +255,33 @@ final class MacVLCController: NSObject, ObservableObject, VLCMediaPlayerDelegate
     @Published private(set) var externalSubtitles: [Subtitle] = []
     @Published private(set) var subtitleSelection: SubtitleChoice = .off
     @Published private(set) var isSearchingSubtitles = false
+    /// VLC really plays, with its tracks registered (`isInputReady`), the
+    /// first time: the `[Start]` trace's last phase.
+    var onFirstPlaying: (() -> Void)?
     /// Bounded storage's message over the video (a limited rewind).
     @Published private(set) var boundedToast: BoundedStorageToastMessage?
+
+    /// What the view shows while a resume is on its way.
+    struct ResumeState: Equatable {
+        /// « Resuming at 1:40:00… »
+        var label: String
+        /// Play/Pause was pressed during the wait.
+        var pausesAtArrival = false
+        /// 30 s into the wait: the message and its buttons.
+        var isOfferShown = false
+        /// The offer has « Start from the beginning ».
+        var canRestart = true
+    }
+    /// A resume on its way (nil: none, or it arrived): from `play()` until
+    /// VLC's clock runs at the start position (`resumeWait`).
+    @Published private(set) var resume: ResumeState?
+    private var resumeWait: VLCResumeWait?
+    /// The media options of a start at a position (the view's:
+    /// `BoundedStorageUX.vlcMediaOptions`), for « Start from the beginning ».
+    var mediaOptions: ((Float) -> [String])?
+    /// The film can start over (the view's: the stream's storage).
+    var canRestartFromBeginning: (() -> Bool)?
+    private var url: URL?
 
     /// VLCKit's macOS default video output (`--vout=macosx`: an NSOpenGLView
     /// it adds to the drawable from the main queue, asynchronously) aborts
@@ -215,6 +311,10 @@ final class MacVLCController: NSObject, ObservableObject, VLCMediaPlayerDelegate
     }()
     let player = VLCMediaPlayer(library: MacVLCController.library)
     private var timer: Timer?
+    /// Episode chaining (`MacVLCPlayerView.upNext`); nil for a movie.
+    weak var upNext: UpNextSession?
+    /// The input's end was told to `upNext` (once).
+    private var toldUpNextTheEnd = false
     /// `stop()` ran (a pending start then does nothing).
     private var isStopped = false
     /// The video view VLC draws into (`MacVLCVideoRepresentable`); nil
@@ -238,6 +338,12 @@ final class MacVLCController: NSObject, ObservableObject, VLCMediaPlayerDelegate
     /// played (it reports -1 once the input has ended), and the hand-off
     /// position until the resume seek has landed.
     private var watch = VLCWatchProgress(startPosition: 0, resumePoint: 0)
+    /// « Start from the beginning » of the slow-resume offer was chosen and
+    /// playback from 0:00 has not yet run long enough for the saved resume
+    /// point to stop being protected (`VLCSlowResumeRestart`).
+    private var restartAwaitsConfirmation = false
+    /// The new input's clock since that restart (`VLCSlowResumeRestart.Confirmation`).
+    private var restartConfirmation = VLCSlowResumeRestart.Confirmation()
     /// The session's furthest position before VLC: the native player's.
     private var nativeHighWater: Float = 0
 
@@ -269,8 +375,8 @@ final class MacVLCController: NSObject, ObservableObject, VLCMediaPlayerDelegate
     func play(_ url: URL, subtitles: [Subtitle] = [], media: Media? = nil, startPosition: Float = 0,
               resumePoint: Float? = nil, nativeHighWater: Float = 0, extraOptions: [String] = []) {
         let vlcMedia = VLCMedia(url: url)
-        // Bounded storage: which Matroska demuxer VLC uses
-        // (`BoundedStorageUX.vlcMediaOptions`).
+        // A stream, full and bounded storage alike: the Matroska demuxer
+        // this start needs (`BoundedStorageUX.vlcMediaOptions`).
         for option in extraOptions { vlcMedia?.addOption(option) }
         // Force software decoding on the fallback path. VLCKit 4's macOS
         // OpenGL video output aborts (CreateFilters, vout_helper.c:164) when
@@ -286,6 +392,8 @@ final class MacVLCController: NSObject, ObservableObject, VLCMediaPlayerDelegate
         startWhenDrawn(vlcMedia)
         isPlaying = true
         self.startPosition = startPosition
+        self.url = url
+        beginResumeWaitIfNeeded() // a start at a position: its state, from play() on
         self.media = media
         // The protected point is the session's — what the title had saved
         // when the player opened (the native player saves nothing when it
@@ -309,6 +417,58 @@ final class MacVLCController: NSObject, ObservableObject, VLCMediaPlayerDelegate
         timer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in
             Task { @MainActor in self?.refresh() }
         }
+        // VLC answers the Playback menu from now on (the native player left
+        // it when it handed the stream over).
+        MacPlaybackCommandCenter.shared.register(self, handlers: MacPlaybackCommandHandlers(
+            togglePlay: { [weak self] in self?.togglePlay() },
+            skip: { [weak self] seconds in self?.skip(by: seconds) },
+            selectAudioTrack: { [weak self] id in self?.selectAudioTrack(id: id) },
+            selectSubtitleTrack: { [weak self] id in self?.selectSubtitle(commandID: id) }))
+        publishCommandState()
+    }
+
+    // MARK: - Playback menu
+
+    /// ±10 s from the menu: a seek like the slider's (limited the same way
+    /// in bounded storage). Nothing while VLC does not know its length.
+    func skip(by seconds: Double) {
+        guard resumeWait == nil else { return } // nothing to jump from before the resume point plays
+        guard let duration = durationSeconds, duration > 0, let now = playheadSeconds else { return }
+        seek(to: min(max((now + seconds) / duration, 0), 0.999))
+    }
+
+    /// The menu's ids for the subtitle choices.
+    private static func commandID(for choice: SubtitleChoice) -> String {
+        switch choice {
+        case .off: return "off"
+        case .embedded(let id): return "e:" + id
+        case .external(let link): return "x:" + link
+        }
+    }
+
+    private func selectSubtitle(commandID id: String) {
+        let choices: [SubtitleChoice] = [.off] + embeddedSubtitleTracks.map { .embedded($0.id) }
+            + externalSubtitles.map { .external($0.link) }
+        if let choice = choices.first(where: { Self.commandID(for: $0) == id }) { selectSubtitle(choice) }
+    }
+
+    /// What the Playback menu shows: the transport bar's own state and menus.
+    private func publishCommandState() {
+        guard !isStopped else { return }
+        var state = MacPlaybackCommandState(isPlaying: isPlaying)
+        if audioTracks.count > 1 {
+            state.audioTracks = audioTracks.map {
+                MacCommandTrack(id: $0.id, name: $0.name, isSelected: $0.id == selectedAudioTrackId)
+            }
+        }
+        let embedded = embeddedSubtitleTracks.map { (SubtitleChoice.embedded($0.id), $0.name) }
+        let external = externalSubtitles.map {
+            (SubtitleChoice.external($0.link), "\(ExternalSubtitleLoader.menuTitle(for: $0)) (OpenSubtitles)")
+        }
+        state.subtitleTracks = ([(SubtitleChoice.off, "Off".localized)] + embedded + external).map { choice, name in
+            MacCommandTrack(id: Self.commandID(for: choice), name: name, isSelected: choice == subtitleSelection)
+        }
+        MacPlaybackCommandCenter.shared.update(self, state)
     }
 
     /// Plays `vlcMedia` once VLC's video view is in a window: at once when
@@ -350,13 +510,34 @@ final class MacVLCController: NSObject, ObservableObject, VLCMediaPlayerDelegate
     }
 
     private func refresh() {
-        // Don't fight the user mid-drag; VLC position is 0…1.
-        position = player.position
-        timeLabel = player.time.stringValue
-        remainingLabel = player.remainingTime?.stringValue ?? "--:--"
-        isPlaying = player.isPlaying
+        sampleResumeWait()
+        if let wait = resumeWait {
+            // The resume point, not VLC's clock (0:00 before its seek lands),
+            // and the Play/Pause the user asked for at the arrival.
+            position = Double(startPosition)
+            if let duration = durationSeconds {
+                let target = Double(startPosition) * duration * 1000
+                timeLabel = VLCTime(number: NSNumber(value: target)).stringValue
+                remainingLabel = VLCTime(number: NSNumber(value: target - duration * 1000)).stringValue
+            }
+            isPlaying = !wait.pausesAtArrival
+        } else {
+            // Don't fight the user mid-drag; VLC position is 0…1.
+            position = player.position
+            timeLabel = player.time.stringValue
+            remainingLabel = player.remainingTime?.stringValue ?? "--:--"
+            isPlaying = player.isPlaying
+        }
         notePlayerPosition()
-        checkBoundedPlayhead()
+        // Every 30 s of playback, as the native player does: a crash or a
+        // forced quit loses half a minute, not the session.
+        if player.state == .playing, MacPlaybackProgress.isCheckpointDue() { saveProgress() }
+        // Not while a resume is on its way: VLC's clock then shows 0:00 or
+        // the target without playing there — bounded storage would take a
+        // step between them for a rewind (a forced seek and its message,
+        // for nothing).
+        if resumeWait == nil { checkBoundedPlayhead() }
+        tickUpNext()
 
         if isInputReady {
             applyStartPositionIfNeeded()
@@ -366,6 +547,7 @@ final class MacVLCController: NSObject, ObservableObject, VLCMediaPlayerDelegate
             selectSlaveTextTrackIfNeeded()
         }
         refreshTrackLists()
+        publishCommandState()
     }
 
     /// True once VLC really plays the input with its tracks registered.
@@ -383,8 +565,130 @@ final class MacVLCController: NSObject, ObservableObject, VLCMediaPlayerDelegate
         if !didReachPlayingWithTracks {
             guard state == .playing, !player.audioTracks.isEmpty || !player.videoTracks.isEmpty else { return false }
             didReachPlayingWithTracks = true
+            noteFirstPlayingIfDue()
         }
         return state == .playing || state == .paused
+    }
+
+    /// `onFirstPlaying` ran.
+    private var didNoteFirstPlaying = false
+
+    /// The `[Start]` trace's last phase: VLC really playing — where the user
+    /// asked to: a resume counts once playback runs at its target, not when
+    /// VLC decodes the file's first picture before its seek.
+    private func noteFirstPlayingIfDue() {
+        guard !didNoteFirstPlaying, didReachPlayingWithTracks, resumeWait == nil else { return }
+        didNoteFirstPlaying = true
+        onFirstPlaying?()
+    }
+
+    // MARK: - Resume: a visible state until playback runs at the target
+
+    /// A start at a position (`play`): the state stays up until VLC's
+    /// clock runs there (`VLCResumeWatch`), sampled at the refreshes — VLC's
+    /// state says nothing (`.playing` from `play()` on, its clock at 0:00
+    /// or at the target, frozen, while it waits for the data).
+    private func beginResumeWaitIfNeeded() {
+        guard resumeWait == nil, VLCWatchProgress.seeksAtStart(startPosition) else { return }
+        let wait = VLCResumeWait(fraction: startPosition, durationSeconds: durationSeconds, now: VLCResumeWait.clock)
+        resumeWait = wait
+        resume = ResumeState(label: wait.label)
+        position = Double(startPosition)
+    }
+
+    /// Every refresh while a resume is on its way.
+    private func sampleResumeWait() {
+        guard !isStopped, var wait = resumeWait else { return }
+        let phase = wait.sample(time: player.time.value.map { $0.doubleValue / 1000 }, isPlaying: player.isPlaying,
+                                durationSeconds: durationSeconds, now: VLCResumeWait.clock)
+        resumeWait = wait
+        switch phase {
+        case .waiting:
+            publishResumeState(wait, offer: false)
+        case .offer:
+            let isNew = resume?.isOfferShown != true
+            publishResumeState(wait, offer: true)
+            #if DEBUG
+            if isNew {
+                VLCResumeDebugHooks.offerShown(keepWaiting: { [weak self] in self?.keepWaitingForResume() },
+                                               fromStart: resume?.canRestart == true ? { [weak self] in self?.restartFromBeginning() } : nil)
+            }
+            #endif
+        case .arrived:
+            endResumeWait()
+        }
+    }
+
+    private func publishResumeState(_ wait: VLCResumeWait, offer: Bool) {
+        let state = ResumeState(label: wait.label, pausesAtArrival: wait.pausesAtArrival, isOfferShown: offer,
+                                canRestart: canRestartFromBeginning?() ?? true)
+        if resume != state { resume = state }
+    }
+
+    /// Playback runs: the state goes away, and a Play/Pause pressed during
+    /// the wait takes effect.
+    private func endResumeWait() {
+        guard let wait = resumeWait else { return }
+        resumeWait = nil
+        resume = nil
+        // Bounded storage's check starts from VLC's clock as it runs now,
+        // not from what it showed during the wait.
+        playheadWatch.noteOwnSeek()
+        noteFirstPlayingIfDue()
+        if wait.pausesAtArrival { player.pause() }
+    }
+
+    /// « Keep waiting »: the offer comes back 30 s later.
+    func keepWaitingForResume() {
+        guard var wait = resumeWait else { return }
+        wait.keepWaiting(now: VLCResumeWait.clock)
+        resumeWait = wait
+        publishResumeState(wait, offer: false)
+    }
+
+    /// « Start from the beginning » of the slow-resume offer: the media is
+    /// opened again at 0:00, with the demuxer that start gets
+    /// (`mediaOptions`). Not a seek: VLC's demuxer may be reading the file
+    /// through to the resume point (no index), and takes no other seek
+    /// until it is there. The saved resume point stays protected until
+    /// playback from 0:00 has really run (`VLCSlowResumeRestart`): the app
+    /// offered this exit after its own resume failed.
+    func restartFromBeginning() {
+        guard !isStopped, let wait = resumeWait, let url, let vlcMedia = VLCMedia(url: url) else { return }
+        wait.logEnded("answer: start from the beginning — the media is opened again at 0:00,", now: VLCResumeWait.clock)
+        resumeWait = nil
+        resume = nil
+        for option in mediaOptions?(0) ?? [] { vlcMedia.addOption(option) }
+        vlcMedia.addOption(":avcodec-hw=none") // as `play` (the OpenGL output and 10-bit hardware frames)
+        didApplyStartPosition = true // no resume seek for the new input
+        watch = VLCSlowResumeRestart.progress(restartingFrom: watch)
+        restartAwaitsConfirmation = true
+        restartConfirmation = VLCSlowResumeRestart.Confirmation()
+        position = 0
+        isPlaying = true
+
+        // The new input: its tracks are not known yet. The OpenSubtitles
+        // file the user picked is attached again once it plays; an
+        // automatic choice is made again (this start's demuxer may show the
+        // file's own text tracks, which the resume's did not).
+        didReachPlayingWithTracks = false
+        didAutoSelectAudio = false
+        didAutoSelectSubtitle = userChoseSubtitle
+        textTrackIdsBeforeSlave = nil
+        slaveLinkAwaitingTrack = nil
+        slaveRequestDate = nil
+        slaveRetryLink = nil
+        slaveTrackIds = [:]
+        slaveTrackIdSet = []
+        selectedEmbeddedTrackId = nil
+        if !userChoseSubtitle { selectedExternalLink = nil }
+        pendingSubtitleLink = selectedExternalLink
+
+        // The video view is in its window by now: no wait for the drawable.
+        player.stop()
+        player.media = vlcMedia
+        playheadWatch.noteOwnSeek()
+        player.play()
     }
 
     // MARK: - VLCMediaPlayerDelegate
@@ -400,8 +704,18 @@ final class MacVLCController: NSObject, ObservableObject, VLCMediaPlayerDelegate
     }
 
     func togglePlay() {
+        // A resume on its way: VLC is not paused while it gets there (the
+        // press is kept for the arrival, `VLCResumeWait.pausesAtArrival`).
+        if var wait = resumeWait {
+            isPlaying = !wait.togglePauseAtArrival()
+            resumeWait = wait
+            publishResumeState(wait, offer: resume?.isOfferShown == true)
+            publishCommandState()
+            return
+        }
         if player.isPlaying { player.pause() } else { player.play() }
         isPlaying = player.isPlaying
+        publishCommandState()
     }
 
     /// The user drags the slider (`setScrubbing`).
@@ -416,6 +730,9 @@ final class MacVLCController: NSObject, ObservableObject, VLCMediaPlayerDelegate
     /// (`setScrubbing(false)`), instead of snapping back with the message
     /// at every step (verify-playback 5).
     func scrub(to newPosition: Double) {
+        // A resume on its way: VLC is already seeking; the slider stays on
+        // the resume point (the next refresh puts it back).
+        guard resumeWait == nil else { return }
         guard isScrubbing, boundedStorage?.isBounded == true, let duration = durationSeconds, duration > 0,
               let now = playheadSeconds,
               BoundedStorageUX.limitedRewindTarget(newPosition * duration, from: now, session: boundedStorage) != nil else {
@@ -435,6 +752,7 @@ final class MacVLCController: NSObject, ObservableObject, VLCMediaPlayerDelegate
 
     func seek(to newPosition: Double) {
         pendingScrub = nil
+        guard resumeWait == nil else { return } // as `scrub`
         // The position VLC reports from now on is the user's, even before
         // the hand-off point. (A non-seekable input ignores the slider.)
         if player.isSeekable { watch.userMovedPlayhead() }
@@ -481,7 +799,7 @@ final class MacVLCController: NSObject, ObservableObject, VLCMediaPlayerDelegate
     private func limitedSeekSeconds(_ seconds: Double) -> Double {
         guard let now = playheadSeconds,
               let landing = BoundedStorageUX.limitedRewindTarget(seconds, from: now, session: boundedStorage) else { return seconds }
-        BoundedStorageUX.logLimited(player: "VLC", target: seconds, playhead: now, landing: landing)
+        BoundedStorageUX.logLimited(player: "VLC", target: seconds, playhead: now, landing: landing, session: boundedStorage)
         showBoundedToast()
         return landing
     }
@@ -493,7 +811,8 @@ final class MacVLCController: NSObject, ObservableObject, VLCMediaPlayerDelegate
         // Not VLC settling after a start or seek (`VLCPlayheadWatch`).
         guard let now = playheadSeconds, let previous = playheadWatch.rewind(to: now),
               let landing = BoundedStorageUX.limitedRewindTarget(now, from: previous, session: boundedStorage) else { return }
-        BoundedStorageUX.logLimited(player: "VLC (refresh)", target: now, playhead: previous, landing: landing)
+        BoundedStorageUX.logLimited(player: "VLC (refresh)", target: now, playhead: previous, landing: landing,
+                                    session: boundedStorage)
         playheadWatch.noteOwnSeek()
         player.time = VLCTime(number: NSNumber(value: landing * 1000))
         showBoundedToast()
@@ -508,29 +827,70 @@ final class MacVLCController: NSObject, ObservableObject, VLCMediaPlayerDelegate
         }
     }
 
+    /// Episode chaining, every refresh: VLC's position and the input's
+    /// length (nil while VLC does not know it: the card then comes after
+    /// the file), paused only by the user; then the input's end — VLC
+    /// stopped by itself near the end (not an error part-way, not while a
+    /// resume is on its way).
+    private func tickUpNext() {
+        guard let upNext, !isStopped, resumeWait == nil, didReachPlayingWithTracks else { return }
+        switch player.state {
+        case .playing, .paused:
+            guard let position = playheadSeconds else { return }
+            upNext.tick(position: position, duration: durationSeconds, isPlaying: player.state == .playing)
+        case .stopped:
+            guard !toldUpNextTheEnd, (watch.current ?? 0) >= 0.9 else { return }
+            toldUpNextTheEnd = true
+            print("[UpNext] Mac VLC player: the input ended at \(Int((watch.current ?? 0) * 100)) %")
+            upNext.itemEnded()
+        default:
+            break
+        }
+    }
+
     /// One position for the watched progress, while VLC plays or is paused
     /// (`VLCWatchProgress.note` ignores the -1 of an input that ended).
     private func notePlayerPosition() {
         guard player.state == .playing || player.state == .paused else { return }
         watch.note(position: player.position)
+        if restartAwaitsConfirmation,
+           restartConfirmation.note(clockSeconds: player.time.value.map { $0.doubleValue / 1000 }) {
+            restartAwaitsConfirmation = false
+            watch.restartFromBeginning()
+            print("[Resume] VLC: playback from 0:00 got past 3:00 after « Start from the beginning » — the restart is the user's, the resume point is no longer protected")
+        }
     }
 
-    func stop() {
-        // Closing: save where playback got (≥ 80 % marks the title watched):
-        // the last position VLC reported while playing — a title played to
-        // its end keeps its last one — or the hand-off position while the
-        // resume seek has not landed. A smaller fraction never replaces the
-        // saved one unless the session — the native player before VLC, or
-        // VLC — played past it (`VLCWatchProgress`, `ResumePolicy`).
-        notePlayerPosition()
+    /// Saves where playback got (≥ 80 % marks the title watched): the last
+    /// position VLC reported while playing — a title played to its end
+    /// keeps its last one — or the hand-off position while the resume seek
+    /// has not landed. A smaller fraction never replaces the saved one
+    /// unless the session — the native player before VLC, or VLC — played
+    /// past it (`VLCWatchProgress`, `ResumePolicy`). At close, and at the
+    /// 30 s checkpoints.
+    private func saveProgress() {
         if let media, let current = watch.current,
            let value = ResumePolicy.progressToSave(current: current, resumePoint: watch.resumePoint,
                                                    highWater: max(watch.highWater, current, nativeHighWater),
-                                                   userRestarted: false) {
+                                                   // « Start from the beginning » of the slow-resume
+                                                   // offer, once playback from 0:00 really ran
+                                                   // (`VLCSlowResumeRestart`): the user's choice.
+                                                   userRestarted: watch.userRestarted) {
             MacPlaybackProgress.store(value, for: media)
         }
+    }
+
+    func stop() {
+        // Closing: the last position, saved.
+        notePlayerPosition()
+        saveProgress()
+        // A resume still on its way: abandoned (the save above kept the
+        // resume point: VLC never followed it, `VLCWatchProgress`).
+        resumeWait?.logEnded("player closed", now: VLCResumeWait.clock)
+        resumeWait = nil
         media = nil
         isStopped = true
+        MacPlaybackCommandCenter.shared.unregister(self)
         deficitMonitor?.detach(self)
         deficitMonitor = nil
         timer?.invalidate()
@@ -557,7 +917,9 @@ final class MacVLCController: NSObject, ObservableObject, VLCMediaPlayerDelegate
             MainActor.assumeIsolated {
                 guard let self, !self.isStopped else { return nil }
                 return BandwidthDeficitMonitor.PlaybackState(playhead: self.playheadSeconds, duration: self.durationSeconds,
-                                                             hasStarted: self.didReachPlayingWithTracks,
+                                                             // Not during a resume's wait: a clock that does
+                                                             // not move there is no stall of a film that played.
+                                                             hasStarted: self.didReachPlayingWithTracks && self.resumeWait == nil,
                                                              wantsPlayback: self.player.state == .playing,
                                                              isStalled: nil)
             }
@@ -575,7 +937,10 @@ final class MacVLCController: NSObject, ObservableObject, VLCMediaPlayerDelegate
         guard let session else { return }
         boundedStorage = session
         session.attachHTTPPlayer(self, readAheadSeconds: 10) { [weak self] in
-            guard let self, let milliseconds = self.player.time.value?.doubleValue, milliseconds > 0 else { return nil }
+            // Nothing while a resume is on its way: VLC's clock then shows
+            // 0:00 or the target without playing there.
+            guard let self, self.resumeWait == nil,
+                  let milliseconds = self.player.time.value?.doubleValue, milliseconds > 0 else { return nil }
             return BoundedPlayerSample(time: milliseconds / 1000, isPlaying: self.player.isPlaying)
         }
     }
@@ -594,6 +959,11 @@ final class MacVLCController: NSObject, ObservableObject, VLCMediaPlayerDelegate
     /// `-PTDebugPause` (BoundedStorageDebugHooks).
     @objc private func debugScriptPlayback(_ note: Notification) {
         guard let playing = note.userInfo?["playing"] as? Bool else { return }
+        // A resume on its way: as the Play/Pause button, kept for the arrival.
+        if let wait = resumeWait {
+            if wait.pausesAtArrival == playing { togglePlay() }
+            return
+        }
         if playing { player.play() } else { player.pause() }
         isPlaying = player.isPlaying
     }
@@ -848,6 +1218,7 @@ final class MacVLCController: NSObject, ObservableObject, VLCMediaPlayerDelegate
         didApplyStartPosition = true
         playheadWatch.noteOwnSeek()
         player.position = Double(startPosition)
+        resumeWait?.seekIssued(now: VLCResumeWait.clock)
     }
 }
 

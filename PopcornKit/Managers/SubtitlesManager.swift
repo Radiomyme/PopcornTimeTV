@@ -68,10 +68,17 @@ open class SubtitlesManager: NetworkManager {
         request(components: components, completion: completion)
     }
 
+    /// A search that gets no answer gives up after this long. The shared
+    /// session's default is 60 s: a silent OpenSubtitles then kept its
+    /// callers (`SubtitleSearch`, the players' menus) waiting a full minute.
+    static let requestTimeout: TimeInterval = 10
+
     private func request(components: [String], completion: @escaping ([Subtitle], NSError?) -> Void) {
         // Alphabetical order of path components is a hard API requirement.
         let url = SubtitlesManager.base + "/" + components.sorted().joined(separator: "/")
-        self.manager.request(url, headers: SubtitlesManager.headers).validate().responseData { response in
+        self.manager.request(url, headers: SubtitlesManager.headers,
+                             requestModifier: { $0.timeoutInterval = SubtitlesManager.requestTimeout })
+            .validate().responseData { response in
             switch response.result {
             case .failure(let error):
                 print("[Subtitles] \(url) FAILED: \(error.localizedDescription)")

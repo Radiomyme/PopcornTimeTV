@@ -51,20 +51,21 @@ struct SubtitleOverlayText: View {
     }
 }
 
-/// SwiftUI menu button listing "Désactivés" + every available subtitle.
+/// SwiftUI menu button listing "Off" + every available subtitle.
 /// Works on iOS and macOS (checkmark on the selected entry); also offers a
-/// ±0.5 s sync adjustment once a subtitle is on. « Désactivés » and the
+/// ±0.5 s sync adjustment once a subtitle is on. « Off » and the
 /// unfilled icon mean no subtitle is on — neither the overlay nor one of the
 /// file's own non-forced subtitles (`areSubtitlesOff`; its forced-only ones
-/// may still show); picking it turns both off.
+/// may still show); picking it turns both off. Its texts are the app's
+/// language (`SubtitleMenuText`), as the tvOS menu's.
 struct SubtitleMenuButton: View {
     @ObservedObject var controller: SubtitleCueController
 
     var body: some View {
         Menu {
-            Toggle("Désactivés", isOn: offBinding)
+            Toggle(SubtitleMenuText.off, isOn: offBinding)
             if controller.available.isEmpty {
-                Text(controller.isSearching ? "Recherche des sous-titres…" : "Aucun sous-titre trouvé")
+                Text(verbatim: SubtitleMenuText.empty(isSearching: controller.isSearching))
             } else {
                 Section("OpenSubtitles") {
                     ForEach(controller.available, id: \.link) { subtitle in
@@ -75,11 +76,11 @@ struct SubtitleMenuButton: View {
             if controller.selected != nil {
                 // `SwiftUI.` qualified: the tvOS module declares a global
                 // `typealias Button = TVButton` (ItemViewController.swift).
-                Section("Synchronisation") {
-                    SwiftUI.Button("Afficher plus tôt (−0,5 s)") { controller.offset -= 0.5 }
-                    SwiftUI.Button("Afficher plus tard (+0,5 s)") { controller.offset += 0.5 }
+                Section(SubtitleMenuText.delay) {
+                    SwiftUI.Button(SubtitleMenuText.earlier) { controller.offset -= 0.5 }
+                    SwiftUI.Button(SubtitleMenuText.later) { controller.offset += 0.5 }
                     if controller.offset != 0 {
-                        SwiftUI.Button("Réinitialiser (\(SubtitleMenuFormatting.offsetLabel(controller.offset)))") {
+                        SwiftUI.Button(SubtitleMenuText.reset(controller.offset)) {
                             controller.offset = 0
                         }
                     }
@@ -92,7 +93,7 @@ struct SubtitleMenuButton: View {
                 .padding(10)
                 .background(Circle().fill(Color.black.opacity(0.35)))
                 .contentShape(Circle())
-                .accessibilityLabel("Sous-titres")
+                .accessibilityLabel(SubtitleMenuText.title)
         }
         .menuStyle(.button)
         .buttonStyle(.plain)
@@ -109,7 +110,7 @@ struct SubtitleMenuButton: View {
         )
     }
 
-    /// « Désactivés »: checked only when neither the overlay nor one of the
+    /// « Off »: checked only when neither the overlay nor one of the
     /// file's own non-forced subtitles is shown (`areSubtitlesOff`); picking
     /// it turns both off. The file's forced-only subtitles for the language
     /// being heard stay on and don't count. Picking it while it is already
@@ -124,11 +125,31 @@ struct SubtitleMenuButton: View {
     }
 }
 
+/// The texts of the subtitle menus (the SwiftUI button of iOS and macOS, the
+/// tvOS transport-bar menu), in the app's language (Localizable.strings).
+enum SubtitleMenuText {
+    static var title: String { "Subtitles".localized }
+    static var off: String { "Off".localized }
+    static var delay: String { "Subtitle Delay".localized }
+    /// The line shown in place of the list while there is none.
+    static func empty(isSearching: Bool) -> String {
+        (isSearching ? "Searching for subtitles…" : "No subtitles found").localized
+    }
+    /// "Show Earlier (−0.5 s)" / "Show Later (+0.5 s)": one step of the delay.
+    static var earlier: String { String(format: "Show Earlier (%@)".localized, SubtitleMenuFormatting.offsetLabel(-0.5)) }
+    static var later: String { String(format: "Show Later (%@)".localized, SubtitleMenuFormatting.offsetLabel(0.5)) }
+    /// "Reset (+1 s)": back to no delay, with the current one.
+    static func reset(_ offset: Double) -> String {
+        String(format: "Reset (%@)".localized, SubtitleMenuFormatting.offsetLabel(offset))
+    }
+}
+
 enum SubtitleMenuFormatting {
-    /// "+0,5 s" / "−1 s" (French decimal comma).
+    /// "+0.5 s" / "−1 s", with the decimal separator of the user's region
+    /// ("+0,5 s" in France).
     static func offsetLabel(_ offset: Double) -> String {
         let formatter = NumberFormatter()
-        formatter.locale = Locale(identifier: "fr_FR")
+        formatter.locale = .current
         formatter.minimumFractionDigits = 0
         formatter.maximumFractionDigits = 1
         let number = formatter.string(from: NSNumber(value: abs(offset))) ?? "\(abs(offset))"
@@ -232,9 +253,9 @@ final class SubtitleOverlayLabelView: UIView {
     }
 }
 
-/// Builds a "Sous-titres" UIMenu (Désactivés + languages, current one
+/// Builds a "Subtitles" UIMenu (Off + languages, current one
 /// checked) for tvOS `AVPlayerViewController.transportBarCustomMenuItems`.
-/// « Désactivés » and the unfilled icon mean no subtitle is on: neither the
+/// « Off » and the unfilled icon mean no subtitle is on: neither the
 /// overlay nor one of the file's own non-forced subtitles (`areSubtitlesOff`;
 /// its forced-only ones may still show).
 @MainActor
@@ -258,11 +279,11 @@ private func makeSubtitleMenu(controller: SubtitleCueController,
                               isNativeSubtitleShown: Bool) -> UIMenu {
     let subtitlesOff = selected == nil && !isNativeSubtitleShown
     var children: [UIMenuElement] = []
-    children.append(UIAction(title: "Désactivés", state: subtitlesOff ? .on : .off) { [weak controller] _ in
+    children.append(UIAction(title: SubtitleMenuText.off, state: subtitlesOff ? .on : .off) { [weak controller] _ in
         controller?.select(nil)   // also the file's own non-forced subtitle
     })
     if available.isEmpty {
-        children.append(UIAction(title: isSearching ? "Recherche des sous-titres…" : "Aucun sous-titre trouvé",
+        children.append(UIAction(title: SubtitleMenuText.empty(isSearching: isSearching),
                                  attributes: .disabled) { _ in })
     }
     for subtitle in available {
@@ -273,18 +294,18 @@ private func makeSubtitleMenu(controller: SubtitleCueController,
     }
     if selected != nil {
         var sync: [UIMenuElement] = [
-            UIAction(title: "Afficher plus tôt (−0,5 s)") { [weak controller] _ in controller?.offset -= 0.5 },
-            UIAction(title: "Afficher plus tard (+0,5 s)") { [weak controller] _ in controller?.offset += 0.5 },
+            UIAction(title: SubtitleMenuText.earlier) { [weak controller] _ in controller?.offset -= 0.5 },
+            UIAction(title: SubtitleMenuText.later) { [weak controller] _ in controller?.offset += 0.5 },
         ]
         if offset != 0 {
-            sync.append(UIAction(title: "Réinitialiser (\(SubtitleMenuFormatting.offsetLabel(offset)))") { [weak controller] _ in
+            sync.append(UIAction(title: SubtitleMenuText.reset(offset)) { [weak controller] _ in
                 controller?.offset = 0
             })
         }
-        children.append(UIMenu(title: "Synchronisation", image: UIImage(systemName: "timer"), children: sync))
+        children.append(UIMenu(title: SubtitleMenuText.delay, image: UIImage(systemName: "timer"), children: sync))
     }
     let icon = subtitlesOff ? "captions.bubble" : "captions.bubble.fill"
-    return UIMenu(title: "Sous-titres", image: UIImage(systemName: icon), children: children)
+    return UIMenu(title: SubtitleMenuText.title, image: UIImage(systemName: icon), children: children)
 }
 
 /// Keeps a transport-bar menu in sync: calls `apply` with a freshly built

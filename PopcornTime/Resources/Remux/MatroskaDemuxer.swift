@@ -392,6 +392,18 @@ final class MatroskaDemuxer {
     /// Upper bound for the Cues body `loadCueIndex` reads (a 3 h UHD remux
     /// with a cue point per 0.5 s keyframe holds ~1 MB).
     static let maxCuesSize: UInt64 = 32 * 1024 * 1024
+    /// The largest TimestampScale taken (1 s per tick; files use 1 ms, some
+    /// 1 µs or 1 ns): a larger one is damage and the default applies.
+    static let maxTimestampScale: UInt64 = 1_000_000_000
+    /// A cluster whose timestamp is further than this from zero (7 days,
+    /// the longest header Duration the remux takes) …
+    static let maxClusterTimestampSeconds: Double = 7 * 24 * 3600
+    /// … or more than this (6 h) after the cluster before it is damage: it
+    /// is skipped (`isPlausibleClusterTimestamp`).
+    static let maxClusterStepSeconds: Double = 6 * 3600
+    /// The bound of a frame's own timestamp (its cluster's, a signed 16-bit
+    /// offset, a lace's): a day above the clusters'.
+    static let maxFrameTimestampSeconds: Double = 8 * 24 * 3600
 
     let reader: EBMLReader
     private(set) var docType: String = "matroska"
@@ -514,6 +526,8 @@ final class MatroskaDemuxer {
 
     private var runtimeByNumber: [UInt64: TrackRuntime] = [:]
     private var blockedProbe: ZeroProbe?
+    /// The first byte of the zero region that blocked the last call (`blockedProbe`), nil when none did.
+    var blockedOffset: UInt64? { blockedProbe?.region.offset }
     /// Non-nil while hunting for the next Cluster after unparseable bytes.
     private var resyncFrom: UInt64?
     /// End of the last cluster returned, and its timestamp: blocks found
@@ -524,6 +538,35 @@ final class MatroskaDemuxer {
     /// Start of the last cluster returned: blocks continuing it
     /// (`lastClusterEnd`) are tagged with it (`MKVFrame.clusterOffset`).
     private var lastClusterStart: UInt64 = 0
+    /// Timestamp of the last cluster taken (nil before the first): what the
+    /// next one's is judged against (`isPlausibleClusterTimestamp`).
+    private var lastPlausibleTimestamp: Int64?
+    /// Clusters skipped for a timestamp no real movie has.
+    private(set) var implausibleClusters = 0
+
+    /// One indexed keyframe of the track `loadCueIndex` was last asked about: its CueTime
+    /// (TimestampScale ticks, as `MKVFrame.timestamp`) and the absolute file offset of the
+    /// Cluster that holds it (CueClusterPosition).
+    struct CueEntry: Equatable {
+        let ticks: Int64
+        let clusterOffset: UInt64
+    }
+
+    /// The keyframe index `loadCueIndex` last returned as `.available`, one entry per time it
+    /// listed, in the same order (strictly increasing ticks). Empty before.
+    private(set) var cueEntries: [CueEntry] = []
+    /// The Cluster offsets of `cueEntries`, sorted, each once (`indexedClusterOffset(before:)`).
+    private var indexedClusterOffsets: [UInt64] = []
+    /// Where the last `jump(toClusterAt:)` landed, until a cluster was read from there.
+    private var jumpAnchor: UInt64?
+    /// Set when the element a jump landed on, once downloaded, is not a Cluster: the index
+    /// does not say the truth about this file. `readNextCluster()` then returns nil for good —
+    /// it never resynchronises on a Cluster further on, which would be another time of the
+    /// movie than the one asked for. Cleared by the next `jump(toClusterAt:)`.
+    private(set) var jumpFailure: String?
+    /// Tracks seen with laced blocks (several frames per block) so far: a block of theirs
+    /// stored before a Cluster holds frames that play after that Cluster's start.
+    private(set) var lacedTracks: Set<UInt64> = []
 
     private func resetState() {
         docType = "matroska"
@@ -542,6 +585,13 @@ final class MatroskaDemuxer {
         lastClusterEnd = nil
         lastClusterTimestamp = 0
         lastClusterStart = 0
+        lastPlausibleTimestamp = nil
+        implausibleClusters = 0
+        cueEntries = []
+        indexedClusterOffsets = []
+        jumpAnchor = nil
+        jumpFailure = nil
+        lacedTracks = []
     }
 
     // MARK: - Headers
@@ -750,7 +800,7 @@ final class MatroskaDemuxer {
             switch id {
             case ID.timestampScale:
                 let value = EBML.uint(payload, default: 1_000_000)
-                scale = value == 0 ? 1_000_000 : value
+                scale = value == 0 || value > Self.maxTimestampScale ? 1_000_000 : value
             case ID.duration:
                 if let value = EBML.finiteFloat(payload), value > 0 { rawDuration = value }
             case ID.muxingApp:
@@ -1336,8 +1386,9 @@ final class MatroskaDemuxer {
     /// whole body must be valid EBML — a 0x00 byte where an element header
     /// must start, or a body whose last byte and the byte after it are
     /// zero (the download frontier), is a region not downloaded yet; any
-    /// other inconsistency (an unexpected element, CueTimes going backward,
-    /// a CuePoint without CueTime) makes the index unusable. Only cue points
+    /// other inconsistency (an unexpected element, CueTimes of the requested
+    /// track going backward, a CuePoint without CueTime) makes the index
+    /// unusable. Only cue points
     /// whose CueClusterPosition lies inside the file count — inside the
     /// Segment while the file is downloading: a file that grows as it
     /// downloads (not preallocated) hasn't reached those clusters yet. The
@@ -1388,6 +1439,7 @@ final class MatroskaDemuxer {
         let fileLength = reader.fileLength()
         let clusterLimit = assumeFullyDownloaded ? fileLength : max(fileLength, segmentDataEnd ?? 0)
         var times: [Int64] = []
+        var entries: [CueEntry] = []
         var previous: UInt64?
         var failure: CueIndex?
         body.withUnsafeBytes { (raw: UnsafeRawBufferPointer) in
@@ -1429,6 +1481,7 @@ final class MatroskaDemuxer {
                 }
                 var time: UInt64?
                 var indexed = false
+                var indexedOffset: UInt64?
                 let complete = walk(pointBody) { field, fieldBody in
                     guard failure == nil else { return }
                     switch field {
@@ -1445,7 +1498,10 @@ final class MatroskaDemuxer {
                         }
                         if track == trackNumber, let offset = cluster {
                             let (absolute, overflow) = segmentDataStart.addingReportingOverflow(offset)
-                            if !overflow, absolute < clusterLimit { indexed = true }
+                            if !overflow, absolute < clusterLimit {
+                                indexed = true
+                                if indexedOffset == nil { indexedOffset = absolute }
+                            }
                         }
                     default:
                         break
@@ -1453,15 +1509,98 @@ final class MatroskaDemuxer {
                 }
                 guard complete, failure == nil else { return }
                 guard let value = time else { return fail("CuePoint without CueTime") }
+                // The order is judged among this track's cue points only: muxers
+                // that write cues in mux order (libavformat before 5.0) put a
+                // subtitle's cue, timed between a keyframe's DTS and its PTS,
+                // after that keyframe's — the video index is still right.
+                guard indexed else { return }
                 if let last = previous, value < last { return fail("CueTime going backward (\(value) after \(last))") }
                 previous = value
                 let ticks = Int64(clamping: value)
-                if indexed, times.last != ticks { times.append(ticks) }
+                if times.last != ticks, let offset = indexedOffset {
+                    times.append(ticks)
+                    entries.append(CueEntry(ticks: ticks, clusterOffset: offset))
+                }
             }
         }
         if let failure = failure { return failure }
         guard !times.isEmpty else { return .unavailable("no cue point for track \(trackNumber)") }
+        cueEntries = entries
+        indexedClusterOffsets = Array(Set(entries.map(\.clusterOffset))).sorted()
         return .available(times)
+    }
+
+    // MARK: - Jumping through the keyframe index
+
+    /// The Cluster holding the keyframe the index lists at `ticks` (a time `loadCueIndex`
+    /// returned); nil for a time it does not list.
+    func clusterOffset(forCueTicks ticks: Int64) -> UInt64? {
+        var low = 0
+        var high = cueEntries.count
+        while low < high {
+            let middle = (low + high) / 2
+            if cueEntries[middle].ticks < ticks { low = middle + 1 } else { high = middle }
+        }
+        guard low < cueEntries.count, cueEntries[low].ticks == ticks else { return nil }
+        return cueEntries[low].clusterOffset
+    }
+
+    /// The nearest indexed Cluster that starts strictly before `offset`; nil when there is none.
+    /// What a reader starts from to get the frames stored just before a Cluster.
+    func indexedClusterOffset(before offset: UInt64) -> UInt64? {
+        var low = 0
+        var high = indexedClusterOffsets.count
+        while low < high {
+            let middle = (low + high) / 2
+            if indexedClusterOffsets[middle] < offset { low = middle + 1 } else { high = middle }
+        }
+        return low > 0 ? indexedClusterOffsets[low - 1] : nil
+    }
+
+    /// What lies at an offset the index gives.
+    enum ClusterProbe: Equatable {
+        /// A Cluster starts there (its header and its first child are downloaded).
+        case cluster
+        /// Not downloaded yet (zeros of a preallocated file, or past the data of one that grows).
+        case notYet
+        /// Downloaded, and not a Cluster: the index is wrong about this file.
+        case notACluster
+    }
+
+    /// Looks at `offset` without moving the reader. `knownDownloaded`: the caller knows that
+    /// the bytes there are on disk (the torrent says so) although the file as a whole is not
+    /// complete — a zero byte there is then data, not a piece still to come, and what is not
+    /// a Cluster is `.notACluster` instead of `.notYet` for ever.
+    func probeCluster(at offset: UInt64, knownDownloaded: Bool = false) -> ClusterProbe {
+        let assumed = assumeFullyDownloaded
+        if knownDownloaded { assumeFullyDownloaded = true }
+        defer { assumeFullyDownloaded = assumed }
+        if case .truncated = reader.header(at: offset) {
+            // Past the end of the data: of a file still growing, or of the whole file.
+            return assumeFullyDownloaded ? .notACluster : .notYet
+        }
+        switch validateCluster(at: offset) {
+        case .valid: return .cluster
+        case .pending: return .notYet
+        case .invalid: return .notACluster
+        }
+    }
+
+    /// Moves the reader to the Cluster at `offset` (a CueClusterPosition): the next
+    /// `readNextCluster()` starts there — it waits while that Cluster is not downloaded, and
+    /// sets `jumpFailure` if what is there turns out not to be one. Nothing of the cluster that
+    /// was being read is kept: neither a continuation of it nor its timestamp as a reference
+    /// (the first cluster read after a jump is judged on its own). Works both ways.
+    func jump(toClusterAt offset: UInt64) {
+        reader.seek(to: offset)
+        blockedProbe = nil
+        resyncFrom = nil
+        lastClusterEnd = nil
+        lastClusterStart = 0
+        lastClusterTimestamp = 0
+        lastPlausibleTimestamp = nil
+        jumpAnchor = offset
+        jumpFailure = nil
     }
 
     // MARK: - Clusters
@@ -1472,9 +1611,27 @@ final class MatroskaDemuxer {
     /// return an empty array (empty cluster, filtered tracks, skipped
     /// damage): call again.
     func readNextCluster() -> [MKVFrame]? {
+        if jumpFailure != nil { return nil }
         if let probe = blockedProbe {
             if !assumeFullyDownloaded, probe.anchor == reader.offset, isStillBlocked(probe.region) { return nil }
             blockedProbe = nil
+        }
+        if let anchor = jumpAnchor {
+            if reader.offset == anchor {
+                // Where a jump landed: a Cluster, or nothing is read (no resynchronisation —
+                // the Cluster it would find is not the one the index promised).
+                switch probeCluster(at: anchor) {
+                case .cluster:
+                    break
+                case .notYet:
+                    return nil
+                case .notACluster:
+                    jumpFailure = "the keyframe index points to offset \(anchor), which is not a Cluster"
+                    return nil
+                }
+            } else {
+                jumpAnchor = nil
+            }
         }
         while true {
             if let from = resyncFrom {
@@ -1637,7 +1794,8 @@ final class MatroskaDemuxer {
             }
 
             var frames: [MKVFrame] = []
-            if let clusterTimestamp = timestamp {
+            let plausible = timestamp.map { isPlausibleClusterTimestamp($0) } ?? true
+            if let clusterTimestamp = timestamp, plausible {
                 frames.reserveCapacity(blocks.count)
                 for block in blocks {
                     let blockRaw = UnsafeRawBufferPointer(rebasing: raw[block.range])
@@ -1650,9 +1808,44 @@ final class MatroskaDemuxer {
                 }
             }
             reader.seek(to: end)
-            lastClusterEnd = end
-            if let clusterTimestamp = timestamp { lastClusterTimestamp = clusterTimestamp }
+            noteClusterRead(end: end, timestamp: timestamp, plausible: plausible)
             return .complete(frames)
+        }
+    }
+
+    /// Whether a cluster's timestamp can be a real movie's: within
+    /// `maxClusterTimestampSeconds` of zero, and not more than
+    /// `maxClusterStepSeconds` after the cluster before it. A cluster that
+    /// fails is damage (a corrupt or forged file, a block not verified yet)
+    /// and is skipped whole: its frames used to go on to the remux with it —
+    /// a trap in the timeline's arithmetic for a huge value (2^41 ticks and
+    /// more), a film cut short and its audio out of step for a smaller one
+    /// (2^40: 120 s published of 300, 8 440 audio frames dropped).
+    static func isPlausibleClusterTimestamp(_ ticks: Int64, timestampScale: UInt64, previous: Int64?) -> Bool {
+        let secondsPerTick = Double(timestampScale) / 1e9
+        let seconds = Double(ticks) * secondsPerTick
+        guard seconds.isFinite, abs(seconds) <= maxClusterTimestampSeconds else { return false }
+        guard let previous = previous else { return true }
+        return (Double(ticks) - Double(previous)) * secondsPerTick <= maxClusterStepSeconds
+    }
+
+    private func isPlausibleClusterTimestamp(_ ticks: Int64) -> Bool {
+        Self.isPlausibleClusterTimestamp(ticks, timestampScale: timestampScale, previous: lastPlausibleTimestamp)
+    }
+
+    /// A cluster was read to its `end`. One skipped for its timestamp
+    /// (`plausible` false) is not continued by blocks found right after it,
+    /// and leaves the reference timestamps as they were.
+    private func noteClusterRead(end: UInt64, timestamp: Int64?, plausible: Bool) {
+        guard plausible else {
+            lastClusterEnd = nil
+            implausibleClusters += 1
+            return
+        }
+        lastClusterEnd = end
+        if let timestamp = timestamp {
+            lastClusterTimestamp = timestamp
+            lastPlausibleTimestamp = timestamp
         }
     }
 
@@ -1744,7 +1937,9 @@ final class MatroskaDemuxer {
 
         var frames: [MKVFrame] = []
         let timestamp = ownTimestamp ?? inheritedTimestamp
-        if let clusterTimestamp = timestamp {
+        // (An inherited timestamp was judged with its own cluster.)
+        let plausible = ownTimestamp.map { isPlausibleClusterTimestamp($0) } ?? true
+        if let clusterTimestamp = timestamp, plausible {
             for child in children {
                 let outcome = child.data.withUnsafeBytes { raw in
                     processBlockElement(raw, fileOffset: child.offset, simple: child.simple,
@@ -1759,9 +1954,9 @@ final class MatroskaDemuxer {
         if let resyncAt = resyncAt {
             resyncFrom = resyncAt
             lastClusterEnd = nil
+            if !plausible { implausibleClusters += 1 }
         } else {
-            lastClusterEnd = end
-            if let clusterTimestamp = timestamp { lastClusterTimestamp = clusterTimestamp }
+            noteClusterRead(end: end, timestamp: timestamp, plausible: plausible)
         }
         return .complete(frames)
     }
@@ -1955,6 +2150,7 @@ final class MatroskaDemuxer {
         let flags = raw[trackLength + 2]
         let keyframe = simple ? (flags & 0x80) != 0 : !hasReference
         let lacing = (flags >> 1) & 0x03
+        if lacing != 0, !lacedTracks.contains(trackNumber) { lacedTracks.insert(trackNumber) }
         guard let laces = Self.laceRanges(raw, from: trackLength + 3, lacing: lacing) else {
             // Lacing that doesn't add up because the block still holds a
             // region not written yet: wait (see `undecodableLacingHole`).

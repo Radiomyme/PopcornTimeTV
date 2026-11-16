@@ -5,10 +5,9 @@ import Foundation
 // PopcornKit) so the rule can be unit-tested on its own; the screen itself is
 // `WhatsNewView`.
 //
-// The text is bilingual in code rather than in Localizable.strings: the iOS
-// target ships no .strings files (the macOS one ships Localizable.strings
-// since 5.1, for its detail pages), and the screen must read the same on all
-// three. French is used when the app runs in French (see
+// The text is bilingual in code rather than in Localizable.strings: the
+// notes are only written in English and French, and the screen must read the
+// same on all three apps. French is used when the app runs in French (see
 // `WhatsNewGate.prefersFrench`).
 
 /// Platforms an item is announced on.
@@ -60,9 +59,85 @@ struct WhatsNewRelease {
 
     /// The notes shown at launch and from Settings: the latest release's
     /// (keep the README's "New in" section in step).
-    static let current = v5_2_0
+    static let current = v5_3_0
 
-    /// What is new since 5.1.0.
+    /// What is new since 5.2.0. Only what a check saw running is announced
+    /// (see the README's "New in 5.3.0" and its known limits); at most eight
+    /// items per platform.
+    static let v5_3_0 = WhatsNewRelease(version: "5.3.0", items: [
+        WhatsNewItem(id: "home", symbol: "house",
+                     titleFR: "Un nouvel écran d'accueil",
+                     bodyFR: "L'app s'ouvre sur Accueil : les sorties à la une en grand, puis Reprendre, les nouveaux épisodes de vos séries, les films et séries du moment, les nouveautés 4K, le Top 100 des films et celui des séries, Ma liste et vos genres. Réglages › Accueil choisit les langues et les rangées.",
+                     titleEN: "A new Home screen",
+                     bodyEN: "The app opens on Home: the featured releases up top, then Continue Watching, new episodes of your shows, trending movies and shows, new in 4K, the Top 100 movies and shows, your Watchlist and your genres. Settings › Home picks the languages and the rows.",
+                     platforms: [.tvOS, .iOS, .macOS]),
+        WhatsNewItem(id: "resume-tv", symbol: "play.circle",
+                     titleFR: "Reprendre là où vous vous étiez arrêté",
+                     bodyFR: "Un film encore en téléchargement reprend à l'endroit enregistré, et les retours en arrière comme les sauts lointains restent dans le lecteur natif, qui reçoit tels quels le Dolby Vision et le Dolby Atmos du fichier. Pendant l'attente, l'écran dit où en est le téléchargement : « Reprise à 22:35 — 45 % · 9,6 Mo/s ».",
+                     titleEN: "Resume where you left off",
+                     bodyEN: "A film that is still downloading resumes at its saved point, and rewinds and far jumps stay in the native player too, which gets the file's Dolby Vision and Dolby Atmos untouched. While it waits, the screen says how far the download has got: “Resuming at 22:35 — 45% · 9.6 MB/s”.",
+                     platforms: [.tvOS]),
+        // iPhone / iPad and Mac: the resume was run there; the far jumps and
+        // rewinds of the merged tree were not, so they are not announced.
+        WhatsNewItem(id: "resume", symbol: "play.circle",
+                     titleFR: "Reprendre là où vous vous étiez arrêté",
+                     bodyFR: "Un film encore en téléchargement reprend à l'endroit enregistré, sans quitter le lecteur natif : le torrent télécharge d'abord ce passage.",
+                     titleEN: "Resume where you left off",
+                     bodyEN: "A film that is still downloading resumes at its saved point, without leaving the native player: the torrent fetches that part first.",
+                     platforms: [.iOS, .macOS]),
+        WhatsNewItem(id: "up-next-tv", symbol: "forward.end",
+                     titleFR: "Les épisodes s'enchaînent",
+                     bodyFR: "60 s avant la fin (Réglages › Carte Épisode suivant : de 30 à 90 s), la carte « Épisode suivant » propose la suite. Elle démarre tout de suite avec « Lire maintenant », sinon à la fin de l'épisode si « Enchaîner les épisodes » est activé. La suite est prise dans une version proche (le même pack d'abord, sinon le même groupe ou la même qualité), sans redemander la qualité. « Reprendre » relance la version déjà regardée, sans question.",
+                     titleEN: "Episodes play on",
+                     bodyEN: "60 s before the end (Settings › Next Episode Card: 30 to 90 s), the Next Episode card offers the next one. It starts at once with Play Now, otherwise at the end of the episode when Autoplay Next Episode is on. The next one comes from a matching release (the same pack first, else the same group or quality), without asking for the quality again. Resume replays the release you were watching, with no question.",
+                     platforms: [.tvOS]),
+        // iPhone / iPad and Mac: the card at 60 s was not seen running there
+        // (only its setting, on screen), so its time is not announced.
+        WhatsNewItem(id: "up-next", symbol: "forward.end",
+                     titleFR: "Les épisodes s'enchaînent",
+                     bodyFR: "Avant la fin, la carte « Épisode suivant » propose la suite. Elle démarre tout de suite avec « Lire maintenant », sinon à la fin de l'épisode si « Enchaîner les épisodes » est activé. La suite est prise dans une version proche (le même pack d'abord, sinon le même groupe ou la même qualité), sans redemander la qualité. « Reprendre » relance la version déjà regardée, sans question.",
+                     titleEN: "Episodes play on",
+                     bodyEN: "Before the end, the Next Episode card offers the next one. It starts at once with Play Now, otherwise at the end of the episode when Autoplay Next Episode is on. The next one comes from a matching release (the same pack first, else the same group or quality), without asking for the quality again. Resume replays the release you were watching, with no question.",
+                     platforms: [.iOS, .macOS]),
+        WhatsNewItem(id: "detail", symbol: "bolt",
+                     titleFR: "Des fiches qui s'ouvrent tout de suite",
+                     bodyFR: "Une fiche montre aussitôt ce que l'affiche connaissait, puis se complète ; les sources arrivent une à une.",
+                     titleEN: "Pages that open at once",
+                     bodyEN: "A page shows straight away what its poster knew, then fills in; sources arrive one by one.",
+                     platforms: [.tvOS, .iOS, .macOS]),
+        WhatsNewItem(id: "grids", symbol: "square.grid.3x3",
+                     titleFR: "Des grilles qui trient vraiment",
+                     bodyFR: "Chaque tri donne sa propre liste, chaque catalogue ses propres genres, et la première page s'affiche dès le lancement depuis la dernière visite. Une page qui échoue propose Réessayer au lieu d'arrêter la liste.",
+                     titleEN: "Grids that really sort",
+                     bodyEN: "Each sort gives its own list, each catalog its own genres, and the first page shows at launch from your last visit. A page that fails offers Try Again instead of ending the list.",
+                     platforms: [.tvOS, .iOS, .macOS]),
+        WhatsNewItem(id: "artwork", symbol: "photo.on.rectangle",
+                     titleFR: "Des images plus légères",
+                     bodyFR: "Les affiches sont demandées à la taille où elles sont dessinées (jusqu'à 96 % de données en moins), et celles des vieux films ne restent plus grises.",
+                     titleEN: "Lighter artwork",
+                     bodyEN: "Posters are fetched at the size they're drawn (up to 96% less data), and old movies' posters no longer stay grey.",
+                     platforms: [.tvOS, .iOS, .macOS]),
+        WhatsNewItem(id: "tv-grids", symbol: "rectangle.grid.3x2",
+                     titleFR: "Des grilles plus riches sur Apple TV",
+                     bodyFR: "Six affiches par rangée, le tri et le genre affichés, des marques 4K, Nouveau, Nouvel épisode, vu et progression ; sous chaque affiche son année, sa note et ses formats, et sous l'affiche choisie son titre.",
+                     titleEN: "Richer grids on Apple TV",
+                     bodyEN: "Six posters per row, the sort and genre shown, 4K, New, New Episode, watched and progress marks; under every poster its year, rating and formats, and under the focused one its title.",
+                     platforms: [.tvOS]),
+        WhatsNewItem(id: "topshelf", symbol: "tv",
+                     titleFR: "Le Top Shelf",
+                     bodyFR: "Placez Popcorn Time dans la rangée du haut : l'écran d'accueil de l'Apple TV montre les dernières sorties en plein écran, avec de quoi lire un titre ou ouvrir sa fiche.",
+                     titleEN: "The Top Shelf",
+                     bodyEN: "Put Popcorn Time in the top row: the Apple TV home screen shows the latest releases full screen, ready to play a title or open its page.",
+                     platforms: [.tvOS]),
+        WhatsNewItem(id: "mac", symbol: "macwindow",
+                     titleFR: "Un Mac plus complet",
+                     bodyFR: "L'Accueil en tête de la barre latérale (⌘1), les menus Aller et Lecture, et ⌘R pour actualiser la page.",
+                     titleEN: "A fuller Mac app",
+                     bodyEN: "Home at the top of the sidebar (⌘1), the Go and Playback menus, and ⌘R to refresh the page.",
+                     platforms: [.macOS]),
+    ])
+
+    /// What was new in 5.2.0 (since 5.1.0), kept for the record.
     static let v5_2_0 = WhatsNewRelease(version: "5.2.0", items: [
         WhatsNewItem(id: "bitrate", symbol: "speedometer",
                      titleFR: "Une qualité adaptée à votre connexion",
@@ -281,17 +356,12 @@ enum WhatsNewGate {
 
     static var release: WhatsNewRelease { .current }
 
-    /// True when the app runs in French. tvOS / macOS: the localization the
-    /// app resolved (they ship fr.lproj), so the notes match the rest of the
-    /// UI, e.g. French for the languages [German, French] but English for
-    /// [Italian, French]. iOS ships no .lproj: the first of the user's
-    /// languages that is English or French.
+    /// True when the app runs in French: the localization the app resolved
+    /// (the three apps ship fr.lproj; iOS since 5.3, with it, es, ar and
+    /// pt-BR), so the notes match the rest of the UI, e.g. French for the
+    /// languages [German, French] but English for [Italian, French].
     static var prefersFrench: Bool {
-        #if os(tvOS) || os(macOS)
         return Bundle.main.preferredLocalizations.first?.lowercased().hasPrefix("fr") ?? false
-        #else
-        return Bundle.preferredLocalizations(from: ["en", "fr"], forPreferences: Locale.preferredLanguages).first == "fr"
-        #endif
     }
 
     static var appVersion: String {
@@ -299,10 +369,13 @@ enum WhatsNewGate {
     }
 
     /// Applies the rule; when it says so, marks the notes seen. Returns true
-    /// when the caller must present the screen now.
+    /// when the caller must present the screen now. `appVersion` and
+    /// `release`: the running app's and its notes (the tests give theirs).
     static func checkAtLaunch(isFreshInstall: Bool,
                               launchedFromURL: Bool,
-                              defaults: UserDefaults = .standard) -> Bool {
+                              defaults: UserDefaults = .standard,
+                              appVersion: String = WhatsNewGate.appVersion,
+                              release: WhatsNewRelease = WhatsNewGate.release) -> Bool {
         #if DEBUG
         if defaults.bool(forKey: forceKey) { return !launchedFromURL }
         #endif
@@ -311,6 +384,16 @@ enum WhatsNewGate {
                                              lastSeenVersion: defaults.string(forKey: lastSeenKey),
                                              isFreshInstall: isFreshInstall,
                                              launchedFromURL: launchedFromURL)
+        // Once per launch (`WhatsNewLaunchCheck`, `WhatsNewPresenter`), in every build: a device
+        // session's console tells whether the notes came up.
+        let said: String
+        switch decision {
+        case .present: said = "present"
+        case .markSeenSilently: said = "marked seen silently"
+        case .skip: said = "skip"
+        }
+        print("[WhatsNew] \(said) — last seen \(defaults.string(forKey: lastSeenKey) ?? "none"), notes \(release.version), "
+              + "app \(appVersion)\(isFreshInstall ? ", fresh install" : "")\(launchedFromURL ? ", launched from a link" : "")")
         switch decision {
         case .present, .markSeenSilently:
             defaults.set(release.version, forKey: lastSeenKey)
@@ -322,9 +405,71 @@ enum WhatsNewGate {
 
     /// Fresh-install test for the iOS and macOS apps (see
     /// `WhatsNewPolicy.looksLikeFreshInstall`), on the keys this app has
-    /// persisted (not the global or registered defaults).
-    static func looksLikeFreshInstall(defaults: UserDefaults = .standard) -> Bool {
-        let persisted = Bundle.main.bundleIdentifier.flatMap { defaults.persistentDomain(forName: $0) } ?? [:]
+    /// persisted (not the global or registered defaults): the persistent
+    /// domain `domainName` (the app's bundle identifier; the tests give a
+    /// suite's name).
+    static func looksLikeFreshInstall(defaults: UserDefaults = .standard,
+                                      domainName: String? = Bundle.main.bundleIdentifier) -> Bool {
+        let persisted = domainName.flatMap { defaults.persistentDomain(forName: $0) } ?? [:]
         return WhatsNewPolicy.looksLikeFreshInstall(defaultsKeys: Array(persisted.keys))
+    }
+}
+
+/// The launch check of the SwiftUI apps (iOS, macOS). They learn that a
+/// popcorntime:// link opened them only through `onOpenURL`, which SwiftUI
+/// may call before or just after the root view's `.task` runs the check:
+/// - the link first: the check sees it (`launchedFromURL`): nothing shown,
+///   nothing remembered;
+/// - the check first, the notes shown, then the link within
+///   `linkWindowSeconds`: the notes are closed and forgotten (the version
+///   seen before is put back), as if the check had seen the link — the
+///   next normal launch shows them.
+/// A link later than that is an ordinary one: the notes stay as they are.
+/// Pure state; the view keeps it in `@State`.
+struct WhatsNewLaunchCheck {
+    /// How long after the notes were shown a link still counts as the one
+    /// that launched the app.
+    static let linkWindowSeconds: TimeInterval = 5
+
+    private(set) var linkArrived = false
+    private(set) var checked = false
+    /// When the notes were shown at this launch, and the version seen
+    /// before (nil: none) — what a late link puts back.
+    private var shownAt: TimeInterval?
+    private var seenBefore: String?
+
+    /// `.task`: applies the rule (`WhatsNewGate.checkAtLaunch`) once; true
+    /// when the notes must be shown now. `now`: a monotonic clock (s).
+    mutating func check(isFreshInstall: Bool,
+                        defaults: UserDefaults = .standard,
+                        appVersion: String = WhatsNewGate.appVersion,
+                        release: WhatsNewRelease = WhatsNewGate.release,
+                        now: TimeInterval = ProcessInfo.processInfo.systemUptime) -> Bool {
+        guard !checked else { return false }
+        checked = true
+        let before = defaults.string(forKey: WhatsNewGate.lastSeenKey)
+        let present = WhatsNewGate.checkAtLaunch(isFreshInstall: isFreshInstall, launchedFromURL: linkArrived,
+                                                 defaults: defaults, appVersion: appVersion, release: release)
+        if present {
+            shownAt = now
+            seenBefore = before
+        }
+        return present
+    }
+
+    /// `onOpenURL`: a link arrived. True when the notes this launch showed
+    /// must be closed now (they are forgotten in `defaults`).
+    mutating func linkOpened(defaults: UserDefaults = .standard,
+                             now: TimeInterval = ProcessInfo.processInfo.systemUptime) -> Bool {
+        linkArrived = true
+        guard let shown = shownAt else { return false }
+        shownAt = nil
+        guard now - shown <= Self.linkWindowSeconds else { return false }
+        if let seenBefore {
+            defaults.set(seenBefore, forKey: WhatsNewGate.lastSeenKey)
+        } else {
+            defaults.removeObject(forKey: WhatsNewGate.lastSeenKey)
+        }
+        return true
     }
 }

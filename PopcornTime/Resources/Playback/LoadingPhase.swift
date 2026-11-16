@@ -179,6 +179,9 @@ struct LoadingSample: Equatable {
 ///   below 1 KiB/s.
 final class LoadingPhaseTracker {
     static let noPeerSeconds: TimeInterval = 45
+    /// This stream's no-peer delay (default `noPeerSeconds`; shorter for a
+    /// remembered release replayed by « Resume », decision D5).
+    var noPeerSeconds: TimeInterval = LoadingPhaseTracker.noPeerSeconds
     static let noDetailsSeconds: TimeInterval = 90
     static let noDataSeconds: TimeInterval = 120
     /// Below this download rate (bytes/s) nothing is coming (protocol chatter only).
@@ -303,7 +306,7 @@ final class LoadingPhaseTracker {
     }
 
     private func detectStall(known: Bool, hasMetadata: Bool, peers: Int, rate: Int, now: TimeInterval) -> LoadingStall? {
-        if known && peers == 0 && now - max(lastPeerAt ?? startedAt, armedAt) >= LoadingPhaseTracker.noPeerSeconds {
+        if known && peers == 0 && now - max(lastPeerAt ?? startedAt, armedAt) >= noPeerSeconds {
             return .noPeers
         }
         if !hasMetadata && now - max(startedAt, armedAt) >= LoadingPhaseTracker.noDetailsSeconds {
@@ -375,7 +378,12 @@ extension LoadingPhaseTracker {
                 now: TimeInterval = LoadingPhaseTracker.clock()) -> LoadingPhase {
         if fromCallback { statusArrived = true }
         guard let streamer = streamer else { return update(.unknown, now: now) }
-        return update(LoadingSample(streamer: streamer, statusArrived: statusArrived), now: now)
+        let sample = LoadingSample(streamer: streamer, statusArrived: statusArrived)
+        // The `[Start]` trace's metadata phase (once per stream).
+        if sample.hasMetadata == true { streamer.noteStartMetadata(peers: sample.peers) }
+        // The `[Measure]` lines' first peer and first piece (once each).
+        streamer.noteStartMeasureStatus()
+        return update(sample, now: now)
     }
 }
 #endif

@@ -18,11 +18,17 @@ enum GlassDetailAdapter {
 
     // MARK: - Pages
 
-    /// Everything a movie page shows that is known once `getMovieInfo` has
-    /// answered. Related titles, cast and the logo arrive later.
-    static func model(for movie: Movie) -> GlassDetailModel {
-        GlassDetailModel(kind: .movie,
-                         title: movie.title,
+    /// Everything a movie page shows of `movie`. Related titles, cast and
+    /// the logo arrive later.
+    /// - Parameter isLoaded: false while the movie is only what the page was
+    ///   opened with (a grid's item, an id): no title made of the id, no
+    ///   "No summary available." — the record brings them a moment later.
+    static func model(for movie: Movie, isLoaded: Bool = true) -> GlassDetailModel {
+        // The rating the cards of this title show on every screen (the
+        // Home's, `HomeTitleFacts`), else the movie's own.
+        let told = HomeTitleFacts.shared.facts(of: movie.id)?.rating.flatMap { $0 > 0 ? $0 : nil }
+        let model = GlassDetailModel(kind: .movie,
+                         title: title(of: movie, shows: movie.hasTitleToShow, isLoaded: isLoaded),
                          logoURL: OpenMetadata.logoURL(imdbId: movie.id),
                          // YTS backgrounds are about 900 px wide: metahub's
                          // 1920 px one first, YTS's if metahub has none.
@@ -31,52 +37,110 @@ enum GlassDetailAdapter {
                          posterURL: url(movie.mediumCoverImage ?? movie.largeCoverImage),
                          metadata: [movie.year, runtime(minutes: movie.runtime), genres(movie.genres)].compactMap(nonEmpty),
                          certification: certificationBadge(movie.certification),
-                         rating: stars(movie.rating),
+                         rating: told.map { stars(Float($0 * 10)) } ?? stars(movie.rating),
                          badges: badges(for: movie.torrents),
-                         summary: summary(movie.summary),
+                         summary: isLoaded || movie.hasSummaryToShow ? summary(movie.summary) : "",
                          play: playInfo(for: movie),
                          hasTrailer: movie.trailerCode != nil,
                          isInWatchlist: movie.isAddedToWatchlist,
                          isWatched: movie.isWatched,
                          download: downloadState(of: movie),
-                         information: information(for: movie),
+                         information: isLoaded ? information(for: movie) : [],
                          accessibility: accessibility)
+        model.score = told.map { min(10, ($0 * 10).rounded() / 10) } ?? score(movie.rating)
+        return model
     }
 
     /// A show page. `show` must already have its episodes linked
     /// (`Show.linkingEpisodes()`), `season` is the season the shelf opens on.
-    static func model(for show: Show, season: Int?) -> GlassDetailModel {
-        let next = nextEpisode(in: show)
+    /// - Parameter isLoaded: false while the show is only what the page was
+    ///   opened with (see `model(for:isLoaded:)` for a movie).
+    static func model(for show: Show, season: Int?, isLoaded: Bool = true) -> GlassDetailModel {
+        let progress = showProgress(of: show)
         return GlassDetailModel(kind: .show,
-                                title: show.title,
+                                title: title(of: show, shows: show.hasTitleToShow, isLoaded: isLoaded),
                                 logoURL: OpenMetadata.logoURL(imdbId: show.id),
                                 // TVMaze only has portrait art: metahub's landscape
                                 // backdrop first (a 404 falls back to the poster).
                                 backdropURL: OpenMetadata.backgroundURL(imdbId: show.id) ?? url(show.largeBackgroundImage),
                                 posterURL: url(show.mediumCoverImage ?? show.largeCoverImage),
                                 metadata: [show.year, seasonCount(show.seasonNumbers.count), genres(show.genres), show.network].compactMap(nonEmpty),
-                                summary: summary(show.summary),
-                                play: next.map(playInfo(for:)),
+                                summary: isLoaded || show.hasSummaryToShow ? summary(show.summary) : "",
+                                play: progress.play,
                                 isInWatchlist: show.isAddedToWatchlist,
                                 seasons: show.seasonNumbers,
                                 selectedSeason: season,
                                 episodes: episodes(of: show),
-                                upNextEpisodeID: show.latestUnwatchedEpisode()?.id,
-                                information: information(for: show),
+                                upNextEpisodeID: progress.upNextEpisodeID,
+                                information: isLoaded ? information(for: show) : [],
                                 accessibility: accessibility)
+    }
+
+    private static func title(of media: Media, shows: Bool, isLoaded: Bool) -> String {
+        isLoaded || shows ? media.title : ""
+    }
+
+    // MARK: - Filling a page as it loads
+
+    /// The page's fields that follow the movie — its record, then its
+    /// torrents — written only where they changed: nothing the page already
+    /// shows is touched (the movie itself keeps what the page was opened
+    /// with, `Movie.completed(by:)`). The watchlist, watched, download,
+    /// related and people fields are the controller's.
+    static func update(_ model: GlassDetailModel, with movie: Movie, isLoaded: Bool) {
+        apply(Self.model(for: movie, isLoaded: isLoaded), to: model)
+    }
+
+    /// The same for a show: also its seasons, its episodes, the episode
+    /// Play starts and the up-next one. The selected season is the caller's.
+    static func update(_ model: GlassDetailModel, with show: Show, isLoaded: Bool) {
+        let fresh = Self.model(for: show, season: model.selectedSeason, isLoaded: isLoaded)
+        apply(fresh, to: model)
+        set(model, \.seasons, fresh.seasons)
+        set(model, \.episodes, fresh.episodes)
+        set(model, \.upNextEpisodeID, fresh.upNextEpisodeID)
+        set(model, \.play, fresh.play)
+    }
+
+    private static func apply(_ fresh: GlassDetailModel, to model: GlassDetailModel) {
+        set(model, \.title, fresh.title)
+        set(model, \.logoURL, fresh.logoURL)
+        set(model, \.backdropURL, fresh.backdropURL)
+        set(model, \.backdropFallbackURL, fresh.backdropFallbackURL)
+        set(model, \.posterURL, fresh.posterURL)
+        set(model, \.metadata, fresh.metadata)
+        set(model, \.certification, fresh.certification)
+        set(model, \.rating, fresh.rating)
+        set(model, \.score, fresh.score)
+        set(model, \.badges, fresh.badges)
+        set(model, \.summary, fresh.summary)
+        set(model, \.hasTrailer, fresh.hasTrailer)
+        set(model, \.information, fresh.information)
+    }
+
+    /// Writes a value only when it differs: an unchanged control does not redraw.
+    private static func set<Value: Equatable>(_ model: GlassDetailModel,
+                                               _ keyPath: ReferenceWritableKeyPath<GlassDetailModel, Value>, _ value: Value) {
+        if model[keyPath: keyPath] != value { model[keyPath: keyPath] = value }
     }
 
     // MARK: - Play
 
-    /// The episode the show page's Play button starts: the one to continue
-    /// (`latestUnwatchedEpisode`), else the first episode of the first season.
-    /// None when that episode has not aired yet (no Play button, rather than
-    /// one that ends on "No torrents found").
+    /// The episode the show page's Play button starts: the one to resume,
+    /// the next one after the last one finished, else the first episode of
+    /// the first season (`Show.watchPosition`, PopcornKit's `NextUpRule`: the
+    /// same answer as the Continue Watching row). None when that episode has
+    /// not aired yet (no Play button, rather than one that ends on "No
+    /// torrents found").
     static func nextEpisode(in show: Show) -> Episode? {
-        let next = show.latestUnwatchedEpisode() ?? firstSeason(of: show).flatMap { first in
-            show.episodes.filter { $0.season == first }.min { $0.episode < $1.episode }
-        }
-        return next.flatMap { $0.isAvailableToPlay ? $0 : nil }
+        show.watchPosition().nextUp?.episode
+    }
+
+    /// Play's episode and the shelf's up-next episode (the one the user's
+    /// history leads to, aired or not), worked out once.
+    static func showProgress(of show: Show) -> (play: GlassPlayInfo?, upNextEpisodeID: String?) {
+        let position = show.watchPosition()
+        return (position.nextUp.map { playInfo(for: $0.episode) }, position.current?.id)
     }
 
     /// The first real season: season 0 (specials, listed by EZTV only) comes
@@ -121,12 +185,33 @@ enum GlassDetailAdapter {
                      number: episode.episode,
                      title: episode.title.isEmpty ? String(localized: "Episode \(episode.episode)") : episode.title,
                      summary: episode.summary,
-                     stillURL: url(episode.smallBackgroundImage ?? episode.largeBackgroundImage),
+                     stillURL: stillURL(of: episode, in: show),
                      detail: [airDate(episode.firstAirDate), show.runtime.flatMap { $0 > 0 ? "\($0) min" : nil }]
                         .compactMap { $0 }.joined(separator: " · ").nilIfEmpty,
                      isWatched: WatchedlistManager<Episode>.episode.isAdded(episode.id),
                      progress: progress(WatchedlistManager<Episode>.episode.currentProgress(episode.id)),
                      download: downloads.map { $0[episode.id] ?? .idle })
+    }
+
+    /// The episode's still: the guide's (TVMaze has one for most episodes),
+    /// else metahub's by the show's IMDb id — an address, nothing to ask
+    /// first (the page used to ask Trakt for the show's TMDB id, then TMDB
+    /// for each still: two keys that are both refused). An episode metahub
+    /// has no still for draws its placeholder.
+    static func stillURL(of episode: Episode, in show: Show) -> URL? {
+        if let still = url(episode.smallBackgroundImage ?? episode.largeBackgroundImage) { return still }
+        guard episode.season > 0, episode.episode > 0 else { return nil }
+        return LibraryArtwork.episodeStillURL(showID: show.id, EpisodeNumber(season: episode.season, episode: episode.episode))
+    }
+
+    /// Where the search for the sources stands, for the page's model.
+    static func sourcesState(_ state: DetailSession.SourcesState) -> GlassSourcesState {
+        switch state {
+        case .searching: return .searching
+        case .partial: return .partial
+        case .ready: return .ready
+        case .none: return .none
+        }
     }
 
     /// Re-reads what can change while the page is open (watched, progress,
@@ -336,6 +421,12 @@ enum GlassDetailAdapter {
         return formatter.string(from: TimeInterval(minutes) * 60)
     }
 
+    /// API rating 0…100 → 0…10 with one decimal; nil when unrated.
+    static func score(_ rating: Float) -> Double? {
+        guard rating > 0 else { return nil }
+        return min(10, (Double(rating)).rounded() / 10)
+    }
+
     /// API rating 0…100 → 0…5 stars in halves; nil when unrated.
     static func stars(_ rating: Float) -> Double? {
         guard rating > 0 else { return nil }
@@ -352,7 +443,16 @@ enum GlassDetailAdapter {
     /// Up to three genres, translated when Localizable.strings knows them
     /// ("Drama" → "Drame").
     private static func genres(_ genres: [String]) -> String? {
-        nonEmpty(genres.prefix(3).map { $0.localizedCapitalized.localized }.joined(separator: ", "))
+        nonEmpty(genres.prefix(3).map { genreKey($0).localized }.joined(separator: ", "))
+    }
+
+    /// The strings' key of a genre: Cinemeta's "Sci-Fi" is the app's
+    /// "Science Fiction" (« Science-fiction », as the Home says it).
+    static func genreKey(_ genre: String) -> String {
+        switch genre.lowercased() {
+        case "sci-fi", "scifi", "science-fiction", "science fiction": return "Science Fiction"
+        default: return genre.localizedCapitalized
+        }
     }
 
     private static func seasonCount(_ count: Int) -> String? {

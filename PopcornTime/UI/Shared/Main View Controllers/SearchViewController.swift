@@ -17,6 +17,12 @@ class SearchViewController: MainViewController, UISearchBarDelegate {
     let searchDelay: TimeInterval = 0.25
     var workItem: DispatchWorkItem!
 
+    /// Bumped by every search: the answer of an older one (another text,
+    /// another scope) is ignored when it lands. A broad search ("ave") can
+    /// answer after the narrower one typed next ("avengers"): its results
+    /// used to replace the newer ones, movies could show under Shows.
+    private var searchGeneration = 0
+
     var fetchType: Trakt.MediaType = .movies
 
     override func load(page: Int) {
@@ -26,7 +32,8 @@ class SearchViewController: MainViewController, UISearchBarDelegate {
     
     override func minItemSize(forCellIn collectionView: UICollectionView, at indexPath: IndexPath) -> CGSize? {
         if UIDevice.current.userInterfaceIdiom == .tv {
-            return CGSize(width: 250, height: fetchType == .people ? 400 : 460)
+            // Posters on the grids' own layout; people keep their round cells.
+            return fetchType == .people ? CGSize(width: 250, height: 400) : nil
         } else {
             return CGSize(width: 108, height: fetchType == .people ? 160 : 185)
         }
@@ -41,12 +48,19 @@ class SearchViewController: MainViewController, UISearchBarDelegate {
     override func collectionView(_ collectionView: UICollectionView, insetForSectionAt section: Int) -> UIEdgeInsets? {
         guard UIDevice.current.userInterfaceIdiom == .tv else { return nil }
         let count = collectionViewController.dataSources[safe: section]?.count ?? 0
-        guard count > 0 && count <= 3 else { return nil }
-        let cellWidth: CGFloat  = 250
-        let spacing:   CGFloat  = 48
+        let people = fetchType == .people
+        // The results start close under the scope bar (they were 210 pt
+        // below it: one row of posters showed their top third).
+        let top: CGFloat = people ? 60 : 44
+        let bottom: CGFloat = people ? 60 : GridStyle.sectionBottom
+        guard count > 0 && count <= 3 else {
+            return UIEdgeInsets(top: top, left: GridStyle.sideInset, bottom: bottom, right: GridStyle.sideInset)
+        }
+        let cellWidth: CGFloat  = people ? 250 : GridStyle.posterSize.width
+        let spacing:   CGFloat  = people ? 48 : GridStyle.columnSpacing
         let total              = (CGFloat(count) * cellWidth) + (CGFloat(count - 1) * spacing)
-        let side               = max(90, (collectionView.bounds.width - total) / 2)
-        return UIEdgeInsets(top: 60, left: side, bottom: 60, right: side)
+        let side               = max(GridStyle.sideInset, ((collectionView.bounds.width - total) / 2).rounded(.down))
+        return UIEdgeInsets(top: top, left: side, bottom: bottom, right: side)
     }
     
     func searchBar(_ searchBar: UISearchBar, selectedScopeButtonIndexDidChange selectedScope: Int) {
@@ -73,13 +87,17 @@ class SearchViewController: MainViewController, UISearchBarDelegate {
     }
     
     func filterSearchText(_ text: String) {
+        searchGeneration += 1
+        let generation = searchGeneration
         collectionViewController.isLoading = !text.isEmpty
         collectionViewController.dataSources = [[]]
+        collectionViewController.error = nil
         collectionView?.reloadData()
 
         if text.isEmpty { return }
 
-        let completion: ([AnyHashable]?, NSError?) -> Void = { [unowned self] (data, error) in
+        let completion: ([AnyHashable]?, NSError?) -> Void = { [weak self] (data, error) in
+            guard let self = self, generation == self.searchGeneration else { return }
             self.collectionViewController.dataSources = [data ?? []]
             self.collectionViewController.error = error
             self.collectionViewController.isLoading = false
@@ -115,15 +133,10 @@ class SearchViewController: MainViewController, UISearchBarDelegate {
     }
     
     override func collectionView(isEmptyForUnknownReason collectionView: UICollectionView) {
-        if let background: ErrorBackgroundView = .fromNib(),
-            let text = searchBar.text, !text.isEmpty {
-            
-            let openQuote = Locale.current.quotationBeginDelimiter ?? "\""
-            let closeQuote = Locale.current.quotationEndDelimiter ?? "\""
-            
-            background.setUpView(title: "No results".localized, description: .localizedStringWithFormat("We didn't turn anything up for %@. Try something else.".localized, "\(openQuote + text + closeQuote)"))
-            
-            collectionView.backgroundView = background
-        }
+        guard let text = searchBar.text, !text.isEmpty else { return }
+        let openQuote = Locale.current.quotationBeginDelimiter ?? "\""
+        let closeQuote = Locale.current.quotationEndDelimiter ?? "\""
+        collectionViewController.showMessage(title: "No results".localized,
+                                             body: .localizedStringWithFormat("We didn't turn anything up for %@. Try something else.".localized, "\(openQuote + text + closeQuote)"))
     }
 }

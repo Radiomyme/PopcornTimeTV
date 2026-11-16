@@ -26,7 +26,13 @@ final class VLCAudioLogFilter: NSObject, VLCLogging {
     var level: VLCLogLevel = .debug
     private let keywords = ["aout", "audio output", "spdif", "eac3", "a52", "passthrough", "avsamplebuffer", "audiounit",
                             "using demux module", "using vout display module", "seek request", "received first picture",
-                            "no spu decoder"]
+                            "no spu decoder"] + VLCAudioLogFilter.extraKeywords
+    /// `-PTDebugVLCLog "preroll,discontinuity,…"`: more of libvlc's lines,
+    /// by the words they hold (measurements of a demuxer's seeks).
+    private static var extraKeywords: [String] {
+        (UserDefaults.standard.string(forKey: "PTDebugVLCLog") ?? "").lowercased()
+            .split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
+    }
     func handleMessage(_ message: String, logLevel: VLCLogLevel, context: VLCLogContext?) {
         let module = context?.module ?? ""
         let haystack = (module + " " + message).lowercased()
@@ -118,6 +124,12 @@ class PCTPlayerViewController: UIViewController, VLCMediaPlayerDelegate, UIGestu
     /// which actually drops into *scrubbing* mode — so the dedicated
     /// Play/Pause button never toggled playback. Do a clean toggle instead.
     @IBAction func playandPause() {
+        // A resume on its way: VLC is not paused while it gets there (the
+        // press is kept for the arrival, `VLCResumeWait.pausesAtArrival`).
+        if resumeWait != nil {
+            resumeOverlay?.showsPause = resumeWait?.togglePauseAtArrival() ?? false
+            return
+        }
         if mediaplayer.isPlaying {
             // canPause guards unseekable live streams; always true for a torrent file.
             if mediaplayer.canPause { mediaplayer.pause() }
@@ -132,12 +144,14 @@ class PCTPlayerViewController: UIViewController, VLCMediaPlayerDelegate, UIGestu
     }
     
     @IBAction func fastForward() {
+        guard resumeWait == nil else { return } // nothing to jump from before the resume point plays
         playheadWatch.noteOwnSeek()
         mediaplayer.jumpForward(30)
         noteUserMovedPlayhead()
     }
     
     @IBAction func rewind() {
+        guard resumeWait == nil else { return }
         jumpBackwardLimited(30)
         noteUserMovedPlayhead()
     }
@@ -196,11 +210,23 @@ class PCTPlayerViewController: UIViewController, VLCMediaPlayerDelegate, UIGestu
     /// itself (end of file, error). The final progress save comes first,
     /// before `stop()`: the last position VLC reached.
     @IBAction func didFinishPlaying() {
+#if os(tvOS)
+        // The user left the player (not a close for the next episode):
+        // nothing of the next episode starts.
+        if !isClosingForNextEpisode { upNextSession?.playerClosed() }
+        upNextCardSubscription = nil
+#endif
         if !isClosing {
             notePlayerPosition()
             setProgress(status: .finished)
             isClosing = true
         }
+        // A resume still on its way: abandoned (the save above kept the
+        // resume point: VLC never followed it, `VLCWatchProgress`).
+        resumeWait?.logEnded("player closed", now: VLCResumeWait.clock)
+        resumeWait = nil
+        resumeWaitTimer?.invalidate()
+        resumeWaitTimer = nil
         NotificationCenter.default.removeObserver(self, name: UIApplication.didEnterBackgroundNotification, object: nil)
         mediaplayer.delegate = nil
         mediaplayer.stop()
@@ -231,7 +257,18 @@ class PCTPlayerViewController: UIViewController, VLCMediaPlayerDelegate, UIGestu
         // « Lighter version »: the next stream starts once this player is gone.
         let next = afterClose
         afterClose = nil
-        dismiss(animated: true, completion: next)
+        // Anything this player presents (the slow-resume offer, the next
+        // episode's card or chooser, the subtitles / audio panel, the
+        // bandwidth toast…): `dismiss` on the player would close only that
+        // and leave a stopped player on screen — and the next playback
+        // could not be presented over it. Dismissing from the presenter
+        // takes the whole stack down, as the native player does.
+        resumeOffer = nil
+        if presentedViewController != nil, let presenter = presentingViewController {
+            presenter.dismiss(animated: true, completion: next)
+        } else {
+            dismiss(animated: true, completion: next)
+        }
     }
     
     // MARK: - Public vars
@@ -523,8 +560,21 @@ class PCTPlayerViewController: UIViewController, VLCMediaPlayerDelegate, UIGestu
         if !didReachPlayingWithTracks {
             guard state == .playing, !mediaplayer.audioTracks.isEmpty || !mediaplayer.videoTracks.isEmpty else { return false }
             didReachPlayingWithTracks = true
+            noteFirstFrameIfDue()
         }
         return state == .playing || state == .paused
+    }
+
+    /// The `[Start]` trace's last phase was noted.
+    private var didNoteFirstFrame = false
+
+    /// The `[Start]` trace's last phase: VLC really playing — where the user
+    /// asked to: a resume counts once playback runs at its target, not when
+    /// VLC decodes the file's first picture before its seek.
+    private func noteFirstFrameIfDue() {
+        guard !didNoteFirstFrame, didReachPlayingWithTracks, resumeWait == nil else { return }
+        didNoteFirstFrame = true
+        streamer?.noteStartFirstFrame(detail: "VLC")
     }
 
     /// Preferred subtitle language (Settings → Subtitles): the file's own
@@ -602,6 +652,27 @@ class PCTPlayerViewController: UIViewController, VLCMediaPlayerDelegate, UIGestu
     private(set) var media: Media!
     private(set) var streamer: PTTorrentStreamer!
     internal var nextEpisode: Episode?
+#if os(tvOS)
+    /// Episode chaining (5.3.0): the playback's link, set by
+    /// `AppDelegate.play` (or handed over by the native player) before
+    /// `play(…)`. With a session the session drives the card
+    /// (`reconcileUpNextCard`); without one, the storyboard's Up Next of
+    /// before 5.3 (`nextEpisode`, segue `showUpNext`).
+    var upNextLink: UpNextTVLink?
+    private var upNextSession: UpNextSession?
+    private var upNextCardSubscription: AnyCancellable?
+    private weak var upNextOverlay: UpNextOverlayViewController?
+    /// The last position / length VLC reported (s): the end of the file is
+    /// told apart from an error stop.
+    private var upNextLastPosition: Double = 0
+    private var upNextLastDuration: Double?
+    #if DEBUG
+    /// `-PTDebugOpenOptionsAtRemaining` did its one opening.
+    private var debugOpenedOptions = false
+    #endif
+    private var isClosingForNextEpisode = false
+    private var upNextRetryScheduled = false
+#endif
     internal var startPosition: Float = 0.0
     private var idleWorkItem: DispatchWorkItem?
     internal var shouldHideStatusBar = true
@@ -624,10 +695,33 @@ class PCTPlayerViewController: UIViewController, VLCMediaPlayerDelegate, UIGestu
     /// (`VLCWatchProgress`) — set up in `viewDidLoad`, once `startPosition`
     /// and `media` are known.
     private var watchProgress = VLCWatchProgress(startPosition: 0, resumePoint: 0)
+    /// « Start from the beginning » of the slow-resume offer was chosen and
+    /// playback from 0:00 has not yet run long enough for the saved resume
+    /// point to stop being protected (`VLCSlowResumeRestart`).
+    private var restartAwaitsConfirmation = false
+    /// The new input's clock since that restart (`VLCSlowResumeRestart.Confirmation`).
+    private var restartConfirmation = VLCSlowResumeRestart.Confirmation()
+    /// When the position was last saved during playback (every 30 s).
+    private var progressCheckpoint = PlaybackCheckpoint()
     /// VLCKit posted a time tick: libvlc has reported a time point, so
     /// `position` is real from now on. Before the first one it reads 0.0
     /// (no time point yet), even while `.playing`.
     private var didReceiveTimeTick = false
+    /// The first time tick's setup (remote commands, Now Playing…) is done.
+    private var didSetUpAtFirstTick = false
+    /// A resume on its way (`beginResumeWait` … `endResumeWait`): from
+    /// `play()` until VLC's clock runs at the resume point. The spinner and
+    /// « Resuming at … » stay up meanwhile (`resumeOverlay`), with the offer
+    /// 30 s in (`resumeOffer`). nil: no resume, or it arrived.
+    private var resumeWait: VLCResumeWait?
+    private var resumeWaitTimer: Timer?
+    private weak var resumeOverlay: VLCResumeOverlayView?
+    private weak var resumeOffer: VLCResumeOfferController?
+    /// When « Start from the beginning » opened the media again
+    /// (`restartFromBeginning`): VLC's `.stopped` for the input it left is
+    /// not the end of playback for `reopenGrace`.
+    private var reopenedAt: Date?
+    private static let reopenGrace: TimeInterval = 5
     /// The player is closing (`didFinishPlaying`): its final save is done.
     private(set) var isClosing = false
     /// Runs once the player is dismissed (« Lighter version »: the next stream).
@@ -666,6 +760,38 @@ class PCTPlayerViewController: UIViewController, VLCMediaPlayerDelegate, UIGestu
         self.directory = directory
         self.imageGenerator = AVAssetImageGenerator(asset: AVAsset(url: local))
         self.streamer = streamer
+#if os(tvOS)
+        if let session = upNextLink?.attach(self, streamer: streamer) {
+            upNextSession = session
+            upNextCardSubscription = session.$card.receive(on: DispatchQueue.main).sink { [weak self] card in
+                self?.reconcileUpNextCard(card)
+            }
+        }
+#endif
+        // The OpenSubtitles search runs alongside the stream (`SubtitleSearch`):
+        // a list that is not in yet joins the options panel when it comes.
+        if media.subtitles.isEmpty {
+            SubtitleSearch.shared.search(for: media) { [weak self] found in
+                self?.attachLateSubtitles(found)
+            }
+        }
+    }
+
+    /// The OpenSubtitles list arrived after the player was set up: it is
+    /// offered from now on (the options panel reads `subtitles` when it
+    /// opens), and the preferred language is applied when the automatic
+    /// choice was already made without it and nothing else is on.
+    private func attachLateSubtitles(_ found: [Subtitle]) {
+        guard !found.isEmpty, !isClosing, media != nil, media.subtitles.isEmpty else { return }
+        media.subtitles = found
+        print("[Player] subtitles: \(found.count) OpenSubtitles language(s) arrived after the player started")
+        subtitleSwitcherButton?.isHidden = false
+        subtitleSwitcherButtonWidthConstraint?.constant = 24
+        guard didAutoSelectSubtitle, !userChoseSubtitle, currentSubtitle == nil, selectedEmbeddedTrackId == nil,
+              let code = PlaybackLanguagePreferences.preferredSubtitleLanguageCode,
+              let subtitle = ExternalSubtitleLoader.preferredSubtitle(in: found, code: code) else { return }
+        print("[Player] auto-selecting OpenSubtitles '\(subtitle.language)' for '\(code)'")
+        currentSubtitle = subtitle
     }
     
     // MARK: - Options view controller delegate
@@ -739,17 +865,18 @@ class PCTPlayerViewController: UIViewController, VLCMediaPlayerDelegate, UIGestu
         return UIImage(cgImage: image)
     }
     
-    // MARK: - Bounded storage: VLC's demuxer
+    // MARK: - VLC's demuxer (a stream, both storage modes)
 
-    /// The bounded-storage options `mediaplayer.media` was made with.
+    /// The demuxer options `mediaplayer.media` was made with
+    /// (`BoundedStorageUX.vlcMediaOptions`).
     private var boundedDemuxerOptions: [String] = []
 
-    /// `url`'s VLC media for a start at `position` (0…1), with bounded
-    /// storage's choice of Matroska demuxer (`BoundedStorageUX.vlcMediaOptions`)
-    /// — added BEFORE the player gets the media: VLCKit 4 opens the input
-    /// when `mediaplayer.media` is set and ignores the options added later
-    /// (measured with 4.0.0a21: ":demux=avformat" added after the
-    /// assignment left VLC on its own demuxer).
+    /// `url`'s VLC media for a start at `position` (0…1), with the Matroska
+    /// demuxer that start needs (`BoundedStorageUX.vlcMediaOptions`, full
+    /// and bounded storage alike) — added BEFORE the player gets the media:
+    /// VLCKit 4 opens the input when `mediaplayer.media` is set and ignores
+    /// the options added later (measured with 4.0.0a21: ":demux=avformat"
+    /// added after the assignment left VLC on its own demuxer).
     private func makeVLCMedia(startingAt position: Float) -> VLCMedia? {
         let vlcMedia = VLCMedia(url: url)
         boundedDemuxerOptions = BoundedStorageUX.vlcMediaOptions(url: url, session: boundedStorage,
@@ -759,20 +886,50 @@ class PCTPlayerViewController: UIViewController, VLCMediaPlayerDelegate, UIGestu
     }
 
     /// The resume prompt chose another start than `startPosition`: a new
-    /// media when bounded storage picks another demuxer for it (before
-    /// `play()`). The options the old one got after the assignment are
-    /// added again, as they were.
+    /// media when that start gets another demuxer (before `play()`) — in
+    /// full storage too, where « Start from Beginning » would otherwise keep
+    /// the resume point's libavformat demuxer and lose the file's text
+    /// subtitles for nothing. The options the old one got after the
+    /// assignment are added again, as they were.
     private func remakeVLCMediaIfNeeded(startingAt position: Float) {
-        guard mediaplayer.state == .stopped || mediaplayer.state == .opening,
-              BoundedStorageSession.session(for: streamer)?.isBounded == true else { return }
+        guard mediaplayer.state == .stopped || mediaplayer.state == .opening else { return }
         let previous = boundedDemuxerOptions
         guard let vlcMedia = makeVLCMedia(startingAt: position), boundedDemuxerOptions != previous else {
             boundedDemuxerOptions = previous
             return
         }
+        retireCurrentVLCMedia()
         mediaplayer.media = vlcMedia
         mediaplayer.media?.addOptions(Self.vlcTuningOptions)
         mediaplayer.media?.addOptions([vlcSettingTextEncoding: SubtitleSettings.shared.encoding])
+    }
+
+    /// The media this player replaced (`retireCurrentVLCMedia`), kept alive
+    /// for as long as the player and a while after (`deinit`).
+    private var retiredVLCMedia: [VLCMedia] = []
+
+    /// Keeps the current media alive before the player gets another one.
+    /// VLCKit 4.0.0a21 posts the player's events to the main queue with the
+    /// libvlc media as a bare pointer, without retaining it
+    /// (`HandleMediaPlayerMediaMetaChanged`: its block reads the pointer
+    /// later, `libvlc_media_get_user_data` then `+[VLCMedia
+    /// mediaWithLibVLCMediaDescriptor:]` → `libvlc_media_retain`). Replaced,
+    /// the old `VLCMedia` is released at once and frees that media, while
+    /// the input VLC is still stopping (`stop()` is asynchronous) can have
+    /// a « meta changed » for it in the queue: a use after free
+    /// (EXC_BAD_ACCESS in `input_item_Hold`, seen once in five « Start from
+    /// the beginning »). Kept, the pointer stays valid and the late event
+    /// finds its own `VLCMedia` (harmless `metaChanged`).
+    private func retireCurrentVLCMedia() {
+        if let current = mediaplayer.media { retiredVLCMedia.append(current) }
+    }
+
+    deinit {
+        // Still alive for late events of an input stopping as the player
+        // goes (dispatched to the main queue before this release).
+        let retired = retiredVLCMedia
+        guard !retired.isEmpty else { return }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 30) { withExtendedLifetime(retired) {} }
     }
 
     /// The caching / frame-drop options `viewDidLoad` adds to the media.
@@ -799,11 +956,14 @@ class PCTPlayerViewController: UIViewController, VLCMediaPlayerDelegate, UIGestu
         let seeksAtStart = VLCWatchProgress.seeksAtStart(startPosition)
         if seeksAtStart && resumesWithoutPrompt {
             resumePlayback = true
+            beginResumeWait()
             mediaplayer.play()
         } else if seeksAtStart {
             let isRegular = traitCollection.horizontalSizeClass == .regular && traitCollection.verticalSizeClass == .regular
             let style: UIAlertController.Style = isRegular ? .alert : .actionSheet
-            let continueWatchingAlert = UIAlertController(title: nil, message: nil, preferredStyle: style)
+            // VLC's own question: a file the native player does not play
+            // (DTS / TrueHD-only audio, AVI, TS…) — it says so.
+            let continueWatchingAlert = UIAlertController(title: nil, message: VLCResumeText.questionMessage, preferredStyle: style)
             
 #if os(tvOS)
                 NotificationCenter.default.addObserver(self, selector: #selector(alertFocusDidChange(_:)), name: .UIViewControllerFocusedViewDidChange, object: continueWatchingAlert)
@@ -812,29 +972,99 @@ class PCTPlayerViewController: UIViewController, VLCMediaPlayerDelegate, UIGestu
             self.loadingActivityIndicatorView.isHidden = true
             
             
+            let shownAt = VLCResumeWait.clock
             continueWatchingAlert.addAction(UIAlertAction(title: "Resume Playing".localized, style: .default, handler:{ action in
                 UIDevice.current.userInterfaceIdiom == .tv ? NotificationCenter.default.removeObserver(self, name: .UIViewControllerFocusedViewDidChange, object: continueWatchingAlert) : ()
-                self.resumePlayback = true
-                self.loadingActivityIndicatorView.isHidden = false
-                self.mediaplayer.play()
+                self.answerResumeQuestion(resume: true, shownAt: shownAt)
             }))
             continueWatchingAlert.addAction(UIAlertAction(title: "Start from Beginning".localized, style: .default, handler: { action in
                 UIDevice.current.userInterfaceIdiom == .tv ? NotificationCenter.default.removeObserver(self, name: .UIViewControllerFocusedViewDidChange, object: continueWatchingAlert) : ()
-                // Bounded storage: the demuxer picked for the resume point
-                // may not be the one for a start at 0:00.
-                self.remakeVLCMediaIfNeeded(startingAt: 0)
-                // The saved resume point is no longer protected: what VLC
-                // plays from 0:00 is saved as is.
-                self.watchProgress.restartFromBeginning()
-                self.loadingActivityIndicatorView.isHidden = false
-                self.mediaplayer.play()
+                self.answerResumeQuestion(resume: false, shownAt: shownAt)
             }))
             continueWatchingAlert.popoverPresentationController?.sourceView = progressBar
             present(continueWatchingAlert, animated: true)
+            print("[Resume] VLC: question shown — saved \(Int(startPosition * 100)) %, this file plays with VLC")
+            #if DEBUG
+            // `-PTDebugResumeAnswer resume|start` (BoundedStorageDebugHooks):
+            // the question answers itself as its buttons do,
+            // `-PTDebugResumeAnswerAfter` seconds later — the simulator has no
+            // remote to press them (end-to-end runs).
+            if let answer = BoundedStorageDebugHooks.resumeAnswer {
+                DispatchQueue.main.asyncAfter(deadline: .now() + answer.after) { [weak self, weak continueWatchingAlert] in
+                    guard let self = self, let alert = continueWatchingAlert, alert.presentingViewController != nil else { return }
+                    print("[BoundedDebug] VLC's resume question answered by the script: \(answer.resume ? "resume" : "start")")
+                    NotificationCenter.default.removeObserver(self, name: .UIViewControllerFocusedViewDidChange, object: alert)
+                    alert.dismiss(animated: true) { self.answerResumeQuestion(resume: answer.resume, shownAt: shownAt) }
+                }
+            }
+            #endif
         } else {
             mediaplayer.play()
         }
     }
+
+    /// The answer to VLC's own resume question (`shownAt`: when it came up,
+    /// `VLCResumeWait.clock`): « Resume Playing » at `startPosition`, under
+    /// the resume state, or « Start from Beginning ».
+    private func answerResumeQuestion(resume: Bool, shownAt: TimeInterval) {
+        let after = String(format: "%.1f", VLCResumeWait.clock - shownAt)
+        if resume {
+            print("[Resume] VLC: answer: resume (after \(after) s)")
+            resumePlayback = true
+            beginResumeWait()
+        } else {
+            print("[Resume] VLC: answer: from the beginning (after \(after) s)")
+            // The demuxer picked for the resume point may not be the one
+            // for a start at 0:00 (both storage modes).
+            remakeVLCMediaIfNeeded(startingAt: 0)
+            // The saved resume point is no longer protected: what VLC
+            // plays from 0:00 is saved as is.
+            watchProgress.restartFromBeginning()
+            loadingActivityIndicatorView.isHidden = false
+        }
+        mediaplayer.play()
+    }
+
+    #if DEBUG
+    /// Wall-clock time of a "[ResumeDebug]" line (the console has none).
+    private static func debugClock() -> String {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "HH:mm:ss.SSS"
+        return formatter.string(from: Date())
+    }
+
+    private var resumeTraceTimer: Timer?
+
+    /// `-PTDebugResumeTrace 1`: VLC's state every second — what a resume
+    /// really does (state, position, time, whether a tick came) next to
+    /// what the transport bar shows; `-PTDebugKeepControls 1` keeps that bar
+    /// on screen for the screenshots.
+    private func startDebugResumeTrace() {
+        guard UserDefaults.standard.object(forKey: "PTDebugResumeTrace") != nil else { return }
+        let opened = Date()
+        print("[ResumeDebug] \(Self.debugClock()) VLC player opened: startPosition=\(startPosition) resumesWithoutPrompt=\(resumesWithoutPrompt) options=\(boundedDemuxerOptions)")
+        resumeTraceTimer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] timer in
+            guard let self = self, !self.isClosing else { timer.invalidate(); return }
+            let player = self.mediaplayer
+            print(String(format: "[ResumeDebug] %@ vlc +%.0fs state=%ld playing=%ld seekable=%ld pos=%.4f time=%@ ms=%ld remaining=%@ tick=%ld resumeDue=%ld spinnerHidden=%ld wait=%@ overlay=%ld offer=%ld",
+                         Self.debugClock(), Date().timeIntervalSince(opened), Int(player.state.rawValue),
+                         player.isPlaying ? 1 : 0, player.isSeekable ? 1 : 0, player.position,
+                         player.time.stringValue, Int(player.time.intValue),
+                         (player.remainingTime ?? VLCTime(int: 0)).stringValue,
+                         self.didReceiveTimeTick ? 1 : 0, self.resumePlayback ? 1 : 0,
+                         self.loadingActivityIndicatorView.isHidden ? 1 : 0,
+                         self.resumeWait.map { "\($0.phase)" + ($0.pausesAtArrival ? "+pause" : "") } ?? "-",
+                         self.resumeOverlay?.superview != nil ? 1 : 0, self.resumeOffer?.presentingViewController != nil ? 1 : 0))
+            guard UserDefaults.standard.bool(forKey: "PTDebugKeepControls") else { return }
+            if self.presentedViewController == nil, let first = self.overlayViews.first, first.isHidden {
+                self.toggleControlsVisible()
+            }
+            print(String(format: "[ResumeDebug] ui elapsed=%@ remaining=%@ progress=%.4f buffer=%.4f isBuffering=%ld",
+                         self.progressBar.elapsedTimeLabel.text ?? "-", self.progressBar.remainingTimeLabel.text ?? "-",
+                         self.progressBar.progress, self.progressBar.bufferProgress, self.progressBar.isBuffering ? 1 : 0))
+        }
+    }
+    #endif
     
     override func viewDidLoad() {
         super.viewDidLoad()
@@ -852,6 +1082,9 @@ class PCTPlayerViewController: UIViewController, VLCMediaPlayerDelegate, UIGestu
         mediaplayer.delegate = self
         mediaplayer.drawable = movieView
         mediaplayer.media = makeVLCMedia(startingAt: startPosition)
+        #if DEBUG
+        startDebugResumeTrace()
+        #endif
 
         // Tune VLC for max-quality playback on Apple TV 4K. Larger cache windows
         // hide network jitter on 1080p/2160p streams that PopcornTorrent serves
@@ -900,7 +1133,9 @@ class PCTPlayerViewController: UIViewController, VLCMediaPlayerDelegate, UIGestu
         // through PopcornTorrent's server, which moves the window; its
         // playhead tells the torrent what it may delete behind it.
         BoundedStorageSession.session(for: streamer)?.attachHTTPPlayer(self, readAheadSeconds: 10) { [weak self] in
-            guard let self = self, !self.isClosing, self.didReceiveTimeTick,
+            // Nothing while a resume is on its way: VLC's clock then shows
+            // 0:00 or the target without playing there.
+            guard let self = self, !self.isClosing, self.didReceiveTimeTick, self.resumeWait == nil,
                   let milliseconds = self.mediaplayer.time.value?.doubleValue else { return nil }
             return BoundedPlayerSample(time: milliseconds / 1000, isPlaying: self.mediaplayer.isPlaying)
         }
@@ -955,6 +1190,11 @@ class PCTPlayerViewController: UIViewController, VLCMediaPlayerDelegate, UIGestu
     /// `-PTDebugPause` (BoundedStorageDebugHooks).
     @objc private func debugScriptPlayback(_ note: Notification) {
         guard !isClosing, let playing = note.userInfo?["playing"] as? Bool else { return }
+        // A resume on its way: as the remote's Play/Pause, kept for the arrival.
+        if let wait = resumeWait {
+            if wait.pausesAtArrival == playing { playandPause() }
+            return
+        }
         if playing { mediaplayer.play() } else { mediaplayer.pause() }
     }
 #endif
@@ -971,8 +1211,12 @@ class PCTPlayerViewController: UIViewController, VLCMediaPlayerDelegate, UIGestu
         // A tick delivered after close would register the remote handlers
         // and the Now Playing info again.
         guard !isClosing else { return }
-        if loadingActivityIndicatorView.isHidden == false {
-            loadingActivityIndicatorView.isHidden = true
+        // The first tick's setup — no longer tied to the spinner: a resume
+        // keeps its own state up until playback runs at the target, long
+        // after VLC's first time point (which it reports at 0:00).
+        loadingActivityIndicatorView.isHidden = true
+        if !didSetUpAtFirstTick {
+            didSetUpAtFirstTick = true
 
             addRemoteCommandCenterHandlers()
             beginReceivingScreenNotifications()
@@ -985,20 +1229,35 @@ class PCTPlayerViewController: UIViewController, VLCMediaPlayerDelegate, UIGestu
         didReceiveTimeTick = true
         applyStartPositionIfNeeded()
         notePlayerPosition() // after the resume seek was issued
-        checkBoundedPlayhead()
+        checkpointProgressIfDue()
+        // Not while a resume is on its way: VLC's clock then shows 0:00 or
+        // the target without playing there — bounded storage would take a
+        // step between them for a rewind (a forced seek, and « This part
+        // hasn't been downloaded », for nothing).
+        if resumeWait == nil { checkBoundedPlayhead() }
         
         playPauseButton?.setImage(UIImage(named: "Pause"), for: .normal)
         
-        progressBar.isBuffering = false
+        progressBar.isBuffering = resumeWait != nil
         
-        progressBar.remainingTimeLabel.text = (mediaplayer.remainingTime ?? VLCTime(int: 0)).stringValue
-        progressBar.elapsedTimeLabel.text = mediaplayer.time.stringValue
-        progressBar.progress = Float(mediaplayer.position) // VLCKit 4: position is Double
+        if resumeWait != nil {
+            showResumeTargetOnBar() // not VLC's clock: 0:00 before its seek lands
+        } else {
+            progressBar.remainingTimeLabel.text = (mediaplayer.remainingTime ?? VLCTime(int: 0)).stringValue
+            progressBar.elapsedTimeLabel.text = mediaplayer.time.stringValue
+            progressBar.progress = Float(mediaplayer.position) // VLCKit 4: position is Double
+        }
         autoSelectSubtitleIfNeeded() // one-shot; waits until VLC has listed the file's tracks
         applyPendingSubtitle() // no-op unless a downloaded subtitle still waits for `.playing`
         selectSlaveTextTrackIfNeeded()
         autoSelectAudioTrackIfNeeded() // one-shot; waits until VLC has listed the tracks
         
+#if os(tvOS)
+        if upNextSession != nil {
+            if resumeWait == nil { upNextTick(isPlaying: true) }
+            return
+        }
+#endif
         if nextEpisode != nil && ((mediaplayer.remainingTime ?? VLCTime(int: 0)).intValue/1000) == -31 && presentedViewController == nil {
             performSegue(withIdentifier: "showUpNext", sender: nil)
         } else if ((mediaplayer.remainingTime ?? VLCTime(int: 0)).intValue/1000) < -31, let vc = presentedViewController as? UpNextViewController {
@@ -1013,7 +1272,7 @@ class PCTPlayerViewController: UIViewController, VLCMediaPlayerDelegate, UIGestu
     /// re-assertion, paused/finished progress and close-at-end never ran.
     func mediaPlayerStateChanged(_ newState: VLCMediaPlayerState) {
         resetIdleTimer()
-        progressBar.isBuffering = false
+        progressBar.isBuffering = resumeWait != nil
         nowPlayingInfo?[MPNowPlayingInfoPropertyElapsedPlaybackTime] = (mediaplayer.time.value?.doubleValue ?? 0)/1000
         // VLCKit 4 collapsed the state enum: `.ended`/`.buffering`/`.esAdded`
         // are gone. End-of-file and manual stop both surface as `.stopped`;
@@ -1022,11 +1281,27 @@ class PCTPlayerViewController: UIViewController, VLCMediaPlayerDelegate, UIGestu
         // clears the delegate before stopping, so our own stop can't re-enter.
         switch newState {
         case .error, .stopped:
+            // « Start from the beginning » just opened the media again
+            // (`restartFromBeginning`): this `.stopped` is the input it
+            // left. VLC is asked to play once more — nothing if it already
+            // plays the new one.
+            if newState == .stopped, let reopened = reopenedAt, Date().timeIntervalSince(reopened) < Self.reopenGrace {
+                mediaplayer.play()
+                return
+            }
+#if os(tvOS)
+            // Episode chaining: the end of the file goes to the session
+            // (after-play card, the countdown's start, or the close).
+            if newState == .stopped, upNextFileEnded() { return }
+#endif
             // Saves (`.finished`: at the end of the file the last tick
             // reported 1.0), then closes.
             didFinishPlaying()
         case .paused:
             checkpointProgress()
+#if os(tvOS)
+            upNextTick(isPlaying: false)
+#endif
             playPauseButton?.setImage(UIImage(named: "Play"), for: .normal)
             nowPlayingInfo?[MPNowPlayingInfoPropertyPlaybackRate] = 0.0
         case .playing:
@@ -1111,7 +1386,7 @@ class PCTPlayerViewController: UIViewController, VLCMediaPlayerDelegate, UIGestu
     private func limitedSeekSeconds(_ seconds: Double) -> Double {
         guard let now = playheadSeconds,
               let landing = BoundedStorageUX.limitedRewindTarget(seconds, from: now, session: boundedStorage) else { return seconds }
-        BoundedStorageUX.logLimited(player: "VLC", target: seconds, playhead: now, landing: landing)
+        BoundedStorageUX.logLimited(player: "VLC", target: seconds, playhead: now, landing: landing, session: boundedStorage)
         BoundedStorageToastView.show(BoundedStorageUX.rewindLimitedMessage(for: boundedStorage), in: view)
         return landing
     }
@@ -1122,6 +1397,9 @@ class PCTPlayerViewController: UIViewController, VLCMediaPlayerDelegate, UIGestu
     /// milliseconds VLC is sent to.
     @discardableResult
     func seekLimited(toMilliseconds milliseconds: NSNumber) -> NSNumber {
+        // A resume on its way: VLC is already seeking; another seek would
+        // start from a clock that shows 0:00 or the target without playing.
+        guard resumeWait == nil else { return milliseconds }
         let wanted = milliseconds.doubleValue / 1000
         let seconds = limitedSeekSeconds(wanted)
         let target = seconds == wanted ? milliseconds : NSNumber(value: seconds * 1000)
@@ -1133,6 +1411,7 @@ class PCTPlayerViewController: UIViewController, VLCMediaPlayerDelegate, UIGestu
     /// `jumpBackward(interval)` (±30 s, remote commands), limited by bounded
     /// storage: stopped at the earliest point still available.
     func jumpBackwardLimited(_ interval: Double) {
+        guard resumeWait == nil else { return } // as `seekLimited`
         if let now = playheadSeconds, boundedStorage?.isBounded == true {
             let landing = limitedSeekSeconds(max(0, now - interval))
             if landing != max(0, now - interval) {
@@ -1154,7 +1433,8 @@ class PCTPlayerViewController: UIViewController, VLCMediaPlayerDelegate, UIGestu
     private func checkBoundedPlayhead() {
         guard let now = playheadSeconds, let previous = playheadWatch.rewind(to: now),
               let landing = BoundedStorageUX.limitedRewindTarget(now, from: previous, session: boundedStorage) else { return }
-        BoundedStorageUX.logLimited(player: "VLC (time tick)", target: now, playhead: previous, landing: landing)
+        BoundedStorageUX.logLimited(player: "VLC (time tick)", target: now, playhead: previous, landing: landing,
+                                    session: boundedStorage)
         if mediaplayer.rate != 1 { mediaplayer.rate = 1 }
         playheadWatch.noteOwnSeek()
         mediaplayer.time = VLCTime(number: NSNumber(value: Float(landing * 1000)))
@@ -1176,7 +1456,10 @@ class PCTPlayerViewController: UIViewController, VLCMediaPlayerDelegate, UIGestu
             let duration = Double(self.streamDuration) / 1000
             return BandwidthDeficitMonitor.PlaybackState(playhead: milliseconds > 0 ? milliseconds / 1000 : nil,
                                                          duration: duration > 0 ? duration : nil,
-                                                         hasStarted: self.didReceiveTimeTick,
+                                                         // Not during a resume's wait: a clock that
+                                                         // does not move there is no stall of a film
+                                                         // that played (no « lighter version » offer).
+                                                         hasStarted: self.didReceiveTimeTick && self.resumeWait == nil,
                                                          wantsPlayback: self.mediaplayer.state == .playing,
                                                          isStalled: nil)
         })
@@ -1239,6 +1522,181 @@ class PCTPlayerViewController: UIViewController, VLCMediaPlayerDelegate, UIGestu
         playheadWatch.noteOwnSeek()
         mediaplayer.position = Double(startPosition)
         print("[Player] resuming at \(Int(startPosition * 100)) %")
+        resumeWait?.seekIssued(now: VLCResumeWait.clock)
+    }
+
+    // MARK: - Resume: a visible state until playback runs at the target
+
+    /// A resume is on its way (the tvOS extension's remote handling).
+    var isWaitingForResume: Bool { resumeWait != nil }
+
+    /// The film's length as VLC reports it, in seconds; nil until it does
+    /// (never `streamDuration`'s fallback, which reads the payload).
+    private var vlcDurationSeconds: Double? {
+        if let length = mediaplayer.media?.length.value?.doubleValue, length > 0 { return length / 1000 }
+        guard didReceiveTimeTick, let remaining = mediaplayer.remainingTime?.value?.doubleValue,
+              let elapsed = mediaplayer.time.value?.doubleValue else { return nil }
+        let total = abs(remaining) + elapsed
+        return total > 0 ? total / 1000 : nil
+    }
+
+    /// A resume starts (just before `play()`): the dimmed picture, the
+    /// spinner and « Resuming at … » stay up until VLC's clock runs at
+    /// `startPosition` (`VLCResumeWatch`), sampled once a second — VLC's own
+    /// time ticks stop while it waits for data. VLC's state says nothing:
+    /// `.playing` and `isPlaying` from `play()` on, its clock at 0:00 or at
+    /// the target, frozen.
+    private func beginResumeWait() {
+        guard resumeWait == nil, !isClosing else { return }
+        let wait = VLCResumeWait(fraction: startPosition, durationSeconds: vlcDurationSeconds, now: VLCResumeWait.clock)
+        resumeWait = wait
+        loadingActivityIndicatorView.isHidden = true // the state has its own spinner, at the same place
+        let overlay = VLCResumeOverlayView.install(in: view, above: movieView)
+        overlay.text = wait.label
+        resumeOverlay = overlay
+        progressBar.isBuffering = true
+        showResumeTargetOnBar()
+        resumeWaitTimer?.invalidate()
+        resumeWaitTimer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
+            self?.resumeWaitTick()
+        }
+    }
+
+    /// Once a second while a resume is on its way.
+    private func resumeWaitTick() {
+        guard !isClosing, var wait = resumeWait else { return }
+        let time = didReceiveTimeTick ? mediaplayer.time.value.map { $0.doubleValue / 1000 } : nil
+        let phase = wait.sample(time: time, isPlaying: mediaplayer.isPlaying, durationSeconds: vlcDurationSeconds,
+                                now: VLCResumeWait.clock)
+        resumeWait = wait
+        resumeOverlay?.text = wait.label // the clock time once VLC knows the film's length
+        switch phase {
+        case .waiting: break
+        case .offer: showResumeOfferIfNeeded()
+        case .arrived: endResumeWait()
+        }
+    }
+
+    /// The transport bar during the wait: the resume point, not VLC's clock.
+    private func showResumeTargetOnBar() {
+        progressBar.progress = startPosition
+        guard let duration = vlcDurationSeconds else { return }
+        let target = Double(startPosition) * duration * 1000
+        progressBar.elapsedTimeLabel.text = VLCTime(number: NSNumber(value: target)).stringValue
+        progressBar.remainingTimeLabel.text = VLCTime(number: NSNumber(value: target - duration * 1000)).stringValue
+    }
+
+    /// Playback runs: the state goes away, and a Play/Pause pressed during
+    /// the wait takes effect.
+    private func endResumeWait() {
+        guard let wait = resumeWait else { return }
+        resumeWait = nil
+        resumeWaitTimer?.invalidate()
+        resumeWaitTimer = nil
+        resumeOverlay?.dismiss()
+        resumeOverlay = nil
+        dismissResumeOffer()
+        progressBar.isBuffering = false
+        // Bounded storage's time-tick check starts from VLC's clock as it
+        // runs now, not from what it showed during the wait.
+        playheadWatch.noteOwnSeek()
+        noteFirstFrameIfDue()
+        if wait.pausesAtArrival, mediaplayer.canPause { mediaplayer.pause() }
+        resetIdleTimer()
+    }
+
+    /// `VLCResumeWatch.offerDelay` into the wait: « Keep waiting » / « Start
+    /// from the beginning », over the state (which stays up). Not over
+    /// another panel (options): shown once that one closes.
+    private func showResumeOfferIfNeeded() {
+        guard resumeOffer == nil, !isClosing, presentedViewController == nil else { return }
+        let fromStart: (() -> Void)? = canRestartFromBeginning ? { [weak self] in self?.restartFromBeginning() } : nil
+        let offer = VLCResumeOfferController(onKeepWaiting: { [weak self] in self?.keepWaitingForResume() },
+                                             onFromStart: fromStart,
+                                             // Play/Pause still reaches the player under the card.
+                                             onPlayPause: { [weak self] in self?.playandPause() })
+        resumeOffer = offer
+        present(offer, animated: true)
+        #if DEBUG
+        VLCResumeDebugHooks.offerShown(keepWaiting: { [weak self] in self?.keepWaitingForResume() }, fromStart: fromStart)
+        #endif
+    }
+
+    private func dismissResumeOffer(completion: (() -> Void)? = nil) {
+        guard let offer = resumeOffer, offer.presentingViewController != nil, !offer.isBeingDismissed else {
+            resumeOffer = nil
+            completion?()
+            return
+        }
+        resumeOffer = nil
+        offer.dismiss(animated: true, completion: completion)
+    }
+
+    /// « Keep waiting »: the offer comes back 30 s later.
+    private func keepWaitingForResume() {
+        guard resumeWait != nil else { return }
+        resumeWait?.keepWaiting(now: VLCResumeWait.clock)
+        dismissResumeOffer()
+    }
+
+    /// The film can start over: always in full storage; in bounded storage
+    /// only while nothing was released (the head is still there to read).
+    private var canRestartFromBeginning: Bool {
+        guard boundedStorage?.isBounded == true else { return true }
+        return streamer.lowestAvailableOffset == 0
+    }
+
+    /// « Start from the beginning » of the slow-resume offer: the media is
+    /// opened again at 0:00, with the demuxer that start gets
+    /// (`makeVLCMedia`). Not a seek: VLC's demuxer may be reading the file
+    /// through to the resume point (no index), and takes no other seek
+    /// until it is there. Unlike the question's « Start from Beginning », the
+    /// saved resume point stays protected until playback from 0:00 has
+    /// really run (`VLCSlowResumeRestart`): the app offered this exit after
+    /// its own resume failed.
+    private func restartFromBeginning() {
+        guard !isClosing, let wait = resumeWait else { return }
+        wait.logEnded("answer: start from the beginning — the media is opened again at 0:00,", now: VLCResumeWait.clock)
+        resumeWait = nil
+        resumeWaitTimer?.invalidate()
+        resumeWaitTimer = nil
+        resumeOverlay?.dismiss()
+        resumeOverlay = nil
+        progressBar.isBuffering = false
+        resumePlayback = false
+        watchProgress = VLCSlowResumeRestart.progress(restartingFrom: watchProgress)
+        restartAwaitsConfirmation = true
+        restartConfirmation = VLCSlowResumeRestart.Confirmation()
+        dismissResumeOffer()
+
+        // The new input: its tracks are not known yet, its first time tick
+        // is to come (the loading spinner until then).
+        didReceiveTimeTick = false
+        didReachPlayingWithTracks = false
+        didAutoSelectAudioTrack = false
+        didReassertPassthrough = false
+        endSlaveWait()
+        attachedSlaveSubtitles = [:]
+        pendingSubtitle = nil
+        selectedEmbeddedTrackId = nil
+        let chosen = userChoseSubtitle ? currentSubtitle : nil
+        choiceFollowsScreen = true // the input is leaving: nothing to download or to turn off
+        currentSubtitle = nil
+        choiceFollowsScreen = false
+        didAutoSelectSubtitle = userChoseSubtitle
+        loadingActivityIndicatorView.isHidden = false
+        progressBar.progress = 0
+
+        reopenedAt = Date()
+        retireCurrentVLCMedia()
+        mediaplayer.stop()
+        mediaplayer.media = makeVLCMedia(startingAt: 0)
+        mediaplayer.media?.addOptions(Self.vlcTuningOptions)
+        mediaplayer.media?.addOptions([vlcSettingTextEncoding: SubtitleSettings.shared.encoding])
+        mediaplayer.play()
+        // The OpenSubtitles file the user picked during the wait: attached
+        // again once the new input plays.
+        if let chosen = chosen { currentSubtitle = chosen }
     }
 
     /// The saved progress (0…1) of a movie / episode, 0 when none.
@@ -1253,13 +1711,21 @@ class PCTPlayerViewController: UIViewController, VLCMediaPlayerDelegate, UIGestu
     private func notePlayerPosition() {
         guard !isClosing, didReceiveTimeTick, mediaplayer.state == .playing || mediaplayer.state == .paused else { return }
         watchProgress.note(position: mediaplayer.position)
+        if restartAwaitsConfirmation, restartConfirmation.note(clockSeconds: playheadSeconds) {
+            restartAwaitsConfirmation = false
+            watchProgress.restartFromBeginning()
+            print("[Resume] VLC: playback from 0:00 got past 3:00 after « Start from the beginning » — the restart is the user's, the resume point is no longer protected")
+        }
     }
 
     /// ±30 s, end of a scrub: the position VLC reports from now on is the
     /// user's, even before the resume point. (A non-seekable input ignores
     /// them.)
     func noteUserMovedPlayhead() {
-        guard mediaplayer.isSeekable else { return }
+        // Not while a resume is on its way: a remote's skip then moves a
+        // clock at 0:00 or at the target, not a position the user watched —
+        // the saved resume point stays protected.
+        guard mediaplayer.isSeekable, resumeWait == nil else { return }
         watchProgress.userMovedPlayhead()
     }
 
@@ -1275,6 +1741,14 @@ class PCTPlayerViewController: UIViewController, VLCMediaPlayerDelegate, UIGestu
     /// terminate it there.
     @objc private func applicationDidEnterBackground() {
         checkpointProgress()
+    }
+
+    /// From the time tick: the position every 30 s of playback
+    /// (`PlaybackCheckpoint`), so a crash, a kill or a power cut loses half a
+    /// minute of an uninterrupted session, not all of it.
+    private func checkpointProgressIfDue() {
+        guard progressCheckpoint.isDue() else { return }
+        setProgress(status: .watching)
     }
 
     /// Watched progress (local + Trakt scrobble, watched mark from 80 %),
@@ -1297,11 +1771,8 @@ class PCTPlayerViewController: UIViewController, VLCMediaPlayerDelegate, UIGestu
             }
             return
         }
-        if let movie = media as? Movie {
-            WatchedlistManager<Movie>.movie.setCurrentProgress(value, for: movie.id, with: status)
-        } else if let episode = media as? Episode {
-            WatchedlistManager<Episode>.episode.setCurrentProgress(value, for: episode.id, with: status)
-        }
+        // With the titles and the length: the Continue Watching card.
+        PlaybackRecorder.save(value, of: media, duration: streamDuration > 0 ? Double(streamDuration) / 1000 : nil, status: status)
     }
     
     // MARK: UpNextViewControllerDelegate
@@ -1310,9 +1781,9 @@ class PCTPlayerViewController: UIViewController, VLCMediaPlayerDelegate, UIGestu
         // Weak: the player may have closed and been released meanwhile.
         let completion: (() -> Void) = { [weak self] in
             guard let self = self else { return }
-            if proceed {
+            if proceed, let next = self.nextEpisode {
                 self.didFinishPlaying()
-                self.delegate?.playNext(self.nextEpisode!)
+                self.delegate?.playNext(next)
             }
         }
         if UIDevice.current.userInterfaceIdiom == .tv {
@@ -1327,6 +1798,89 @@ class PCTPlayerViewController: UIViewController, VLCMediaPlayerDelegate, UIGestu
         }
     }
     
+#if os(tvOS)
+    // MARK: - Episode chaining (5.3.0): the session drives the card
+
+    /// From VLC's time ticks (and a pause): where the file is, to the session.
+    private func upNextTick(isPlaying: Bool) {
+        guard let session = upNextSession, !isClosing, didReceiveTimeTick else { return }
+        let position = (mediaplayer.time.value?.doubleValue ?? 0) / 1000
+        let duration = streamDuration > 0 ? Double(streamDuration) / 1000 : nil
+        guard position.isFinite, position >= 0 else { return }
+        upNextLastPosition = position
+        if let duration = duration { upNextLastDuration = duration }
+        session.tick(position: position, duration: duration, isPlaying: isPlaying)
+        #if DEBUG
+        debugOpenOptionsIfAsked(position: position, duration: duration)
+        #endif
+        reconcileUpNextCard(session.card)
+    }
+
+    #if DEBUG
+    /// `-PTDebugOpenOptionsAtRemaining <s>` (bench): the subtitles / audio
+    /// panel opens once, that many seconds before the end — as a swipe down
+    /// would — and stays: the next episode must still take the whole stack
+    /// down (`didFinishPlaying`).
+    private func debugOpenOptionsIfAsked(position: Double, duration: Double?) {
+        guard !debugOpenedOptions, let duration,
+              let remaining = UserDefaults.standard.string(forKey: "PTDebugOpenOptionsAtRemaining").flatMap(Double.init),
+              duration - position <= remaining else { return }
+        debugOpenedOptions = true
+        print("[UpNextDebug] the options panel opens \(Int(duration - position)) s before the end")
+        presentOptionsViewController()
+    }
+    #endif
+
+    /// VLC stopped: at the end of the file (the last position within 3 s
+    /// of the length, or VLC's own position at 98 %) the session takes the
+    /// end over — true: this player stays, with the card. Else (an error,
+    /// a stop elsewhere): false, the player closes as before.
+    private func upNextFileEnded() -> Bool {
+        guard let session = upNextSession, !isClosing else { return false }
+        let nearEnd = upNextLastDuration.map { upNextLastPosition >= $0 - 3 } ?? false
+        guard nearEnd || mediaplayer.position >= 0.98 else { return false }
+        print("[UpNext] VLC player: end of the file at \(Int(upNextLastPosition)) s")
+        // The position the close would save: the end.
+        notePlayerPosition()
+        guard session.itemEnded() else { return false }
+        reconcileUpNextCard(session.card)
+        return true
+    }
+
+    /// The overlay card over the player while the session has one.
+    private func reconcileUpNextCard(_ card: UpNextCardState?) {
+        guard upNextSession != nil, !isClosing, !isClosingForNextEpisode else { return }
+        guard let card = card else {
+            if let overlay = upNextOverlay, overlay.presentingViewController != nil, !overlay.isBeingDismissed {
+                overlay.dismiss(animated: true)
+            }
+            upNextOverlay = nil
+            return
+        }
+        if let overlay = upNextOverlay, overlay.presentingViewController != nil, !overlay.isBeingDismissed { return }
+        // Not over another presentation (options, the slow-resume offer, the
+        // chooser): tried again in a second.
+        guard viewIfLoaded?.window != nil, presentedViewController == nil, transitionCoordinator == nil else {
+            scheduleUpNextRetry()
+            return
+        }
+        let overlay = UpNextOverlayViewController(session: upNextSession, summary: upNextSession?.next.summary)
+        upNextOverlay = overlay
+        print("[UpNext] VLC card: overlay (\(card.kind.rawValue))")
+        present(overlay, animated: true)
+    }
+
+    private func scheduleUpNextRetry() {
+        guard !upNextRetryScheduled else { return }
+        upNextRetryScheduled = true
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1) { [weak self] in
+            guard let self = self else { return }
+            self.upNextRetryScheduled = false
+            self.reconcileUpNextCard(self.upNextSession?.card)
+        }
+    }
+#endif
+
     // MARK: - Navigation
     
     override func prepare(for segue: UIStoryboardSegue, sender: Any?) {
@@ -1360,3 +1914,22 @@ class PCTPlayerViewController: UIViewController, VLCMediaPlayerDelegate, UIGestu
         
     }
 }
+
+#if os(tvOS)
+extension PCTPlayerViewController: UpNextTVPlayer {
+
+    /// The next episode (or today's flow): this player closes as at the
+    /// end of an episode — progress saved, stream cancelled and its data
+    /// deleted (`didFinishPlaying`) — and `then` runs once it is gone.
+    func closeForNextEpisode(then: @escaping () -> Void) {
+        guard !isClosing else { return then() }
+        isClosingForNextEpisode = true
+        print("[UpNext] VLC player closes at the session's request (next episode, fallback or end) — stream cancelled, its data deleted")
+        let before = afterClose
+        afterClose = { before?(); then() }
+        didFinishPlaying()
+    }
+
+    var upNextPresenter: UIViewController { self }
+}
+#endif

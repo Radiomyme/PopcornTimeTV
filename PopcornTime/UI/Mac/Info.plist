@@ -18,8 +18,10 @@
 	     macOS shows a generic text. -->
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>Popcorn Time asks your router to open its torrent port (UPnP, NAT-PMP) and looks for peers on your network, so that videos download faster.</string>
-	<!-- Trakt OAuth finishes by redirecting to popcorntime://trakt?code=… —
-	     the same scheme the iOS app registers. -->
+	<!-- popcorntime:// links — a title's page, a section, a search
+	     (PopcornKit's DeepLink, shown by MacNavigator) — and the redirect
+	     that ends Trakt's OAuth, popcorntime://trakt?code=…: the same scheme
+	     the iOS app registers. -->
 	<key>CFBundleURLTypes</key>
 	<array>
 		<dict>

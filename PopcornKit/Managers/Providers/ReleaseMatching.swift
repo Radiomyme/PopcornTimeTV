@@ -798,9 +798,11 @@ public enum Top100Ranking {
     /// Movie titles of top-100 lists (several categories merged: Movies, HD,
     /// UHD), each with its releases, most seeded first. A release whose name
     /// reads no "Title Year" counts under its IMDb id; without one either
-    /// (box sets, collections) it is left out.
+    /// (box sets, collections) it is left out. Theater copies and screeners
+    /// (`VideoTags.cam`) do not count, as on the Home's shelf.
     public static func movieGroups(_ releases: [IndexedRelease]) -> [Top100Group] {
-        return groups(releases) { release in
+        let kept = releases.filter { !VideoTags.parse($0.name).contains(.cam) }
+        return groups(kept) { release in
             let candidates = ReleaseMatch.movieTitleCandidates(release.name)
             if let first = candidates.first {
                 // Same key for "The Odyssey 2026" and "Odyssey 2026".

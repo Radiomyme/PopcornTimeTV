@@ -43,6 +43,33 @@ public func loadShows(
 }
 
 /**
+ Load the first page of a TV Shows list, painted from its snapshot first: `snapshot` gets the list saved by an earlier load at once (when there is one and it is not recent enough to be the answer), then `completion` the up-to-date list. See `ShowManager.load(_:filterBy:genre:searchTerm:orderBy:snapshot:completion:)`.
+ */
+public func loadShows(
+    _ page: Int = 1,
+    filterBy filter: ShowManager.Filters = .popularity,
+    genre: ShowManager.Genres = .all,
+    orderBy order: ShowManager.Orders = .descending,
+    snapshot: @escaping ([Show]) -> Void,
+    completion: @escaping ([Show]?, NSError?) -> Void) {
+    ShowManager.shared.load(
+        page,
+        filterBy: filter,
+        genre: genre,
+        searchTerm: nil,
+        orderBy: order,
+        snapshot: snapshot,
+        completion: completion)
+}
+
+/**
+ An explicit refresh of the Movies and Shows lists (a pull to refresh): the first pages saved on disk are asked to the network again on their next load, however recent. They are still what a load falls back to when the network fails.
+ */
+public func refreshCatalogs() {
+    CatalogSnapshotStore.shared.expireAll()
+}
+
+/**
  Get more show information.
  
  - Parameter imdbId:        The imdb identification code of the show.
@@ -89,6 +116,26 @@ public func loadMovies(
         genre: genre,
         searchTerm: searchTerm,
         orderBy: order,
+        completion: completion)
+}
+
+/**
+ Load the first page of a Movies list, painted from its snapshot first: `snapshot` gets the list saved by an earlier load at once (when there is one and it is not recent enough to be the answer), then `completion` the up-to-date list. See `MovieManager.load(_:filterBy:genre:searchTerm:orderBy:snapshot:completion:)`.
+ */
+public func loadMovies(
+    _ page: Int = 1,
+    filterBy filter: MovieManager.Filters = .popularity,
+    genre: MovieManager.Genres = .all,
+    orderBy order: MovieManager.Orders = .descending,
+    snapshot: @escaping ([Movie]) -> Void,
+    completion: @escaping ([Movie]?, NSError?) -> Void) {
+    MovieManager.shared.load(
+        page,
+        filterBy: filter,
+        genre: genre,
+        searchTerm: nil,
+        orderBy: order,
+        snapshot: snapshot,
         completion: completion)
 }
 

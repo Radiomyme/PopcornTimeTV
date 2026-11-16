@@ -14,27 +14,26 @@ class ErrorBackgroundView: UIView {
     }
     
     func setUpView(error: NSError) {
+        let texts = ErrorBackgroundView.texts(for: error)
+        setUpView(title: texts.title, description: texts.description)
+    }
+
+    /// What to tell the user about `error`: a title and what to do.
+    static func texts(for error: NSError) -> (title: String, description: String) {
         // The Top 100 filter: The Pirate Bay can't be reached (blocked on
         // some networks) or the titles couldn't be loaded, and no list is cached.
         if error.domain == PirateBayTop100.errorDomain {
-            return setUpView(title: "Top 100 Unavailable".localized, description: PirateBayTop100.message(for: error))
+            return ("Top 100 Unavailable".localized, PirateBayTop100.message(for: error))
         }
-        let helpfulDescription: String
-        let title: String
         switch error.code {
         case -1200:
-            title = "SSL Error".localized
-            helpfulDescription = "It looks like your ISP/Network admin is blocking our servers. You can try again with a VPN to hide your internet traffic from them. Please do so at your own risk".localized
+            return ("SSL Error".localized, "It looks like your ISP/Network admin is blocking our servers. You can try again with a VPN to hide your internet traffic from them. Please do so at your own risk".localized)
         case -404:
-            title = "Not found".localized
-            helpfulDescription = "Please check your internet connection and try again.".localized
+            return ("Not found".localized, "Please check your internet connection and try again.".localized)
         case -1005, -1009:
-            title = "You're Offline".localized
-            helpfulDescription = "Please make sure you have a valid internet connection and try again.".localized
+            return ("You're Offline".localized, "Please make sure you have a valid internet connection and try again.".localized)
         default:
-            title = "Unknown Error".localized
-            helpfulDescription = error.localizedDescription
+            return ("Unknown Error".localized, error.localizedDescription)
         }
-        setUpView(title: title, description: helpfulDescription)
     }
 }

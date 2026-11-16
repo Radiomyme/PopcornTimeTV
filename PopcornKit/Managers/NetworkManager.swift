@@ -127,6 +127,13 @@ open class NetworkManager: NSObject {
     }
     
     /// Possible genres used in API call.
+    ///
+    /// The raw values are the app's names (and localisation keys); what a
+    /// source is asked is `ytsValue` (movies) / `cinemetaValue` (shows). The
+    /// cases no source has (Disaster, Fan Film, Holiday, Indie, Road, Short,
+    /// Sporting Event, Suspense: inherited from the retired popcorn API) are
+    /// kept so stored values still decode, but are no longer offered: YTS
+    /// ignores a genre it does not know and answers its whole catalog.
     public enum Genres: String {
         case all = "All"
         case action = "Action"
@@ -157,9 +164,48 @@ open class NetworkManager: NSObject {
         case thriller = "Thriller"
         case war = "War"
         case western = "Western"
-        
-        public static var array = [all, action, adventure, animation, comedy, crime, disaster, documentary, drama, family, fanFilm, fantasy, filmNoir, history, holiday, horror, indie, music, mystery, road, romance, sciFi, short, sports, sportingEvent, suspense, thriller, war, western]
-        
+
+        /// The genres a grid can offer: those at least one catalog knows
+        /// (`movies`; `shows` is a subset). A grid of one kind should list
+        /// `movies` or `shows`.
+        public static var array = movies
+
+        /// The genres of the Movies grid: YTS's vocabulary.
+        public static let movies: [Genres] = [all, action, adventure, animation, comedy, crime, documentary, drama, family, fantasy, filmNoir, history, horror, music, mystery, romance, sciFi, sports, thriller, war, western]
+
+        /// The genres of the Shows grid: Cinemeta's vocabulary.
+        public static let shows: [Genres] = movies.filter { $0 == .all || $0.cinemetaValue != nil }
+
+        /// What YTS calls the genre (`genre=` of `list_movies`, measured
+        /// 2026-11-14: "Science Fiction" is ignored, "sci-fi" is 5,862 films),
+        /// nil for `all` and for the genres YTS does not have.
+        public var ytsValue: String? {
+            switch self {
+            case .action, .adventure, .animation, .comedy, .crime, .documentary, .drama, .family, .fantasy,
+                 .history, .horror, .music, .mystery, .romance, .thriller, .war, .western:
+                return rawValue.lowercased()
+            case .sciFi: return "sci-fi"
+            case .sports: return "sport"
+            case .filmNoir: return "film-noir"
+            case .all, .disaster, .fanFilm, .holiday, .indie, .road, .short, .sportingEvent, .suspense:
+                return nil
+            }
+        }
+
+        /// What Cinemeta calls the genre (the `genre=` extra of its series
+        /// catalogs), nil for `all` and for the genres it does not have.
+        public var cinemetaValue: String? {
+            switch self {
+            case .action, .adventure, .animation, .comedy, .crime, .documentary, .drama, .family, .fantasy,
+                 .history, .horror, .mystery, .romance, .thriller, .war, .western:
+                return rawValue
+            case .sciFi: return "Sci-Fi"
+            case .sports: return "Sport"
+            case .all, .disaster, .fanFilm, .filmNoir, .holiday, .indie, .music, .road, .short, .sportingEvent, .suspense:
+                return nil
+            }
+        }
+
         public var string: String {
             return rawValue.localized
         }

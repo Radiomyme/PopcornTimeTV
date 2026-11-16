@@ -4,7 +4,7 @@
 
 # PopcornTimeTV — modernized fork
 
-[![Version](https://img.shields.io/badge/version-5.2.0-blue.svg?style=flat)](https://github.com/Radiomyme/PopcornTimeTV/releases)
+[![Version](https://img.shields.io/badge/version-5.3.0-blue.svg?style=flat)](https://github.com/Radiomyme/PopcornTimeTV/releases)
 [![Platform](http://img.shields.io/badge/platform-tvOS%2026%20%7C%20iOS%2026%20%7C%20macOS-lightgrey.svg?style=flat)](https://github.com/Radiomyme/PopcornTimeTV)
 [![Swift](https://img.shields.io/badge/swift-5-orange.svg?style=flat)](https://swift.org)
 [![License](https://img.shields.io/badge/license-GPL_v3-373737.svg?style=flat)](LICENSE.md)
@@ -18,7 +18,281 @@ native `AVPlayer`. **5.1.0** redesigns the Apple TV pages in Liquid Glass, makes
 engine play far more files natively, adds The Pirate Bay and Knaben sources with a Top 100, and
 plays films larger than the free space. **5.2.0** picks releases the connection can carry, says
 what loading is doing, plays the right episode from season packs, downloads at the swarm's speed
-and makes the Apple TV remote's Back reliable.
+and makes the Apple TV remote's Back reliable. **5.3.0** opens on a Home screen, opens pages at
+once, resumes a film that is still downloading in the native player, chains a show's episodes in the same release and adds the Apple TV Top Shelf.
+
+## New in 5.3.0
+
+The same notes are shown once in the app after the update (`WhatsNewRelease.current` in
+`PopcornTime/UI/Shared SwiftUI/WhatsNew.swift`; keep the two in step). Timings below were
+measured on simulators with a seeder on 127.0.0.1, unless said otherwise: they are upper bounds
+of single runs on a shared machine. One session ran on a real Apple TV 4K with real swarms
+(see [On a real Apple TV 4K](#on-a-real-apple-tv-4k-2026-11-16) below); what changed after it
+ran on simulators and on the test rig only.
+
+**Home and pages (Apple TV, iPhone / iPad, Mac)**
+- **A Home screen** the app opens on: the featured releases up top (logo, formats, Play / More
+  Info / Watchlist), then Continue Watching, new episodes of your shows, trending movies and
+  shows, new in 4K, the Top 100 movies and shows, your Watchlist and your
+  genres; "See All" at the end of a shelf. The Top 100 movies and shows are The Pirate Bay's HD
+  movies and episodes seeded the most right now (its 48-hour lists are no longer used: for movies,
+  mostly old re-encodes), ranked by the seeders of all their releases, including those The Pirate Bay lists
+  without an IMDb id when their name matches a known title and year; theater copies and
+  screeners (CAM, TS, TC, « HQ Pre », DVDScr…) are left out, in the Top 100 grid too. It paints at once from the last visit's lists, then refreshes; an offline launch says
+  how old the lists are, an error page offers Try Again. **Settings › Home** picks the content
+  languages and the shelves shown, and whether the new episodes of your shows are asked of
+  Cinemeta in one request (public ids, no account) or show by show of TVMaze.
+- **Pages that open at once**: a title's page shows what its poster knew at once, then fills
+  in; the sources arrive one by one (tvOS simulator: on screen 137 ms after the press instead of
+  1,791 ms, medians of five). Play pressed before the sources is kept and runs when they are in,
+  with the rules of an episode's sources (3 s deadline, 12 s at most); Menu / Cancel drops it. A
+  focused (Apple TV) or hovered (Mac) poster asks its page ahead.
+- **One rating everywhere**, and on the cards the two best formats (Dolby Vision, then HDR, 4K,
+  Atmos) whatever the row; a source's working title ("Untitled … thriller") is not printed;
+  English summaries are marked "(in English)" when the app is in another language.
+
+**Resume and playback**
+- **A film that is still downloading resumes natively**: the remux conversion jumps to the
+  saved position (by the file's keyframe index), the torrent downloads that part first, and
+  « Resuming at 1:40:00… » (in a dark capsule, readable on a bright picture) shows until the
+  picture is there; after a second it adds how much of the media needed there is downloaded and
+  the download rate (« Resuming at 1:40:00 — 45% · 9.6 MB/s »; the share never goes back and
+  stays at 99 % until the media is written; seen on the Apple TV simulator, in French; iPhone /
+  iPad and Mac compiled only): 5.3 s from the answer to the first frame (Apple TV simulator),
+  4.7 s (iPhone simulator), 5.5 s (Mac). On a real Apple TV, a 7.7 GB Dolby Vision 8.1 + E-AC-3
+  Atmos MKV resumed natively, its first frame 5.7 s after the answer (5.3.0's first device run);
+  in the session of 2026-11-16 a decided « Resume » took 158.9 s (see the known limits). What
+  the jump skipped is a *hole*: listed in the playlist, written when playback comes back to it.
+- **Apple TV: rewinds and far jumps stay native too**, also on a real Apple TV 4K (session of
+  2026-11-16: the rewind in pause played at the chosen point 8.7 s after the click, three far
+  jumps landed in 6.7 to 19.8 s, never through VLC): into a hole, the conversion jumps there and
+  the film starts again at the chosen point by itself, ≈ 10 s on the simulator. The target is the one the remote's gesture gives AVKit's navigation delegate (`UserNavigationTarget`
+  in `PopcornKit/Managers/Playback/UserNavigation.swift`), whatever the player's clock still
+  reads; if tvOS doesn't tell the app, a request for a hole behind the playhead is taken as a
+  seek there (`HoleRequestRule`); a failure of the old item meanwhile (-12889) is recovered at
+  the target, and the player is no longer paused during the wait, so further presses are still
+  seeks and the last one wins; if AVPlayer gives up on its held seek and puts its clock back
+  where the move came from (with no failure), the wait stays at the target. This fixes the
+  freeze seen on a real Apple TV in 5.3.0's first device run (pause, rewind ~10 minutes, click:
+  a silent spinner and a dead transport bar): in the session of 2026-11-16 the same gesture
+  (pause, about 15 minutes back, click) played at the chosen point. A press made while the
+  previous one's seek is still held keeps the newest target (`navigation chained on the pending
+  one`; before, the second of two quick +10 s presses was dropped as "went elsewhere", seen on
+  the device; the fix is covered by unit tests, the rig only showed no regression). On iPhone and Mac rewinds and far jumps were checked on the
+  fix branch only, not on the merged tree, and a move made while paused stays paused at the
+  target (Play resumes there), as AVKit does. With **bounded storage**, a
+  rewind past what is kept is blocked with « This part hasn't been downloaded (limited
+  storage). »: nothing is downloaded again and nothing goes to VLC.
+- **A late jump wait is made known to the torrent engine** (full storage mode only): the
+  conversion reads the file from disk, so PopcornTorrent, which rescues only the readers of its
+  own HTTP server, never treated the piece it waited for as late, and slow peers could keep its
+  blocks for minutes. When a jump's wait has read nothing for max(8 s, twice the time the
+  missing bytes need at the current rate), the app asks the engine's own server on 127.0.0.1 for
+  small ranges of the missing pieces (two requests at most; the next one as soon as one is on
+  disk; the piece the conversion is stopped on even past the share's end, inside the keyframe's
+  Cluster it reads whole), so that the engine takes those pieces as waited for, until the jump's
+  first two segments are written (`[Resume] jump wait late`). Proven on the loopback rig with
+  synthetic slow peers: 150–263 s without it, 20–28 s with it (8 runs, before the last
+  adjustments), 19.4 to 21.3 s with the final code (3 runs), 12.8 s and no request on a healthy
+  swarm; a held piece past the share's end is covered by unit tests only; not yet run on a
+  device. Known cost: a rewind made
+  during an already-late wait is 1–4 s slower (the engine keeps a cancelled request's waiter
+  for a few seconds; only an engine change can end that).
+- VLC remains the last resort only (a file without a keyframe index, a codec Apple can't
+  decode); the resume question says so when it happens. A crash of VLCKit after « Start from
+  the beginning » on Apple TV is fixed.
+
+**Episode chaining (Apple TV, iPhone / iPad, Mac)**
+- **The Next Episode card** comes 60 s before the end of an episode by default (Settings ›
+  Next Episode Card: 30, 45, 60 or 90 s, at most a third of a short episode); the next episode
+  still starts at the end, or on *Play Now*. The card shows the episode, the release
+  line (« 1080p HEVC · same pack », « · same group », « · same quality ») and a countdown. Apple
+  TV: *Play Now* (focused), *Back to the Video*, *Choose Version*; iPhone / iPad and Mac: *Play
+  Now*, *Cancel* and *Choose Version* in the "…" menu (Mac: Return plays, Escape closes the card,
+  not the player). On Apple TV, *Play Now* / *Continue* are ignored during the card's first
+  second on screen: on the device the next episode started the instant the card appeared, most
+  likely from a press still made to skip ahead (AVKit's own didAccept is not held back; the
+  `outcome accepted (…, card up N s)` line will tell next time). Menu, *Back to the Video* and
+  *Choose Version* are never held back; iPhone / iPad and Mac have no such guard. At the end of the countdown the next episode starts in the same release: the
+  same season pack when it holds it, else the same group at the same definition, else the same
+  quality class, native releases first; the quality picker is not asked again. The finished
+  episode's stream is stopped and its data deleted before the next one starts. When the length
+  is unknown, an "Episode finished" card with 10 s comes at the end instead.
+- **« Still watching? »** after three episodes chained with no action.
+- **Resume replays the release you were watching**, with no « Resume at … ? » question (a native
+  jump); if it has no peer after 20 s, « Choose another source » is offered; choosing it, or a
+  failure of the stream, forgets that release (on Mac the offer alone does). The Home's "Next episode" cards replay the same pack without asking.
+  The release keeps its name and details on Resume: it is looked up in the title's list by its
+  exact link, then by its info-hash, else the remembered release is used (on the device the
+  short link of the remembered release matched nothing, so the stream ran with a nameless
+  release and saved it back without its name).
+- **Settings › Autoplay Next Episode** (« Enchaîner les épisodes »), on by default on the three
+  apps: off, the card and the end card wait for a press.
+- **Settings › Next Episode Card** (« Carte Épisode suivant »): 30, 45, 60 (default) or 90 s
+  before the end, on the three apps.
+- The plan (which release, which file) is made at the start of the episode, before the card;
+  the `[UpNext]` lines tell it (see [Logs](#logs)).
+
+**Grids and artwork**
+- **Grids that really sort**: each sort its own list, each catalog its own genres, the first
+  page painted at launch from the last visit; a page that fails offers Try Again under the
+  posters instead of ending the list.
+- **Lighter artwork** (`ArtworkPipeline`): posters fetched at the size they are drawn and
+  kept on disk: Shows · Recently Added grid on Apple TV 8.4 MB → 0.32 MB
+  (−96 %), Movies 832 KB → 235 KB (−72 %), the Mac's 21 posters 1.54 MB → 0.45 MB; 0 bytes at the
+  next launch. Old movies' posters no longer stay grey (metahub, then YTS's medium poster, when
+  the proxy says nothing).
+
+**Apple TV**
+- **Richer grids**: six posters per row, the sort and genre in one header line, 4K / New / New
+  Episode / watched / progress marks, under every poster its year, rating and formats, and under
+  the focused one its title.
+- **The Top Shelf**: with the app in the top row, the Apple TV home screen shows the latest
+  releases full screen with their details and Play / More Info (see
+  [The Apple TV Top Shelf](#the-apple-tv-top-shelf)).
+- Home: a clear white focus ring on the cards, the main button in neutral glass (white when
+  focused, no longer red), a top panel whose title no longer jumps, no empty screen at launch,
+  collage backdrops left out; pages without the empty grey chip and without the tab bar sliding
+  over them; genres in French in French.
+- A Continue Watching card keeps the focus when Movies or Shows appears or reloads: Down pressed
+  before the tab has finished appearing no longer lands on the card and then jumps to the first
+  poster (a defect since 4.2.0).
+
+**iPhone / iPad**
+- The Home screen in a tab, the Next Episode card above the playback bar, Settings › Home and
+  Autoplay Next Episode; the iPad's landscape carousel no longer shows the previous page under
+  the sidebar.
+- The app is also in Italian, Spanish, Arabic and Brazilian Portuguese (translations not
+  reviewed by a speaker; What's New is in English in these languages).
+
+**Mac**
+- Home first in the sidebar (⌘1), the Go and Playback menus, ⌘R; the rank of a Top in "See All"
+  is a badge in the corner instead of covering the poster's printed title; no ghost text under
+  the window's bar; a black first paint instead of grey; window restoration off, with a safety
+  net that opens a window when the app has none.
+
+**Tests** (see [Tests](#tests))
+- Unit tests for the Home feed, the library, the artwork pipeline, the native resume and jumps
+  (`RemuxResumeEngineTests`, `RemuxJumpIdentityTests`, `RemuxSequentialGoldenTests`,
+  `ResumeStartTests`, `VLCResumeWatchTests`), the jump wait's share on screen and its requests
+  to the engine (`JumpWaitProgressTests`, `RemuxWaitNudgeTests`), the navigation rules
+  (`UserNavigationTests`), episode chaining (`UpNextPlannerTests`, `UpNextSessionTests`,
+  `UpNextCountdownTests`, `UpNextResumeReleaseTests`, `RememberedReleaseTests`) and
+  What's New (`WhatsNewTests`). Apple TV UI tests for Home, the grids and the Next Episode card,
+  and a Siri Remote script replayed on the player over a loopback torrent
+  (`tools/remote-rig/fx-run.sh`).
+
+#### On a real Apple TV 4K (2026-11-16)
+
+One session of 5.3.0 on the user's Apple TV 4K: a Debug build, real swarms, one launch (its
+console has 849 lines; `[Start]`, `[Measure]`, `[Resume]` and `[UpNext]` lines quoted here).
+- **The Home** painted from disk in 58 ms (`[Measure] home paint from disk: yes in 58.0 ms (15
+  shelves)`; a Debug build on an Apple TV 4K, not the Release build on an Apple TV HD the limit
+  below asks for). The Top Shelf's *More Info* and *Play* opened the page and started the stream.
+- **Starts**, Play to first frame: 14.0 s to 95.1 s (a 2160p Dolby Vision film with 256 KiB
+  pieces 14.0 s, of which 7.7 s engine buffer and 5.8 s metadata; one with 4 MiB pieces 40.6 s;
+  episodes of a 4K season pack with 8 MiB pieces 95.1 s and 39.6 s), most of it the engine's
+  start buffer on the large-piece torrents; the conversion then took 0.2 to 1.3 s. **A chained episode** (the next one of the same
+  pack, from the card) started in 39.6 s.
+- **Jumps**: three far jumps landed in 6.7, 13.8 and 19.8 s; **the rewind in pause** (about 15
+  minutes back) played at the chosen point 8.7 s after the click; « Resume » from a show's page
+  started without the question.
+- **Everything native**: every start, jump and the chained episode went remux → AVPlayer, with
+  no VLC line in the console. The two films declared Dolby Vision 8.1 and E-AC-3 16/JOC (Atmos)
+  to the player. The season pack (the chained episode, the slow « Resume » and the 6.7 s and
+  13.8 s jumps) was HDR10 with AC-3 5.1, so episode chaining with Dolby Vision or Atmos was not
+  seen on the device.
+- **What it found** (changed since, on simulators and the test rig only): the decided « Resume »
+  at 40 % of a 12.5 GB episode with 8 MiB pieces took 158.9 s to its first frame, 110 s of it
+  under a bare « Resuming at 22:35… »; on that resume the release lost its name; the Next Episode
+  card was accepted the instant it appeared (most likely a press still made to skip ahead; the
+  console of 5.3.0 does not tell which path accepted); the user asked
+  for the card earlier than 30 s, and for The Pirate Bay's Top 100 instead of the 48-hour movie
+  Top.
+- **Not covered by the session**: the touch-surface swipe rewind, the resume question on a film,
+  a countdown running to its end, What's New on a second launch (no `[WhatsNew]` line then),
+  the HDR / Dolby Vision and Atmos badges of the TV and receiver, any iPhone, iPad or Mac
+  device. **Everything changed after it** — the share and rate on screen during a wait, the
+  card at 60 s and its setting, the press guard, the release kept on « Resume », the wait made
+  known to the engine, the Top 100 movies and shows — **ran on simulators and the test rig only**.
+
+**Known limits**
+- **Devices**: besides the Apple TV 4K session above, nothing ran on a real device: no iPhone or
+  iPad, no Mac other than this one, no Apple TV HD, no tvOS 17 to 25, no macOS 14 or 15. Not
+  seen on a device: the Siri Remote on the Next Episode card, a countdown run to its end, a
+  touch-surface swipe (the simulator's remote only clicks). Release builds of the three apps
+  compile, carry no `-PTDebug…` hook and were launched on the tvOS simulator only.
+- **Resume**: a file without a keyframe index (Matroska without Cues) can't resume fast: VLC
+  reads it up to the point, under « Resuming at … », and offers after 30 s to keep waiting or
+  start from the beginning. On iPhone and Mac that VLC state and its offer were never seen on
+  screen. Re-aiming a real torrent adds 2.6 to 6.9 s (diagnosis). On torrents with very large
+  pieces (8 MiB) the engine's start buffer alone took 36 to 90 s on the device (it waits for
+  20 pieces at the head and 1 or 2 at the end, whatever the film's bitrate; 44.6 s before the
+  slow « Resume » below): unchanged, the engine is frozen. The slow decided « Resume » of the device session (158.9 s): its cause, the
+  engine not treating the conversion's blocking piece as late while slow peers hold its blocks,
+  was shown on the rig and is answered by the app (see « A late jump wait is made known to the
+  torrent engine »); that answer has not run on a device yet. Its lateness counter restarts each
+  time the conversion reads a little further, so a wait that crawls one piece every few seconds
+  is never helped. A « Resume » whose seed is slower than the film no longer goes to VLC after 8 s
+  when the keyframe index is read and only the first segment is still to come (a slow head): it
+  waits, native (seen twice on the rig before the fix, `index not on disk … after 8 s`).
+- **Rewinds (Apple TV)**: after a click, the old item may play about 2 s at the target before the
+  new one replaces it, so a few seconds are replayed where a jump lands (on the device the new
+  item went back 1.7 s; the replacement is kept on purpose: an old item can go on with its
+  sound while its picture is frozen); Pause during the wait of a rewind or a far jump takes
+  « Resuming at … » and its spinner away (the pause shows as a pause; Play brings the wait back:
+  before, « … — 100 % » stayed over a spinner for minutes on the rig); after a blocked
+  rewind (bounded storage) AVKit restarts playback by itself at the start of what is kept. The
+  server-side net only sees holes *behind* the playhead (a paused forward move that tvOS doesn't
+  report is not caught). A press while the resume's item is put in place, before its start seek
+  (the player has no clock yet), is not a move: AVKit's own seek is sent to the resume point
+  (`[Resume] navigation to … while the resume's item is put in place — ignored`; before, it sent
+  the film to 0:00 once on the rig). On iPhone the net is the only source of the target; on Mac it is not
+  wired (the player's clock shows the target there). Remote presses made during the black
+  « Resuming at … » cover of a decided start are ignored (the start goes to the remembered
+  point).
+- **Episode chaining**: the Next Episode card can stay up over a slow-download recovery near the
+  end; a rewind after the end does not cancel the 10 s end card; on Mac a scrub into the last
+  0.75 s inside a hole can start the next episode during the jump wait; the AVKit transport bar
+  can cross the card while playback stalls; the remembered release is forgotten at 20 s on Mac
+  but only on « Choose another source » or a failure on Apple TV and iPhone. Apple TV, while
+  AVKit's Next Episode card is up: Play/Pause neither pauses the film nor stops the countdown,
+  left / right go to the card's buttons (not the transport bar); *Play Now* / *Continue* are
+  ignored during the card's first second on screen (`[UpNext] Play Now ignored: card up 0.4 s`),
+  but a Select pressed while AVKit is still bringing the card in (about 1.5 s on the simulator)
+  may go to the player: once it paused the film instead (the countdown then stayed frozen). The
+  cards of before 5.3 that the VLC player still shows (no session) stay at 30 s, without the
+  guard. A chained episode restarts its stream: 39.6 s on the device for a 4K pack with 8 MiB
+  pieces. A change of the card's setting applies from the next episode. *Back to the Video* (or Menu on
+  the card) dismisses it for that episode: it does not come back, and at the end the player
+  closes as before 5.3 instead of starting the next one; with the card at 60 to 90 s that
+  dismiss falls in the episode's last scene more often (a decision left open). The card at 60 s and the
+  guard were tried only with 3-minute test episodes from a local seeder.
+- **Home, pages, artwork**: a card can announce a format (Dolby Vision) that the page's
+  releases don't list; the Apple TV grids (Movies, Shows, Search) keep the older focus style;
+  the first paint from disk takes ≈ 125 ms on the main thread on the simulator, 58 ms on the
+  Apple TV 4K in a Debug build (to measure on an Apple TV HD in Release: `[Measure] home paint
+  from disk: … ms` is printed at every launch, in every build). The Top 100 movies and shows: a release
+  listed without an IMDb id counts only when its title and year match a title some list already
+  knows (no search is made for it: a title only such releases name stays out), and a name that
+  shortens the title (« Mission Impossible 2025 ») or carries two years does not count; an
+  update shows no ranking shelf until its first refresh (the 48-hour lists' cache is
+  dropped). On a fresh install the Apple TV Home asks nothing before the Terms of Service are
+  accepted (the iPhone and Mac apps have no such terms);
+  working titles and English summaries come from Cinemeta / YTS / TVMaze. TVMaze posters and
+  stills go through the `images.weserv.nl` proxy, which sees the IP address and the shows
+  viewed.
+- **Top Shelf**: no shared container with the app (no App Group), so no resume card, no library,
+  none of the app's settings; it asks Cinemeta, YTS and apibay's 4K ranking (`.topUHD`) itself,
+  even before the Terms of Service are accepted.
+- **Apple TV UI tests**: holding Select on a Continue Watching card once in a while opens no
+  menu (2 runs in 97 of the test alone; cause unknown, the remote's simulation is not ruled
+  out). A simulator with shows in progress breaks the Shows grid layout test, which takes them
+  for the first row.
+- Mac: no window at launch after a killed run whose state macOS restores (seen only in tests;
+  restoration is now off and a window is opened, the real case is not reproduced). Grids and
+  sources as in 5.2.0: a Pirate Bay or Knaben outage reads as "nothing found"; « No torrents
+  found » comes after every source (12 s at most).
 
 ## New in 5.2.0
 
@@ -228,16 +502,29 @@ serves it to `AVPlayer` as a complete VOD HLS presentation over a localhost serv
   for the data and resumes natively at the same position; a damaged or incomplete region of the
   torrent is waited for, never played as garbage. A jump just past the downloaded part also
   stays native: the player measures the download's pace and waits when the data will arrive
-  within about 45 seconds. VLC only takes over when native playback is impossible or would keep
-  you waiting: a codec Apple can't decode, a rewind past the segments still on disk, a full
-  disk, or a jump so far ahead that the player can't prepare it within about 45 seconds — a
-  part not downloaded yet (the torrent downloads in order; VLC fetches that part directly), or
-  one so far into the downloaded part that the remux can't reach it in time. It continues at the
-  current or chosen position.
+  within about 45 seconds. A far jump stays native too when the file has a keyframe index
+  (Matroska Cues), as most releases do: the conversion moves to that position, the torrent
+  downloads that part first, and « Resuming at 1:40:00… », with the share of the media there
+  already downloaded and the download rate, shows until the picture is there. A
+  film that is still downloading resumes where you left off the same way. VLC only takes over
+  when native playback is impossible: a codec Apple can't decode, a resume, a far jump or a
+  rewind into a part no longer on disk in a file without a keyframe index, or a full disk (with
+  bounded storage, a rewind past what is kept is blocked instead). It
+  continues at the current or chosen position, under the same « Resuming at … » until playback
+  really runs there (after 30 seconds it offers to keep waiting or to start from the
+  beginning).
 - **Bounded disk use** — played segments are kept behind the playhead as far as the free disk
   space allows (at least 3 minutes), so rewinds stay native; only on a tight disk are the oldest
   ones pruned. Torrent / remux caches are reclaimed at launch and before each stream on **all**
   platforms.
+
+**The hidden switch `PTNativeJumpsDisabled`** (5.3.0; no UI, compiled in every build, not a
+DEBUG hook): a boolean user default. Absent or `NO`, the default, the conversion jumps natively
+(resume, far seeks, rewinds into holes). `YES` turns native jumps off: the conversion only runs
+in file order, as in 5.2.0, and resuming a film that is still downloading goes through VLC (the
+resume question then says so; VLC jumps by the keyframe index, under « Resuming at … »). The
+`[Resume]` lines name it: `native jumps are off (PTNativeJumpsDisabled)`. To try it, add
+`-PTNativeJumpsDisabled YES` to the scheme's launch arguments.
 
 > Note: macOS decodes Dolby to PCM and can't bitstream Atmos, so the Atmos badge is an **Apple
 > TV** capability; on Mac the remux still gives you the untouched HDR video and the full-quality
@@ -280,8 +567,10 @@ serves it to `AVPlayer` as a complete VOD HLS presentation over a localhost serv
   WebM file (the remuxer checks the codecs within seconds and hands anything Apple can't decode
   to VLC), **AVPlayer** for mp4/m4v/mov, **VLC** for AVI, MPEG-TS/M2TS, WMV, FLV, MPEG-PS/VOB,
   Ogg… and as the universal fallback
-- On Apple TV, iPhone and iPad, playback resumes where you left off on every engine; a far
-  resume on a still-downloading file asks whether to resume through VLC or restart natively
+- On Apple TV, iPhone and iPad, playback resumes where you left off on every engine; a film
+  that is still downloading asks « Resume at … » or « Start from the beginning » — both play
+  natively (HDR, Dolby Vision, Atmos kept), and the question says so when resuming that file
+  has to go through VLC
 
 ## Supported formats
 
@@ -323,14 +612,123 @@ Then pick a scheme:
 > creates `<file> 2.ext` conflict copies inside `Pods/` and can rewrite tracked project files,
 > which breaks clean builds.
 
+## The Apple TV Top Shelf
+
+With the app's icon in the top row of the Apple TV home screen, the Top Shelf is a full-screen
+carousel of what is new: the Home's hero, then the newest 4K releases, additions and episodes,
+each with its details, its format badges (4K, Dolby Vision / HDR, Atmos), **Play** (the title's
+page, then playback: `popcorntime://play/…`) and **More Info** (the page). When no title has a
+real backdrop it falls back to rows of posters; with nothing to show, to the static image.
+
+- **Its own lists.** The extension (`TopShelf/`) runs the Home engine itself on a light plan
+  (`TopShelfLoader`): the app and the extension share no container (no App Group yet), so it keeps
+  its own small cache in its Caches folder and asks its five lists itself. It answers from that
+  cache at once, refreshes what is stale, and asks the system to reload if the titles changed; a
+  first load waits 5 s at most. For the same reason it does not know the library (no resume card,
+  no new episodes of your shows), the content languages and hidden shelves chosen in the app, nor
+  whether the Terms of Service were accepted: with the app in the top row, the extension asks its
+  hosts (Cinemeta, YTS and apibay's 4K ranking) on its own whenever the system wants the shelf and
+  a list is stale, even before the app was ever opened — as 5.2.0's asked YTS and EZTV.
+- **When it is reloaded.** In the app, `TopShelfReloader` notes a Home refresh that brought new
+  lists, and tells the system once, when the app leaves the foreground (at once if the refresh ends
+  while it is in the background). A library change is not followed while the extension cannot read
+  the library (`TopShelfReloader.followsLibrary`): it would only wake the extension for nothing.
+- **Its log.** The extension prints `[TopShelf] answered … in N ms` and `[TopShelf] refreshed …`
+  in its own process: `log stream --predicate 'process == "TopShelf"'`. The app prints
+  `[TopShelf] the shelf may have changed: the system is told`.
+
+## Logs
+
+Every console line of the app starts with a tag. The ones that tell a playback's story:
+
+| Tag | What it says |
+|---|---|
+| `[Start]` | **The start-up timing**: one line per phase from Play to the first frame, with the phase's milliseconds and the time since Play (`t+`), then a total. Grep it to measure a start |
+| `[Measure]` | **The torrent side of a start**, next to `[Start]`: the torrent's pieces, what PopcornTorrent waits for before « ready », then the bytes, rate and peers at the first peer, the first piece, the moment the head and the moment the tail it waits for are all on disk (`head on disk`, `tail on disk`: the later one ended the start buffer; in bounded storage the head line can come only at ready, marked `seen at ready`, since the engine does not publish its window: it then says the head was there by ready at the latest), ready, the remux's first segments, a resume's steering (`resume steering: … decided start` or `question up`, `N ms after ready`), the start's jump (the first one before the first frame; a later far seek or rewind is not logged), that jump's first segment and the first frame; Apple TV: `[Measure] home paint from disk: yes in 12.3 ms (14 shelves)` at launch (in every build) |
+| `[chooseQuality]` | The releases found for the title, the automatic pick or the chooser |
+| `[Sources]`, `[Torrentio]`, `[T4P]`, `[Extra]`, `[TPB]`, `[Knaben]` | An episode's extra sources (asked together behind one 3 s deadline), each source's answer |
+| `[Subtitles]` | The OpenSubtitles search (it runs alongside the stream) and its answer |
+| `[Play]`, `[Streamer]`, `[Loading]` | The stream: added, buffering by 10 %, ready, failed, cancelled (`[Loading] Back: stream cancelled, data kept`, or `no stream yet to cancel`) |
+| `[Remux]` | The MKV → HLS engine: tracks, segment target, each anomaly, why it stopped |
+| `[Player]` | The players: the route (remux, direct, VLC), recoveries, hand-offs to VLC, subtitles; `closed at X s — stream cancelled, data deleted=…` (`(the next episode starts)` when the card chains; a hand-off to VLC does not cancel the stream: `handed off to VLC`); during a jump's wait (5.3.0) `jump wait: still waiting for the media at … after N s` and `jump wait: the old item before its replacement — …` (its state, time, rate, picture size and the errors since the jump), `jump wait paused by the user — « Reprise à … » hidden until play is pressed`; `audio track not resolved yet (item.tracks N)`, then one more look 1 s later |
+| `[Player] navigation` | Apple TV, native player (5.3.0): a remote gesture AVKit reported — `navigation A → B s (paused, before AVKit's seek the player reads A s, …)`; `navigation to B s pending for 1.0 s: the player reads X s` (X = A: the clock still shows the old time; the target is used anyway); `navigation chained on the pending one: from X s, …` when a press comes while the previous seek is still held; `navigation to B s no longer pending: …` (naming the target dropped). With them: `[Remux] hole segment N requested (…)` then `[Player] AVPlayer asks for …, which a jump …` when tvOS did not report the gesture, and `[Player] AVKit resumes playback after the navigation to … s (from … s; item: …, rate …, item …, the player reads … s)` |
+| `[Resume]` | A resume or a far jump in a film that is still downloading: native or VLC and why, the segment and the source offset the conversion jumps to, the first segment written, the first frame, each with its timing (`jump decided (resume / farSeek / rewind)`, `steering: readPosition=… (decided start / question up, +N s)`, `jump: a new item plays at …`, `rewind to … blocked at …` with bounded storage); during a jump's wait (5.3.0) `jump wait +N s: reader …, first missing … (piece … of the file), on disk X of Y bytes of the target (Z %), window W %, R MB/s, P peers` at +2, +5, +10 s then every 10 s, `jump wait late: …` when the wait is late in full storage mode and the engine's own server (127.0.0.1) is asked for the missing pieces (two at most), then `jump wait: the engine is asked for N more piece(s) …` and `jump wait: N request(s) to the engine cancelled — …` (`— the conversion stops` when the player closes, hands off to VLC or chains the next episode); `navigation to … while the resume's item is put in place — ignored, AVKit is sent to the resume point …`; `[Resume] VLC:` for a resume through VLC |
+| `[UpNext]` | Episode chaining (5.3.0): the plan (`plan S01E02 rule=samePack / sameGroup / sameClass …` and why), `armed S01E01 → S01E02: prefetch at … s, card at … s (duration … s)`, `sources asked ahead: N ms — …` (the next episode's sources during playback, not a start), the card (`card shown: countdown, 60 s — …`, then `native card on screen (AVKit proposal)` or `card on screen (overlay)`), a press too early (`Play Now ignored: card up 0.4 s`), the answer with its source and the card's time on screen (`outcome accepted (Play Now, card up 12.4 s)`, or `AVKit didAccept`, `overlay`, `debug`, `card button`), `file ended`, `start S01E02 (deadline / accepted)`, the previous stream stopped and its data deleted, `resume … rule=sameRelease` for Resume, a remembered release forgotten |
+| `[Bounded]`, `[Deficit]`, `[Cache]` | Bounded storage, a download slower than the film, the caches purged |
+| `[Detail]` | A title's page: opened, first paint, metadata, first source, all sources (milliseconds since the page opened), a page asked ahead from a focused or hovered card, a Play pressed before the sources |
+| `[TopShelf]` | The Apple TV Top Shelf: the extension's answer and refresh (milliseconds, titles shown; in the `TopShelf` process), the app telling the system to reload it |
+| `[Home]` | The Home feed (5.3.0): a host that failed (`[Home] <host><path> FAILED status=… code=…`); with DEBUG launch arguments, also the fixtures it was fed from |
+| `[DeepLink]` | A `popcorntime://` link (Top Shelf, Home, another app): opened, kept until a screen goes, dropped, refused before the Terms of Service, not a link into the app |
+| `[WhatsNew]` | What's New at launch (5.3.0), once per launch, in every build: `present`, `marked seen silently` or `skip`, the version last seen, the notes' and the app's versions (`, fresh install`, `, launched from a link`) |
+
+The `[Start]` lines of one playback (an episode, MKV, native player):
+
+```
+[Start] sources: 1240 ms — 14 torrent(s) (T4P 3 · Torrentio 9 · TPB/Knaben 2)
+[Start] subtitles: 830 ms (t+830 ms) — 23 language(s)
+[Start] metadata: 3200 ms (t+3200 ms) — 12 peer(s)
+[Start] buffer: 8100 ms (t+11300 ms) — Show.S02E05.1080p.mkv
+[Start] remux prepare: 420 ms (t+11720 ms) — 2 segment(s)
+[Start] first frame: 900 ms (t+12620 ms) — AVPlayer (remux)
+[Start] total: 12620 ms to the first frame — Show (subtitles 830 ms · metadata 3200 ms · buffer 8100 ms · remux prepare 420 ms · first frame 900 ms)
+```
+
+- `sources`: an episode's extra sources, from the press to the chooser (`0 ms … kept from N s ago`
+  when the page had asked them ahead). It stands alone: the chooser sits between it and the rest.
+  `, not in time: T4P` names a source the list came without (it is past the 3 s deadline, or not
+  waited for after it did not answer the last time); `, failed: Torrentio` one that answered
+  with an error and is asked again at the next press. A release played without asking (an
+  automatic quality) and « No torrents found » wait for the sources still expected, 12 s at most.
+- `subtitles`: the OpenSubtitles search, started with the stream; it never holds it.
+- `metadata`: from the stream being added to the torrent's file list being in (peers found).
+- `buffer`: from there to PopcornTorrent's « ready to play ».
+- `remux prepare` (MKV on the native player only): header read, first two segments written.
+- `first frame`: from there to the player really playing (`AVPlayer (remux)`, `AVPlayer (direct)`
+  or `VLC`).
+
+The `[Measure]` lines of the same start (the resume of a 1.6 GB test film at 70 %, on the local
+test seeder):
+
+```
+[Measure] first peer: t+1362 ms (engine +1216 ms) — file 0 B · on disk 0 B · head 0 B · 0 B/s · 1 peer(s), 1 seed(s)
+[Measure] first piece: t+1581 ms (engine +1435 ms) — file 1048576 B (1.0 MiB) · on disk 1048576 B (1.0 MiB) · head 0 B · 0 B/s · 1 peer(s), 1 seed(s)
+[Measure] torrent: piece 1048576 B (1.0 MiB), 1568 piece(s), 1643505184 B; file #0 of 1, 1643505184 B at offset 0 (pieces 0…1567)
+[Measure] readiness (engine rule, recomputed by the app): head 20 piece(s) = 20971520 B of the file + tail 2 piece(s) = 1435168 B; tail pinned from 1635778560 (7726624 B), head pin 0 B; full
+[Measure] ready: t+8514 ms (engine +8368 ms) — file 28698144 B (27.4 MiB) · on disk 28700672 B (27.4 MiB) · head 20971520 B (20.0 MiB) · 3126919 B/s (3.0 MiB/s) · 1 peer(s), 1 seed(s)
+[Measure] resume steering: … — read offset 1142296945, segment 114
+[Measure] remux ready: … — remux read 21594269 B of the file for 2 segment(s)
+[Measure] jump decided: … — resume, segment 114
+[Measure] jump written: … — segment 114, read from 1142296945 to 1152980534
+[Measure] first frame: t+18056 ms (engine +17910 ms) — file 66446880 B (63.4 MiB) · … — AVPlayer (remux)
+```
+
+`file` is what PopcornTorrent counts as downloaded (the file's verified pieces), `on disk` the
+file's allocated bytes, `head` the start of the file on disk without a gap, then libtorrent's
+download rate and the peers. The first peer and the first piece are sampled with the loading
+screen's status (every 0.5 to 1 s). The readiness line is recomputed by the app from
+PopcornTorrent's rule (it does not publish it).
+
 ## Tests
 
 **⌘U**: pick the **PopcornTimeTests** scheme (or PopcornTimeMac), destination *My Mac*. The
-macOS unit-test target runs in about 8 seconds, offline, in English whatever the Mac's
-language: 37 tests, 3,320 checks of the extra sources (apibay, Knaben, Cinemeta, TVMaze, the
-Top 100), the season-pack file choice, the bandwidth estimate and the lighter-release offer,
-the loading phases, bounded storage, the remux eviction and `FarTargetWatch` rules, the
-GCDWebServer log filter. The
+macOS unit-test target runs in about 15 seconds, offline, in English whatever the Mac's
+language: 871 tests, 24,780 checks of the extra sources (apibay, Knaben, Cinemeta, TVMaze, the
+Top 100), the catalogs (each source's sorts and genres, the mirror races, the first pages kept
+on disk), the Home feed (`PopcornTimeTests/Home`: its parsers, shelves, cache and loader on
+the answers recorded on 2026-11-14, its transport on hosts played by a `URLProtocol`, and the
+library behind its local shelves), the user's
+library (`PopcornTimeTests/Library`: the watch state, Continue Watching and the release it remembers, the next episode, new
+episodes), the links the app opens, the grids' paging (and when the Mac grid asks for its
+next page), the live search and the recent searches, the season-pack file choice, episode chaining (the next episode, the release in continuity, the card's countdown and
+its setting, the press guard, the release kept on Resume), the
+bandwidth estimate and the lighter-release offer, the loading phases, bounded storage, the
+remux eviction and `FarTargetWatch` rules, a jump wait's share on screen and its requests to
+the torrent engine, the
+GCDWebServer log filter, the play path (the subtitles search alongside the stream, an
+episode's sources behind one deadline, the `[Start]` lines, the cache purge, where the Mac
+resumes) and the remux engine on synthetic Matroska streams made in memory
+(`PopcornTimeTests/Remux`: the keyframe grid, a video with a single keyframe, a cluster
+timestamp no movie has, the fMP4 segment layout). The
 recorded API answers are in `PopcornTimeTests/Fixtures` (slimmed to the fields the parsers
 read); the tests never call an API. The playback files under test are compiled into the test
 bundle: a new file they come to depend on must be added to the PopcornTimeTests target too.
@@ -342,7 +740,7 @@ torrents are skipped unless `PT_INTERNET_TESTS=1` is set.
 From the terminal, one command runs everything:
 
 ```bash
-tools/run-tests.sh          # quick: the app's and PopcornTorrent's unit tests, in parallel (~10 s, < 1 min after a change)
+tools/run-tests.sh          # quick: the app's and PopcornTorrent's unit tests, in parallel (~15 s, < 1 min after a change)
 tools/run-tests.sh full     # quick + the long benches, the independent ones in parallel
 tools/run-tests.sh clean    # forget the cached builds
 ```
@@ -353,7 +751,7 @@ repository) they are skipped, and the summary says so.
 
 | Suite | Mode | Time |
 |---|---|---|
-| PopcornTimeTests (macOS) | quick | ~8 s (+ ~20 s when a source changed, ~70 s from scratch) |
+| PopcornTimeTests (macOS) | quick | ~15 s (+ ~20 s when a source changed, ~70 s from scratch) |
 | PopcornTorrentLogicTests, PopcornTorrent-Tests (offline, sandboxed) | quick | ~8 s |
 | PopcornTorrent SessionHarness: 11 modes and the network settings of the 3 profiles, in parallel (sandboxed) | full | ~3 min |
 | P10 / B6: a real AVPlayer on a 20 s clip (local benches, not in the repository: skipped without them) | full | ~3 min |
@@ -372,19 +770,41 @@ drives the tvOS app on an Apple TV simulator with the remote (`XCUIRemote`): Bac
 in, on a slow loading screen and on a load error, a page's summary and shelves, a show's
 episodes, the quality chooser, the poster menu, Settings, Search (Up from its results back to
 the tab bar), Downloads, the Watchlist and What's New, Menu pressed twice or three times in
-quick succession, Menu with the focus in the tab bar, and a grid's title and Sort / Genre
-scrolling away with the posters (Up from the first row reaches them, then the tab bar). 24
-tests, about 8 minutes. They read the public catalog APIs, never press Play, and
-set the app up with DEBUG launch arguments, so they are built with the DEBUG condition (the app
-for x86_64, the test runner for arm64):
+quick succession, Menu with the focus in the tab bar, a grid's title and Sort / Genre
+scrolling away with the posters (Up from the first row reaches them, then the tab bar), the
+links the app opens (`popcorntime://…` from every tab, a tab never shown yet included, a show
+link with a season, a link that comes while a Settings choice is open, the 5.2.0 Top Shelf
+link, broken links, a link behind the Terms of Service of a fresh install, the Home starting
+once the terms are accepted) and the Continue
+Watching row (an episode in progress has its card on the Shows tab, holding Select removes a
+card), the Home tab (`HomeUITests`, fed from recorded answers) and the poster grids
+(`GridUITests`), the next episode's card over the player and its press guard (`UpNextUITests`, on a
+DEBUG fixture), and Siri Remote presses replayed on the player over a loopback test torrent
+(`RemoteScriptUITests`, through `tools/remote-rig/fx-run.sh`; skipped unless `PT_REMOTE_SCRIPT`
+is set). 74 tests. They read the public catalog APIs, never
+press Play, and set the app up with DEBUG launch arguments, so they are built with the DEBUG
+condition (the app for x86_64, the test runner for arm64). The second command names its own
+DerivedData and result bundle: without them the results go to a `PopcornTime-…` folder of
+Xcode's DerivedData:
 
 ```bash
 xcodebuild -workspace PopcornTime.xcworkspace -scheme PopcornTimetvOSUITests \
   -destination "generic/platform=tvOS Simulator" -derivedDataPath build/ui \
   ONLY_ACTIVE_ARCH=NO SWIFT_ACTIVE_COMPILATION_CONDITIONS=DEBUG build-for-testing
 xcodebuild test-without-building -xctestrun build/ui/Build/Products/PopcornTimetvOSUITests_*.xctestrun \
-  -destination "platform=tvOS Simulator,name=<your Apple TV simulator>,arch=arm64"
+  -destination "platform=tvOS Simulator,name=<your Apple TV simulator>,arch=arm64" \
+  -derivedDataPath build/ui -resultBundlePath "build/ui/results-$(date +%Y%m%d-%H%M%S).xcresult"
 ```
+
+**The remote test tool** (`tools/remote-rig`, 5.3.0): `fx-run.sh` replays a script of Siri Remote
+presses (pause, left ×30 then a click, ±10 s, a held skip, screenshots, waits on a log line) on
+the DEBUG x86_64 app in a tvOS 26.5 simulator, through `RemoteScriptUITests` (built with the
+command above), while a private trackerless test torrent is seeded on 127.0.0.1 under
+`sandbox-exec` with `tools/localhost-only.sb`; it keeps the app's console (through the stdout
+shim built from `ptstdout.c`), the seeder's pieces and the presses, timestamped. The script
+language is described at the top of `RemoteScriptUITests.swift`, the variables at the top of
+`fx-run.sh`. The seeder, the test film and their tools are local benches, not in the
+repository. The simulator's remote only clicks: a touch-surface swipe can't be replayed.
 
 ## License
 
