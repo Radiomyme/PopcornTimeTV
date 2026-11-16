@@ -741,6 +741,8 @@
 "Remux.Resume.FromStart" = "Ricomincia dall'inizio";
 "Remux.Resume.Message.VLC" = "Questo file non consente di riprendere in qualità nativa: la ripresa da quel punto passa dal lettore VLC. Dall'inizio, la riproduzione resta nativa (HDR, Dolby Atmos).";
 "Player.Resuming.At" = "Ripresa da %@…";
+"Player.Resuming.Detail" = "Ripresa da %1$@ — %2$@";
+"Player.Resuming.Percent" = "%d%%";
 
 /* Continue Watching row (tvOS): second line of a show's card once the last episode played was finished, before "S2 · E6" and the episode's title. */
 "ContinueWatching.NextEpisode" = "Episodio successivo";
@@ -827,9 +829,10 @@
 "Skip Back 10 Seconds" = "Indietro di 10 secondi";
 "Skip Forward 10 Seconds" = "Avanti di 10 secondi";
 "Stream on Cellular Data" = "Streaming con dati cellulare";
-"Top Movies of the Last 48 Hours" = "Top 48 ore: film";
+"Top 100 Movies" = "Top 100: film";
 "Top Rated of the Year" = "I più votati dell'anno";
 "Top Shows of the Last 48 Hours" = "Top 48 ore: serie TV";
+"Top 100 Shows" = "Top 100: serie TV";
 "Trending Movies" = "Film di tendenza";
 "Trending Shows" = "Serie TV di tendenza";
 "When this is off, Popcorn Time asks before it starts a stream on cellular data or a personal hotspot." = "Se questa opzione è disattivata, Popcorn Time chiede conferma prima di avviare uno stream con i dati cellulare o un hotspot personale.";
@@ -850,3 +853,6 @@
 "UpNext.StillWatching.Stop" = "Interrompi";
 "Settings.AutoPlayNext" = "Riproduci l'episodio successivo";
 "Settings.AutoPlayNext.Footer" = "Verso la fine di un episodio, il successivo viene proposto con un conto alla rovescia e parte da solo, nella stessa versione quando possibile.";
+"Settings.UpNextCard" = "Scheda episodio successivo";
+"Settings.UpNextCard.Value" = "%d s prima della fine";
+"Settings.UpNextCard.Message" = "Quanto prima della fine di un episodio la sua scheda propone il successivo. Con Riproduci l'episodio successivo attivo, il successivo parte alla fine; altrimenti solo quando scegli Riproduci ora.";

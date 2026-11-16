@@ -117,7 +117,7 @@ struct HomeSource: Hashable, Sendable {
 
     static let calendarPrefix = "cm-calendar-"
 
-    /// Metadata of shows no loaded list knows (the Top 48 h): one request for
+    /// Metadata of shows no loaded list knows (the shows' ranking): one request for
     /// all of them, the card and the last 20 episodes each (a full meta of a
     /// long-running show is megabytes).
     static func lookupShows(ids: [String]) -> HomeSource {
@@ -195,21 +195,51 @@ struct HomeSource: Hashable, Sendable {
 
     // MARK: apibay
 
-    /// The most seeded HD episodes of the last 48 hours.
-    static let top48hShows = apibay("48h_208", .show)
-    /// The most seeded HD movies of the last 48 hours.
-    static let top48hMovies = apibay("48h_207", .movie)
+    /// apibay's list behind each ranked shelf (`data_top100_<list>.json`).
+    /// "207" / "208" (both shelves): the Top 100 of HD movies / of HD episodes, the most
+    /// seeded torrents of the moment — what the grids' « Top 100 » reads
+    /// (with SD and UHD merged in). "48h_207" / "48h_208": the most seeded
+    /// among the torrents UPLOADED in the last 48 hours — a few new
+    /// releases, then re-encodes of old films with a hundred seeders (the
+    /// movies' list of 2026-11-16: 45 titles, 3 in common with the Top 100).
+    /// A shelf's title (`HomeShelfID.defaultTitle`) and cache key follow
+    /// its list: changing the list is all a switch takes.
+    static let moviesRanking = "207"
+    static let showsRanking = "208"
+
+    static func isLast48Hours(_ list: String) -> Bool {
+        return list.hasPrefix("48h_")
+    }
+
+    /// The fewest titles (releases with an IMDb id) of a complete answer
+    /// of the shows' Top 100. Its hundred releases are episodes and season
+    /// packs of few shows: 26 on 2026-11-16 (the 48 h list: 49), so the
+    /// movies' 20 would take an honest day for a broken answer. Fewer than
+    /// this: an incomplete answer (`HomeCachePolicy.decision`), kept only
+    /// when nothing fuller is.
+    static let showsRankingMinimum = 10
+
+    /// The most seeded HD episodes (`showsRanking`).
+    static let topShows = apibay(showsRanking, .show, minimum: showsRankingMinimum)
+    /// The most seeded HD movies (`moviesRanking`).
+    static let topMovies = apibay(moviesRanking, .movie)
     /// The most seeded UHD movies: order and Dolby Vision / HDR / Atmos
     /// badges of the 4K shelf.
     static let topUHD = apibay("211", .movie)
 
-    private static func apibay(_ list: String, _ kind: HomeItem.Kind) -> HomeSource {
+    private static func apibay(_ list: String, _ kind: HomeItem.Kind, minimum: Int = 20) -> HomeSource {
         return HomeSource(key: apibayPrefix + list.replacingOccurrences(of: "_", with: "-"),
                           request: HomeRequest(host: .apibay, path: "/precompiled/data_top100_\(list).json"),
-                          parser: .apibay(kind), minimum: 20, allowsEmpty: false)
+                          parser: .apibay(kind), minimum: minimum, allowsEmpty: false)
     }
 
     static let apibayPrefix = "tpb-"
+
+    /// Every apibay list the hub reads. Another one kept on disk is a list
+    /// it read before (5.3.0's first builds kept the Top 48 h under
+    /// "tpb-48h-207" and "tpb-48h-208"): `HomePlan.isCurrent` says no, the
+    /// next refresh deletes it.
+    static let apibayLists: Set<String> = [topShows.key, topMovies.key, topUHD.key]
 
     /// What every key starts with, one prefix per service: the names of
     /// the store's own files (`HomeStore` touches no other file of its
@@ -258,10 +288,22 @@ struct HomeEntry: Codable, Hashable, Sendable {
     /// that puts the title in the ranking (nil: it names none, or "multi":
     /// the original language, or unknown).
     var releaseLanguages: [String]?
+    /// apibay: the seeders of the most seeded release (`releaseName`).
+    var releaseSeeders: Int?
+    /// apibay: releases without an IMDb id, and what their names read as
+    /// ("streetfighter|2026", `HomeParse.readings(ofRelease:kind:)`). Such an
+    /// entry has no id: the builder gives it to the title its lists know by
+    /// that name, or drops it.
+    var readings: [String]?
+    /// apibay, an entry without an id: the id of the titled releases of the
+    /// list whose names read the same, nil when none does. The builder gives
+    /// the entry to that title only, and only when its card has that name.
+    var listedUnder: String?
 
     init(item: HomeItem, language: String? = nil, weight: Int? = nil, showType: String? = nil,
          episodes: [HomeEpisode]? = nil, seeders: Int? = nil, qualities: Int? = nil,
-         releaseName: String? = nil, releaseLanguages: [String]? = nil) {
+         releaseName: String? = nil, releaseLanguages: [String]? = nil, releaseSeeders: Int? = nil,
+         readings: [String]? = nil, listedUnder: String? = nil) {
         self.item = item
         self.language = language
         self.weight = weight
@@ -271,6 +313,37 @@ struct HomeEntry: Codable, Hashable, Sendable {
         self.qualities = qualities
         self.releaseName = releaseName
         self.releaseLanguages = releaseLanguages
+        self.releaseSeeders = releaseSeeders
+        self.readings = readings
+        self.listedUnder = listedUnder
+    }
+
+    /// Releases without an IMDb id waiting for a title (`readings`).
+    var isPending: Bool {
+        return item.imdbId.isEmpty
+    }
+
+    /// This ranking entry with the releases of `other` (the same title):
+    /// seeders summed, the most seeded release's name and languages, every
+    /// format badge, the latest date.
+    func adding(releasesOf other: HomeEntry) -> HomeEntry {
+        var entry = self
+        entry.seeders = (seeders ?? 0) + (other.seeders ?? 0)
+        if (other.releaseSeeders ?? 0) > (releaseSeeders ?? 0) {
+            entry.releaseSeeders = other.releaseSeeders
+            entry.releaseName = other.releaseName
+            entry.releaseLanguages = other.releaseLanguages
+        }
+        entry.item.badges = HomeBadge.ordered(item.badges + other.item.badges)
+        entry.item.date = [item.date, other.item.date].compactMap { $0 }.max()
+        return entry
+    }
+
+    /// A ranking in order: most seeded first, equal seeders in their order.
+    static func mostSeededFirst(_ entries: [HomeEntry]) -> [HomeEntry] {
+        return entries.enumerated()
+            .sorted { ($0.element.seeders ?? 0) != ($1.element.seeders ?? 0) ? ($0.element.seeders ?? 0) > ($1.element.seeders ?? 0) : $0.offset < $1.offset }
+            .map(\.element)
     }
 
     /// A lookup that found nothing, remembered so the title is not asked again.
@@ -354,10 +427,10 @@ struct HomePlan: Sendable {
         return days.flatMap { [HomeSource.tvmaze(web: true, day: $0), HomeSource.tvmaze(web: false, day: $0)] }
     }
 
-    /// Last: the Top 48 h, the 4K ranking, the genre shelves.
+    /// Last: the two rankings, the 4K ranking, the genre shelves.
     var phase3: [HomeSource] {
         guard !light else { return [] }
-        return [.top48hShows, .top48hMovies, .topUHD] + genres
+        return [.topShows, .topMovies, .topUHD] + genres
     }
 
     /// Every source of the three phases.
@@ -366,10 +439,11 @@ struct HomePlan: Sendable {
     }
 
     /// Every key the plan can read: the others are leftovers (another day,
-    /// another year, shows no longer followed).
+    /// another year, shows no longer followed, a ranking's former list).
     func isCurrent(_ key: String) -> Bool {
         if key.hasPrefix(HomeSource.calendarPrefix) { return key == calendar?.key }
         if key.hasPrefix(HomeSource.tvmazePrefix) { return days.contains { key.hasSuffix($0) } }
+        if key.hasPrefix(HomeSource.apibayPrefix) { return HomeSource.apibayLists.contains(key) }
         return true
     }
 }

@@ -67,35 +67,38 @@ struct WhatsNewRelease {
     static let v5_3_0 = WhatsNewRelease(version: "5.3.0", items: [
         WhatsNewItem(id: "home", symbol: "house",
                      titleFR: "Un nouvel écran d'accueil",
-                     bodyFR: "L'app s'ouvre sur Accueil : les sorties à la une en grand, puis Reprendre, les nouveaux épisodes de vos séries, les films et séries du moment, les nouveautés 4K, le Top 48 h, Ma liste et vos genres. Réglages › Accueil choisit les langues et les rangées.",
+                     bodyFR: "L'app s'ouvre sur Accueil : les sorties à la une en grand, puis Reprendre, les nouveaux épisodes de vos séries, les films et séries du moment, les nouveautés 4K, le Top 100 des films et celui des séries, Ma liste et vos genres. Réglages › Accueil choisit les langues et les rangées.",
                      titleEN: "A new Home screen",
-                     bodyEN: "The app opens on Home: the featured releases up top, then Continue Watching, new episodes of your shows, trending movies and shows, new in 4K, the 48-hour Top, your Watchlist and your genres. Settings › Home picks the languages and the rows.",
+                     bodyEN: "The app opens on Home: the featured releases up top, then Continue Watching, new episodes of your shows, trending movies and shows, new in 4K, the Top 100 movies and shows, your Watchlist and your genres. Settings › Home picks the languages and the rows.",
                      platforms: [.tvOS, .iOS, .macOS]),
-        // Apple TV: the user's own Apple TV delivered a Dolby Vision 8.1 +
-        // E-AC-3 Atmos file to the native player on resume. Rewinds and far
-        // jumps are not announced: the paused rewind froze on that Apple TV,
-        // and its fix ran only on the simulator (add them back once the
-        // device session of the fix has passed).
         WhatsNewItem(id: "resume-tv", symbol: "play.circle",
                      titleFR: "Reprendre là où vous vous étiez arrêté",
-                     bodyFR: "Un film encore en téléchargement reprend en quelques secondes à l'endroit enregistré, dans le lecteur natif, qui reçoit tels quels le Dolby Vision et le Dolby Atmos du fichier : le torrent télécharge d'abord ce passage.",
+                     bodyFR: "Un film encore en téléchargement reprend à l'endroit enregistré, et les retours en arrière comme les sauts lointains restent dans le lecteur natif, qui reçoit tels quels le Dolby Vision et le Dolby Atmos du fichier. Pendant l'attente, l'écran dit où en est le téléchargement : « Reprise à 22:35 — 45 % · 9,6 Mo/s ».",
                      titleEN: "Resume where you left off",
-                     bodyEN: "A film that is still downloading resumes at its saved point in a few seconds, in the native player, which gets the file's Dolby Vision and Dolby Atmos untouched: the torrent fetches that part first.",
+                     bodyEN: "A film that is still downloading resumes at its saved point, and rewinds and far jumps stay in the native player too, which gets the file's Dolby Vision and Dolby Atmos untouched. While it waits, the screen says how far the download has got: “Resuming at 22:35 — 45% · 9.6 MB/s”.",
                      platforms: [.tvOS]),
         // iPhone / iPad and Mac: the resume was run there; the far jumps and
         // rewinds of the merged tree were not, so they are not announced.
         WhatsNewItem(id: "resume", symbol: "play.circle",
                      titleFR: "Reprendre là où vous vous étiez arrêté",
-                     bodyFR: "Un film encore en téléchargement reprend en quelques secondes à l'endroit enregistré, sans quitter le lecteur natif : le torrent télécharge d'abord ce passage.",
+                     bodyFR: "Un film encore en téléchargement reprend à l'endroit enregistré, sans quitter le lecteur natif : le torrent télécharge d'abord ce passage.",
                      titleEN: "Resume where you left off",
-                     bodyEN: "A film that is still downloading resumes at its saved point in a few seconds, without leaving the native player: the torrent fetches that part first.",
+                     bodyEN: "A film that is still downloading resumes at its saved point, without leaving the native player: the torrent fetches that part first.",
                      platforms: [.iOS, .macOS]),
+        WhatsNewItem(id: "up-next-tv", symbol: "forward.end",
+                     titleFR: "Les épisodes s'enchaînent",
+                     bodyFR: "60 s avant la fin (Réglages › Carte Épisode suivant : de 30 à 90 s), la carte « Épisode suivant » propose la suite. Elle démarre tout de suite avec « Lire maintenant », sinon à la fin de l'épisode si « Enchaîner les épisodes » est activé. La suite est prise dans une version proche (le même pack d'abord, sinon le même groupe ou la même qualité), sans redemander la qualité. « Reprendre » relance la version déjà regardée, sans question.",
+                     titleEN: "Episodes play on",
+                     bodyEN: "60 s before the end (Settings › Next Episode Card: 30 to 90 s), the Next Episode card offers the next one. It starts at once with Play Now, otherwise at the end of the episode when Autoplay Next Episode is on. The next one comes from a matching release (the same pack first, else the same group or quality), without asking for the quality again. Resume replays the release you were watching, with no question.",
+                     platforms: [.tvOS]),
+        // iPhone / iPad and Mac: the card at 60 s was not seen running there
+        // (only its setting, on screen), so its time is not announced.
         WhatsNewItem(id: "up-next", symbol: "forward.end",
                      titleFR: "Les épisodes s'enchaînent",
-                     bodyFR: "30 s avant la fin, la carte « Épisode suivant » lance la suite après un compte à rebours, dans une version proche (le même pack d'abord, sinon le même groupe ou la même qualité), sans redemander la qualité. « Reprendre » relance la version déjà regardée, sans question. Le réglage « Enchaîner les épisodes » arrête le compte à rebours.",
+                     bodyFR: "Avant la fin, la carte « Épisode suivant » propose la suite. Elle démarre tout de suite avec « Lire maintenant », sinon à la fin de l'épisode si « Enchaîner les épisodes » est activé. La suite est prise dans une version proche (le même pack d'abord, sinon le même groupe ou la même qualité), sans redemander la qualité. « Reprendre » relance la version déjà regardée, sans question.",
                      titleEN: "Episodes play on",
-                     bodyEN: "30 s before the end, the Next Episode card starts the next one after a countdown, in a matching release (the same pack first, else the same group or quality), without asking for the quality again. Resume replays the release you were watching, with no question. The Autoplay Next Episode setting stops the countdown.",
-                     platforms: [.tvOS, .iOS, .macOS]),
+                     bodyEN: "Before the end, the Next Episode card offers the next one. It starts at once with Play Now, otherwise at the end of the episode when Autoplay Next Episode is on. The next one comes from a matching release (the same pack first, else the same group or quality), without asking for the quality again. Resume replays the release you were watching, with no question.",
+                     platforms: [.iOS, .macOS]),
         WhatsNewItem(id: "detail", symbol: "bolt",
                      titleFR: "Des fiches qui s'ouvrent tout de suite",
                      bodyFR: "Une fiche montre aussitôt ce que l'affiche connaissait, puis se complète ; les sources arrivent une à une.",
@@ -381,6 +384,16 @@ enum WhatsNewGate {
                                              lastSeenVersion: defaults.string(forKey: lastSeenKey),
                                              isFreshInstall: isFreshInstall,
                                              launchedFromURL: launchedFromURL)
+        // Once per launch (`WhatsNewLaunchCheck`, `WhatsNewPresenter`), in every build: a device
+        // session's console tells whether the notes came up.
+        let said: String
+        switch decision {
+        case .present: said = "present"
+        case .markSeenSilently: said = "marked seen silently"
+        case .skip: said = "skip"
+        }
+        print("[WhatsNew] \(said) — last seen \(defaults.string(forKey: lastSeenKey) ?? "none"), notes \(release.version), "
+              + "app \(appVersion)\(isFreshInstall ? ", fresh install" : "")\(launchedFromURL ? ", launched from a link" : "")")
         switch decision {
         case .present, .markSeenSilently:
             defaults.set(release.version, forKey: lastSeenKey)

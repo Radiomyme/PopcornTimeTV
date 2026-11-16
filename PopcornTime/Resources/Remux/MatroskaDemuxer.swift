@@ -526,6 +526,8 @@ final class MatroskaDemuxer {
 
     private var runtimeByNumber: [UInt64: TrackRuntime] = [:]
     private var blockedProbe: ZeroProbe?
+    /// The first byte of the zero region that blocked the last call (`blockedProbe`), nil when none did.
+    var blockedOffset: UInt64? { blockedProbe?.region.offset }
     /// Non-nil while hunting for the next Cluster after unparseable bytes.
     private var resyncFrom: UInt64?
     /// End of the last cluster returned, and its timestamp: blocks found

@@ -37,6 +37,9 @@ extension PTTorrentStreamer {
     func noteStartBuffered(fileName: String) {
         startTrace?.reach(.buffer, detail: fileName)
         noteStartMeasureGeometry()
+        // The head and the tail the engine waited for: whichever came since
+        // the last sample is logged now, before `ready`.
+        noteStartMeasureRequiredEnds(atReady: true)
         noteStartMeasure(.ready)
     }
 
@@ -124,6 +127,29 @@ extension PTTorrentStreamer {
         let measure = startMeasure
         if measure.isPending(.firstPeer), torrentStatus.peers > 0 { noteStartMeasure(.firstPeer) }
         if measure.isPending(.firstPiece), totalDownloaded.longLongValue > 0 { noteStartMeasure(.firstPiece) }
+        noteStartMeasureRequiredEnds()
+    }
+
+    /// `[Measure] head on disk` / `tail on disk`: the first sample at which
+    /// the head, then the tail, that the engine waits for before
+    /// `readyToPlay` (its rule, `PlaybackStartMeasure.Readiness`) is on disk
+    /// in full — which of the two ended the start buffer. Nothing once both
+    /// are logged; nothing before the metadata.
+    private func noteStartMeasureRequiredEnds(atReady: Bool = false) {
+        guard isMeasuredStream, hasMetadata else { return }
+        let measure = startMeasure
+        guard measure.isPending(.headOnDisk) || measure.isPending(.tailOnDisk) else { return }
+        let statistics = storageStatistics
+        guard let pieceLength = statistics["pieceLength"]?.int64Value, pieceLength > 0,
+              let fileSize = statistics["fileSize"]?.int64Value, fileSize > 0,
+              let rule = PlaybackStartMeasure.Readiness.engineRule(measure.geometry(pieceLength: pieceLength, fileSize: fileSize),
+                                                                    bounded: statistics["bounded"]?.boolValue ?? isStorageBounded)
+        else { return }
+        let tailStart = fileSize - rule.tailBytes
+        let due = PlaybackStartMeasure.requiredEnds(rule, fileSize: fileSize, headOnDisk: firstMissingOffset(from: 0),
+                                                    tailOnDisk: rule.tailBytes > 0 && isRangeAvailable(tailStart, length: rule.tailBytes),
+                                                    atReady: atReady)
+        for (step, detail) in due where measure.isPending(step) { noteStartMeasure(step, detail: detail) }
     }
 
     /// The torrent's and the readiness requirement's `[Measure]` lines, once

@@ -44,6 +44,11 @@ public struct UserNavigationTarget: Equatable {
     /// Why `wanted(current:played:clock:)` last dropped a target (logs); nil when it dropped none
     /// since the last move.
     public private(set) var lastDrop: Drop?
+    /// The target `wanted(current:played:clock:)` last dropped (logs: the line names the target
+    /// really dropped, not one a log saw earlier); nil when none since the last move.
+    public private(set) var lastDroppedTarget: Double?
+    /// Drops so far (logs: each drop is told once).
+    public private(set) var dropCount = 0
     private var playedAtTarget: Double?
     private var setAt: TimeInterval?
 
@@ -68,8 +73,24 @@ public struct UserNavigationTarget: Equatable {
         self.from = from.flatMap { $0.isFinite && $0 >= 0 ? $0 : nil }
         isConfirmed = confirmed
         lastDrop = nil
+        lastDroppedTarget = nil
         playedAtTarget = played
         setAt = clock
+    }
+
+    /// Where a move AVKit reports as coming from `old` really comes from, the player reading
+    /// `current` (`currentTime()`): a press made while the previous move is still held is counted
+    /// by AVKit from that move's target (`old` within `thresholdSeconds` of `target`) while the
+    /// player still reads where the previous move came from — that origin (`from`) is kept, so that
+    /// the player's unchanged time is not taken for a move elsewhere (Apple TV, 16 November 2026: a
+    /// second +10 s press while the first seek was held was dropped as « elsewhere »). Not when the
+    /// previous seek already shows (`current` at its target: the player IS at `old`), and not
+    /// without a known origin: `old` then.
+    public func origin(ofMoveFrom old: Double?, current: Double?) -> Double? {
+        guard let old = old, old.isFinite, let target = target, let from = from,
+              abs(old - target) <= Self.thresholdSeconds else { return old }
+        if let current = current, current.isFinite, abs(current - target) <= Self.thresholdSeconds { return old }
+        return from
     }
 
     /// Forgets the target (a new item, a recovery that took it over).
@@ -93,8 +114,7 @@ public struct UserNavigationTarget: Equatable {
         let current = current.flatMap { $0.isFinite && $0 >= 0 ? $0 : nil }
         guard let target = target else { return current }
         if played != playedAtTarget {
-            clear()
-            lastDrop = .played
+            drop(.played)
             return current
         }
         guard let now = current else { return target }
@@ -104,9 +124,16 @@ public struct UserNavigationTarget: Equatable {
         if now >= from - Self.thresholdSeconds, now <= from + Self.thresholdSeconds + elapsed * Self.maxRate {
             return target
         }
-        clear()
-        lastDrop = .elsewhere
+        drop(.elsewhere)
         return current
+    }
+
+    private mutating func drop(_ reason: Drop) {
+        let dropped = target
+        clear()
+        lastDrop = reason
+        lastDroppedTarget = dropped
+        dropCount += 1
     }
 }
 

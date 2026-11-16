@@ -82,7 +82,10 @@ final class HomePresentationTests: CheckedTestCase {
         eq(en.title(of: genre), "Science Fiction Movies", "in English")
         eq(fr.title(ofShelf: HomeShelfID.genre(.show, "Drama")), "Séries : Drame", "from the id alone (Settings)")
         eq(fr.title(ofShelf: HomeShelfID.continueWatching), "Reprendre", "Continue Watching")
-        eq(fr.title(ofShelf: HomeShelfID.top48hShows), "Top 48 h : séries", "a ranked shelf")
+        eq(fr.title(ofShelf: HomeShelfID.topShows), "Top 100 : séries", "a ranked shelf: the shows' Top 100")
+        eq(en.title(ofShelf: HomeShelfID.topShows), "Top 100 Shows", "in English")
+        eq(fr.title(ofShelf: HomeShelfID.topMovies), "Top 100 : films", "the movies' Top 100")
+        eq(en.title(ofShelf: HomeShelfID.topMovies), "Top 100 Movies", "in English")
         for id in HomeShelfID.order where id != HomeShelfID.hero {
             check(fr.title(ofShelf: id) != HomeShelfID.defaultTitle(id) || id == "none", "\(id) has a French title", fr.title(ofShelf: id))
         }
@@ -291,8 +294,8 @@ final class HomePresentationTests: CheckedTestCase {
         eq(last.heroItems.count, 8, "the hero's eight titles")
         let ids = last.rows.map(\.id)
         for id in [HomeShelfID.trendingMovies, HomeShelfID.newMovies, HomeShelfID.uhd, HomeShelfID.airedEpisodes,
-                   HomeShelfID.trendingShows, HomeShelfID.newShows, HomeShelfID.moviesOfTheYear, HomeShelfID.top48hShows,
-                   HomeShelfID.top48hMovies] {
+                   HomeShelfID.trendingShows, HomeShelfID.newShows, HomeShelfID.moviesOfTheYear, HomeShelfID.topShows,
+                   HomeShelfID.topMovies] {
             check(ids.contains(id), "the page has \(id)", "\(ids)")
         }
         eq(ids.first ?? "", HomeShelfID.trendingMovies, "the shelf the UI tests reach first")

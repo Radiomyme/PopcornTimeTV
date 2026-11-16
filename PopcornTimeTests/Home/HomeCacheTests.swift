@@ -55,7 +55,7 @@ final class HomeCacheTests: CheckedTestCase {
         eq(life(.tvmaze(web: true, day: "2026-11-14")), HomeCachePolicy.Lifetime(fresh: hour, usable: day), "TVMaze, today: 1 h / 24 h")
         eq(life(.tvmaze(web: false, day: "2026-11-13")), HomeCachePolicy.Lifetime(fresh: day, usable: 7 * day), "TVMaze, a past day: 24 h / 7 days")
         eq(life(.tvmaze(web: true, day: "2026-11-14"), at: now.addingTimeInterval(day)), HomeCachePolicy.Lifetime(fresh: day, usable: 7 * day), "the same list tomorrow is a past day's")
-        for source in [HomeSource.top48hShows, .top48hMovies, .topUHD] {
+        for source in [HomeSource.topShows, .topMovies, .topUHD] {
             eq(life(source), HomeCachePolicy.Lifetime(fresh: 2 * hour, usable: day), "\(source.key): apibay, 2 h / 24 h")
         }
         eq(life(.lookupShows(ids: ["tt0413573"])), HomeCachePolicy.Lifetime(fresh: 7 * day, usable: 7 * day), "lookups: 7 days")
@@ -63,7 +63,7 @@ final class HomeCacheTests: CheckedTestCase {
         // The keys are file names: letters, digits and dashes.
         let every: [HomeSource] = [.movieTop, .seriesTop, .movieFeatured, .movieTopNext, .seriesYear(2026), .genre(.show, "Sci-Fi"),
                                    HomeSource.calendar(ids: ["tt31510819"])!, .ytsNew(2026), .yts4K, .ytsYear(2026), .ytsTop(2026), .ytsLikes(2026),
-                                   .tvmaze(web: true, day: "2026-11-14"), .tvmaze(web: false, day: "2026-11-14"), .top48hShows, .top48hMovies, .topUHD,
+                                   .tvmaze(web: true, day: "2026-11-14"), .tvmaze(web: false, day: "2026-11-14"), .topShows, .topMovies, .topUHD,
                                    .lookupShows(ids: ["tt0413573"]), .lookupMovie(id: "tt4154796")]
         check(every.allSatisfy { $0.key.allSatisfy { $0.isASCII && ($0.isLetter || $0.isNumber || $0 == "-") } }, "keys are safe file names", "\(every.map(\.key))")
         eq(Set(every.map(\.key)).count, every.count, "and distinct")
@@ -101,7 +101,7 @@ final class HomeCacheTests: CheckedTestCase {
         eq(HomeSource.movieTop.minimum, 20, "a Cinemeta page is about 50")
         check(HomeSource.ytsYear(2026).minimum == 30 && HomeSource.ytsYear(2026).allowsEmpty
               && HomeSource.seriesYear(2026).minimum == 30 && HomeSource.seriesYear(2026).allowsEmpty, "lists of one year")
-        check(!HomeSource.movieTop.allowsEmpty && !HomeSource.top48hShows.allowsEmpty, "the others always have titles")
+        check(!HomeSource.movieTop.allowsEmpty && !HomeSource.topShows.allowsEmpty, "the others always have titles")
         check(HomeSource.yts4K.minimum == 20 && !HomeSource.yts4K.allowsEmpty, "the 4K additions are not bound to a year")
         check(HomeSource.tvmaze(web: true, day: "2026-11-14").allowsEmpty && HomeSource.tvmaze(web: true, day: "2026-11-14").minimum == 0, "a day's schedule")
     }
@@ -128,8 +128,8 @@ final class HomeCacheTests: CheckedTestCase {
         eq(files.count, lists.count, "one file per list")
         check(files.allSatisfy { $0.pathExtension == "json" }, "json files")
         let fixtureBytes = ["cm_movie_top.json", "cm_series_top.json", "cm_series_year_2026.json", "yts_new_2026.json", "yts_4k.json", "yts_year_2026.json",
-                            "yts_year_2026.json", "tvm_web_2026-11-13.json", "tvm_us_2026-11-13.json", "tvm_web_2026-11-14.json", "tpb_48h_208.json",
-                            "tpb_48h_207.json", "tpb_211.json"].reduce(0) { $0 + HomeFixture.data($1).count }
+                            "yts_year_2026.json", "tvm_web_2026-11-13.json", "tvm_us_2026-11-13.json", "tvm_web_2026-11-14.json", "tpb_208.json",
+                            "tpb_207.json", "tpb_211.json"].reduce(0) { $0 + HomeFixture.data($1).count }
         check(store.size > 0 && store.size < 2 * fixtureBytes, "the cache is of the order of the trimmed answers", "\(store.size) bytes for \(fixtureBytes) of fixtures")
         // The sources that were down, next to the lists.
         eq(store.readDown(), [], "none remembered")
@@ -235,11 +235,11 @@ final class HomeCacheTests: CheckedTestCase {
 
         eq(settings.hiddenShelves, [], "nothing hidden by default")
         settings.setShelf(HomeShelfID.uhd, hidden: true)
-        settings.setShelf(HomeShelfID.top48hMovies, hidden: true)
-        eq(settings.hiddenShelves, [HomeShelfID.uhd, HomeShelfID.top48hMovies], "hidden shelves")
+        settings.setShelf(HomeShelfID.topMovies, hidden: true)
+        eq(settings.hiddenShelves, [HomeShelfID.uhd, HomeShelfID.topMovies], "hidden shelves")
         eq(sandbox.defaults.array(forKey: "popcornkit.home.hiddenShelves") as? [String], ["top48hMovies", "uhd"], "under the documented key")
         settings.setShelf(HomeShelfID.uhd, hidden: false)
-        eq(settings.hiddenShelves, [HomeShelfID.top48hMovies], "shown again")
+        eq(settings.hiddenShelves, [HomeShelfID.topMovies], "shown again")
         check(UserDefaults.standard.object(forKey: HomeSettings.Key.hiddenShelves) == nil, "the standard defaults are untouched")
     }
 
@@ -264,7 +264,7 @@ final class HomeCacheTests: CheckedTestCase {
             "/schedule/web?date=2026-11-12", "/schedule?country=US&date=2026-11-12",
         ], "then the shelves of the year, the new shows and three days of schedules")
         eq(plan.phase3.map(\.request.path), [
-            "/precompiled/data_top100_48h_208.json", "/precompiled/data_top100_48h_207.json", "/precompiled/data_top100_211.json",
+            "/precompiled/data_top100_208.json", "/precompiled/data_top100_207.json", "/precompiled/data_top100_211.json",
             "/catalog/movie/top/genre=Action.json", "/catalog/series/top/genre=Drama.json",
         ], "then the rankings and the genres")
         check(plan.calendar == nil, "nobody followed: no calendar")
@@ -272,6 +272,10 @@ final class HomeCacheTests: CheckedTestCase {
         eq(followed.phase2.map(\.request.path)[3], "/catalog/series/calendar-videos/calendarVideosIds=tt31510819.json", "the followed shows' calendar is in the second phase")
         check(followed.isCurrent(followed.calendar!.key) && !plan.isCurrent(followed.calendar!.key), "another set of shows' calendar is a leftover")
         check(plan.isCurrent("tvm-web-2026-11-12") && !plan.isCurrent("tvm-web-2026-11-11") && plan.isCurrent(HomeSource.movieTop.key), "so is a day out of the window")
+        // The former lists (the Top 48 h, 5.3.0's first builds) are leftovers; the lists read are not.
+        check(!plan.isCurrent("tpb-48h-207"), "the movies' Top 48 h is a leftover")
+        check(!plan.isCurrent("tpb-48h-208"), "the shows' Top 48 h is a leftover")
+        check([HomeSource.topShows, .topMovies, .topUHD].allSatisfy { plan.isCurrent($0.key) }, "the three rankings read are current")
         // New Year's Eve, 23:30 in New York: the plan follows UTC.
         let newYear = HomePlan(now: CatalogDates.date(from: "2027-01-01T04:30:00Z")!, followedShowIds: [], genres: [])
         eq(newYear.year, 2027, "the year in UTC")

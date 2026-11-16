@@ -267,7 +267,8 @@
 "Movies of the Year" = "Les films de l’année";
 "Top Rated of the Year" = "Films bien notés de l’année";
 "Top Shows of the Last 48 Hours" = "Top 48 h : séries";
-"Top Movies of the Last 48 Hours" = "Top 48 h : films";
+"Top 100 Shows" = "Top 100 : séries";
+"Top 100 Movies" = "Top 100 : films";
 "%@ Movies" = "Films : %@";
 "%@ Shows" = "Séries : %@";
 "Biography" = "Biographie";
@@ -530,6 +531,8 @@
 "Remux.Resume.FromStart" = "Reprendre du début";
 "Remux.Resume.Message.VLC" = "Ce fichier ne permet pas de reprendre en qualité native : la reprise à cet endroit passe par le lecteur VLC. Depuis le début, la lecture reste native (HDR, Dolby Atmos).";
 "Player.Resuming.At" = "Reprise à %@…";
+"Player.Resuming.Detail" = "Reprise à %1$@ — %2$@";
+"Player.Resuming.Percent" = "%d %%";
 
 /* Continue Watching row (tvOS): second line of a show's card once the last episode played was finished, before "S2 · E6" and the episode's title. */
 "ContinueWatching.NextEpisode" = "Épisode suivant";
@@ -550,3 +553,6 @@
 "UpNext.StillWatching.Stop" = "Arrêter";
 "Settings.AutoPlayNext" = "Enchaîner les épisodes";
 "Settings.AutoPlayNext.Footer" = "Vers la fin d'un épisode, le suivant est proposé avec un compte à rebours, puis démarre seul, dans la même version quand c'est possible.";
+"Settings.UpNextCard" = "Carte Épisode suivant";
+"Settings.UpNextCard.Value" = "%d s avant la fin";
+"Settings.UpNextCard.Message" = "Combien de temps avant la fin d'un épisode sa carte propose le suivant. Avec « Enchaîner les épisodes », le suivant démarre à la fin ; sinon seulement quand vous choisissez Lire maintenant.";

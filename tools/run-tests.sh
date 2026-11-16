@@ -83,7 +83,8 @@ app_tests() {
   local start=$EPOCHREALTIME dd=${PT_APP_DERIVED_DATA:-$CACHE/app-dd} stamp=$CACHE/app.stamp hash f
   # The workspace too: its package pins (Package.resolved) and a local package override decide
   # which PopcornTorrent the bundle is built against.
-  hash=$(inputs_hash $REPO PopcornKit PopcornTime/Resources PopcornTime/Startup PopcornTimeTests PopcornTime.xcodeproj \
+  # The bundle also compiles files of PopcornTime/UI (the Home's layout rules, What's New) and TopShelf.
+  hash=$(inputs_hash $REPO PopcornKit PopcornTime/Resources PopcornTime/Startup PopcornTime/UI TopShelf PopcornTimeTests PopcornTime.xcodeproj \
       PopcornTime.xcworkspace/contents.xcworkspacedata PopcornTime.xcworkspace/xcshareddata/swiftpm/Package.resolved)
   f=$(fork_dir); [[ -n $f ]] && hash=$hash-$(inputs_hash $f PopcornTorrent Package.swift Package.resolved)
   local products=$dd/Build/Products/Debug built=cached

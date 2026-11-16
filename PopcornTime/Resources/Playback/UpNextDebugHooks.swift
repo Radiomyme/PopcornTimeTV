@@ -32,7 +32,11 @@ import PopcornKit
 ///   itself `s` seconds after it shows (accept also answers « Still
 ///   watching? »).
 /// - `-PTDebugUpNextCardAt <s>`: the card at that position of the file
-///   (short test episodes) instead of 30 s before its end.
+///   (short test episodes) instead of the setting's time before its end
+///   (« Next Episode Card », 60 s by default): it wins over the setting.
+/// - `-PTDebugUpNextPressGuard <s>`: « Play Now » / « Continue » on the Apple
+///   TV cards count that long after the card appeared instead of 1 s
+///   (`UpNextPressGuard`; the UI tests, whose presses take longer than 1 s).
 /// - `-PTDebugUpNextStillAfter <n>`: « Still watching? » after n episodes
 ///   chained with no action (default 3).
 /// - `-PTDebugNoSubtitleSearch YES`: no subtitle search leaves the device
@@ -199,7 +203,7 @@ enum UpNextDebugHooks {
                 guard let session = session else { return }
                 print("[UpNextDebug] answer \(answer.action)")
                 switch answer.action {
-                case "accept": session.accept()
+                case "accept": session.accept(source: .debug)
                 case "cancel": session.cancel()
                 default: session.chooseVersion()
                 }

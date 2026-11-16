@@ -669,8 +669,11 @@ public final class HomeFeed: @unchecked Sendable {
             list = HomeSourceList(key: source.key, savedAt: previous?.savedAt ?? now, complete: true,
                                   entries: Array((entries + unknown + earlier).prefix(200)))
         } else {
-            let decision = HomeCachePolicy.decision(count: entries.count, minimum: source.minimum,
-                                                    allowsEmpty: source.allowsEmpty, previous: previous?.entries.count)
+            // The titles only: a ranking's releases without an id (pending)
+            // may name no title at all.
+            let titled = { (list: [HomeEntry]) in list.filter { !$0.isPending }.count }
+            let decision = HomeCachePolicy.decision(count: titled(entries), minimum: source.minimum,
+                                                    allowsEmpty: source.allowsEmpty, previous: previous.map { titled($0.entries) })
             guard decision.accept else { return .refused }
             list = HomeSourceList(key: source.key, savedAt: now, complete: decision.complete, entries: entries)
         }

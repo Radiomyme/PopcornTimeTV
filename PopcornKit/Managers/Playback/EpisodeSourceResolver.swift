@@ -32,7 +32,8 @@ import Foundation
 ///   the press then finds the answer, or joins the request in flight — the
 ///   deadline counts from the moment the sources were asked.
 ///
-/// Each call logs its `[Start] sources` line (`PlaybackStartTrace`).
+/// Each call logs its `[Start] sources` line (`PlaybackStartTrace`) — `[UpNext] sources asked ahead`
+/// when episode chaining asks during playback, which is no start.
 /// Completions run on the main queue. Any thread.
 public final class EpisodeSourceResolver {
 
@@ -142,6 +143,8 @@ public final class EpisodeSourceResolver {
         let isEnough: ((Sources) -> Bool)?
         let completion: (Sources) -> Void
         let late: ((Sources) -> Void)?
+        /// Asked ahead by episode chaining, not by a press (`resolve`'s `askedAhead`).
+        let askedAhead: Bool
     }
 
     private struct Entry {
@@ -226,8 +229,10 @@ public final class EpisodeSourceResolver {
     /// caller waiting — for the next source to answer, when it is asked
     /// again, for the complete list, or for `patience` seconds after the
     /// sources were asked, when what is in answers it whatever it holds.
+    /// `askedAhead`: episode chaining asks for the next episode during playback — its timing is no
+    /// start's (`[UpNext] sources asked ahead: …` instead of `[Start] sources: …`).
     public func resolve(showId: String, showTitle: String?, season: Int, episode: Int,
-                        isEnough: ((Sources) -> Bool)? = nil,
+                        isEnough: ((Sources) -> Bool)? = nil, askedAhead: Bool = false,
                         completion: @escaping (Sources) -> Void, late: ((Sources) -> Void)? = nil) {
         guard showId.hasPrefix("tt") else {
             deliver { completion(Sources()) }
@@ -240,15 +245,15 @@ public final class EpisodeSourceResolver {
         if let entry = usableEntry(key), entry.completedAt != nil {
             let sources = entry.sources
             lock.unlock()
-            log(PlaybackStartTrace.sourcesLine(elapsed: 0, detail: Self.detail(request, sources) + ", kept from "
-                                               + "\(Int((askedAt - entry.startedAt).rounded())) s ago"))
+            log(Self.sourcesLine(elapsed: 0, detail: Self.detail(request, sources) + ", kept from "
+                                 + "\(Int((askedAt - entry.startedAt).rounded())) s ago", askedAhead: askedAhead))
             deliver { completion(sources) }
             return
         }
         let start = startIfNeeded(request)
         nextWaiter += 1
         entries[key]?.waiters.append(Waiter(id: nextWaiter, askedAt: askedAt, isEnough: isEnough,
-                                            completion: completion, late: late))
+                                            completion: completion, late: late, askedAhead: askedAhead))
         // A request in flight may already be answerable (every source but a
         // benched one in, or its deadline past); else its own deadline, set
         // when it was sent, answers this caller too.
@@ -464,7 +469,7 @@ public final class EpisodeSourceResolver {
             if !sources.isComplete { entry.lateWaiters += waiters }
             entries[key] = entry
             let lines = waiters.map { waiter in
-                PlaybackStartTrace.sourcesLine(elapsed: time - waiter.askedAt, detail: Self.detail(sources))
+                Self.sourcesLine(elapsed: time - waiter.askedAt, detail: Self.detail(sources), askedAhead: waiter.askedAhead)
             }
             return { [deliver, log] in
                 lines.forEach(log)
@@ -497,12 +502,20 @@ public final class EpisodeSourceResolver {
             entry.lateWaiters.append(waiter)
             entries[key] = entry
             lock.unlock()
-            log(PlaybackStartTrace.sourcesLine(elapsed: time - waiter.askedAt, detail: Self.detail(sources)))
+            log(Self.sourcesLine(elapsed: time - waiter.askedAt, detail: Self.detail(sources), askedAhead: waiter.askedAhead))
             waiter.completion(sources)
         }
     }
 
     // MARK: Lines
+
+    /// `PlaybackStartTrace.sourcesLine`, or for sources asked ahead by episode chaining
+    /// "[UpNext] sources asked ahead: 810 ms — …".
+    static func sourcesLine(elapsed: TimeInterval, detail: String, askedAhead: Bool) -> String {
+        let line = PlaybackStartTrace.sourcesLine(elapsed: elapsed, detail: detail)
+        guard askedAhead, line.hasPrefix("[Start] sources:") else { return line }
+        return "[UpNext] sources asked ahead:" + line.dropFirst("[Start] sources:".count)
+    }
 
     private static func detail(_ request: Request, _ sources: Sources) -> String {
         return "\(request.key): " + detail(sources)

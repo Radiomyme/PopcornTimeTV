@@ -267,7 +267,8 @@
 "Movies of the Year" = "Movies of the Year";
 "Top Rated of the Year" = "Top Rated of the Year";
 "Top Shows of the Last 48 Hours" = "Top Shows of the Last 48 Hours";
-"Top Movies of the Last 48 Hours" = "Top Movies of the Last 48 Hours";
+"Top 100 Shows" = "Top 100 Shows";
+"Top 100 Movies" = "Top 100 Movies";
 "%@ Movies" = "%@ Movies";
 "%@ Shows" = "%@ Shows";
 "Biography" = "Biography";
@@ -530,6 +531,8 @@
 "Remux.Resume.FromStart" = "Start from the beginning";
 "Remux.Resume.Message.VLC" = "This file can't resume in full quality: resuming there goes through the VLC player. From the beginning, playback stays native (HDR, Dolby Atmos).";
 "Player.Resuming.At" = "Resuming at %@…";
+"Player.Resuming.Detail" = "Resuming at %1$@ — %2$@";
+"Player.Resuming.Percent" = "%d%%";
 
 /* Continue Watching row (tvOS): second line of a show's card once the last episode played was finished, before "S2 · E6" and the episode's title. */
 "ContinueWatching.NextEpisode" = "Next episode";
@@ -550,3 +553,6 @@
 "UpNext.StillWatching.Stop" = "Stop";
 "Settings.AutoPlayNext" = "Autoplay Next Episode";
 "Settings.AutoPlayNext.Footer" = "Near the end of an episode, the next one is offered with a countdown, then starts on its own, in the same version when possible.";
+"Settings.UpNextCard" = "Next Episode Card";
+"Settings.UpNextCard.Value" = "%d s before the end";
+"Settings.UpNextCard.Message" = "How long before the end of an episode its card offers the next one. With Autoplay Next Episode on, the next one starts at the end; otherwise only when you choose Play Now.";

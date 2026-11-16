@@ -277,8 +277,13 @@ public enum HomeShelfID {
     public static let newShows = "newShows"
     public static let moviesOfTheYear = "moviesOfTheYear"
     public static let topRatedOfTheYear = "topRatedOfTheYear"
-    public static let top48hShows = "top48hShows"
-    public static let top48hMovies = "top48hMovies"
+    /// The ranked shelves (`HomeSource.topShows` / `.topMovies`). Their ids
+    /// are the ones of 5.3.0's first build, when both were the Top 48 h:
+    /// Settings › Home stored them (`HomeSettings.Key.hiddenShelves`), the
+    /// debug hooks and the accessibility identifiers name them. Kept as they
+    /// are whatever list a shelf reads: a shelf hidden then stays hidden.
+    public static let topShows = "top48hShows"
+    public static let topMovies = "top48hMovies"
     public static let watchlist = "watchlist"
 
     private static let genrePrefix = "genre-"
@@ -302,7 +307,7 @@ public enum HomeShelfID {
     /// The fixed shelves in display order; the genre shelves come after.
     public static let order: [String] = [
         hero, continueWatching, yourShows, trendingMovies, newMovies, uhd, airedEpisodes,
-        trendingShows, newShows, moviesOfTheYear, topRatedOfTheYear, top48hShows, top48hMovies, watchlist,
+        trendingShows, newShows, moviesOfTheYear, topRatedOfTheYear, topShows, topMovies, watchlist,
     ]
 
     /// The shelves made of the user's own data (`HomeLocalHooks`): never
@@ -324,8 +329,9 @@ public enum HomeShelfID {
         case newShows: return "New Shows"
         case moviesOfTheYear: return "Movies of the Year"
         case topRatedOfTheYear: return "Top Rated of the Year"
-        case top48hShows: return "Top Shows of the Last 48 Hours"
-        case top48hMovies: return "Top Movies of the Last 48 Hours"
+        // A ranking's title says which list it is (`HomeSource.showsRanking`).
+        case topShows: return HomeSource.isLast48Hours(HomeSource.showsRanking) ? "Top Shows of the Last 48 Hours" : "Top 100 Shows"
+        case topMovies: return "Top 100 Movies"
         case watchlist: return "Watchlist"
         default:
             guard let genre = genre(of: id) else { return id }

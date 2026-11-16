@@ -128,8 +128,8 @@ enum HomeBuilder {
         drafts += [
             trendingMovies, context.newMovies(), context.uhd(), context.airedEpisodes(), trendingShows,
             context.newShows(), context.moviesOfTheYear(), context.topRatedOfTheYear(),
-            context.ranking(HomeShelfID.top48hShows, .top48hShows, kind: .show),
-            context.ranking(HomeShelfID.top48hMovies, .top48hMovies, kind: .movie),
+            context.ranking(HomeShelfID.topShows, .topShows, kind: .show),
+            context.ranking(HomeShelfID.topMovies, .topMovies, kind: .movie),
         ].compactMap { $0 }
         drafts.append(Draft(HomeShelfID.watchlist, inputs.local.watchlist.map { HomeEntry(item: $0) }))
         drafts += context.genres()
@@ -178,7 +178,7 @@ enum HomeBuilder {
         switch id {
         case HomeShelfID.hero: return .hero
         case HomeShelfID.continueWatching, HomeShelfID.yourShows, HomeShelfID.airedEpisodes: return .landscape
-        case HomeShelfID.top48hShows, HomeShelfID.top48hMovies: return .ranked
+        case HomeShelfID.topShows, HomeShelfID.topMovies: return .ranked
         default: return .posters
         }
     }
@@ -191,11 +191,11 @@ enum HomeBuilder {
         case HomeShelfID.newMovies: return HomeSeeAll(catalogue: .movies, filter: MovieManager.Filters.date.rawValue)
         case HomeShelfID.moviesOfTheYear: return HomeSeeAll(catalogue: .movies, filter: MovieManager.Filters.year.rawValue)
         case HomeShelfID.topRatedOfTheYear: return HomeSeeAll(catalogue: .movies, filter: MovieManager.Filters.rating.rawValue)
-        case HomeShelfID.top48hMovies: return HomeSeeAll(catalogue: .movies, filter: MovieManager.Filters.top100.rawValue)
+        case HomeShelfID.topMovies: return HomeSeeAll(catalogue: .movies, filter: MovieManager.Filters.top100.rawValue)
         case HomeShelfID.airedEpisodes: return HomeSeeAll(catalogue: .shows, filter: ShowManager.Filters.date.rawValue)
         case HomeShelfID.trendingShows: return HomeSeeAll(catalogue: .shows, filter: ShowManager.Filters.trending.rawValue)
         case HomeShelfID.newShows: return HomeSeeAll(catalogue: .shows, filter: ShowManager.Filters.year.rawValue)
-        case HomeShelfID.top48hShows: return HomeSeeAll(catalogue: .shows, filter: ShowManager.Filters.top100.rawValue)
+        case HomeShelfID.topShows: return HomeSeeAll(catalogue: .shows, filter: ShowManager.Filters.top100.rawValue)
         case HomeShelfID.watchlist: return HomeSeeAll(catalogue: .watchlist)
         default:
             guard let genre = HomeShelfID.genre(of: id), let appGenre = appGenre(genre.genre) else { return nil }
@@ -313,14 +313,72 @@ enum HomeBuilder {
         return episode
     }
 
+    // MARK: - Releases without an id
+
+    /// The ids of the known titles of a kind by what a release names them
+    /// (`HomeParse.readings(ofTitle:year:kind:)`): their card's title and the
+    /// name every card prints (`titles`), with the card's year.
+    static func titlesByReading<Cards: Sequence>(_ cards: Cards, titles: [String: String], kind: HomeItem.Kind) -> [String: Set<String>]
+        where Cards.Element == HomeEntry {
+        var ids: [String: Set<String>] = [:]
+        for card in cards where card.item.kind == kind && !card.isUnknown && !card.isPending {
+            let id = card.item.imdbId
+            for title in Set([card.item.title, titles[id]].compactMap { $0 }) where !HomeTitleFacts.isPlaceholder(title) {
+                for key in HomeParse.readings(ofTitle: title, year: card.item.year, kind: kind) { ids[key, default: []].insert(id) }
+            }
+        }
+        return ids
+    }
+
+    /// The ranking with each pending entry given to a title, its releases
+    /// joining the title's entry (or making one when the list has none):
+    /// - an entry the list ties to a title (`listedUnder`) goes to that title
+    ///   only, when its card's name and year are one of the entry's readings
+    ///   (`known`: ids by reading) — apibay files some releases under another
+    ///   title's id ("Avengers Endgame Encore 2026" under the 2019 film). A
+    ///   title no list has a card for yet (`pooled`: the ids that have one)
+    ///   takes it as is: only the lookups' order sees it, a ranking shows a
+    ///   title once its card is known, and checked then;
+    /// - an entry the list ties to no title goes to the one title the lists
+    ///   know by one of its readings; none, or two: dropped.
+    /// Most seeded first.
+    static func attachingPending(_ entries: [HomeEntry], known: [String: Set<String>], pooled: Set<String>) -> [HomeEntry] {
+        var result = entries.filter { !$0.isPending }
+        var index = Dictionary(result.enumerated().map { ($0.element.item.imdbId, $0.offset) }) { first, _ in first }
+        for entry in entries where entry.isPending {
+            let readings = entry.readings ?? []
+            let target: String?
+            if let listed = entry.listedUnder {
+                let named = readings.contains { known[$0]?.contains(listed) == true }
+                target = named || !pooled.contains(listed) ? listed : nil
+            } else {
+                let ids = readings.reduce(into: Set<String>()) { $0.formUnion(known[$1] ?? []) }
+                target = ids.count == 1 ? ids.first : nil
+            }
+            guard let id = target else { continue }
+            if let position = index[id] {
+                result[position] = result[position].adding(releasesOf: entry)
+            } else {
+                var titled = entry
+                titled.item.imdbId = id
+                titled.item.id = id
+                titled.readings = nil
+                titled.listedUnder = nil
+                index[id] = result.count
+                result.append(titled)
+            }
+        }
+        return HomeEntry.mostSeededFirst(result)
+    }
+
     // MARK: - Lookups
 
     /// The titles of the rankings no loaded list knows, most seeded first:
     /// what the loader asks Cinemeta about once a refresh has ended.
     static func lookupsNeeded(_ inputs: Inputs, rules: Rules = Rules()) -> (shows: [String], movies: [String]) {
         let context = Context(inputs: inputs, rules: rules)
-        var shows = context.unknownTitles(of: .top48hShows)
-        var movies = context.unknownTitles(of: .top48hMovies)
+        var shows = context.unknownTitles(of: .topShows)
+        var movies = context.unknownTitles(of: .topMovies)
         // The 4K shelf is made of apibay's ranking only when YTS is down.
         if context.list(.yts4K) == nil { movies += context.unknownTitles(of: .topUHD).filter { !movies.contains($0) } }
         shows = Array(shows.prefix(rules.rankedLimit))
@@ -349,6 +407,15 @@ private struct Context {
     let formats: [String: [HomeBadge]]
     /// Shows whose first episode aired in the schedules read.
     let premieres: Set<String>
+    /// `HomeBuilder.titlesByReading` of the pool, made once per kind for this build: `ranked`
+    /// runs for each ranking shelf, the 4K shelf and the lookups — up to five scans of the whole
+    /// pool on the main thread before the Home's first frame from disk otherwise.
+    private let readingIndex = ReadingIndex()
+
+    private final class ReadingIndex {
+        var byKind: [HomeItem.Kind: [String: Set<String>]] = [:]
+        var pooled: Set<String>?
+    }
 
     init(inputs: HomeBuilder.Inputs, rules: HomeBuilder.Rules) {
         self.inputs = inputs
@@ -390,7 +457,7 @@ private struct Context {
         var formats: [String: [HomeBadge]] = [:]
         for source in [HomeSource.ytsNew(year), .ytsNew(year - 1), .yts4K, .ytsYear(year), .ytsYear(year - 1), .ytsTop(year),
                        .ytsTop(year - 1), .ytsLikes(year), .ytsLikes(year - 1), .topUHD] {
-            for entry in usable(source)?.entries ?? [] {
+            for entry in usable(source)?.entries ?? [] where !entry.isPending {
                 let badges = entry.item.badges.filter(\.isFormat)
                 if !badges.isEmpty { formats[entry.item.imdbId] = HomeBadge.ordered((formats[entry.item.imdbId] ?? []) + badges) }
             }
@@ -488,7 +555,7 @@ private struct Context {
             // First the titles people are seeding right now, most seeded
             // first, then the other additions, latest first.
             var seeders: [String: Int] = [:]
-            for entry in ranking?.entries ?? [] { seeders[entry.item.imdbId] = entry.seeders ?? 0 }
+            for entry in ranking.map({ ranked($0, kind: .movie) }) ?? [] { seeders[entry.item.imdbId] = entry.seeders ?? 0 }
             let ranked = kept.enumerated().filter { seeders[$0.element.item.imdbId] != nil }.sorted {
                 let a = seeders[$0.element.item.imdbId] ?? 0, b = seeders[$1.element.item.imdbId] ?? 0
                 return a != b ? a > b : $0.offset < $1.offset
@@ -707,7 +774,7 @@ private struct Context {
     /// knows, when that card's title names the release (apibay files some
     /// releases under another title's id) and the language is a wanted one.
     func resolved(_ ranking: HomeSourceList, kind: HomeItem.Kind) -> [HomeEntry] {
-        return ranking.entries.compactMap { group in
+        return ranked(ranking, kind: kind).compactMap { group in
             guard let card = pool[group.item.imdbId], !card.isUnknown, card.item.kind == kind,
                   HomeParse.names(group.releaseName ?? "", title: card.item.title, year: card.item.year, kind: kind),
                   speaksRelease(group, card: card) else { return nil }
@@ -717,6 +784,30 @@ private struct Context {
             entry.seeders = group.seeders
             return entry
         }
+    }
+
+    /// A ranking with its pending entries (releases without an IMDb id that
+    /// no titled release of the list names) given to the title the other
+    /// lists know by that name (`HomeBuilder.attachingPending`): ranks by
+    /// the seeders of every release counted. No request: only the titles
+    /// already known.
+    func ranked(_ ranking: HomeSourceList, kind: HomeItem.Kind) -> [HomeEntry] {
+        guard ranking.entries.contains(where: \.isPending) else { return ranking.entries }
+        return HomeBuilder.attachingPending(ranking.entries, known: titlesByReading(kind), pooled: pooledIds())
+    }
+
+    private func titlesByReading(_ kind: HomeItem.Kind) -> [String: Set<String>] {
+        if let made = readingIndex.byKind[kind] { return made }
+        let made = HomeBuilder.titlesByReading(pool.values, titles: titles, kind: kind)
+        readingIndex.byKind[kind] = made
+        return made
+    }
+
+    private func pooledIds() -> Set<String> {
+        if let made = readingIndex.pooled { return made }
+        let made = Set(pool.keys)
+        readingIndex.pooled = made
+        return made
     }
 
     /// The title's own language when a list tells it, else the languages
@@ -738,10 +829,10 @@ private struct Context {
     /// place among the leading ones: the search does not move down the
     /// ranking refresh after refresh.
     func unknownTitles(of source: HomeSource) -> [String] {
-        guard let ranking = list(source) else { return [] }
+        guard let ranking = list(source), case .apibay(let kind) = source.parser else { return [] }
         var unknown: [String] = []
         var shown = 0
-        for group in ranking.entries where shown < rules.rankedLimit {
+        for group in ranked(ranking, kind: kind) where shown < rules.rankedLimit {
             if let card = pool[group.item.imdbId] {
                 if card.isUnknown || speaksRelease(group, card: card) { shown += 1 }
             } else if speaksRelease(group, card: nil) {

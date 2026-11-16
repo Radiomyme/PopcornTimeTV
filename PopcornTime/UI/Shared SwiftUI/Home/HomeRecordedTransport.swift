@@ -12,7 +12,7 @@
 //   yts_new_<year>.json, yts_year_<year>.json        YTS, a year by date added / by downloads
 //   yts_4k.json                                      YTS, 2160p
 //   tvm_web_<day>.json, tvm_us_<day>.json            TVMaze's schedules of a day (2026-11-14)
-//   tpb_<list>.json                                  apibay's precompiled lists (48h_207, 48h_208, 211)
+//   tpb_<list>.json                                  apibay's precompiled lists (207, 208, 211)
 //
 // A request without a file answers what its host answers when it has
 // nothing (an empty page, an empty day), or fails when a real host would.
@@ -96,7 +96,7 @@ struct HomeRecordedTransport {
             if path.hasPrefix("/schedule?") { return "tvm_us_\(day).json" }
             return nil
         case .apibay:
-            // "/precompiled/data_top100_48h_207.json" → "tpb_48h_207.json".
+            // "/precompiled/data_top100_207.json" → "tpb_207.json".
             let name = path.split(separator: "/").last.map(String.init) ?? ""
             let prefix = "data_top100_"
             guard name.hasPrefix(prefix), name.hasSuffix(".json"), isPlainName(name) else { return nil }

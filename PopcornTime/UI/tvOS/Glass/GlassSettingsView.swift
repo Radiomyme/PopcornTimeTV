@@ -88,6 +88,12 @@ struct GlassSettingsActions {
     /// default): written, and re-read by `refresh()`. nil: never re-read.
     var setAutoPlayNext: (Bool) -> Void = { _ in }
     var readAutoPlayNext: (() -> Bool)? = nil
+    /// « Next Episode Card »: seconds before the end of an episode its card
+    /// comes (`UpNextPreferences.cardLead`, 60 by default), one of
+    /// `upNextCardLeadChoices`: written, and re-read by `refresh()`.
+    var setUpNextCardLead: (Int) -> Void = { _ in }
+    var readUpNextCardLead: (() -> Int)? = nil
+    var upNextCardLeadChoices: [Int] = [30, 45, 60, 90]
     /// Bytes the clearable cache holds now. Called off the main thread.
     var measureCache: @Sendable () -> Int64 = { 0 }
     /// Empties the cache. Called on the main thread.
@@ -115,6 +121,8 @@ final class GlassSettingsModel: ObservableObject {
     /// Episode chaining: the next episode starts on its own at the end of
     /// a countdown (off: the card stays, nothing starts by itself).
     @Published private(set) var autoPlayNext: Bool
+    /// Seconds before the end the next episode's card comes.
+    @Published private(set) var upNextCardLead: Int
     @Published private(set) var isTraktSignedIn: Bool
     /// nil while it is being measured.
     @Published private(set) var cacheBytes: Int64?
@@ -134,6 +142,7 @@ final class GlassSettingsModel: ObservableObject {
         self.subtitleLanguage = subtitleLanguage
         self.themeSongs = themeSongs
         self.autoPlayNext = actions.readAutoPlayNext?() ?? true
+        self.upNextCardLead = actions.readUpNextCardLead?() ?? 60
         self.version = version
         self.languages = languages
         self.actions = actions
@@ -217,6 +226,16 @@ final class GlassSettingsModel: ObservableObject {
         actions.setAutoPlayNext(autoPlayNext)
     }
 
+    func select(upNextCardLead seconds: Int) {
+        upNextCardLead = seconds
+        actions.setUpNextCardLead(seconds)
+    }
+
+    /// "60 s avant la fin".
+    func upNextCardLeadText(_ seconds: Int) -> String {
+        String(format: glassSettingsLocalized("Settings.UpNextCard.Value"), seconds)
+    }
+
     func signOutOfTrakt() {
         actions.signOutOfTrakt()
         isTraktSignedIn = actions.isTraktSignedIn()
@@ -228,6 +247,7 @@ final class GlassSettingsModel: ObservableObject {
         isTraktSignedIn = actions.isTraktSignedIn()
         if let stored = actions.readThemeSongs?(), stored != themeSongs { themeSongs = stored }
         if let stored = actions.readAutoPlayNext?(), stored != autoPlayNext { autoPlayNext = stored }
+        if let stored = actions.readUpNextCardLead?(), stored != upNextCardLead { upNextCardLead = stored }
         if let stored = actions.readHome?(), stored != home { home = stored }
         cacheBytes = nil
         let measure = actions.measureCache
@@ -304,13 +324,13 @@ enum GlassSettingsPalette {
 
 /// The rows that open a picker.
 enum GlassSettingsPicker: String, Identifiable {
-    case quality, audio, subtitles, homeLanguages, homeShelves
+    case quality, upNextCard, audio, subtitles, homeLanguages, homeShelves
     var id: String { rawValue }
 }
 
 /// Rows that can hold the focus (default focus, screenshots).
 enum GlassSettingsRowID: Hashable {
-    case quality, autoPlayNext, audio, subtitles, themeSongs, clearCache, trakt, version
+    case quality, autoPlayNext, upNextCard, audio, subtitles, themeSongs, clearCache, trakt, version
     case homeLanguages, homeShelves, homeLookup
 }
 
@@ -427,6 +447,11 @@ struct GlassSettingsView: View {
                 .focused($focusedRow, equals: .autoPlayNext)
                 .accessibilityIdentifier("Settings.Row.autoPlayNext")
             GlassSettingsDivider()
+            GlassSettingsRow(symbol: "timer", tint: .green, title: "Settings.UpNextCard",
+                             value: model.upNextCardLeadText(model.upNextCardLead)) { picker = .upNextCard }
+                .focused($focusedRow, equals: .upNextCard)
+                .accessibilityIdentifier("Settings.Row.upNextCard")
+            GlassSettingsDivider()
             GlassSettingsRow(symbol: "speaker.wave.2.fill", tint: .blue, title: "Audio Language",
                              value: model.languageName(model.audioLanguage)) { picker = .audio }
                 .focused($focusedRow, equals: .audio)
@@ -522,6 +547,19 @@ struct GlassSettingsView: View {
                 selectedID: model.autoQuality.rawValue,
                 onSelect: { id in
                     if let quality = GlassSettingsAutoQuality(rawValue: id) { model.select(autoQuality: quality) }
+                    self.picker = nil
+                },
+                onCancel: { self.picker = nil })
+        case .upNextCard:
+            GlassSettingsPickerSheet(
+                title: "Settings.UpNextCard",
+                message: "Settings.UpNextCard.Message",
+                options: model.actions.upNextCardLeadChoices.map {
+                    .init(id: String($0), title: model.upNextCardLeadText($0), detail: nil)
+                },
+                selectedID: String(model.upNextCardLead),
+                onSelect: { id in
+                    if let seconds = Int(id) { model.select(upNextCardLead: seconds) }
                     self.picker = nil
                 },
                 onCancel: { self.picker = nil })

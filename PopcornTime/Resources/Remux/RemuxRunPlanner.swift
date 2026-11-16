@@ -256,11 +256,17 @@ enum RemuxSteering {
     ///    in full mode only once a jump was made — a film played from 0:00 without a jump
     ///    leaves PopcornTorrent's own window alone.
     ///  - Nothing once stopped, nor before the header is parsed (`readerOffset` 0).
+    ///  - nudgeOffset: while a late jump's wait has requests in flight to the engine's server
+    ///    (`RemuxWaitNudge`, full mode), the byte the pass is blocked on, where the first of
+    ///    them reads: the torrent is told to read there rather than at the reader just before
+    ///    it (every byte in between is on disk), so the two never pull its window back and
+    ///    forth. Never below the reader.
     static func readPosition(isStopped: Bool, preparedOffset: Int64?, isBounded: Bool, hasJumped: Bool,
-                             readerOffset: Int64) -> Int64? {
+                             readerOffset: Int64, nudgeOffset: Int64? = nil) -> Int64? {
         guard !isStopped else { return nil }
         if let prepared = preparedOffset { return max(0, prepared) }
         guard isBounded || hasJumped, readerOffset > 0 else { return nil }
+        if let nudge = nudgeOffset, !isBounded { return max(readerOffset, nudge) }
         return readerOffset
     }
 }

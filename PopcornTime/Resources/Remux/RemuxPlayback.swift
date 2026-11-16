@@ -451,6 +451,23 @@ final class RemuxPlayback {
     /// Thread-safe.
     var resumeReadiness: NativeResumeReadiness { stateLock.withLock { lockedResumeReadiness } }
 
+    /// The file's keyframe index is read and nothing rules a jump out yet: the session can jump
+    /// (`.available`), or its plan only waits for segment 0 (`.pending` with the index read: the
+    /// head is slow to come). A prepared resume is then waited for, however long — the players'
+    /// `ResumePolicy.resumeEngine(indexIsRead:)` and `expireResumePreparation`. Thread-safe.
+    var isKeyframeIndexRead: Bool {
+        guard let session = session else { return false }
+        return Self.isKeyframeIndexRead(capability: session.jumpCapability, indexedKeyframes: session.indexedKeyframeCount)
+    }
+
+    static func isKeyframeIndexRead(capability: MKVToHLSRemuxSession.JumpCapability, indexedKeyframes: Int) -> Bool {
+        switch capability {
+        case .available: return true
+        case .pending: return indexedKeyframes > 0
+        case .unavailable: return false
+        }
+    }
+
     /// Called on the main queue each time `resumeReadiness` changes.
     var onResumeReadinessChanged: ((NativeResumeReadiness) -> Void)? {
         get { stateLock.withLock { lockedOnResumeReadiness } }
@@ -468,13 +485,16 @@ final class RemuxPlayback {
     /// turned to that position's data — in both storage modes, nothing being
     /// released for it — while the user is asked; the conversion goes on from
     /// the head with what is on disk, and nothing is written at the position
-    /// before `commitResume()`. Main queue, before `start()`.
-    func prepareResume(atFraction fraction: Float) {
+    /// before `commitResume()`. Main queue, before `start()`. `decided`: a
+    /// start that resumes without asking (« Resume » from a show's page) — the
+    /// logs say so instead of « question up ».
+    func prepareResume(atFraction fraction: Float, decided: Bool = false) {
         guard fraction.isFinite, fraction > 0, fraction < 1 else { return }
         stateLock.withLock {
             guard lockedResumePhase == .none else { return }
             lockedResumePhase = .prepared
             lockedResumeFraction = fraction
+            lockedResumeDecided = decided
         }
     }
 
@@ -652,6 +672,118 @@ final class RemuxPlayback {
         let length = index < durations.count ? max(0, durations[index]) : max(0.5, target)
         // Through the first instant of the next segment.
         return hasMedia(fromPlayerSeconds: position, cushion: max(0, start + length - position) + 0.001)
+    }
+
+    // MARK: Wait progress (« Resuming at 22:35 — 45% · 9.6 MB/s »)
+
+    /// How far the media of the wait under way is (a jump somebody waits on, a resume on its way
+    /// to its jump), refreshed on the 1 s timer tick: the player's « Resuming at … » shows it.
+    /// nil when nothing waits. Read-only, thread-safe, nothing computed on the caller's queue.
+    var waitProgress: JumpWaitProgress? { waitProgressBox.value }
+    private let waitProgressBox = RemuxWaitProgressBox()
+
+    /// The end of the bytes the player needs at a jump's target: the Cluster
+    /// that holds the keyframe two segments on is read whole before the
+    /// segment before it is cut — its end is not in the index: a quarter of
+    /// the segment before it stands for it (measured on the loopback rig:
+    /// the media came 0.8 MB past that keyframe's offset). nil when the
+    /// keyframe is not known. `isFilmEnd`: the target is in the plan's last
+    /// two segments — there is no keyframe two segments on, the player needs
+    /// what is left of the file (`hasMediaToStart` asks `isTailWritten`): the
+    /// file's end.
+    static func waitProgressEnd(keyframeAfterNext: Int64?, keyframeOfNext: Int64?, fileSize: Int64,
+                                isFilmEnd: Bool = false) -> Int64? {
+        guard let end = keyframeAfterNext, end > 0 else { return isFilmEnd && fileSize > 0 ? fileSize : nil }
+        let quarter = keyframeOfNext.map { max(0, end - $0) / 4 } ?? 0
+        return fileSize > 0 ? min(fileSize, end + quarter) : end + quarter
+    }
+
+    /// `waitProgressEnd` for a jump to `segment` of this session: where the bytes the player
+    /// waits for there end. One rule for the share on screen (`refreshWaitProgress`) and for
+    /// the requests to the engine (`updateWaitNudge`): the screen never counts bytes the
+    /// requests leave out. Where a jump two segments on would read (its lead-in, or its
+    /// keyframe's Cluster) is not the end: that keyframe's Cluster is read whole before the
+    /// second segment is cut, and a pass blocked in it waits like any other.
+    static func jumpNeedEnd(_ session: MKVToHLSRemuxSession, segment: Int, fileSize: Int64) -> Int64? {
+        waitProgressEnd(keyframeAfterNext: session.jumpTarget(forSegment: segment + 2)?.keyframeOffset,
+                        keyframeOfNext: session.jumpTarget(forSegment: segment + 1)?.keyframeOffset,
+                        fileSize: fileSize,
+                        isFilmEnd: session.lastJumpableSegment.map { segment + 2 > $0 } ?? false)
+    }
+
+    /// Pump queue, timer ticks: `waitProgress` afresh, and the `[Resume] jump wait +N s` lines
+    /// (+2, +5, +10 s, then every 10 s of a jump's wait). The bytes the player needs at the
+    /// target are counted piece by piece (`JumpWaitProgressRule`) from the jump's read offset to
+    /// the keyframe two segments on.
+    private func refreshWaitProgress(_ session: MKVToHLSRemuxSession) {
+        let box = waitProgressBox
+        let now = Self.uptime
+        let (wait, phase, steeringOffset, resumeSeconds, committed) = stateLock.withLock {
+            (lockedJumpWait, lockedResumePhase, lockedSteeringOffset, lockedResumeSeconds,
+             lockedCommitRequested || lockedResumeDecided)
+        }
+        // What is waited on: a jump's segment and read offset; a resume's before its jump.
+        var segment: Int?
+        var readOffset: Int64?
+        var target: Double?
+        var since: TimeInterval?
+        var labelSince: TimeInterval?
+        if let wait = wait {
+            (segment, readOffset, target, since) = (wait.segment, wait.readOffset, wait.playerSeconds, wait.startedAt)
+            // A resume's jump: « Resuming at … » was up since its preparation, its share stays.
+            labelSince = JumpWaitProgressRule.labelClockStart(jumpStartedAt: wait.startedAt, isResumeJump: wait.reason == .resume,
+                                                              resumeStartedAt: steeringSince ?? firstTickAt)
+        } else if phase == .committed || phase == .steering || (phase == .prepared && committed) {
+            (segment, readOffset, target) = (steeringSegment, steeringOffset, resumeSeconds)
+            since = steeringSince ?? firstTickAt
+        } else {
+            box.value = nil
+            box.tracker.reset()
+            return
+        }
+        if box.pieceLength <= 0, let statistics = streamer?.storageStatistics,
+           let piece = statistics["pieceLength"]?.int64Value, piece > 0 {
+            box.pieceLength = piece
+            box.pieceBoundary = max(0, statistics["tailPinStart"]?.int64Value ?? 0)
+        }
+        let status = streamer?.torrentStatus
+        var progress = JumpWaitProgress(targetSeconds: target, segment: segment, waitedSeconds: max(0, now - (since ?? now)),
+                                        isJump: wait != nil, bytesPerSecond: Int(status?.downloadSpeed ?? 0),
+                                        peers: Int(status?.peers ?? 0),
+                                        window: status.map { Double($0.bufferingProgress) },
+                                        labelSeconds: labelSince.map { max(0, now - $0) })
+        if let target = target { progress.isMediaReady = hasMediaToStart(fromPlayerSeconds: target) }
+        if let torrent = torrent {
+            if wait != nil {
+                let reader = session.consumedInputOffset
+                let missing = torrent.firstMissingOffset(reader)
+                progress.reader = reader
+                progress.firstMissing = missing
+                progress.firstMissingPiece = missing < torrent.fileSize()
+                    ? JumpWaitProgressRule.filePiece(of: missing, pieceLength: box.pieceLength, pieceBoundary: box.pieceBoundary)
+                    : nil
+            }
+            if let segment = segment, let start = readOffset,
+               let end = Self.jumpNeedEnd(session, segment: segment, fileSize: torrent.fileSize()), end > start {
+                progress.neededBytes = end - start
+                progress.onDiskBytes = JumpWaitProgressRule.bytesOnDisk(from: start, to: end, pieceLength: box.pieceLength,
+                                                                        pieceBoundary: box.pieceBoundary,
+                                                                        firstMissing: torrent.firstMissingOffset)
+            }
+        }
+        let fraction = JumpWaitProgressRule.fraction(onDisk: progress.onDiskBytes, needed: progress.neededBytes,
+                                                     isMediaReady: progress.isMediaReady)
+        progress.shownFraction = box.tracker.shown(fraction, for: .init(segment: segment, startOffset: readOffset))
+        box.value = progress
+        guard let wait = wait else { return }
+        if box.loggedWaitStart != wait.startedAt {
+            box.loggedWaitStart = wait.startedAt
+            box.lastLoggedStep = nil
+        }
+        if let step = JumpWaitProgressRule.logStep(waited: progress.waitedSeconds, lastLogged: box.lastLoggedStep) {
+            box.lastLoggedStep = step
+            print(JumpWaitProgressRule.logLine(step: step, progress))
+        }
     }
 
     /// What the player is told about a jump somebody waits on.
@@ -930,6 +1062,8 @@ final class RemuxPlayback {
     }
     private var lockedResumePhase: ResumePhase = .none
     private var lockedResumeFraction: Float = 0
+    /// `prepareResume(atFraction:decided:)`'s `decided` (logs only).
+    private var lockedResumeDecided = false
     private var lockedResumeReadiness: NativeResumeReadiness = .pending
     /// `resumeTargetSeconds`.
     private var lockedResumeSeconds: Double?
@@ -970,6 +1104,24 @@ final class RemuxPlayback {
         var stalledTicks = 0
     }
     private var lockedJumpWait: JumpWait?
+    /// The requests that make a late jump's wait known to the torrent engine
+    /// (`RemuxWaitNudge`), made at the first one; closed by `stop()`.
+    private var lockedNudgeWaiter: RemuxEngineWaiter?
+    private var lockedNudgeClosed = false
+    /// While requests are in flight: the blocking offset they start at (the torrent is
+    /// told to read there, not at the reader just before it — `reportReadPosition`).
+    private var lockedNudgeOffset: Int64?
+    private var lockedEngineServerURL: URL?
+    /// Pump queue: the reader of the jump being waited for, since when it has
+    /// not moved, and whether that wait was found late (it stays so).
+    private struct NudgeTrack {
+        var waitStartedAt: TimeInterval
+        var reader: Int64
+        var since: TimeInterval
+        var late = false
+    }
+    private var nudgeTrack: NudgeTrack?
+    private var loggedNoEngineURL = false
     /// Bounded storage: a jump is PROVISIONAL until playback has run at its
     /// destination. Meanwhile nothing more is released (`boundedSnapshot`
     /// reports `floorOffset` as the reader), what it skipped stays writable,
@@ -1163,6 +1315,7 @@ final class RemuxPlayback {
         }
         guard !alreadyStopped else { return }
         timer?.cancel()
+        closeWaitNudge()
         boundedSession?.detachRemux(self)
         let held: [HeldRequest] = holdLock.withLock {
             holdClosed = true
@@ -2470,6 +2623,7 @@ final class RemuxPlayback {
         logJumpCapability(session)
         applyResumePreparation(session)
         reportReadPosition(session)
+        if timer { refreshWaitProgress(session) }
         if let reason = session.writeFailure {
             retireHolesIfJumpsAreOver(session)
             haltAfterWriteFailure(reason)
@@ -2477,6 +2631,7 @@ final class RemuxPlayback {
         }
         if haltIfJumpFailed(session) { return }
         if trackJumpWait(session, produced: produced, moreInput: moreInput, timer: timer) { return }
+        updateWaitNudge(session)
 
         var progress = session.progress
         if !progress.finished {
@@ -2638,6 +2793,7 @@ final class RemuxPlayback {
     /// FailedToPlayToEnd (-1100). The output directory is left to `stop()`
     /// (the player stops this object when it hands off). Pump queue only.
     private func haltAfterWriteFailure(_ reason: String) {
+        cancelWaitNudge("the remux halted")
         guard readyFired else {
             fail(reason)
             return
@@ -2662,6 +2818,7 @@ final class RemuxPlayback {
     private func fail(_ message: String) {
         guard !failed, !readyFired else { return }
         failed = true
+        cancelWaitNudge("the remux failed")
         stateLock.withLock { if lockedFailureReason == nil { lockedFailureReason = message } }
         print("[Remux] FAIL: \(message)")
         stop()
@@ -2842,6 +2999,11 @@ final class RemuxPlayback {
                 return
             }
             switch session.jumpCapability {
+            case .pending where Self.isKeyframeIndexRead(capability: .pending, indexedKeyframes: session.indexedKeyframeCount):
+                // The index is read; the plan waits for segment 0, whose head pieces are slow
+                // to come (a seed slower than the film): a slow head, as below — no reason for
+                // VLC. The plan, or its refusal, decides at a later tick.
+                break
             case .pending: resumeIsVLCOnly("index not on disk (the keyframe index is not read \(after))")
             case .unavailable(let reason): resumeIsVLCOnly(reason)
             case .available:
@@ -2875,8 +3037,8 @@ final class RemuxPlayback {
     /// the probe of its Cluster while the question is up; `.vlcOnly` when the
     /// session can't jump after all.
     private func applyResumePreparation(_ session: MKVToHLSRemuxSession) {
-        let (phase, fraction, commitRequested) = stateLock.withLock {
-            (lockedResumePhase, lockedResumeFraction, lockedCommitRequested)
+        let (phase, fraction, commitRequested, decided) = stateLock.withLock {
+            (lockedResumePhase, lockedResumeFraction, lockedCommitRequested, lockedResumeDecided)
         }
         switch phase {
         case .prepared:
@@ -2930,8 +3092,12 @@ final class RemuxPlayback {
                 logResume("prepared: \(Self.tenths(seconds)) s → segment \(target.segment) "
                           + "(player \(Self.tenths(target.playerStartSeconds)) s), keyframe offset \(target.keyframeOffset), "
                           + "read offset \(target.readOffset), lead-in \(target.readOffset != target.keyframeOffset ? 1 : 0), mode \(mode)")
-                logResume("steering: readPosition=\(target.readOffset) (question up, +\(sinceFirstTick) s)")
-                streamer?.noteStartMeasure(.resumeSteering, detail: "read offset \(target.readOffset), segment \(target.segment)")
+                // A decided start (« Resume » from a show's page, a chained
+                // episode's saved position) has its commit already: no question.
+                let kind = decided || commitRequested ? "decided start" : "question up"
+                logResume("steering: readPosition=\(target.readOffset) (\(kind), +\(sinceFirstTick) s)")
+                // One line with both: the kind of start and how long after ready (`PlaybackStartMeasure`).
+                streamer?.noteStartMeasure(.resumeSteering, detail: "read offset \(target.readOffset), segment \(target.segment), \(kind)")
             } else {
                 logResume("prepared: \(Self.tenths(seconds)) s — its segment is already written, nothing to steer, mode \(mode)")
             }
@@ -3227,6 +3393,9 @@ final class RemuxPlayback {
                                           playedAtJump: lockedPlayedSeconds)
             }
         }
+        // The requests a late wait had made for the old place go first: the
+        // report just below (and every tick's) is the last word on where to read.
+        cancelWaitNudge("a new jump")
         // Now, not at the end of the tick: the torrent takes seconds to turn.
         torrent?.setReadPosition(target.readOffset)
         let mode = bounded ? "bounded mode, provisional" : "full mode"
@@ -3249,7 +3418,14 @@ final class RemuxPlayback {
             }
         }
         if let floor = provisionalFloor { logResume("bounded: jump provisional (floor \(floor))") }
-        if waits, playerWaits { notifyJumpState(.waiting(playerSeconds: playerSeconds ?? target.playerStartSeconds)) }
+        if waits, playerWaits {
+            // The previous wait's share is not this one's: the label under the new position
+            // must not show it until the next timer tick (a step back within a segment's
+            // tolerance would read as the same wait, then go back). A resume's jump keeps the
+            // share its preparation showed (`JumpWaitProgressRule.labelClockStart`).
+            if reason != .resume { waitProgressBox.value = nil }
+            notifyJumpState(.waiting(playerSeconds: playerSeconds ?? target.playerStartSeconds))
+        }
         return true
     }
 
@@ -3292,6 +3468,7 @@ final class RemuxPlayback {
             if lockedResumePhase == .committed || lockedResumePhase == .jumped { lockedResumePhase = .vlcOnly }
             return (lockedOnJumpState, lockedOnJumpFailed)
         }
+        cancelWaitNudge("the jump failed")
         logResume("jump failed: \(reason) → VLC at \(Self.tenths(playerSeconds)) s")
         retireHoles(session, reason: reason)
         if readyFired {
@@ -4147,11 +4324,157 @@ final class RemuxPlayback {
     /// (PopcornTorrent's own window, unchanged).
     private func reportReadPosition(_ session: MKVToHLSRemuxSession) {
         guard let torrent = torrent else { return }
-        let (stopped, prepared) = stateLock.withLock { (lockedStopped, lockedSteeringOffset) }
+        let (stopped, prepared, nudge) = stateLock.withLock { (lockedStopped, lockedSteeringOffset, lockedNudgeOffset) }
         guard let offset = RemuxSteering.readPosition(isStopped: stopped, preparedOffset: prepared,
                                                       isBounded: isStorageBounded, hasJumped: session.hasJumped,
-                                                      readerOffset: session.consumedInputOffset) else { return }
+                                                      readerOffset: session.consumedInputOffset,
+                                                      nudgeOffset: nudge) else { return }
         torrent.setReadPosition(offset)
+    }
+
+    // MARK: A late jump's wait, made known to the engine (pump queue unless noted)
+
+    /// The engine's local server (`PlaybackRouting.playableLocalURL`: 127.0.0.1),
+    /// set by the player; nil: no request is ever made (`RemuxWaitNudge`).
+    var engineServerURL: URL? {
+        get { stateLock.withLock { lockedEngineServerURL } }
+        set { stateLock.withLock { lockedEngineServerURL = newValue } }
+    }
+
+    /// After every tick (`RemuxWaitNudge`): while a jump somebody waits on is
+    /// late in full storage mode, one request in flight per missing piece of
+    /// what its first two segments need; none otherwise.
+    private func updateWaitNudge(_ session: MKVToHLSRemuxSession) {
+        let wait = stateLock.withLock { lockedJumpWait }
+        guard let wait = wait, let torrent = torrent else {
+            cancelWaitNudge("no jump waits")
+            return
+        }
+        // What the player waits for there: the jump's first two segments (the
+        // first alone when it is the plan's last).
+        let missing = session.missingSegments()
+        let highWater = session.progress.segmentsWritten
+        func written(_ index: Int) -> Bool { index < highWater && !missing.contains(index) }
+        let lastNeeded = session.jumpTarget(forSegment: wait.segment + 1) != nil ? wait.segment + 1 : wait.segment
+        guard !(written(wait.segment) && written(lastNeeded)) else {
+            cancelWaitNudge("the jump's first segments are written")
+            return
+        }
+        let now = Self.uptime
+        let reader = session.consumedInputOffset
+        if nudgeTrack?.waitStartedAt != wait.startedAt {
+            nudgeTrack = NudgeTrack(waitStartedAt: wait.startedAt, reader: reader, since: wait.startedAt)
+        } else if nudgeTrack?.reader != reader {
+            nudgeTrack?.reader = reader
+            nudgeTrack?.since = now
+        }
+        guard let track = nudgeTrack else { return }
+        let bounded = isStorageBounded
+        let strategy = RemuxWaitNudge.strategy
+        let alreadyLate = track.late
+        // Cheap until the pass has stood still for the shortest lateness.
+        guard !bounded, strategy != .off,
+              alreadyLate || now - track.since >= RemuxWaitNudge.minimumLateSeconds else {
+            cancelWaitNudge(bounded ? "bounded storage" : "not late")
+            return
+        }
+        let size = torrent.fileSize()
+        let pieceLength = torrent.pieceLength()
+        let head = torrent.firstMissingOffset(0)
+        let phase: Int64? = pieceLength > 0 && head > 0 && head < size ? head % pieceLength : nil
+        // The same end as the share on screen (`jumpNeedEnd`), the file's end when not known.
+        let needEnd = Self.jumpNeedEnd(session, segment: wait.segment, fileSize: size) ?? size
+        let input = RemuxWaitNudge.Input(strategy: strategy, isBounded: bounded, jumpWaiting: true,
+                                         startWritten: false, readerOffset: reader,
+                                         secondsBlocked: now - track.since,
+                                         firstMissing: torrent.firstMissingOffset(reader),
+                                         demuxerBlocked: session.demuxerBlockedOffset, needEnd: needEnd,
+                                         fileSize: size, pieceLength: pieceLength, piecePhase: phase,
+                                         downloadRate: torrent.downloadRate(), alreadyLate: alreadyLate)
+        let wanted = RemuxWaitNudge.requests(input) { torrent.firstMissingOffset($0) }
+        guard !wanted.isEmpty, let waiter = waitNudgeExecutor(torrent) else {
+            cancelWaitNudge(wanted.isEmpty ? "nothing missing to wait for" : "no engine server")
+            return
+        }
+        let plan = RemuxWaitNudge.plan(inFlight: waiter.inFlight, wanted: wanted, strategy: strategy)
+        waiter.apply(plan)
+        stateLock.withLock { lockedNudgeOffset = wanted.first?.offset }
+        if !alreadyLate {
+            nudgeTrack?.late = true
+            let rate = torrent.downloadRate()
+            logResume("jump wait late: the pass has read nothing for \(Self.tenths(now - track.since)) s at \(reader), "
+                      + "blocked at \(wanted[0].offset) (\(Self.tenths(Double(max(0, needEnd - reader)) / 1_048_576)) MiB "
+                      + "still needed, \(rate) B/s) — the engine is asked for \(wanted.count) piece(s) "
+                      + "(\(strategy.rawValue), its server) so that it treats them as waited for")
+        } else if !plan.start.isEmpty {
+            logResume("jump wait: the engine is asked for \(plan.start.count) more piece(s) from \(plan.start[0].offset) "
+                      + "(\(waiter.inFlight.count) in flight, reader \(reader))")
+        }
+    }
+
+    /// The executor of `updateWaitNudge`, made at its first request: the test's
+    /// stand-in (`RemuxTorrentView.requestRange`) or the engine's own server.
+    private func waitNudgeExecutor(_ torrent: RemuxTorrentView) -> RemuxEngineWaiter? {
+        let existing: RemuxEngineWaiter?? = stateLock.withLock {
+            if lockedNudgeClosed { return .some(nil) }
+            return lockedNudgeWaiter.map { .some($0) }
+        }
+        if let existing = existing { return existing }
+        let made: RemuxEngineWaiter
+        if let send = torrent.requestRange {
+            made = RemuxEngineWaiter(send: send)
+        } else if let url = RemuxEngineHTTPSender.loopbackURL(engineServerURL) {
+            let sender = RemuxEngineHTTPSender(url: url)
+            made = RemuxEngineWaiter(send: { sender.send($0, done: $1) }, onClose: { sender.invalidate() })
+        } else {
+            if !loggedNoEngineURL {
+                loggedNoEngineURL = true
+                logResume("jump wait late, but the engine's local server is not known — nothing asked")
+            }
+            return nil
+        }
+        // A request that ended by itself once its piece is on disk: the next piece is asked
+        // now, not at the next 1 s tick (with two in flight at most, held pieces are taken back
+        // two by two). A request that failed while its piece is still missing waits for the
+        // tick, as before (no loop on a server that refuses).
+        made.onEnded = { [weak self] request in
+            guard let self = self else { return }
+            self.workQueue.async { [weak self] in
+                guard let self = self, torrent.firstMissingOffset(request.offset) > request.offset else { return }
+                self.scheduleTick(after: 0)
+            }
+        }
+        let kept: RemuxEngineWaiter? = stateLock.withLock {
+            if lockedNudgeClosed { return nil }
+            if lockedNudgeWaiter == nil { lockedNudgeWaiter = made }
+            return lockedNudgeWaiter
+        }
+        if kept !== made { made.close() }
+        return kept
+    }
+
+    /// Every request in flight is cancelled (the jump's first segment is
+    /// written, a new jump, a failure, …). Any thread.
+    private func cancelWaitNudge(_ reason: String) {
+        let waiter = stateLock.withLock { () -> RemuxEngineWaiter? in
+            lockedNudgeOffset = nil
+            return lockedNudgeWaiter
+        }
+        guard let count = waiter?.cancelAll(), count > 0 else { return }
+        logResume("jump wait: \(count) request(s) to the engine cancelled — \(reason)")
+    }
+
+    /// `stop()`: everything cancelled for good, the HTTP session let go (the player closed, a
+    /// hand-off to VLC, the next episode): said when requests were in flight.
+    private func closeWaitNudge() {
+        let waiter = stateLock.withLock { () -> RemuxEngineWaiter? in
+            lockedNudgeClosed = true
+            lockedNudgeOffset = nil
+            defer { lockedNudgeWaiter = nil }
+            return lockedNudgeWaiter
+        }
+        guard let count = waiter?.close(), count > 0 else { return }
+        logResume("jump wait: \(count) request(s) to the engine cancelled — the conversion stops")
     }
 
     var statsSummary: String {
@@ -4175,6 +4498,13 @@ struct RemuxTorrentView {
     var totalProgress: () -> Float
     /// Every byte of the file is on disk now.
     var isFileComplete: () -> Bool
+    /// The torrent's piece length (0: unknown).
+    var pieceLength: () -> Int64 = { 0 }
+    /// The torrent's download rate (B/s).
+    var downloadRate: () -> Int64 = { 0 }
+    /// Tests: stands in for the requests to the engine's server
+    /// (`RemuxWaitNudge`); nil: the engine's own server (`engineServerURL`).
+    var requestRange: RemuxEngineWaiter.Send?
 
     static func live(_ streamer: PTTorrentStreamer) -> RemuxTorrentView {
         RemuxTorrentView(setReadPosition: { streamer.readPosition = $0 },
@@ -4182,6 +4512,8 @@ struct RemuxTorrentView {
                          fileSize: { streamer.fileSize.longLongValue },
                          isBounded: { streamer.storageMode == .bounded },
                          totalProgress: { streamer.torrentStatus.totalProgress },
-                         isFileComplete: { streamer.isFileComplete })
+                         isFileComplete: { streamer.isFileComplete },
+                         pieceLength: { streamer.storageStatistics["pieceLength"]?.int64Value ?? 0 },
+                         downloadRate: { Int64(max(0, streamer.torrentStatus.downloadSpeed)) })
     }
 }

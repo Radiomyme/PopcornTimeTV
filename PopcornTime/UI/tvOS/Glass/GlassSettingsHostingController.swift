@@ -20,6 +20,9 @@ final class GlassSettingsHostingController: UIHostingController<GlassSettingsVie
             readThemeSongs: { GlassSettingsStore.themeSongs },
             setAutoPlayNext: { UpNextPreferences.autoPlayNext = $0 },
             readAutoPlayNext: { UpNextPreferences.autoPlayNext },
+            setUpNextCardLead: { UpNextPreferences.cardLeadSeconds = $0 },
+            readUpNextCardLead: { UpNextPreferences.cardLeadSeconds },
+            upNextCardLeadChoices: UpNextCountdown.cardLeadChoices,
             measureCache: { GlassSettingsStore.cacheSize() },
             clearCache: { AppDelegate.aggressivelyFreeDiskSpace() },
             hasActiveDownloads: { !PTTorrentDownloadManager.shared().activeDownloads.isEmpty },
@@ -53,6 +56,7 @@ final class GlassSettingsHostingController: UIHostingController<GlassSettingsVie
         case "homeShelves": row = .homeShelves
         case "homeLookup": row = .homeLookup
         case "autoPlayNext": row = .autoPlayNext
+        case "upNextCard": row = .upNextCard
         default: row = .quality
         }
         let picker = UserDefaults.standard.string(forKey: "PTDebugSettingsPicker").flatMap(GlassSettingsPicker.init(rawValue:))

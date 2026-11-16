@@ -353,7 +353,7 @@ struct HomeHarmony {
 
     /// The shelves whose order is the point: they are never reordered.
     static let keepsOrder: Set<String> = [HomeShelfID.continueWatching, HomeShelfID.watchlist,
-                                          HomeShelfID.top48hMovies, HomeShelfID.top48hShows]
+                                          HomeShelfID.topMovies, HomeShelfID.topShows]
 
     /// The user's own shelves: built from the library on the device, they
     /// arrive apart from the catalogue's, so they never reorder the

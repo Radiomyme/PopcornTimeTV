@@ -1059,7 +1059,10 @@ final class MacPlayerController: ObservableObject {
                                                                                       torrent: playback.torrent, log: "[Player]")))
 
         statsTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
-            Task { @MainActor in self?.refreshStats() }
+            Task { @MainActor in
+                self?.refreshStats()
+                self?.refreshResumingText()
+            }
         }
     }
 
@@ -1150,6 +1153,8 @@ final class MacPlayerController: ObservableObject {
         remux.preferredAudioLanguages = PlaybackLanguagePreferences.preferredAudioLanguageCode.map { [$0] } ?? []
         remux.preferredSubtitleLanguages = PlaybackLanguagePreferences.preferredSubtitleLanguageCode.map { [$0] } ?? []
         remux.releaseHintsHDR = releaseHintsHDR
+        // A late jump's wait asks the engine's own server (127.0.0.1) for its bytes (`RemuxWaitNudge`).
+        remux.engineServerURL = directURL
         // The search may have answered without its list being handed over
         // yet (its completion, in `start`, comes a queue turn after the
         // answer is recorded): taken from the search itself, or this
@@ -1163,7 +1168,7 @@ final class MacPlayerController: ObservableObject {
         // (`resumeReadiness`) and turns the torrent to it while the user is
         // asked. Its jumps are reported: one somebody waits on, one that failed.
         remux.allowsNativeJumps = nativeJumps
-        if let pending = pendingResume, nativeJumps { remux.prepareResume(atFraction: pending.fraction) }
+        if let pending = pendingResume, nativeJumps { remux.prepareResume(atFraction: pending.fraction, decided: !pending.asks) }
         remux.onResumeReadinessChanged = { [weak self] readiness in
             MainActor.assumeIsolated { self?.resumeReadinessChanged(readiness) }
         }
@@ -1419,7 +1424,7 @@ final class MacPlayerController: ObservableObject {
         let now = ProcessInfo.processInfo.systemUptime
         return ResumePolicy.resumeEngine(readiness: remux?.resumeReadiness ?? .pending,
                                          waited: now - (resumeWaitStartedAt ?? now), nativeJumps: nativeJumps,
-                                         indexIsRead: remux?.session?.jumpCapability == .available)
+                                         indexIsRead: remux?.isKeyframeIndexRead == true)
     }
 
     /// Seconds since `mark` (default: the remux's start), to a tenth: the
@@ -1524,8 +1529,8 @@ final class MacPlayerController: ObservableObject {
             startFraction = fraction
             vlcStartPosition = fraction
             remux?.commitResume()
-            let text = ResumePolicy.resumingText(position: label)
-            resumingText = text
+            showResumingText(label, target: nil)
+            let text = resumingText ?? ResumePolicy.resumingText(position: label)
             isResumeCovered = true
             // Until the player exists the loading screen says it.
             statusLine = text
@@ -1601,8 +1606,36 @@ final class MacPlayerController: ObservableObject {
 
     private func hideResuming() {
         resumingText = nil
+        resumingPosition = nil
+        resumingTarget = nil
         isResumeCovered = false
         jumpLabelTarget = nil
+    }
+
+    /// What « Resuming at … » shows: its position as written, and on the
+    /// player's timeline (nil: the start's resume) — `refreshResumingText`.
+    private var resumingPosition: String?
+    private var resumingTarget: Double?
+
+    /// « Resuming at <position>… », then — once the wait lasts — how far the
+    /// media there is (« Resuming at 22:35 — 45% · 9.6 MB/s »,
+    /// `RemuxPlayback.waitProgress`).
+    private func showResumingText(_ position: String, target: Double?) {
+        resumingPosition = position
+        resumingTarget = target
+        resumingText = ResumePolicy.resumingText(position: position,
+                                                 progress: ResumePolicy.progress(remux?.waitProgress, forTarget: target))
+    }
+
+    /// 1 Hz: the progress of the wait under « Resuming at … » (also on the
+    /// loading screen while the start's resume has no player yet).
+    private func refreshResumingText() {
+        guard let position = resumingPosition, let current = resumingText else { return }
+        let text = ResumePolicy.resumingText(position: position,
+                                             progress: ResumePolicy.progress(remux?.waitProgress, forTarget: resumingTarget))
+        guard text != current else { return }
+        if statusLine == current { statusLine = text }
+        resumingText = text
     }
 
     /// `RemuxPlayback.onJumpStateChanged`: the conversion was moved to serve
@@ -1620,10 +1653,10 @@ final class MacPlayerController: ObservableObject {
             case .armGraceOnly:
                 // A seek under the resume's cover: the cover stays (no
                 // `jumpLabelTarget`), its text follows the new position.
-                resumingText = ResumePolicy.resumingText(position: ResumePolicy.clockString(seconds: playerSeconds))
+                showResumingText(ResumePolicy.clockString(seconds: playerSeconds), target: playerSeconds)
             case .showAndArmGrace:
                 jumpLabelTarget = playerSeconds
-                resumingText = ResumePolicy.resumingText(position: ResumePolicy.clockString(seconds: playerSeconds))
+                showResumingText(ResumePolicy.clockString(seconds: playerSeconds), target: playerSeconds)
             }
             // The item is not left waiting on a segment the torrent has yet
             // to bring (`moveJumpWaitToNewItemIfNeeded`).
@@ -1852,7 +1885,7 @@ final class MacPlayerController: ObservableObject {
                   + "the conversion jumps there, native playback kept")
             farTarget.reset()
             jumpLabelTarget = held
-            resumingText = ResumePolicy.resumingText(position: ResumePolicy.clockString(seconds: held))
+            showResumingText(ResumePolicy.clockString(seconds: held), target: held)
             return
         }
         print("[Player] seek to \(Int(held)) s held past the remux frontier (\(Int(frontier)) s): \(away) — VLC there")
@@ -2027,7 +2060,7 @@ final class MacPlayerController: ObservableObject {
             guard let self = self, waiting, !recovery.isRebuildingStuckItem, !self.isResumingNatively,
                   self.remux?.isJumpWaiting == true, let time = recovery.resumeTime else { return }
             self.jumpLabelTarget = time
-            self.resumingText = ResumePolicy.resumingText(position: ResumePolicy.clockString(seconds: time))
+            self.showResumingText(ResumePolicy.clockString(seconds: time), target: time)
         }
         // Remux: a user seek during the wait moves the remux lookahead there
         // at once — the dead item requests nothing (direct path: no remux).

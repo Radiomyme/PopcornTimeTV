@@ -31,9 +31,9 @@ final class HomeBuilderTests: CheckedTestCase {
         let shelves = build(HomeFixture.allLists())
         eq(shelves.ids, [HomeShelfID.hero, HomeShelfID.trendingMovies, HomeShelfID.newMovies, HomeShelfID.uhd,
                          HomeShelfID.airedEpisodes, HomeShelfID.trendingShows, HomeShelfID.newShows,
-                         HomeShelfID.moviesOfTheYear, HomeShelfID.topRatedOfTheYear, HomeShelfID.top48hShows],
-           "the order of the page; no local shelf without a library, no ranking of fewer than five known titles")
-        eq(shelves.map(\.style), [.hero, .posters, .posters, .posters, .landscape, .posters, .posters, .posters, .posters, .ranked], "styles")
+                         HomeShelfID.moviesOfTheYear, HomeShelfID.topRatedOfTheYear, HomeShelfID.topShows, HomeShelfID.topMovies],
+           "the order of the page; no local shelf without a library")
+        eq(shelves.map(\.style), [.hero, .posters, .posters, .posters, .landscape, .posters, .posters, .posters, .posters, .ranked, .ranked], "styles")
         check(shelves.allSatisfy { !$0.items.isEmpty }, "no empty shelf")
         check(shelves.allSatisfy { !$0.isStale && $0.updatedAt == now }, "lists fetched now are not stale")
         for shelf in shelves {
@@ -42,7 +42,8 @@ final class HomeBuilderTests: CheckedTestCase {
         eq(shelves.shelf(HomeShelfID.trendingMovies)?.seeAll, HomeSeeAll(catalogue: .movies, filter: "trending"), "see all: the movies grid, Trending")
         eq(shelves.shelf(HomeShelfID.newMovies)?.seeAll?.movieFilter, .date, "see all: Recently Added")
         eq(shelves.shelf(HomeShelfID.airedEpisodes)?.seeAll?.showFilter, .date, "see all: the shows grid")
-        eq(shelves.shelf(HomeShelfID.top48hShows)?.seeAll?.showFilter, .top100, "see all: Top 100")
+        eq(shelves.shelf(HomeShelfID.topShows)?.seeAll?.showFilter, .top100, "see all: Top 100")
+        eq(shelves.shelf(HomeShelfID.topMovies)?.seeAll, HomeSeeAll(catalogue: .movies, filter: MovieManager.Filters.top100.rawValue), "see all: the movies' Top 100")
         check(shelves.shelf(HomeShelfID.hero)?.seeAll == nil && shelves.shelf(HomeShelfID.uhd)?.seeAll == nil, "nothing more to show behind the hero and 4K")
     }
 
@@ -115,16 +116,16 @@ final class HomeBuilderTests: CheckedTestCase {
         eq(count["tt26598805"], [HomeShelfID.hero, HomeShelfID.airedEpisodes], "Nocturne: hero, its episode — not in the new shows")
 
         // A ranking keeps every title, whatever is shown above: a top without its number one lies.
-        let top = shelves.shelf(HomeShelfID.top48hShows)!
-        eq(top.titles.first, "Dexter: Resurrection", "number one, although it is in two shelves above")
-        eq(count["tt33043892"], [HomeShelfID.airedEpisodes, HomeShelfID.trendingShows], "it is")
+        let top = shelves.shelf(HomeShelfID.topShows)!
+        eq(top.titles.first, "MobLand", "number one, although it is in two shelves above")
+        eq(count["tt31510819"], [HomeShelfID.hero, HomeShelfID.airedEpisodes], "it is")
         // The rule is a parameter: three shelves, or rankings filtered like the others.
         var loose = HomeBuilder.Rules()
         loose.maximumAppearances = 3
         check(build(HomeFixture.allLists(), rules: loose).shelf(HomeShelfID.moviesOfTheYear)!.imdbIds.contains("tt33764258"), "three allowed: The Odyssey is in the movies of the year")
         var strict = HomeBuilder.Rules()
         strict.rankedShelvesAreComplete = false
-        check(!build(HomeFixture.allLists(), rules: strict).shelf(HomeShelfID.top48hShows)!.imdbIds.contains("tt33043892"), "rankings filtered: no Dexter")
+        check(!build(HomeFixture.allLists(), rules: strict).shelf(HomeShelfID.topShows)!.imdbIds.contains("tt31510819"), "rankings filtered: no MobLand")
     }
 
     // MARK: Movies
@@ -293,7 +294,11 @@ final class HomeBuilderTests: CheckedTestCase {
            "read off series/top: no request more")
         eq(shelf.style, .landscape, "same shelf, same style")
         eq(shelf.items[2].episode?.stillURL?.absoluteString, "https://episodes.metahub.space/tt31510819/2/9/w780.jpg", "the still Cinemeta lists")
-        check(shelf.items.allSatisfy { $0.badges == [.newEpisode] }, "all aired this week")
+        check(shelf.items.allSatisfy { $0.badges.filter { !$0.isFormat } == [.newEpisode] }, "all aired this week")
+        // A format a ranking's release names is the title's on every shelf (`sameFormats`): one
+        // VisionQuest release of the shows' Top 100 says Atmos.
+        eq(shelf.items.filter { !$0.badges.filter(\.isFormat).isEmpty }.map(\.title), ["VisionQuest"], "VisionQuest: Atmos")
+        eq(shelf.items[4].badges, [.atmos, .newEpisode], "its badges")
     }
 
     func testNewShows() {
@@ -359,44 +364,68 @@ final class HomeBuilderTests: CheckedTestCase {
 
     func testRankingsTakeTheirCardsFromTheOtherLists() {
         let shelves = build(HomeFixture.allLists())
-        let top = shelves.shelf(HomeShelfID.top48hShows)!
-        eq(top.titles, ["Dexter: Resurrection", "12 12 12", "Tulsa King", "War", "The Rainmaker", "SpongeBob SquarePants",
-                        "Sheriff Country", "Yaga", "Fire Country"], "the shows another list knows, most seeded first")
-        eq(top.items.map(\.rank), [1, 2, 3, 4, 5, 6, 7, 8, 9], "ranked from 1, without holes")
+        let top = shelves.shelf(HomeShelfID.topShows)!
+        // The shows' Top 100 of 2026-11-16 with the cards the lists of 11-14 know. MobLand counts
+        // its release without an id ("MobLand S02E09…", 1,594 seeders, which the list ties to its
+        // id); Dexter: Resurrection and Slow Horses their season packs without one; From has only
+        // a season pack without an id, the show of that name and year the lists know.
+        eq(top.titles, ["MobLand", "VisionQuest", "Dexter: Resurrection", "Tulsa King", "Slow Horses", "The Gilded Age", "12 12 12",
+                        "Nocturne", "The Terminal List", "From", "Crystal Lake", "Black Doves"], "the shows another list knows, most seeded first")
+        eq(top.items.map(\.rank), Array(1...12).map { Optional($0) }, "ranked from 1, without holes")
         check(top.items.allSatisfy { $0.episode == nil && $0.posterURL != nil }, "title cards")
-        check(shelves.shelf(HomeShelfID.top48hMovies) == nil, "two known movies are not a ranking")
+        // The movies' Top 100: the HD movies most seeded on 2026-11-16, with the cards the lists of
+        // 11-14 know. Left out: the Telugu releases (Ranabaali, Jailer 2: not English or French),
+        // the screeners ("DVDScr": Donga Naa Koduku, Ramayana, G.O.A.T, Scene…), the titles no list
+        // knows yet (Coyote vs. Acme, Buddy: looked up below). Resident Evil counts its release
+        // without an id (4,748 seeders); Project Hail Mary, whose only release here has none, is
+        // the film of that name and year the lists know.
+        let movies = shelves.shelf(HomeShelfID.topMovies)!
+        eq(Array(movies.titles.prefix(9)), ["The Odyssey", "Spider-Man: Brand New Day", "Heart of the Beast", "Resident Evil", "Primetime",
+                                            "Obsession", "Project Hail Mary", "Other Mommy", "Backrooms"], "the movies another list knows, most seeded first")
+        check(!movies.titles.contains("Street Fighter"), "Street Fighter: no release with an id, and no list knows it")
+        eq(movies.items.first?.rank, 1, "ranked from 1")
 
         // What the loader then asks Cinemeta about: the leading titles nobody knows.
         let needed = HomeBuilder.lookupsNeeded(HomeFixture.inputs(HomeFixture.allLists()))
-        eq(needed.shows, ["tt0413573", "tt7235466", "tt0437005", "tt20859904", "tt33270224", "tt0159881", "tt33550053", "tt27954448",
-                          "tt31842126", "tt36984433", "tt0350448"], "the unknown shows of the first twenty, most seeded first")
-        eq(needed.movies, ["tt27419420", "tt4154796", "tt47791876", "tt29256561"], "the unknown movies with a release in a wanted language")
+        // Among the movies, Resident Evil and Project Hail Mary hold places among the first twenty:
+        // The Cycle (tt32358390) falls out of them. The shows: twelve of the first twenty (Avatar
+        // Seven Havens, The Rings of Power, South Park… Grey's Anatomy, 16th).
+        eq(needed.shows, ["tt35854736", "tt7631058", "tt0121955", "tt2861424", "tt26545992", "tt10986410", "tt36849871", "tt33332385",
+                          "tt0413573", "tt14688458", "tt0141842", "tt37522541"], "the unknown shows of the first twenty, most seeded first")
+        eq(needed.movies, ["tt1756855", "tt37281055"], "the unknown movies of the first twenty, most seeded first")
 
         // With the lookups answered: the cards, and "unknown" remembered for the rest.
         var lists = HomeFixture.allLists()
         let found = HomeFixture.entries("cm_last_videos.json", .cinemeta(.show))
         let unknown = needed.shows.filter { id in !found.contains { $0.item.imdbId == id } }.map { HomeEntry.unknown(imdbId: $0, kind: .show) }
         lists[HomeSource.lookupShowsKey] = HomeSourceList(key: HomeSource.lookupShowsKey, savedAt: now, complete: true, entries: found + unknown)
-        let resolved = build(lists).shelf(HomeShelfID.top48hShows)!
-        eq(resolved.titles.prefix(5).map { $0 }, ["Dexter: Resurrection", "12 12 12", "Tulsa King", "Grey's Anatomy", "9-1-1"], "the looked up shows take their rank")
-        eq(resolved.items.count, 15, "nine known + six found")
-        check(resolved.titles.contains("SWAT Exiles") && resolved.titles.contains("Law & Order Toronto: Criminal Intent"), "titles spelled differently in the release")
+        let resolved = build(lists).shelf(HomeShelfID.topShows)!
+        // The recorded lookup answers six shows of the 48 h list: of the twelve asked, it has
+        // Grey's Anatomy only.
+        eq(Array(resolved.titles.prefix(9)), ["MobLand", "VisionQuest", "Dexter: Resurrection", "Tulsa King", "Slow Horses", "The Gilded Age",
+                                              "12 12 12", "Grey's Anatomy", "Nocturne"], "the looked up show takes its rank")
+        eq(resolved.items.count, 13, "twelve known + one found")
+        check(resolved.titles.contains("Grey's Anatomy"), "a title spelled differently in the release (\"Greys Anatomy S23E05\")")
         eq(HomeBuilder.lookupsNeeded(HomeFixture.inputs(lists)).shows, [], "nothing is asked twice, found or not")
 
         // A release filed under another title's id is not shown under that title.
         var wrong = HomeFixture.allLists()
-        var ranking = wrong[HomeSource.top48hShows.key]!
+        var ranking = wrong[HomeSource.topShows.key]!
         ranking.entries[0].releaseName = "Some Other Show S01E01 1080p WEB H264"
         wrong[ranking.key] = ranking
-        eq(build(wrong).shelf(HomeShelfID.top48hShows)?.titles.first, "12 12 12", "Dexter's card does not name that release: left out")
+        eq(ranking.entries[0].item.imdbId, "tt31510819", "MobLand's entry")
+        eq(build(wrong).shelf(HomeShelfID.topShows)?.titles.first, "VisionQuest", "MobLand's card does not name that release: left out")
     }
 
     func testRankingLanguages() {
         var lists = HomeFixture.allLists()
+        // The movies' Top 48 h of 2026-11-14 (the shelf's list before the Top 100): Telugu,
+        // Tamil and Malayalam releases lead it, the language rule's case.
+        lists[HomeSource.topMovies.key] = HomeFixture.list(.topMovies, "tpb_48h_207.json")
         let metas = (try? JSONSerialization.jsonObject(with: HomeFixture.data("cm_meta_movies.json"))) as? [String: [String: Any]] ?? [:]
         let found = metas.values.compactMap { HomeParse.cinemetaEntry($0["meta"] as? [String: Any], kind: .movie, now: now) }
         lists[HomeSource.lookupMoviesKey] = HomeSourceList(key: HomeSource.lookupMoviesKey, savedAt: now, complete: true, entries: found)
-        let top = build(lists).shelf(HomeShelfID.top48hMovies)!
+        let top = build(lists).shelf(HomeShelfID.topMovies)!
         // Telugu / Tamil / Malayalam releases lead the list: not in an English + French ranking.
         // "Avengers: Endgame" (2019) is not the card of "Avengers Endgame Encore 2026".
         eq(top.titles, ["Street Fighter", "Snoopy Presents: 12 Days of Snoopy", "The Beast", "Extra Geography", "Resident Evil"], "the titles with a release in a wanted language")
@@ -405,11 +434,354 @@ final class HomeBuilderTests: CheckedTestCase {
         rules.rankedMinimum = 1
         // Tamil wanted: Jailer 2 (Tamil on YTS) is in; Extra Geography and Resident Evil (English on YTS) are out;
         // the releases that name no language stay.
-        eq(build(lists, languages: ["ta"], rules: rules).shelf(HomeShelfID.top48hMovies)?.titles,
+        eq(build(lists, languages: ["ta"], rules: rules).shelf(HomeShelfID.topMovies)?.titles,
            ["Jailer 2", "Street Fighter", "Snoopy Presents: 12 Days of Snoopy", "The Beast"], "another language setting")
-        check(build(lists, languages: ["ta"]).shelf(HomeShelfID.top48hMovies) == nil, "four titles are not a ranking (five at least)")
-        let everything = build(lists, languages: []).shelf(HomeShelfID.top48hMovies)!
+        check(build(lists, languages: ["ta"]).shelf(HomeShelfID.topMovies) == nil, "four titles are not a ranking (five at least)")
+        let everything = build(lists, languages: []).shelf(HomeShelfID.topMovies)!
         eq(everything.titles.first, "Jailer 2", "no language set: the most seeded known title leads")
+    }
+
+    // MARK: The movies' Top 100
+
+    func testTheMoviesRankingIsTheTop100OfHDMovies() {
+        // The list: apibay's Top 100 of HD movies, not the 48 h one; the shows' Top 100 too.
+        eq(HomeSource.topMovies.request, HomeRequest(host: .apibay, path: "/precompiled/data_top100_207.json"), "the Top 100 of HD movies")
+        eq(HomeSource.topMovies.key, "tpb-207", "its cache key")
+        eq(HomeSource.topMovies.minimum, 20, "twenty titles at least")
+        eq(HomeSource.topShows.request, HomeRequest(host: .apibay, path: "/precompiled/data_top100_208.json"), "the shows: the Top 100 of HD episodes")
+        eq(HomeSource.topShows.key, "tpb-208", "its cache key")
+        check(!HomeSource.isLast48Hours(HomeSource.showsRanking) && !HomeSource.isLast48Hours(HomeSource.moviesRanking), "neither is the 48 h list")
+        // The titles, which follow the lists.
+        eq(HomeShelfID.defaultTitle(HomeShelfID.topMovies), "Top 100 Movies", "the movies' title")
+        eq(HomeShelfID.defaultTitle(HomeShelfID.topShows), "Top 100 Shows", "the shows' title")
+        let repository = URL(fileURLWithPath: "\(#filePath)").deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+        let expected = ["Base": ("Top 100 Movies", "Top 100 Shows"), "en": ("Top 100 Movies", "Top 100 Shows"),
+                        "fr": ("Top 100 : films", "Top 100 : séries"), "es": ("Top 100: películas", "Top 100: series"),
+                        "it": ("Top 100: film", "Top 100: serie TV"), "pt-BR": ("Top 100: filmes", "Top 100: seriados"),
+                        "ar": ("أفضل 100: أفلام", "أفضل 100: مسلسلات")]
+        for (language, titles) in expected {
+            let file = repository.appendingPathComponent("PopcornTime/\(language).lproj/Localizable.strings")
+            guard let strings = NSDictionary(contentsOf: file) as? [String: String] else { check(false, "\(language): the strings file reads"); continue }
+            eq(strings["Top 100 Movies"], titles.0, "\(language): the movies' Top 100")
+            eq(strings["Top 100 Shows"], titles.1, "\(language): the shows' Top 100")
+            check(strings["Top Movies of the Last 48 Hours"] == nil, "\(language): the former title is gone")
+            check(strings["Top Shows of the Last 48 Hours"] != nil, "\(language): the shows' former title stays translated (a switch back is one line)")
+        }
+        // On the page: the titles English and French speakers read, theater copies out.
+        let shelf = build(HomeFixture.allLists()).shelf(HomeShelfID.topMovies)!
+        let recordings = ["tt43738410", "tt27988879", "tt27730178", "tt38192494", "tt39131708", "tt30768979"]
+        check(!shelf.imdbIds.contains { recordings.contains($0) }, "no screener (DVDScr)")
+        check(!shelf.imdbIds.contains("tt32324552") && !shelf.imdbIds.contains("tt33318732"), "no Telugu release (Ranabaali, Jailer 2)")
+        eq(shelf.style, .ranked, "a ranked shelf")
+        eq(shelf.items.map(\.rank), Array(1...shelf.items.count).map { Optional($0) }, "ranked from 1, without holes")
+        // Every language: the Telugu titles are back, the screeners never.
+        let all = build(HomeFixture.allLists(), languages: []).shelf(HomeShelfID.topMovies)!
+        check(all.imdbIds.contains("tt33318732"), "Jailer 2 is a known title in another language")
+        check(!all.imdbIds.contains { recordings.contains($0) }, "the screeners are out in every language")
+    }
+
+    func testTheFormer48HoursListIsNeverShownUnderTheNewTitle() {
+        // A cache of 5.3.0's first build: the movies' Top 48 h under its key of then, with the
+        // cards of its titles — enough for a ranking (testRankingLanguages) — and no Top 100.
+        var lists = HomeFixture.allLists()
+        lists[HomeSource.topMovies.key] = nil
+        lists[HomeSource.topShows.key] = nil
+        // The shows' Top 48 h too: ten of its titles have a card in the lists of 11-14.
+        let formerShows = HomeFixture.list(.topShows, "tpb_48h_208.json")
+        lists["tpb-48h-208"] = HomeSourceList(key: "tpb-48h-208", savedAt: now, complete: true, entries: formerShows.entries)
+        check(build(lists).shelf(HomeShelfID.topShows) == nil, "no shows' Top 100 yet: no shelf, not the 48 h list under « Top 100 : séries »")
+        eq(HomeBuilder.lookupsNeeded(HomeFixture.inputs(lists)).shows, [], "and no show is looked up for it")
+        var withShows = lists
+        withShows[HomeSource.topShows.key] = formerShows
+        check(build(withShows).shelf(HomeShelfID.topShows) != nil, "the shows: the key decides")
+        let former = HomeFixture.list(.topMovies, "tpb_48h_207.json")
+        lists["tpb-48h-207"] = HomeSourceList(key: "tpb-48h-207", savedAt: now, complete: true, entries: former.entries)
+        let metas = (try? JSONSerialization.jsonObject(with: HomeFixture.data("cm_meta_movies.json"))) as? [String: [String: Any]] ?? [:]
+        let found = metas.values.compactMap { HomeParse.cinemetaEntry($0["meta"] as? [String: Any], kind: .movie, now: now) }
+        lists[HomeSource.lookupMoviesKey] = HomeSourceList(key: HomeSource.lookupMoviesKey, savedAt: now, complete: true, entries: found)
+        check(build(lists).shelf(HomeShelfID.topMovies) == nil, "no Top 100 yet: no shelf, not the 48 h list under its title")
+        eq(HomeBuilder.lookupsNeeded(HomeFixture.inputs(lists)).movies, [], "and nothing is looked up for it")
+        // The same entries under the new key would make one: what keeps them out is the key.
+        lists[HomeSource.topMovies.key] = former
+        check(build(lists).shelf(HomeShelfID.topMovies) != nil, "the key decides")
+    }
+
+    // MARK: The shows' Top 100
+
+    func testTheShowsRankingIsTheTop100OfHDEpisodes() {
+        // The list of 2026-11-16, whole: 100 releases, episodes and season packs of 26 shows, ten
+        // of them without an IMDb id.
+        let entries = HomeFixture.entries("tpb_208.json", .apibay(.show))
+        eq(entries.filter { !$0.isPending }.count, 26, "26 titles")
+        eq(entries.filter(\.isPending).count, 10, "ten releases without an id, each read apart")
+        eq(HomeSource.topShows.minimum, 10, "its own minimum: few shows fill it")
+        // Ranked with the cards the lists of 11-14 know, as the builder does.
+        let cards = HomeFixture.allLists().filter { !$0.key.hasPrefix(HomeSource.apibayPrefix) }.values.flatMap(\.entries)
+        let ranked = HomeBuilder.attachingPending(entries, known: HomeBuilder.titlesByReading(cards, titles: [:], kind: .show),
+                                                  pooled: Set(cards.map(\.item.imdbId)))
+        func seeders(_ id: String) -> Int? { ranked.first { $0.item.imdbId == id }?.seeders }
+        eq(seeders("tt31510819"), 23_284 + 1_594, "MobLand: fifteen episodes with an id, one without that the list ties to its id")
+        eq(seeders("tt33043892"), 9_974 + 508, "Dexter: Resurrection: five episodes and the pack « Dexter - Resurrection (2025) S01 », "
+            + "not « Dexter (2006) Season 1-8 » (353), another show that shares a word")
+        eq(seeders("tt5875444"), 1_256 + 1_075, "Slow Horses: an episode and the pack « Slow Horses S01 »")
+        eq(seeders("tt9813792"), 859, "From: its season pack only, the show of that name and year the lists know")
+        eq(seeders("tt0773262"), nil, "Dexter (2006): no card known, its pack counts for no show")
+        eq(seeders("tt10986410"), 3_933, "Ted Lasso: its episodes; its 2020 pack waits for a card of that year")
+        eq(ranked.count, 27, "26 titles and From")
+        // The page: show cards only, ranked from 1. A movie card under one of the list's ids is
+        // not a show's.
+        var lists = HomeFixture.allLists()
+        lists[HomeSource.lookupMoviesKey] = HomeSourceList(key: HomeSource.lookupMoviesKey, savedAt: now, complete: true,
+                                                           entries: [movie("tt37522541", "Apocalypse Z: New World", 2026)])
+        let shelf = build(lists).shelf(HomeShelfID.topShows)!
+        check(shelf.items.allSatisfy { $0.kind == .show }, "show cards only")
+        check(!shelf.imdbIds.contains("tt37522541"), "the movie card is not shown")
+        eq(shelf.items.map(\.rank), Array(1...shelf.items.count).map { Optional($0) }, "ranked from 1, without holes")
+        eq(shelf.seeAll?.showFilter, .top100, "« See all »: the shows' Top 100 grid")
+    }
+
+    func testRankingLookupsAreBounded() {
+        // Forty unknown movies lead the ranking: the loader asks Cinemeta about the first
+        // `lookupLimit` (8) only, one request each, and never about titles past the shelf's
+        // twenty; the shows are one request for at most twenty ids.
+        let unknown = (1...40).map { index -> HomeEntry in
+            return HomeEntry(item: HomeItem(imdbId: String(format: "tt95%05d", index), kind: .movie, title: ""), seeders: 1000 - index,
+                             releaseName: "Unknown Film \(index) 2026 1080p WEB-DL x264")
+        }
+        var lists = HomeFixture.allLists()
+        lists[HomeSource.topMovies.key] = HomeFixture.list(.topMovies, unknown)
+        let rules = HomeBuilder.Rules()
+        eq(rules.lookupLimit, 8, "the cap")
+        let needed = HomeBuilder.lookupsNeeded(HomeFixture.inputs(lists), rules: rules)
+        eq(needed.movies, (1...8).map { String(format: "tt95%05d", $0) }, "the eight most seeded, in order")
+        check(needed.shows.count <= rules.rankedLimit, "the shows: twenty at most, in one request")
+        // Once they are looked up (found or not), the next ones — within the first twenty only.
+        var asked = needed.movies
+        for _ in 0..<4 {
+            let answered = asked.map { HomeEntry.unknown(imdbId: $0, kind: .movie) }
+            lists[HomeSource.lookupMoviesKey] = HomeSourceList(key: HomeSource.lookupMoviesKey, savedAt: now, complete: true, entries: answered)
+            asked += HomeBuilder.lookupsNeeded(HomeFixture.inputs(lists), rules: rules).movies
+        }
+        eq(asked.count, rules.rankedLimit, "twenty titles at most over every refresh: the shelf's own size")
+        eq(Set(asked).count, asked.count, "none asked twice")
+    }
+
+    // MARK: Releases without an IMDb id
+
+    /// Where the seeders of `release` (no IMDb id, 777 seeders) go, by the real parser and builder
+    /// rules: the id of the title it counts for, nil when it counts for none. `titled`: releases of
+    /// the same list with an id (10 seeders each); `known`: the cards the lists know (a titled
+    /// release's id without a card here: not looked up yet).
+    private func attachment(_ release: String, titled: [(id: String, name: String)] = [], known: [HomeEntry] = [],
+                            kind: HomeItem.Kind = .movie) -> String? {
+        var releases: [[String: Any]] = titled.map { ["name": $0.name, "seeders": 10, "imdb": $0.id, "category": 207] }
+        releases.append(["name": release, "seeders": 777, "imdb": "", "category": 207])
+        let parsed = HomeParse.entries(try! JSONSerialization.data(withJSONObject: releases), parser: .apibay(kind), now: now) ?? []
+        let ranked = HomeBuilder.attachingPending(parsed, known: HomeBuilder.titlesByReading(known, titles: [:], kind: kind),
+                                                  pooled: Set(known.map(\.item.imdbId)))
+        check(!ranked.contains(where: \.isPending), "no pending entry is left after the builder: \(release)")
+        let counted = ranked.filter { ($0.seeders ?? 0) % 10 == 7 }
+        check(counted.count <= 1, "counted once at most: \(release)")
+        return counted.first?.item.imdbId
+    }
+
+    private func movie(_ id: String, _ title: String, _ year: Int?) -> HomeEntry { HomeFixture.entry(id, title, year: year) }
+    private func show(_ id: String, _ title: String, _ year: Int?) -> HomeEntry { HomeFixture.entry(id, title, kind: .show, year: year) }
+
+    func testReleasesWithoutAnIdCountForTheTitleTheyName() {
+        // (a) A titled release of the same list reads the same: the release joins it when the
+        // title's card has that name and year, whatever else the lists know.
+        let residentEvil = movie("tt35538033", "Resident Evil", 2026)
+        eq(attachment("Resident Evil 2026 REPACK 1080p AMZN WEB-DL DDP5 1 Atmos H 264-Kitsune",
+                      titled: [("tt35538033", "Resident.Evil.2026.1080p.WEBRip.10Bit.DDP5.1.x265-NeoNoir")], known: [residentEvil]),
+           "tt35538033", "the list's own title")
+        eq(attachment("Resident Evil 2026 REPACK 1080p AMZN WEB-DL DDP5 1 Atmos H 264-Kitsune",
+                      titled: [("tt35538033", "Resident.Evil.2026.1080p.WEBRip.10Bit.DDP5.1.x265-NeoNoir")]),
+           "tt35538033", "a card not looked up yet: counted for the lookups' order (no ranking shows a title without its card)")
+        eq(attachment("The Odyssey (2026) 1080p WEBRip x265 10bit 5.1-LAMA", titled: [("tt33764258", "The Odyssey 2026 1080p BluRay HEVC x265 5.1 BONE")],
+                      known: [movie("tt33764258", "The Odyssey", 2026), movie("tt0000001", "The Odyssey", 2026), movie("tt0000002", "The Odyssey", 2026)]),
+           "tt33764258", "the list decides before the other lists (YTS's twin stubs of the same name)")
+        // apibay files some releases under another title's id: the card must have the name and
+        // year the release reads, the list's word alone is not enough.
+        let endgame = movie("tt4154796", "Avengers: Endgame", 2019)
+        eq(attachment("Avengers Endgame Encore (2026) 1080p HDRip x264 DD+5.1  [Tel +Tam + Hiin + Eng]",
+                      titled: [("tt4154796", "Avengers Endgame Encore (2026) iMAX 1080p H265 10Bit iTA EnG AC3 Sub iTA EnG-MIRCrew.mkv")],
+                      known: [endgame]), nil, "the Top 48 h of 2026-11-16: a 2026 Encore filed under the 2019 film is not counted for it")
+        let wicked = movie("tt1262426", "Wicked", 2024), forGood = movie("tt19847976", "Wicked: For Good", 2025)
+        eq(attachment("Wicked.For.Good.2025.1080p.AMZN.WEB-DL", titled: [("tt1262426", "Wicked 2024 1080p"), ("tt1262426", "Wicked For Good 2025 1080p")],
+                      known: [wicked, forGood]), nil, "the sequel filed under Wicked's id: not Wicked's (nor, the list naming another title, the sequel's)")
+        eq(attachment("Wicked.For.Good.2025.1080p.AMZN.WEB-DL", titled: [("tt1262426", "Wicked 2024 1080p")], known: [wicked, forGood]),
+           "tt19847976", "with no misfiled release in the list: the sequel")
+        // (b) No titled release reads the same: the one title of that name, year and kind the lists know.
+        eq(attachment("Project Hail Mary (2026) [1080p] [WEBRip] [5.1]", known: [movie("tt12042730", "Project Hail Mary", 2026)]),
+           "tt12042730", "a known title")
+        eq(attachment("Street.Fighter.2026.WEB-DL.1080p.KR.EN-CinemaCity", known: [movie("tt12042730", "Project Hail Mary", 2026)]),
+           nil, "a title nobody knows stays out: no request is made for it")
+        eq(attachment("Project Hail Mary (2026) [1080p]", known: [show("tt12042730", "Project Hail Mary", 2026)]), nil, "of the same kind")
+        eq(attachment("Project Hail Mary (2026) [1080p]", known: [movie("tt12042730", "Project Hail Mary", nil)]), nil, "a card without a year: no")
+        // Never a theater copy, with or without a titled release of its name.
+        eq(attachment("The.Odyssey.2026.1080p.TELESYNC.HEVC.AAC2.0-SPLiCE", titled: [("tt33764258", "The Odyssey 2026 1080p BluRay")],
+                      known: [movie("tt33764258", "The Odyssey", 2026)]), nil, "a TELESYNC never counts")
+        eq(attachment("Donga Naa Koduku (2026) 720p Telugu DVDScr x264 AAC", known: [movie("tt43738410", "Donga Naa Koduku", 2026)]),
+           nil, "nor a screener")
+        // Two titles of the list by that name: neither.
+        eq(attachment("The Odyssey 2026 1080p WEB-DL", titled: [("tt33764258", "The Odyssey 2026 1080p BluRay"), ("tt0000001", "The.Odyssey.2026.720p.WEB")],
+                      known: [movie("tt33764258", "The Odyssey", 2026)]), nil, "two ids in the list: counted for neither, not even the known one")
+
+        // The seeders add up, and the release without an id may become the one the card reads.
+        let list = Data(#"""
+            [{"name":"Resident.Evil.2026.1080p.WEBRip.10Bit.DDP5.1.x265-NeoNoir","seeders":1478,"imdb":"tt35538033","category":207,"added":1794000000},
+             {"name":"Resident Evil 2026 REPACK 1080p AMZN WEB-DL DDP5 1 Atmos H 264-Kitsune","seeders":4748,"imdb":"","category":207,"added":1794500000},
+             {"name":"Project Hail Mary (2026) [1080p] [WEBRip] [5.1]","seeders":3880,"imdb":"","category":207,"added":1794400000},
+             {"name":"Project Hail Mary 2026 1080p WEB Line AC3 H264-DJT","seeders":1252,"imdb":"tt12042730","category":207,"added":1794100000},
+             {"name":"Coyote vs. Acme (2026) [1080p] [WEBRip] [5.1]","seeders":5000,"imdb":"tt1756855","category":207}]
+            """#.utf8)
+        let parsed = HomeParse.entries(list, parser: .apibay(.movie), now: now)!
+        eq(parsed.filter(\.isPending).map(\.listedUnder), ["tt35538033", "tt12042730"], "the parser ties each to the title of the list it names")
+        let cards = [residentEvil, movie("tt12042730", "Project Hail Mary", 2026), movie("tt1756855", "Coyote vs. Acme", 2026)]
+        let entries = HomeBuilder.attachingPending(parsed, known: HomeBuilder.titlesByReading(cards, titles: [:], kind: .movie),
+                                                   pooled: Set(cards.map(\.item.imdbId)))
+        eq(entries.map(\.item.imdbId), ["tt35538033", "tt12042730", "tt1756855"], "ordered by the seeders summed: 6,226, 5,132, 5,000")
+        eq(entries.map(\.seeders), [1478 + 4748, 3880 + 1252, 5000], "summed")
+        eq(entries[0].releaseName, "Resident Evil 2026 REPACK 1080p AMZN WEB-DL DDP5 1 Atmos H 264-Kitsune", "the most seeded release, without an id")
+        eq(entries[0].releaseSeeders, 4748, "its seeders")
+        eq(entries[0].item.badges, [.atmos], "its badges")
+        eq(entries[0].item.date, Date(timeIntervalSince1970: 1_794_500_000), "its date, the latest")
+    }
+
+    func testReleasesWithoutAnIdFalsePositives() {
+        // Each release (no IMDb id) against the titles the other lists know: the one it counts for, or nil.
+        let dune1984 = movie("tt0087182", "Dune", 1984), dune2021 = movie("tt1160419", "Dune", 2021)
+        let duneTwo = movie("tt15239678", "Dune: Part Two", 2024)
+        let scream = movie("tt11245972", "Scream", 2022), scream7 = movie("tt27047903", "Scream 7", 2026)
+        let avatar = movie("tt0499549", "Avatar", 2009), fireAndAsh = movie("tt1757678", "Avatar: Fire and Ash", 2025)
+        let toyStory5 = movie("tt29355505", "Toy Story 5", 2026)
+        let finalReckoning = movie("tt9603208", "Mission: Impossible - The Final Reckoning", 2025)
+        let y2012 = movie("tt1190080", "2012", 2009), y1917 = movie("tt8579674", "1917", 2019)
+        let bladeRunner = movie("tt0083658", "Blade Runner", 1982), bladeRunner2049 = movie("tt1856101", "Blade Runner 2049", 2017)
+        let godfather = movie("tt0068646", "The Godfather", 1972), toyStory = movie("tt0114709", "Toy Story", 1995)
+        let hungerGames = movie("tt1392170", "The Hunger Games", 2012), fargo = movie("tt0116282", "Fargo", 1996)
+        let lupin = movie("tt2531336", "Lupin", 2021), witch = movie("tt0479997", "Season of the Witch", 2011)
+        let endgame = movie("tt4154796", "Avengers: Endgame", 2019)
+        let amelie = movie("tt0211915", "Amélie", 2001), spiderMan = movie("tt22084616", "Spider-Man: Brand New Day", 2026)
+        let odysseyA = movie("tt33764258", "The Odyssey", 2026), odysseyB = movie("tt40000001", "The Odyssey", 2026)
+        let cases: [(release: String, known: [HomeEntry], expected: String?, why: String)] = [
+            // The same title, another year: a remake.
+            ("Dune.1984.1080p.BluRay.x264", [dune2021], nil, "the 1984 Dune is not the 2021 one"),
+            ("Dune.2021.1080p.WEB-DL.x264", [dune1984, dune2021], "tt1160419", "the year picks the film"),
+            // A title that starts another one.
+            ("Scream 7 2026 1080p WEB-DL", [scream], nil, "Scream 7 is not Scream"),
+            ("Scream 7 2026 1080p WEB-DL", [scream, scream7], "tt27047903", "Scream 7"),
+            ("Scream.2022.1080p.WEB", [scream, scream7], "tt11245972", "Scream"),
+            ("Avatar Fire and Ash 2025 1080p", [avatar], nil, "Avatar: Fire and Ash is not Avatar"),
+            ("Avatar.Fire.and.Ash.2025.1080p", [avatar, fireAndAsh], "tt1757678", "Avatar: Fire and Ash"),
+            ("Avatar 2009 Extended 1080p", [fireAndAsh], nil, "Avatar is not Avatar: Fire and Ash"),
+            // A sequel number, a subtitle.
+            ("Dune Part Two 2024 1080p", [dune2021], nil, "Part Two is not Dune"),
+            ("Dune Part Two 2024 1080p", [dune2021, duneTwo], "tt15239678", "Dune: Part Two"),
+            ("Toy Story 2026 1080p WEB", [toyStory5], nil, "without its number, not the sequel"),
+            ("Toy.Story.5.2026.1080p.WEB", [toyStory5], "tt29355505", "with it"),
+            ("Mission Impossible 2025 1080p", [finalReckoning], nil, "a subtitle left out: not enough"),
+            // Titles that are, or hold, a year.
+            ("2012 (2009) 1080p BluRay", [y2012], "tt1190080", "\"2012\", the 2009 film"),
+            ("2012 1080p BluRay x264", [y2012], nil, "\"2012\" alone: no release year"),
+            ("1917.2019.1080p.BluRay", [y1917], "tt8579674", "1917"),
+            ("Blade Runner 2049 (2017) 1080p", [bladeRunner, bladeRunner2049], "tt1856101", "Blade Runner 2049, not Blade Runner"),
+            ("Blade.Runner.1982.Final.Cut.1080p", [bladeRunner, bladeRunner2049], "tt0083658", "Blade Runner"),
+            // No year.
+            ("Project Hail Mary 1080p WEBRip", [movie("tt12042730", "Project Hail Mary", 2026)], nil, "no year in the name"),
+            // Several films.
+            ("The Godfather Trilogy 1972-1990 1080p BluRay", [godfather], nil, "a trilogy"),
+            ("The Godfather (1972) (Trilogy) 1080p", [godfather], nil, "a trilogy in brackets"),
+            ("Dune 2021 Duology 1080p", [dune2021], nil, "a duology"),
+            ("Dune Duology 2021-2024 1080p", [dune2021], nil, "a duology, a range of years"),
+            ("Toy Story 1-3 1995 1080p", [toyStory], nil, "\"1-3\""),
+            ("The Hunger Games (2012) [Collection] 1080p", [hungerGames], nil, "a collection"),
+            ("The Hunger Games 2012 Collection 1080p", [hungerGames], nil, "a collection"),
+            // An episode or a season among the movies.
+            ("Lupin 2021 S01E02 1080p WEB", [lupin], nil, "S01E02"),
+            ("Fargo 1996 Season 1 1080p", [fargo], nil, "\"Season 1\""),
+            ("Season of the Witch 2011 1080p BluRay", [witch], "tt0479997", "\"Season of the Witch\" is a film"),
+            // A re-release of the same film: counted, with the film's year.
+            ("Avengers Endgame Encore 2019 1080p", [endgame], "tt4154796", "\"Encore\""),
+            ("Avengers Endgame Encore (2026) 1080p HDRip x264 DD+5.1 [Tel +Tam + Hiin + Eng]", [endgame], nil,
+             "an Encore that names the year of its re-release: not the 2019 film's year"),
+            ("Dune Extended 2021 1080p", [dune1984, dune2021], "tt1160419", "\"Extended\""),
+            ("Blade Runner Director's Cut 1982 1080p", [bladeRunner], "tt0083658", "\"Director's Cut\""),
+            // Accents and punctuation.
+            ("Amelie.2001.1080p.BluRay", [amelie], "tt0211915", "Amélie"),
+            ("Amélie (2001) 1080p", [movie("tt0211915", "Amelie", 2001)], "tt0211915", "Amelie"),
+            ("Spider-Man Brand New Day (2026) [1080p]", [spiderMan], "tt22084616", "Spider-Man: Brand New Day"),
+            ("Spider.Man.Brand.New.Day.2026.1080p", [spiderMan], "tt22084616", "Spider-Man: Brand New Day"),
+            // Two films of the same title and year.
+            ("The Odyssey 2026 1080p AMZN WEB-DL DDP5 1 H 264-Kitsune", [odysseyA, odysseyB], nil, "two ids: counted for neither"),
+        ]
+        for test in cases {
+            eq(attachment(test.release, known: test.known), test.expected, "\(test.release): \(test.why)")
+        }
+        // The same names, read against a titled release of the list instead: the same answers,
+        // with the title's card known or not looked up yet.
+        for test in cases where test.known.count == 1 {
+            let card = test.known[0]
+            let titled: (id: String, name: String) = (card.item.imdbId, "\(card.item.title) \(card.item.year.map(String.init) ?? "") 1080p WEB-DL")
+            eq(attachment(test.release, titled: [titled], known: [card]), test.expected, "\(test.release), in the list: \(test.why)")
+            eq(attachment(test.release, titled: [titled]), test.expected, "\(test.release), in the list, no card yet: \(test.why)")
+        }
+    }
+
+    func testShowReleasesWithoutAnId() {
+        let office = show("tt0386676", "The Office", 2005), officeUK = show("tt0290978", "The Office", 2001)
+        let dexter = show("tt0773262", "Dexter", 2006), resurrection = show("tt33043892", "Dexter: Resurrection", 2025)
+        let doctorWho = show("tt0056751", "Doctor Who", 1963), mobLand = show("tt31510819", "MobLand", 2025)
+        eq(attachment("MobLand S02E09 Nervous Breakdown 1080p AMZN WEB-DL DDP5 1 H 264-RAWR", titled: [("tt31510819", "MobLand S02E07 1080p WEB H264")],
+                      kind: .show), "tt31510819", "an episode of a show of the list")
+        eq(attachment("MobLand S02E09 1080p WEB", known: [mobLand], kind: .show), "tt31510819", "a known show")
+        eq(attachment("MobLand S02E09 1080p WEB", known: [movie("tt31510819", "MobLand", 2025)], kind: .show), nil, "a movie of that name is not the show")
+        eq(attachment("Dexter - Resurrection (2025) S01 (1080p AMZN WEB-DL x265 10bit EAC3 5.1 Silence)", known: [dexter, resurrection], kind: .show),
+           "tt33043892", "Dexter: Resurrection, not Dexter")
+        eq(attachment("Dexter (2006) Season 1-8 S01-S08 (1080p BluRay x265 HEVC 10bit", known: [dexter, resurrection], kind: .show),
+           "tt0773262", "Dexter")
+        eq(attachment("The Office (US) (2005) Season 1-9 S01-S09 (1080p BluRay x265", known: [office, officeUK], kind: .show),
+           "tt0386676", "the year picks one of two shows of the same name")
+        eq(attachment("The.Office.S01.1080p.BluRay", known: [office, officeUK], kind: .show), nil, "without a year: two shows, neither")
+        eq(attachment("The.Office.UK.S01.1080p.BluRay", known: [officeUK], kind: .show), nil, "a country the lists cannot check")
+        eq(attachment("Doctor Who (2005) S01 1080p", known: [doctorWho], kind: .show), nil, "another year: another show")
+        eq(attachment("UFC 334 Gane vs. Hokit Prelims &amp; Main Card 14.11.2026, MMA, IPTV 1080p", known: [mobLand], kind: .show),
+           nil, "no episode or season: no show name read")
+        // A release that names no year, and two shows of that name: the list names the new one
+        // with its year, the lists know only the old one.
+        let frasier = show("tt0106004", "Frasier", 1993), reboot = show("tt14527010", "Frasier", 2023)
+        eq(attachment("Frasier S02E02 1080p WEB H264-CAKES", titled: [("tt14527010", "Frasier 2023 S02E01 1080p WEB H264")], known: [frasier], kind: .show),
+           "tt14527010", "the list's Frasier is the 2023 one (its card not looked up yet): never the 1993 one")
+        eq(attachment("Frasier S02E02 1080p WEB H264-CAKES", titled: [("tt14527010", "Frasier 2023 S02E01 1080p WEB H264")],
+                      known: [frasier, show("tt14527010", "Kelsey", 2023)], kind: .show),
+           nil, "a card of another name: neither")
+        eq(attachment("Frasier S02E02 1080p WEB H264-CAKES", titled: [("tt14527010", "Frasier 2023 S02E01 1080p WEB H264")], known: [frasier, reboot], kind: .show),
+           "tt14527010", "the 2023 one, once its card is known")
+        eq(attachment("Frasier S02E02 1080p WEB H264-CAKES", titled: [("tt14527010", "Frasier S02E01 1080p WEB H264")], known: [frasier], kind: .show),
+           "tt14527010", "the list's Frasier without a year: the list's, never the 1993 one")
+        eq(attachment("Frasier S02E02 1080p WEB H264-CAKES", known: [frasier], kind: .show),
+           "tt0106004", "no Frasier in the list, one known: that one (a release that names no year, no other show to tell)")
+    }
+
+    func testAReleaseWithoutAnIdCanDecideTheLanguage() {
+        // A title's most seeded release names its language when no list tells it: a release
+        // without an id that becomes the most seeded one decides, as any other.
+        let list = Data(#"""
+            [{"name":"Film 2026 1080p WEB-DL x264","seeders":100,"imdb":"tt9900001","category":207},
+             {"name":"Film (2026) 1080p Telugu HQ HDRip x264","seeders":5000,"imdb":"","category":207}]
+            """#.utf8)
+        var lists = HomeFixture.allLists()
+        var ranking = HomeParse.entries(list, parser: .apibay(.movie), now: now)!
+        ranking += (1...5).map { HomeEntry(item: HomeItem(imdbId: "tt990000\($0 + 1)", kind: .movie, title: ""), seeders: 50 - $0,
+                                           releaseName: "Other \($0) 2026 1080p WEB") }
+        lists[HomeSource.topMovies.key] = HomeFixture.list(.topMovies, ranking)
+        let cards = [movie("tt9900001", "Film", 2026)] + (1...5).map { movie("tt990000\($0 + 1)", "Other \($0)", 2026) }
+        lists[HomeSource.lookupMoviesKey] = HomeSourceList(key: HomeSource.lookupMoviesKey, savedAt: now, complete: true, entries: cards)
+        let english = build(lists).shelf(HomeShelfID.topMovies)
+        check(english?.imdbIds.contains("tt9900001") == false, "[en, fr]: the Telugu release ranks the title, the title is out")
+        let all = build(lists, languages: []).shelf(HomeShelfID.topMovies)
+        eq(all?.imdbIds.first, "tt9900001", "every language: first, with 5,100 seeders")
     }
 
     // MARK: Local shelves
@@ -593,8 +965,8 @@ final class HomeBuilderTests: CheckedTestCase {
     }
 
     func testHiddenShelvesAndLimits() {
-        let hidden = build(HomeFixture.allLists(), hidden: [HomeShelfID.uhd, HomeShelfID.top48hShows])
-        check(hidden.shelf(HomeShelfID.uhd) == nil && hidden.shelf(HomeShelfID.top48hShows) == nil, "hidden shelves are not built")
+        let hidden = build(HomeFixture.allLists(), hidden: [HomeShelfID.uhd, HomeShelfID.topShows])
+        check(hidden.shelf(HomeShelfID.uhd) == nil && hidden.shelf(HomeShelfID.topShows) == nil, "hidden shelves are not built")
         // A hidden shelf does not use up a title's two appearances.
         check(hidden.shelf(HomeShelfID.moviesOfTheYear)!.imdbIds.contains("tt33764258"), "The Odyssey, no longer in 4K, is in the movies of the year")
         var rules = HomeBuilder.Rules()
@@ -605,7 +977,7 @@ final class HomeBuilderTests: CheckedTestCase {
         eq(small.shelf(HomeShelfID.hero)?.items.count, 3, "hero limit")
         eq(small.shelf(HomeShelfID.hero)?.titles, ["Heart of the Beast", "Resident Evil", "MobLand"], "two movies, one show")
         check(small.filter { $0.style == .posters || $0.style == .landscape }.allSatisfy { $0.items.count <= 5 }, "shelf limit")
-        eq(small.shelf(HomeShelfID.top48hShows)?.items.count, 6, "ranking limit")
+        eq(small.shelf(HomeShelfID.topShows)?.items.count, 6, "ranking limit")
         // Titles past a shelf's limit do not use up their appearances either.
         check(small.shelf(HomeShelfID.moviesOfTheYear) != nil, "the next shelves still have titles")
         eq(build([:]).count, 0, "nothing loaded, no library: no shelf")
@@ -621,7 +993,7 @@ final class HomeBuilderTests: CheckedTestCase {
         eq(shelves.shelf(HomeShelfID.newMovies)?.isStale, true, "the new movies for 30 min")
         // Two days later: YTS's additions and apibay (usable 24 h) are gone, Cinemeta (7 days) is still shown.
         let twoDays = build(HomeFixture.allLists(), now: now.addingTimeInterval(2 * 86_400))
-        check(twoDays.shelf(HomeShelfID.newMovies) == nil && twoDays.shelf(HomeShelfID.uhd) == nil && twoDays.shelf(HomeShelfID.top48hShows) == nil, "expired lists are not shown")
+        check(twoDays.shelf(HomeShelfID.newMovies) == nil && twoDays.shelf(HomeShelfID.uhd) == nil && twoDays.shelf(HomeShelfID.topShows) == nil, "expired lists are not shown")
         check(twoDays.shelf(HomeShelfID.trendingMovies) != nil && twoDays.shelf(HomeShelfID.moviesOfTheYear) != nil, "the others still are")
         // An incomplete list is shown, and stale at once.
         var lists = HomeFixture.allLists()

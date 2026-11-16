@@ -46,9 +46,12 @@ final class UpNextSessionTests: CheckedTestCase {
         return (first, show)
     }
 
+    /// `cardLead`: the setting « Next Episode Card »; these tests were written with the card 30 s
+    /// before the end (2:30 of a 3 min file), the default (60 s) has its own test.
     private func begin(_ episode: Episode, playing: Torrent?, recorder: Recorder, files: PackFiles? = nil, autoAdvance: Bool = true,
-                       alwaysAsks: Bool = false) -> UpNextSession? {
+                       alwaysAsks: Bool = false, cardLead: TimeInterval = 30) -> UpNextSession? {
         var environment = UpNextSession.Environment()
+        environment.tuning.cardLead = cardLead
         environment.now = { [unowned self] in self.time }
         environment.every = { [unowned self] _, block in self.timers.append(block); return {} }
         environment.resolveSources = { [unowned self] _, completion in self.pendingSources.append(completion) }
@@ -321,5 +324,114 @@ final class UpNextSessionTests: CheckedTestCase {
             episode = guide.episodes[index + 1]
             episode.show = guide
         }
+    }
+
+    // MARK: 5.3.0's device session: the card's time, the accept line, the release on « Resume »
+
+    func testTheDefaultCardComesSixtySecondsBeforeTheEnd() {
+        let recorder = Recorder()
+        let (e1, _) = makeShow("tt0000120")
+        let pack = makeRelease("Bench.Show.S01.1080p.HEVC-PTT", hash: "a")
+        let files = PackFiles(names: ["P/Bench.Show.S01E01.1080p.HEVC-PTT.mkv", "P/Bench.Show.S01E02.1080p.HEVC-PTT.mkv"], sizes: [5, 5])
+        let session = begin(e1, playing: pack, recorder: recorder, files: files, cardLead: UpNextCountdown.defaultCardLead)
+        play(session, from: 0, to: 119)
+        eq(session?.card, nil, "no card before 2:00")
+        check(recorder.lines.contains { $0.contains("card at 120 s (duration 180 s)") }, "the armed line", "\(recorder.lines)")
+        play(session, from: 120, to: 120)
+        eq(session?.card?.secondsLeft, 60, "60 s to the end of the file")
+        eq(session?.card?.total, 60, "a 60 s countdown")
+        check(recorder.lines.contains { $0.hasPrefix("[UpNext] card shown: countdown, 60 s") }, "the card line", "\(recorder.lines)")
+        play(session, from: 121, to: 178)
+        eq(recorder.started.count, 0, "nothing starts before the end")
+        play(session, from: 179, to: 180)
+        eq(recorder.started.count, 1, "the next episode at the end, once")
+        eq(recorder.lines.filter { $0.hasPrefix("[UpNext] start S01E02 (deadline)") }.count, 1, "one start line, by the deadline")
+    }
+
+    func testEveryAcceptanceLogsItsSourceAndTheCardsTime() {
+        func accepted(_ source: UpNextAcceptSource?) -> String? {
+            let recorder = Recorder()
+            let (e1, _) = makeShow("tt0000121")
+            let session = begin(e1, playing: makeRelease("Bench.Show.S01E01.1080p.HEVC-PTT.mkv", hash: "c"), recorder: recorder)
+            play(session, from: 0, to: 150)
+            time = 152
+            if let source = source { session?.accept(source: source) } else { session?.accept() }
+            return recorder.lines.first { $0.hasPrefix("[UpNext] outcome accepted") }
+        }
+        eq(accepted(.playNow(cardUp: 12.4)), "[UpNext] outcome accepted (Play Now, card up 12.4 s)", "the card's Play Now, its time on screen")
+        eq(accepted(.avkit(cardUp: nil)), "[UpNext] outcome accepted (AVKit didAccept, card up 2.0 s)", "AVKit, the session's time")
+        eq(accepted(.overlay(cardUp: 3.24)), "[UpNext] outcome accepted (overlay, card up 3.2 s)", "the overlay")
+        eq(accepted(.debug), "[UpNext] outcome accepted (debug, card up 2.0 s)", "the DEBUG answer")
+        eq(accepted(nil), "[UpNext] outcome accepted (card button, card up 2.0 s)", "iPhone / iPad, Mac: the card's button")
+    }
+
+    func testThePressGuardOfTheAppleTVCard() {
+        check(!UpNextPressGuard.accepts(appearedAt: 10, now: 10.3), "0.3 s after the card appeared: ignored")
+        check(UpNextPressGuard.accepts(appearedAt: 10, now: 11.1), "1.1 s: it counts")
+        check(UpNextPressGuard.accepts(appearedAt: 10, now: 11), "1.0 s: it counts")
+        check(!UpNextPressGuard.accepts(appearedAt: nil, now: 11), "not on screen yet: ignored")
+        var lines: [String] = []
+        eq(UpNextPressGuard.check(appearedAt: 10, now: 10.3, button: "Play Now", log: { lines.append($0) }), nil, "refused")
+        eq(lines, ["[UpNext] Play Now ignored: card up 0.3 s"], "the line")
+        eq(UpNextPressGuard.check(appearedAt: nil, now: 10.3, button: "Continue", log: { lines.append($0) }), nil, "refused")
+        eq(lines.last, "[UpNext] Continue ignored: card up not on screen yet", "the line, before viewDidAppear")
+        let up = UpNextPressGuard.check(appearedAt: 10, now: 22.4, button: "Play Now", log: { lines.append($0) })
+        check(up.map { abs($0 - 12.4) < 0.001 } == true, "accepted, 12.4 s up", "\(String(describing: up))")
+        eq(lines.count, 2, "no line for a press that counts")
+
+        // An ignored press leaves the session as it was: the countdown runs on, and a rewind still takes the card away.
+        let recorder = Recorder()
+        let (e1, _) = makeShow("tt0000122")
+        let session = begin(e1, playing: makeRelease("Bench.Show.S01E01.1080p.HEVC-PTT.mkv", hash: "d"), recorder: recorder)
+        play(session, from: 0, to: 150)
+        eq(session?.card?.kind, .countdown, "the card")
+        time = 150.3
+        session?.tick(position: 140, duration: 180, isPlaying: true)
+        eq(session?.card, nil, "a rewind before the card's time dismisses it")
+        check(!recorder.lines.contains { $0.contains("outcome accepted") }, "nothing accepted", "\(recorder.lines)")
+    }
+
+    func testTheCardAfterAResumeReadsTheReleaseLabel() {
+        // « Resume » plays the remembered pack by its short link; the episode's list holds the full magnet.
+        let recorder = Recorder()
+        let (e1, _) = makeShow("tt0000123")
+        let full = Torrent(url: "magnet:?xt=urn:btih:\(String(repeating: "e", count: 40))&dn=Bench.Show.S01.2160p.HEVC-GRP"
+                           + "&tr=udp%3A%2F%2Fa.example%3A1&tr=udp%3A%2F%2Fb.example%3A2&tr=udp%3A%2F%2Fc.example%3A3&tr=udp%3A%2F%2Fd.example%3A4",
+                           quality: "2160p HEVC — T4P", seeds: 40, size: "3.2 GB", fileName: "Bench.Show.S01E01.2160p.HEVC-GRP.mkv")
+        let files = PackFiles(names: ["P/Bench.Show.S01E01.2160p.HEVC-GRP.mkv", "P/Bench.Show.S01E02.2160p.HEVC-GRP.mkv"], sizes: [5, 5])
+        let resume = RememberedRelease(torrent: full, files: files, playedIndex: 0, at: Date()).torrent
+        let found = PlaybackStreamContext.playingRelease(sourceURL: resume.url, passed: resume, list: [full])
+        let session = begin(e1, playing: found.playing, recorder: recorder, files: files)
+        check(recorder.lines.contains { $0.hasSuffix("playing 2160p HEVC — T4P") }, "begin … playing <label>", "\(recorder.lines)")
+        play(session, from: 0, to: 150)
+        eq(session?.plan?.rule, .samePack, "the same pack")
+        eq(session?.plan?.torrent?.qualityLabel, "2160p HEVC", "the label the card's line shows")
+        eq(session?.card?.versionLine.map { _ in UpNextResumeReleaseTests.english(.samePack, session?.plan?.torrent?.qualityLabel ?? "") },
+           "2160p HEVC · same pack", "never « ? · same pack »")
+    }
+
+    /// The card of before 5.3 (no session: a native proposal without a show
+    /// guide) comes at the same time as the session's, no longer 30 s fixed.
+    func testTheCardOfBefore53FollowsTheSetting() {
+        eq(UpNextPreferences.legacyCardLead(duration: 2700, lead: 60), 60, "the default, 60 s")
+        eq(UpNextPreferences.legacyCardLead(duration: 2700, lead: 90), 90, "the setting's 90 s")
+        eq(UpNextPreferences.legacyCardLead(duration: 2700, lead: 30), 30, "30 s")
+        eq(UpNextPreferences.legacyCardLead(duration: 120, lead: 60), 40, "at most a third of a short file")
+        check(abs(UpNextPreferences.legacyCardLead(duration: 178, lead: 60) - 178.0 / 3) < 1e-9, "the rig's 3-minute episode: a third",
+              "\(UpNextPreferences.legacyCardLead(duration: 178, lead: 60))")
+    }
+
+    /// Its countdown is the file's time: a pause or a stall during the card does not start the
+    /// next episode before the end of this one.
+    func testTheCardOfBefore53CountsTheFilesTime() {
+        eq(UpNextPreferences.legacySecondsLeft(remaining: 55.2, total: 60, previous: 56), 55, "playing: the file's seconds left")
+        eq(UpNextPreferences.legacySecondsLeft(remaining: 55.2, total: 60, previous: 55), 55,
+           "paused or stalled a second later: the same file time, the count holds")
+        eq(UpNextPreferences.legacySecondsLeft(remaining: 40, total: 60, previous: 2), 40,
+           "40 s of a stall later the count is still the file's (the wall clock would have reached 0)")
+        eq(UpNextPreferences.legacySecondsLeft(remaining: 0.3, total: 60, previous: 1), 0, "the end of the file: 0, the next episode")
+        eq(UpNextPreferences.legacySecondsLeft(remaining: 300, total: 60, previous: 60), 60, "never more than the card's length")
+        eq(UpNextPreferences.legacySecondsLeft(remaining: nil, total: 60, previous: 30), 29, "no item: one second less, as before")
+        eq(UpNextPreferences.legacySecondsLeft(remaining: .nan, total: 60, previous: 0), 0, "never below 0")
     }
 }

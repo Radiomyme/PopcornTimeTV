@@ -652,7 +652,7 @@ extension AppDelegate {
                 // `handOffToVLC`, passes its own position as is.)
                 let startPosition = ResumePolicy.startPosition(forSavedProgress: currentProgress)
                 playViewController.upNextLink = upNext
-                media.play(fromFileOrMagnetLink: torrent.url, nextEpisodeInSeries: nextEpisode, loadingViewController: loadingViewController, playViewController: playViewController, progress: startPosition, errorBlock: error, streamFailureBlock: streamFailed, finishedLoadingBlock: finishedLoading)
+                media.play(fromFileOrMagnetLink: torrent.url, torrent: torrent, nextEpisodeInSeries: nextEpisode, loadingViewController: loadingViewController, playViewController: playViewController, progress: startPosition, errorBlock: error, streamFailureBlock: streamFailed, finishedLoadingBlock: finishedLoading)
                 return
             }
 
@@ -677,7 +677,8 @@ extension AppDelegate {
                 }
                 // Saved progress: resumed natively (direct MP4, payload on
                 // disk) or asked about (remux of a still-downloading file).
-                // Episodes get "Up Next" 30 s before the end; accepting it
+                // Episodes get "Up Next" before the end (60 s by default,
+                // Settings › Next Episode Card); accepting it
                 // closes this player (stream cancelled) and then plays
                 // `upNext` through the normal flow, like the VLC player.
                 nativeViewController.configure(localFile: videoFilePath,
@@ -695,6 +696,7 @@ extension AppDelegate {
                                                upNext: upNext)
             }
             media.play(fromFileOrMagnetLink: torrent.url,
+                       torrent: torrent,
                        nextEpisodeInSeries: nextEpisode,
                        loadingViewController: loadingViewController,
                        playViewController: nativeViewController,

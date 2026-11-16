@@ -56,7 +56,7 @@ enum MacHome {
         MacDoubleClick.swallowSecondClick()
     }
 
-    /// Every shelf of posters has a « See All » (Nouveautés 4K, Top 48 h,
+    /// Every shelf of posters has a « See All » (Nouveautés 4K, Top 100,
     /// the genres too); a shelf of episodes or resume cards only when a
     /// catalogue continues it.
     static func showsSeeAll(_ shelf: HomeShelf) -> Bool {

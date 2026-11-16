@@ -418,7 +418,9 @@ final class HomeScreenLogicTests: CheckedTestCase {
         eq(file(.tvmaze, "/schedule/web?date=2026-11-14"), "tvm_web_2026-11-14.json", "TVMaze, the platforms")
         eq(file(.tvmaze, "/schedule?country=US&date=2026-11-13"), "tvm_us_2026-11-13.json", "TVMaze, the US networks")
         eq(file(.tvmaze, "/schedule/web?date=../../x"), nil, "a day is a day")
-        eq(file(.apibay, "/precompiled/data_top100_48h_207.json"), "tpb_48h_207.json", "apibay")
+        eq(file(.apibay, "/precompiled/data_top100_208.json"), "tpb_208.json", "apibay, the shows' Top 100")
+        eq(file(.apibay, "/precompiled/data_top100_48h_208.json"), "tpb_48h_208.json", "apibay, the shows' 48 h (no longer asked)")
+        eq(file(.apibay, "/precompiled/data_top100_207.json"), "tpb_207.json", "apibay, the movies' Top 100")
         eq(file(.apibay, "/precompiled/data_top100_211.json"), "tpb_211.json", "apibay, 4K")
         eq(file(.apibay, "/q.php?q=x"), nil, "not a precompiled list")
     }
@@ -466,13 +468,13 @@ final class HomeScreenLogicTests: CheckedTestCase {
             return feed.snapshot
         }
 
-        // Replayed: the full page. (The movies' ranking shows once the titles no list knows
-        // have been looked up, a moment after the refresh ends.)
+        // Replayed: the full page. (The movies' Top 100 is there when the refresh ends; the
+        // titles no list knows join it once looked up, a moment later.)
         let first = feed()
         _ = load(first)
         let ranked = expectation(description: "the movies' ranking")
         let poll = Timer.scheduledTimer(withTimeInterval: 0.05, repeats: true) { timer in
-            guard first.snapshot.shelf(HomeShelfID.top48hMovies) != nil else { return }
+            guard first.snapshot.shelf(HomeShelfID.topMovies) != nil else { return }
             timer.invalidate()
             ranked.fulfill()
         }
@@ -483,12 +485,12 @@ final class HomeScreenLogicTests: CheckedTestCase {
         check(page.heroItems.allSatisfy { $0.backdropURL != nil && $0.logoURL != nil }, "each with a backdrop and a logo")
         let ids = page.rows.map(\.id)
         for id in [HomeShelfID.trendingMovies, HomeShelfID.newMovies, HomeShelfID.uhd, HomeShelfID.airedEpisodes,
-                   HomeShelfID.trendingShows, HomeShelfID.top48hShows, HomeShelfID.top48hMovies] {
+                   HomeShelfID.trendingShows, HomeShelfID.topShows, HomeShelfID.topMovies] {
             check(ids.contains(id), "the page has \(id)", "\(ids)")
         }
         check(!page.isOffline && !page.isUnavailable, "the hub is online")
-        eq(page.shelf(HomeShelfID.top48hMovies)?.style, .ranked, "a ranking is a ranked shelf")
-        check(page.shelf(HomeShelfID.top48hMovies)?.items.first?.rank == 1, "its first card is number 1")
+        eq(page.shelf(HomeShelfID.topMovies)?.style, .ranked, "a ranking is a ranked shelf")
+        check(page.shelf(HomeShelfID.topMovies)?.items.first?.rank == 1, "its first card is number 1")
         check(page.shelf(HomeShelfID.uhd)?.items.contains { $0.badges.contains(.uhd) } == true, "4K cards carry their badge")
         check(page.shelf(HomeShelfID.airedEpisodes)?.items.allSatisfy { $0.episode != nil } == true, "episode cards carry their episode")
 

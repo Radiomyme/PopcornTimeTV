@@ -157,7 +157,7 @@ enum HomeParse {
 
     /// The least popular shows kept (TVMaze's weight, 0…100): the shelves
     /// ask for 90 and more, the rest of the kept ones give titles and
-    /// posters to the Top 48 h. Below, a day is mostly local news.
+    /// posters to the shows' ranking. Below, a day is mostly local news.
     static let tvmazeMinimumWeight = 80
 
     /// schedule?country=US&date= (the show under "show") and
@@ -207,9 +207,19 @@ enum HomeParse {
 
     /// A precompiled list (top 100, top 100 of the last 48 hours): one entry
     /// per IMDb id, most seeded first, the seeders of its releases summed.
-    /// Theater recordings and screeners (`VideoTags.cam`) and releases
-    /// without an IMDb id are left out. The entry has no title yet: the
-    /// builder takes it, with the poster, from the lists already loaded.
+    /// Theater recordings and screeners (`VideoTags.cam`) are left out. The
+    /// entry has no title yet: the builder takes it, with the poster, from
+    /// the lists already loaded.
+    ///
+    /// A release without an IMDb id whose name reads as a title
+    /// (`readings(ofRelease:kind:)`) is kept as a pending entry
+    /// (`HomeEntry.isPending`: no id, its readings), with the id of the
+    /// titled releases of the list that read the same (`listedUnder`). The
+    /// builder gives it to that title when its card has that name and year
+    /// (apibay files some releases under another title's id), or, when no
+    /// titled release reads the same, to the one title its lists know by
+    /// that name. Left out: unreadable names (no year, a box set, an episode
+    /// in the movies), and a name that two titles of the list read as.
     static func apibayTop(_ data: Data, kind: HomeItem.Kind) -> [HomeEntry]? {
         guard let releases = object(data) as? [Any] else { return nil }
         struct Group {
@@ -220,31 +230,79 @@ enum HomeParse {
             var uhd = false
             var added: Double = 0
             var bestLanguages: Set<String>?
+            var readings: [String] = []
+
+            mutating func add(_ other: Group) {
+                seeders += other.seeders
+                if other.bestSeeders > bestSeeders {
+                    bestSeeders = other.bestSeeders
+                    bestName = other.bestName
+                    bestLanguages = other.bestLanguages
+                }
+                tags.formUnion(other.tags)
+                uhd = uhd || other.uhd
+                added = max(added, other.added)
+                for reading in other.readings where !readings.contains(reading) { readings.append(reading) }
+            }
         }
-        var order: [String] = []
-        var groups: [String: Group] = [:]
+        // One group per release first: the titled ones' readings say which
+        // title a release without an id names.
+        var titled: [(id: String, group: Group)] = []
+        var untitled: [Group] = []
         for case let release as [String: Any] in releases {
-            guard let name = string(release["name"]), let imdbId = string(release["imdb"]), isImdbId(imdbId) else { continue }
+            guard let name = string(release["name"]) else { continue }
             let tags = VideoTags.parse(name)
             guard !tags.contains(.cam) else { continue }
             // A hostile or broken mirror's huge counts must not overflow the sum.
             let seeders = Int(min(max(double(release["seeders"]) ?? 0, 0), 10_000_000))
+            let category = int(release["category"])
+            let group = Group(seeders: seeders, bestSeeders: seeders, bestName: name, tags: tags,
+                              uhd: category == 211 || category == 212 || ReleaseName.tokens(name).contains("2160"),
+                              added: double(release["added"]) ?? 0,
+                              bestLanguages: HomeLanguages.named(inRelease: name),
+                              readings: readings(ofRelease: name, kind: kind))
+            if let imdbId = string(release["imdb"]), isImdbId(imdbId) {
+                titled.append((imdbId, group))
+            } else if !group.readings.isEmpty {
+                untitled.append(group)
+            }
+        }
+        var order: [String] = []
+        var groups: [String: Group] = [:]
+        var idsByReading: [String: Set<String>] = [:]
+        for (imdbId, release) in titled {
             if groups[imdbId] == nil { order.append(imdbId) }
             var group = groups[imdbId] ?? Group()
-            group.seeders += seeders
-            if seeders > group.bestSeeders {
-                group.bestSeeders = seeders
-                group.bestName = name
-                group.bestLanguages = HomeLanguages.named(inRelease: name)
-            }
-            group.tags.formUnion(tags)
-            let category = int(release["category"])
-            if category == 211 || category == 212 || ReleaseName.tokens(name).contains("2160") { group.uhd = true }
-            group.added = max(group.added, double(release["added"]) ?? 0)
+            group.add(release)
             groups[imdbId] = group
+            for reading in release.readings {
+                idsByReading[reading, default: []].insert(imdbId)
+                // A show the list names with its year ("Frasier 2023 S02E01")
+                // also answers to its name alone: a release that names no
+                // year ("Frasier S02E02") is then tied to it, never to an
+                // older show of that name.
+                let parts = reading.split(separator: "|", omittingEmptySubsequences: false)
+                if kind == .show, parts.count > 1, ReleaseMatch.year(String(parts[1])) != nil {
+                    idsByReading[String(parts[0]), default: []].insert(imdbId)
+                }
+            }
         }
-        let entries: [HomeEntry] = order.compactMap { imdbId in
-            guard let group = groups[imdbId] else { return nil }
+        // The releases without an id: pending, tied to the title of the list
+        // they name (checked by the builder against its card), grouped by that
+        // title and their first reading.
+        var pendingOrder: [String] = []
+        var pending: [String: (group: Group, listedUnder: String?)] = [:]
+        for release in untitled {
+            let ids = release.readings.reduce(into: Set<String>()) { $0.formUnion(idsByReading[$1] ?? []) }
+            // Two titles of the list by that name: neither.
+            guard ids.count <= 1, let reading = release.readings.first else { continue }
+            let key = (ids.first ?? "") + "#" + reading
+            if pending[key] == nil { pendingOrder.append(key) }
+            var group = pending[key]?.group ?? Group()
+            group.add(release)
+            pending[key] = (group, ids.first)
+        }
+        func entry(_ group: Group, imdbId: String, readings: [String]?, listedUnder: String? = nil) -> HomeEntry {
             var badges: [HomeBadge] = []
             if group.uhd { badges.append(.uhd) }
             if group.tags.contains(.dolbyVision) { badges.append(.dolbyVision) }
@@ -253,12 +311,81 @@ enum HomeParse {
             let item = HomeItem(imdbId: imdbId, kind: kind, title: "", badges: badges,
                                 date: group.added > 0 ? Date(timeIntervalSince1970: group.added) : nil)
             return HomeEntry(item: item, seeders: group.seeders, releaseName: group.bestName,
-                             releaseLanguages: group.bestLanguages?.sorted())
+                             releaseLanguages: group.bestLanguages?.sorted(), releaseSeeders: group.bestSeeders,
+                             readings: readings, listedUnder: listedUnder)
         }
-        // Stable: equal seeders keep the list's order.
-        return entries.enumerated()
-            .sorted { ($0.element.seeders ?? 0) != ($1.element.seeders ?? 0) ? ($0.element.seeders ?? 0) > ($1.element.seeders ?? 0) : $0.offset < $1.offset }
-            .map(\.element)
+        let entries = order.compactMap { id in groups[id].map { entry($0, imdbId: id, readings: nil) } }
+            + pendingOrder.compactMap { key in pending[key].map { entry($0.group, imdbId: "", readings: $0.group.readings, listedUnder: $0.listedUnder) } }
+        return HomeEntry.mostSeededFirst(entries)
+    }
+
+    /// What a release name reads as, for the rankings: "title|year" keys
+    /// (`ReleaseMatch.movieTitleCandidates`, the Top 100 grid's reading), or
+    /// for a show its name (`ReleaseMatch.showReadings`) with the year and
+    /// country it names. [] when it does not name one title: a movie without
+    /// a year after its title, a box set, a pack or bonus material
+    /// (`ReleaseMatch.isPackOrExtras`), an episode or season among movies;
+    /// a show release without an episode or season marker.
+    static func readings(ofRelease name: String, kind: HomeItem.Kind) -> [String] {
+        let tokens = ReleaseMatch.words(ReleaseMatch.cleaned(name))
+        switch kind {
+        case .movie:
+            // "Avengers Endgame Encore 2019": a re-release of the film. Only
+            // here: the Top 100 grid and the source picker keep their reading.
+            let candidates = ReleaseMatch.movieTitleCandidates(name).map { candidate -> (title: String, year: Int) in
+                var words = candidate.title.split(separator: " ").map(String.init)
+                while words.count > 1, let last = words.last, last == "encore" || ReleaseMatch.editionWords.contains(last) { words.removeLast() }
+                return (words.joined(separator: " "), candidate.year)
+            }
+            guard let first = candidates.first, !namesEpisodes(tokens) else { return [] }
+            let titleEnd = first.title.split(separator: " ").count
+            let yearIndex = tokens.indices.first { $0 >= titleEnd && ReleaseMatch.year(tokens[$0]) == first.year }
+            guard !ReleaseMatch.isPackOrExtras(name, tokens: tokens, titleEnd: titleEnd, yearIndex: yearIndex) else { return [] }
+            return unique(candidates.map { ReleaseMatch.titleWords($0.title).joined() + "|\($0.year)" })
+        case .show:
+            return unique(ReleaseMatch.showReadings(of: name).map { reading in
+                reading.words.joined() + (reading.year.map { "|\($0)" } ?? "") + (reading.country.map { "|\($0)" } ?? "")
+            })
+        }
+    }
+
+    /// The keys of `readings(ofRelease:kind:)` a title answers to: a movie,
+    /// by its name and year (a movie without a year has none); a show, by
+    /// its name alone and with its first year. Never with a country: a
+    /// release that names one ("The Office US") only joins the titled
+    /// releases of its own list.
+    static func readings(ofTitle title: String, year: Int?, kind: HomeItem.Kind) -> Set<String> {
+        var keys = Set<String>()
+        for var form in ReleaseMatch.titleForms(title) {
+            switch kind {
+            case .movie:
+                guard let year = year else { return [] }
+                keys.insert(form.joined() + "|\(year)")
+            case .show:
+                // "Doctor Who (2005)": the name without its year.
+                while form.count > 1, let last = form.last, ReleaseMatch.year(last) != nil { form.removeLast() }
+                keys.insert(form.joined())
+                if let year = year { keys.insert(form.joined() + "|\(year)") }
+            }
+        }
+        keys.remove("")
+        return keys
+    }
+
+    /// An episode or a season among a release's words: "S01E02", "S01",
+    /// "3x05", "Season 1" (a season word, then a number), "Complete" — not
+    /// "Season of the Witch".
+    private static func namesEpisodes(_ tokens: [String]) -> Bool {
+        for (index, token) in tokens.enumerated() where ReleaseMatch.isSeasonMarker(token) {
+            guard ReleaseName.seasonWords.contains(token) else { return true }
+            if index + 1 < tokens.count, Int(tokens[index + 1]) != nil { return true }
+        }
+        return false
+    }
+
+    private static func unique(_ keys: [String]) -> [String] {
+        var seen = Set<String>()
+        return keys.filter { !$0.hasPrefix("|") && seen.insert($0).inserted }
     }
 
     /// The title a card would show names the release: apibay files some

@@ -343,6 +343,21 @@ final class ReleaseMatchingTests: CheckedTestCase {
             check(odyssey.map { $0.seeders == IndexedRelease.deduplicated(movieTop).filter { r in odyssey!.entries.contains { $0.name == r.name } }.map(\.seeders).reduce(0, +) } ?? false,
                   "group seeders = sum of its distinct torrents (\(total) torrents)")
             check(!movieGroups.contains { $0.key.contains("kurosawa") }, "box sets without year or imdb dropped")
+            check(!movieGroups.contains { $0.entries.contains { VideoTags.parse($0.name).contains(.cam) } }, "no theater copy or screener in the movie groups")
+            do {
+                // The grid's Top 100 leaves theater copies and screeners out, as the Home's shelf does
+                // (the Top 100 of 2026-11-16 put "Donga Naa Koduku … DVDScr" right behind The Odyssey).
+                func release(_ name: String, _ seeders: Int, _ hash: Character) -> IndexedRelease {
+                    IndexedRelease(name: name, infoHash: String(repeating: hash, count: 40), seeders: seeders, peers: 0, bytes: nil, source: "TPB")
+                }
+                let groups = Top100Ranking.movieGroups([
+                    release("Donga Naa Koduku (2026) 720p Telugu DVDScr x264 AAC", 7500, "a"),
+                    release("Spider-Man: Brand New Day 2026.1080p.HQ Pre.Multi.AAC 2.0.x264", 2758, "b"),
+                    release("Spider-Man Brand New Day 2026 1080p WEB-DL x264", 100, "c"),
+                ])
+                check(groups.map(\.key) == ["m:spidermanbrandnewday|2026"], "the screener is gone: \(groups.map(\.key))")
+                check(groups.first?.seeders == 100, "the HQ Pre copy's seeders do not count: \(groups.first?.seeders ?? -1)")
+            }
             check(ReleaseMatch.movieTitleCandidates("Wonder.Woman.1984.2020.1080p").map { "\($0.title)|\($0.year)" } == ["wonder woman|1984", "wonder woman 1984|2020"], "WW84 readings")
             check(ReleaseMatch.movieTitleCandidates("1917.2019.1080p").first.map { "\($0.title)|\($0.year)" } == "1917|2019", "1917 reading")
             check(ReleaseMatch.movieTitleCandidates("Blade.Runner.2049.2017.1080p").first.map { "\($0.title)|\($0.year)" } == "blade runner 2049|2017", "BR2049 reading")

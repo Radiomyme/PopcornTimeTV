@@ -62,8 +62,8 @@ enum HomeFixtures {
             if path == "/schedule/web?date=2026-11-14" { return .file("tvm_web_2026-11-14.json") }
             return .empty("[]")
         case .apibay:
-            if path.hasSuffix("data_top100_48h_208.json") { return .file("tpb_48h_208.json") }
-            if path.hasSuffix("data_top100_48h_207.json") { return .file("tpb_48h_207.json") }
+            if path.hasSuffix("data_top100_208.json") { return .file("tpb_208.json") }
+            if path.hasSuffix("data_top100_207.json") { return .file("tpb_207.json") }
             if path.hasSuffix("data_top100_211.json") { return .file("tpb_211.json") }
             return .none
         }

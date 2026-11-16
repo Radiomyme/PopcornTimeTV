@@ -748,6 +748,8 @@
 "Remux.Resume.FromStart" = "Empezar desde el principio";
 "Remux.Resume.Message.VLC" = "Este archivo no permite reanudar con calidad nativa: para reanudar en ese punto se usa el reproductor VLC. Desde el principio, la reproducción sigue siendo nativa (HDR, Dolby Atmos).";
 "Player.Resuming.At" = "Reanudando en %@…";
+"Player.Resuming.Detail" = "Reanudando en %1$@ — %2$@";
+"Player.Resuming.Percent" = "%d %%";
 
 /* Continue Watching row (tvOS): second line of a show's card once the last episode played was finished, before "S2 · E6" and the episode's title. */
 "ContinueWatching.NextEpisode" = "Siguiente episodio";
@@ -834,9 +836,10 @@
 "Skip Back 10 Seconds" = "Retroceder 10 segundos";
 "Skip Forward 10 Seconds" = "Avanzar 10 segundos";
 "Stream on Cellular Data" = "Streaming con datos móviles";
-"Top Movies of the Last 48 Hours" = "Top 48 h: películas";
+"Top 100 Movies" = "Top 100: películas";
 "Top Rated of the Year" = "Mejor valoradas del año";
 "Top Shows of the Last 48 Hours" = "Top 48 h: series";
+"Top 100 Shows" = "Top 100: series";
 "Trending Movies" = "Películas en tendencia";
 "Trending Shows" = "Series en tendencia";
 "When this is off, Popcorn Time asks before it starts a stream on cellular data or a personal hotspot." = "Si esta opción está desactivada, Popcorn Time pregunta antes de iniciar un stream con datos móviles o un punto de acceso personal.";
@@ -857,3 +860,6 @@
 "UpNext.StillWatching.Stop" = "Detener";
 "Settings.AutoPlayNext" = "Reproducir el siguiente episodio";
 "Settings.AutoPlayNext.Footer" = "Cerca del final de un episodio, se propone el siguiente con una cuenta atrás y empieza solo, en la misma versión cuando es posible.";
+"Settings.UpNextCard" = "Tarjeta del siguiente episodio";
+"Settings.UpNextCard.Value" = "%d s antes del final";
+"Settings.UpNextCard.Message" = "Cuánto tiempo antes del final de un episodio su tarjeta propone el siguiente. Con Reproducir el siguiente episodio activado, el siguiente empieza al final; si no, solo cuando eliges Reproducir ahora.";

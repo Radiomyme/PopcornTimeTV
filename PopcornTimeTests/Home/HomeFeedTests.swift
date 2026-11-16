@@ -181,9 +181,9 @@ final class HomeFeedTests: CheckedTestCase {
         check(homeWait { finished }, "the refresh ends")
         let snapshot = feed.snapshot
         check(!snapshot.isRefreshing && !snapshot.isOffline && !snapshot.isUnavailable, "done, online")
-        eq(Array(snapshot.shelves.ids.prefix(10)), [HomeShelfID.hero, HomeShelfID.trendingMovies, HomeShelfID.newMovies, HomeShelfID.uhd,
+        eq(Array(snapshot.shelves.ids.prefix(11)), [HomeShelfID.hero, HomeShelfID.trendingMovies, HomeShelfID.newMovies, HomeShelfID.uhd,
                                                     HomeShelfID.airedEpisodes, HomeShelfID.trendingShows, HomeShelfID.newShows, HomeShelfID.moviesOfTheYear,
-                                                    HomeShelfID.topRatedOfTheYear, HomeShelfID.top48hShows], "the whole page")
+                                                    HomeShelfID.topRatedOfTheYear, HomeShelfID.topShows, HomeShelfID.topMovies], "the whole page")
         check(snapshot.shelves.ids.contains(HomeShelfID.genre(.movie, "Action")) && snapshot.shelves.ids.contains(HomeShelfID.genre(.show, "Drama")), "and the genre shelves")
         eq(snapshot.lastUpdated, HomeFixture.now, "updated now")
         eq(snapshot.shelf(HomeShelfID.airedEpisodes)?.titles.first, "Honey", "the latest episodes now come from the schedules")
@@ -191,25 +191,43 @@ final class HomeFeedTests: CheckedTestCase {
         // 4 + 9 + the new shows of 2025 (2026's list is short in the fixtures) + 3 rankings
         // + 4 genres + the lookups (one request for the shows, one per movie).
         let paths = network.paths
-        eq(paths.count, 4 + 9 + 1 + 3 + 4 + 1 + 4, "26 requests for a cold load of everything")
+        eq(paths.count, 4 + 9 + 1 + 3 + 4 + 1 + 2, "24 requests for a cold load of everything")
         eq(Set(paths).count, paths.count, "none asked twice")
         check(paths.contains("/catalog/series/year/genre=2025.json"), "the year before, because this year's new shows are fewer than thirty")
         eq(paths.filter { $0.hasPrefix("/precompiled/") }.count, 3, "the rankings")
         eq(paths.filter { $0.contains("/top/genre=") }.count, 4, "the default genres")
         eq(paths.filter { $0.hasPrefix("/catalog/series/last-videos/") },
-           ["/catalog/series/last-videos/lastVideosIds=tt0159881,tt0350448,tt0413573,tt0437005,tt20859904,tt27954448,tt31842126,tt33270224,tt33550053,tt36984433,tt7235466.json"],
-           "one request for the shows of the Top 48 h nobody knew")
-        eq(Set(paths.filter { $0.hasPrefix("/meta/movie/") }), ["/meta/movie/tt27419420.json", "/meta/movie/tt4154796.json", "/meta/movie/tt47791876.json", "/meta/movie/tt29256561.json"],
+           ["/catalog/series/last-videos/lastVideosIds=tt0121955,tt0141842,tt0413573,tt10986410,tt14688458,tt26545992,tt2861424,tt33332385,tt35854736,tt36849871,tt37522541,tt7631058.json"],
+           "one request for the shows of the Top 100's first twenty nobody knew")
+        // The Top 100's leading titles the lists of the day do not know: Coyote vs. Acme and Buddy
+        // (recorded). The Cycle is not among the first twenty any more: Resident Evil and Project
+        // Hail Mary count their releases without an IMDb id.
+        eq(Set(paths.filter { $0.hasPrefix("/meta/movie/") }), ["/meta/movie/tt1756855.json", "/meta/movie/tt37281055.json"],
            "one per unknown movie")
         let firstRanking = paths.firstIndex { $0.hasPrefix("/precompiled/") }!, lastSchedule = paths.lastIndex { $0.hasPrefix("/schedule") }!
         check(firstRanking > lastSchedule, "phase 3 after phase 2")
         check(paths.firstIndex { $0.hasPrefix("/catalog/series/last-videos/") }! > paths.lastIndex { $0.contains("/top/genre=") }!, "the lookups last")
         // The refresh did not wait for the lookups: the ranking fills in when they answer.
-        eq(snapshot.shelf(HomeShelfID.top48hShows)?.titles.prefix(4).map { $0 }, ["Dexter: Resurrection", "12 12 12", "Tulsa King", "War"], "the ranking with the cards the lists know")
+        let known = ["MobLand", "VisionQuest", "Dexter: Resurrection", "Tulsa King", "Slow Horses", "The Gilded Age", "12 12 12"]
+        eq(snapshot.shelf(HomeShelfID.topShows)?.titles.prefix(8).map { $0 }, known + ["Nocturne"], "the ranking with the cards the lists know")
         idle(feed)
-        eq(feed.snapshot.shelf(HomeShelfID.top48hShows)?.titles.prefix(5).map { $0 }, ["Dexter: Resurrection", "12 12 12", "Tulsa King", "Grey's Anatomy", "9-1-1"], "the lookups filled the ranking")
-        eq(feed.snapshot.shelf(HomeShelfID.top48hMovies)?.titles, ["Street Fighter", "Snoopy Presents: 12 Days of Snoopy", "The Beast", "Extra Geography", "Resident Evil"], "and made the movies' one")
-        eq(feed.snapshot.shelves.ids[10], HomeShelfID.top48hMovies, "in its place, after the shows' ranking")
+        // The recorded lookup knows one of the twelve shows asked: Grey's Anatomy, 16th of the list.
+        eq(feed.snapshot.shelf(HomeShelfID.topShows)?.titles.prefix(8).map { $0 }, known + ["Grey's Anatomy"], "the lookups filled the ranking")
+        // The movies' Top 100: the lists of the day know most of its titles, so it is on the page
+        // before the lookups, which add theirs at their rank.
+        let before = snapshot.shelf(HomeShelfID.topMovies)?.titles ?? []
+        // Releases without an IMDb id count, offline, from the recorded list alone: Resident Evil
+        // (4,748 + 1,478 seeders) is 4th, Project Hail Mary (3,880, its only release here) 7th.
+        eq(Array(before.prefix(5)), ["The Odyssey", "Spider-Man: Brand New Day", "Heart of the Beast", "Resident Evil", "Primetime"], "the movies' ranking with the cards the lists know")
+        eq(before.firstIndex(of: "Project Hail Mary"), 6, "Project Hail Mary: the film of that name and year the lists know")
+        check(!before.contains("Coyote vs. Acme") && !before.contains("Buddy"), "not yet the titles no list knows")
+        let after = feed.snapshot.shelf(HomeShelfID.topMovies)?.titles ?? []
+        eq(after.firstIndex(of: "Coyote vs. Acme"), 11, "the lookups put Coyote vs. Acme at its rank")
+        eq(after.firstIndex(of: "Buddy"), 14, "and Buddy")
+        check(!after.contains("The Cycle"), "a title nobody asked Cinemeta about stays out")
+        check(!after.contains("Street Fighter"), "Street Fighter: no release with an id, and no list knows it")
+        eq(after.count, 20, "twenty titles, the ranking's size")
+        eq(feed.snapshot.shelves.ids[10], HomeShelfID.topMovies, "in its place, after the shows' ranking")
         check(!feed.snapshot.isRefreshing, "without a refresh")
         check(updates.count >= 8, "the page was updated as the answers came", "\(updates.count) updates")
         check(zip(updates, updates.dropFirst()).allSatisfy { $0 != $1 }, "never twice the same snapshot")
@@ -366,14 +384,14 @@ final class HomeFeedTests: CheckedTestCase {
         eq(snapshot.shelf(HomeShelfID.trendingMovies)?.isStale, true, "marked stale")
         eq(snapshot.shelf(HomeShelfID.trendingMovies)?.updatedAt, HomeFixture.now, "with the date they were fetched")
         eq(snapshot.lastUpdated, HomeFixture.now, "the page's date is the last session's")
-        check(snapshot.shelf(HomeShelfID.newMovies) != nil && snapshot.shelf(HomeShelfID.top48hShows) != nil, "lists usable 24 h are still shown after 5 h")
+        check(snapshot.shelf(HomeShelfID.newMovies) != nil && snapshot.shelf(HomeShelfID.topShows) != nil, "lists usable 24 h are still shown after 5 h")
         check(network.requests.count >= 4, "it did try")
 
         // Two days later, still nothing: YTS's additions and apibay are too old to show, Cinemeta is not.
         clock.now = HomeFixture.now.addingTimeInterval(2 * 86_400)
         let old = load(makeFeed())
         check(old.isOffline && !old.isUnavailable, "offline, with a page")
-        check(old.shelf(HomeShelfID.newMovies) == nil && old.shelf(HomeShelfID.top48hShows) == nil, "expired lists are gone")
+        check(old.shelf(HomeShelfID.newMovies) == nil && old.shelf(HomeShelfID.topShows) == nil, "expired lists are gone")
         check(old.shelf(HomeShelfID.trendingMovies) != nil && old.shelf(HomeShelfID.moviesOfTheYear) != nil, "the weekly ones are there")
 
         // Back online: the flags clear.
@@ -460,8 +478,8 @@ final class HomeFeedTests: CheckedTestCase {
         eq(snapshot.shelf(HomeShelfID.newShows)?.titles, ["Honey", "12 12 12"], "new shows: this week's premieres")
         check(snapshot.shelf(HomeShelfID.newMovies) != nil && snapshot.shelf(HomeShelfID.uhd) != nil && snapshot.shelf(HomeShelfID.airedEpisodes) != nil, "YTS and TVMaze shelves are untouched")
         check(!snapshot.shelves.ids.contains { HomeShelfID.genre(of: $0) != nil }, "no genre shelf without Cinemeta")
-        eq(snapshot.shelf(HomeShelfID.top48hShows)?.titles.first, "Dexter: Resurrection", "the ranking uses the schedules' cards")
-        check(snapshot.shelf(HomeShelfID.top48hShows)?.titles.contains("Grey's Anatomy") == false, "the lookups failed: those titles are left out")
+        eq(snapshot.shelf(HomeShelfID.topShows)?.titles.first, "MobLand", "the ranking uses the schedules' cards (VisionQuest, 2nd, is Cinemeta's)")
+        check(snapshot.shelf(HomeShelfID.topShows)?.titles.contains("Grey's Anatomy") == false, "the lookups failed: those titles are left out")
         check(snapshot.shelf(HomeShelfID.trendingMovies)?.isStale == false, "a stand-in that just answered is not stale")
     }
 
@@ -488,13 +506,13 @@ final class HomeFeedTests: CheckedTestCase {
         eq(snapshot.shelf(HomeShelfID.airedEpisodes)?.titles.prefix(3).map { $0 }, ["Black Clover", "Nocturne", "MobLand"], "the latest episodes read off the trending shows")
         check(snapshot.shelf(HomeShelfID.airedEpisodes)!.items.allSatisfy { $0.episode?.stillURL?.host == "episodes.metahub.space" }, "with Cinemeta's stills")
         eq(network.paths.filter { $0.hasPrefix("/schedule") }.count, 6, "the schedules were asked")
-        check(snapshot.shelf(HomeShelfID.top48hShows) != nil, "the ranking still has cards (Cinemeta's lists and lookups)")
+        check(snapshot.shelf(HomeShelfID.topShows) != nil, "the ranking still has cards (Cinemeta's lists and lookups)")
     }
 
     func testApibayDown() {
         network.down = [.apibay]
         let snapshot = load(makeFeed())
-        check(snapshot.shelf(HomeShelfID.top48hShows) == nil && snapshot.shelf(HomeShelfID.top48hMovies) == nil, "no ranking: the shelves are simply absent")
+        check(snapshot.shelf(HomeShelfID.topShows) == nil && snapshot.shelf(HomeShelfID.topMovies) == nil, "no ranking: the shelves are simply absent")
         eq(snapshot.shelf(HomeShelfID.uhd)?.titles.prefix(2).map { $0 }, ["Allen", "Avedon"], "4K in YTS's order")
         check(!network.paths.contains { $0.contains("last-videos") || $0.hasPrefix("/meta/") }, "nothing to look up")
         check(!snapshot.isOffline && snapshot.shelf(HomeShelfID.hero) != nil, "the rest of the page is whole")
@@ -797,6 +815,115 @@ final class HomeFeedTests: CheckedTestCase {
         eq(network.requests.count, 0, "without a request")
     }
 
+    func testWhatTheFirst530BuildStoredStillApplies() {
+        // Settings › Home of 5.3.0's first build, written by its own code (HomeSettings): the
+        // movies' ranking hidden, under the id it had then.
+        HomeSettings(defaults: sandbox.defaults).setShelf("top48hMovies", hidden: true)
+        eq(sandbox.defaults.array(forKey: "popcornkit.home.hiddenShelves") as? [String], ["top48hMovies"], "as that build stored it")
+        // Its disk: the movies' and the shows' Top 48 h under the keys of then, fresh.
+        let store = HomeStore(directory: sandbox.directory, now: { HomeFixture.now })
+        store.write(HomeSourceList(key: "tpb-48h-207", savedAt: HomeFixture.now, complete: true,
+                                   entries: HomeFixture.entries("tpb_48h_207.json", .apibay(.movie))))
+        store.write(HomeSourceList(key: "tpb-48h-208", savedAt: HomeFixture.now, complete: true,
+                                   entries: HomeFixture.entries("tpb_48h_208.json", .apibay(.show))))
+        store.write(down: ["tpb-48h-207", "tpb-48h-208"])
+        let former = sandbox.directory.appendingPathComponent("tpb-48h-207.json")
+        let formerShows = sandbox.directory.appendingPathComponent("tpb-48h-208.json")
+        check(FileManager.default.fileExists(atPath: former.path) && FileManager.default.fileExists(atPath: formerShows.path), "the former lists are on disk")
+
+        let feed = makeFeed()
+        let page = load(feed)
+        check(page.shelf(HomeShelfID.topMovies) == nil, "hidden then, hidden now")
+        check(page.shelf(HomeShelfID.topShows) != nil, "the shows' ranking is shown")
+        eq(page.shelf(HomeShelfID.topShows)?.titles.first, "MobLand", "the shows' Top 100, not their Top 48 h (Dexter: Resurrection)")
+        check(!network.paths.contains { $0.hasSuffix("data_top100_48h_207.json") }, "the former list is never asked")
+        check(!network.paths.contains { $0.hasSuffix("data_top100_48h_208.json") }, "nor the shows' former list")
+        check(network.paths.contains("/precompiled/data_top100_207.json"), "the Top 100 is")
+        check(network.paths.contains("/precompiled/data_top100_208.json"), "the shows' Top 100 too")
+        check(!FileManager.default.fileExists(atPath: former.path), "the first refresh deleted the former list's file")
+        check(!FileManager.default.fileExists(atPath: formerShows.path), "and the shows' one")
+        let down = HomeStore(directory: sandbox.directory, now: { HomeFixture.now }).readDown()
+        check(!down.contains("tpb-48h-207") && !down.contains("tpb-48h-208"), "and forgot they were down")
+        // Shown again: the Top 100 under its new title, in its place after the shows' ranking.
+        HomeSettings(defaults: sandbox.defaults).setShelf(HomeShelfID.topMovies, hidden: false)
+        feed.refreshLocal()
+        check(homeWait { feed.snapshot.shelf(HomeShelfID.topMovies) != nil }, "shown again at the next build")
+        eq(feed.snapshot.shelf(HomeShelfID.topMovies)?.titles.first, "The Odyssey", "the Top 100's number one")
+        let ids = feed.snapshot.shelves.ids
+        eq(ids.firstIndex(of: HomeShelfID.topMovies), ids.firstIndex(of: HomeShelfID.topShows).map { $0 + 1 }, "right after the shows' ranking, as before")
+    }
+
+    func testRankingLookupsAreCappedAtEveryRefresh() {
+        // Forty movies no list knows lead the Top 100: eight lookups per refresh, never past the
+        // shelf's twenty, and none before the page is whole.
+        let unknown = (1...40).map { ["name": "Unknown Film \($0) 2026 1080p WEB-DL x264", "category": 207, "seeders": 5000 - $0,
+                                      "added": 1_794_600_000, "imdb": String(format: "tt95%05d", $0)] as [String: Any] }
+        let body = try! JSONSerialization.data(withJSONObject: unknown)
+        network.answer { $0.path == "/precompiled/data_top100_207.json" ? .some(body) : nil }
+        let feed = makeFeed()
+        var counts: [Int] = []
+        for _ in 0..<4 {
+            network.forget()
+            load(feed, force: true)
+            counts.append(network.paths.filter { $0.hasPrefix("/meta/movie/") }.count)
+        }
+        eq(counts, [8, 8, 4, 0], "eight per refresh, twenty in all, then none")
+        check(feed.snapshot.shelf(HomeShelfID.topMovies) == nil, "titles Cinemeta does not know make no ranking")
+    }
+
+    func testARankingIsCompleteWithTwentyTitlesNotTwentyEntries() {
+        // The movies' Top 100 answers fifteen titled releases and six readable releases without an
+        // IMDb id that no list knows: twenty-one entries, fifteen titles. Short: kept, but stale,
+        // so it is asked again (the pending entries may name no title).
+        var releases = (1...15).map { ["name": "Known Film \($0) 2026 1080p WEB-DL x264", "category": 207, "seeders": 5000 - $0,
+                                       "added": 1_794_600_000, "imdb": String(format: "tt96%05d", $0)] as [String: Any] }
+        releases += ["A", "B", "C", "D", "E", "F"].map { ["name": "Unknown Title \($0) 2026 1080p WEB", "category": 207, "seeders": 4000,
+                                                          "added": 1_794_600_000, "imdb": ""] as [String: Any] }
+        let body = try! JSONSerialization.data(withJSONObject: releases)
+        eq(HomeParse.entries(body, parser: .apibay(.movie), now: HomeFixture.now)?.count, 21, "fifteen titles and six pending entries")
+        network.answer { $0.path == "/precompiled/data_top100_207.json" ? .some(body) : nil }
+        let feed = makeFeed()
+        load(feed)
+        let list = feed.store.readAll()[HomeSource.topMovies.key]
+        check(list != nil, "kept: better than nothing")
+        eq(list?.complete, false, "incomplete: fifteen titles, under the minimum of twenty")
+        // With five more titles it is whole.
+        releases += (16...20).map { ["name": "Known Film \($0) 2026 1080p WEB-DL x264", "category": 207, "seeders": 3000 - $0,
+                                     "added": 1_794_600_000, "imdb": String(format: "tt96%05d", $0)] as [String: Any] }
+        let whole = try! JSONSerialization.data(withJSONObject: releases)
+        network.answer { $0.path == "/precompiled/data_top100_207.json" ? .some(whole) : nil }
+        load(feed, force: true)
+        eq(feed.store.readAll()[HomeSource.topMovies.key]?.complete, true, "twenty titles: complete")
+    }
+
+    func testTheShowsTop100IsCompleteWithTenShows() {
+        // Its hundred releases are episodes and season packs of few shows (26 on 2026-11-16): ten
+        // titles make a complete answer, not twenty as for the movies.
+        func answer(_ shows: Int) -> Data {
+            let releases = (1...shows).map { ["name": "Known Show \($0) S01E0\($0 % 9 + 1) 1080p WEB H264", "category": 208, "seeders": 5000 - $0,
+                                             "added": 1_794_600_000, "imdb": String(format: "tt97%05d", $0)] as [String: Any] }
+            return try! JSONSerialization.data(withJSONObject: releases)
+        }
+        let feed = makeFeed()
+        func refresh(_ shows: Int) -> HomeSourceList? {
+            network.answer { $0.path == "/precompiled/data_top100_208.json" ? .some(answer(shows)) : nil }
+            load(feed, force: true)
+            return feed.store.readAll()[HomeSource.topShows.key]
+        }
+        // Five shows and nothing kept: kept, better than nothing, but incomplete (asked again).
+        eq(refresh(5)?.complete, false, "five shows: under the minimum")
+        // An honest day of twelve shows: complete.
+        let twelve = refresh(12)
+        eq(twelve?.entries.count, 12, "twelve shows kept")
+        eq(twelve?.complete, true, "twelve shows: complete")
+        // Five again: refused, the twelve stay.
+        let after = refresh(5)
+        eq(after?.entries.count, 12, "a shorter answer does not replace them")
+        eq(after?.complete, true, "still complete")
+        eq(feed.store.readAll()[HomeSource.topMovies.key]?.complete, true, "the movies keep their minimum of twenty (the recorded list: 26 titles)")
+        eq(HomeSource.topMovies.minimum, 20, "twenty")
+    }
+
     func testOptionsSizeThePage() {
         var options = HomeFeed.Options(requestDeadline: .infinity, phaseGrace: .infinity)
         options.heroLimit = 4
@@ -806,7 +933,7 @@ final class HomeFeedTests: CheckedTestCase {
         let snapshot = load(makeFeed(options: options))
         eq(snapshot.heroItems.count, 4, "the hero's size")
         check(snapshot.rows.filter { $0.style != .ranked }.allSatisfy { $0.items.count <= 6 }, "a shelf's size")
-        eq(snapshot.shelf(HomeShelfID.top48hShows)?.items.count, 3, "a ranking's size (and it may then be shorter than five)")
+        eq(snapshot.shelf(HomeShelfID.topShows)?.items.count, 3, "a ranking's size (and it may then be shorter than five)")
         check(!snapshot.shelves.ids.contains { HomeShelfID.genre(of: $0) != nil }, "no genre shelf")
         check(!network.paths.contains { $0.contains("/top/genre=") }, "and no genre request")
     }
@@ -869,7 +996,7 @@ final class HomeFeedTests: CheckedTestCase {
         check(gaps.allSatisfy { $0 >= spacing * 0.95 }, "no two updates within the spacing", "\(gaps.map { String(format: "%.3f", $0) })")
         eq(lastAtCompletion, updates.prefix(updatesAtCompletion).last?.snapshot, "the completion runs once the refresh's last page is delivered")
         check(lastAtCompletion?.isRefreshing == false, "a page that is not refreshing any more")
-        check(lastAtCompletion?.shelf(HomeShelfID.top48hShows)?.titles.contains("Grey's Anatomy") == false,
+        check(lastAtCompletion?.shelf(HomeShelfID.topShows)?.titles.contains("Grey's Anatomy") == false,
               "the page the refresh left, not one its lookups made since")
         idle(feed)
         check(zip(updates, updates.dropFirst()).allSatisfy { $0.snapshot != $1.snapshot }, "never twice the same snapshot")

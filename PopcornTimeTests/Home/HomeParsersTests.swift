@@ -240,10 +240,22 @@ final class HomeParsersTests: CheckedTestCase {
     // MARK: apibay
 
     func testApibayShowsGroupedByImdbId() {
-        let entries = HomeFixture.entries("tpb_48h_208.json", .apibay(.show))
-        // 32 releases: 3 without an IMDb id, the others under 21 ids.
-        eq(entries.count, 21, "one entry per IMDb id")
-        eq(entries.prefix(6).map(\.item.imdbId), ["tt33043892", "tt32375763", "tt16358384", "tt0413573", "tt7235466", "tt37972251"], "most seeded first")
+        let parsed = HomeFixture.entries("tpb_48h_208.json", .apibay(.show))
+        // 32 releases: 3 without an IMDb id, the others under 21 ids. The three are pending, one
+        // per show name read: "Greys.Anatomy.S14…" tied to Grey's Anatomy (it reads as the titled
+        // "Greys Anatomy S23E05…"); MobLand and X Factor Italia name no titled release of the list.
+        eq(parsed.filter { !$0.isPending }.count, 21, "one entry per IMDb id")
+        eq(parsed.filter(\.isPending).map(\.readings), [["mobland"], ["xfactoritalia|2026"], ["greysanatomy"]], "then one pending entry per show name read")
+        eq(parsed.filter(\.isPending).map(\.listedUnder), [nil, nil, "tt0413573"], "tied to the title of the list it names, if any")
+        eq(parsed.filter(\.isPending).map(\.seeders), [1549, 78, 56], "with their seeders")
+        eq(parsed.prefix(6).map(\.item.imdbId), ["tt33043892", "tt32375763", "tt16358384", "tt0413573", "", "tt7235466"],
+           "most seeded first, the pending entries among the others")
+        // The builder, before any card is known: the season pack joins the title the list ties it
+        // to; the other two wait for a card of their name.
+        let entries = HomeBuilder.attachingPending(parsed, known: [:], pooled: [])
+        eq(entries[2].seeders, 1850 + 276 + 56, "Grey's Anatomy: its two titled releases and the season pack without an id")
+        eq(entries[2].releaseName, "Greys Anatomy S23E05 1080p WEB h264-ETHEL", "its most seeded release still names it")
+        eq(entries.count, 21, "MobLand and X Factor Italia: no card of their name yet")
         let dexter = entries[0]
         eq(dexter.seeders, 3201 + 2005 + 884 + 537, "the seeders of the four releases of the episode")
         eq(dexter.releaseName, "Dexter Resurrection S02E03 1080p WEB H264-CAKES", "the most seeded release names the group")
@@ -274,10 +286,104 @@ final class HomeParsersTests: CheckedTestCase {
         eq(entries.first { $0.item.imdbId == "tt4154796" }?.item.badges, [.atmos], "\"DDP5.1.Atmos\"")
     }
 
+    func testApibayTop100OfHDMovies() {
+        // The movies' ranking since it reads the Top 100 (recorded 2026-11-16, 45 releases): eight
+        // DVDScr screeners, one "HQ Pre" copy and one TELESYNC left out; six other releases have
+        // no IMDb id.
+        let parsed = HomeFixture.entries("tpb_207.json", .apibay(.movie))
+        eq(parsed.filter { !$0.isPending }.count, 26, "one entry per IMDb id")
+        // The six are pending, one per title read; three read as a titled release of the list
+        // (Resident Evil, The Odyssey twice): tied to it.
+        eq(parsed.filter(\.isPending).map(\.readings),
+           [["residentevil|2026"], ["projecthailmary|2026"], ["streetfighter|2026"], ["odyssey|2026"], ["avengersendgame|2026"]],
+           "Resident Evil, Project Hail Mary, Street Fighter, The Odyssey, Avengers Endgame Encore (a re-release: \"Encore\" read as an edition)")
+        eq(parsed.filter(\.isPending).map(\.listedUnder), ["tt35538033", nil, nil, "tt33764258", nil], "tied to the title of the list they name, if any")
+        eq(parsed.filter(\.isPending).map(\.seeders), [4748, 3880, 3500, 1942 + 1302, 2192], "with their seeders")
+        check(parsed.filter(\.isPending).allSatisfy { $0.item.imdbId.isEmpty && $0.item.title.isEmpty }, "no id, no title")
+        // The builder, before any card is known: the tied ones join their title (a card, once
+        // known, must have their name and year); the others wait for a card of their name.
+        let entries = HomeBuilder.attachingPending(parsed, known: [:], pooled: [])
+        eq(entries.count, 26, "the titles of the list")
+        let residentEvil = entries.first { $0.item.imdbId == "tt35538033" }!
+        eq(residentEvil.seeders, 1478 + 4748, "Resident Evil: its titled release and the Kitsune one without an id")
+        eq(residentEvil.releaseName, "Resident Evil 2026 REPACK 1080p AMZN WEB-DL DDP5 1 Atmos H 264-Kitsune",
+           "the most seeded release names the group, with or without an id")
+        eq(residentEvil.item.badges, [.atmos], "its badges too: \"DDP5 1 Atmos\"")
+        let screeners = ["tt43738410", "tt27988879", "tt27730178", "tt38192494", "tt39131708", "tt30768979"]
+        check(!entries.contains { screeners.contains($0.item.imdbId) },
+              "Donga Naa Koduku, Ramayana, G.O.A.T, Scene, Itllu Arjuna, AK 47: DVDScr, left out")
+        eq(entries[0].item.imdbId, "tt33764258", "The Odyssey first")
+        eq(entries[0].seeders, 9685 + 4455 + 1942 + 1302, "its two titled releases, and the Kitsune and LAMA ones without an id (not the TELESYNC)")
+        eq(entries.prefix(3).map(\.item.imdbId), ["tt33764258", "tt22084616", "tt32324552"], "then Spider-Man: Brand New Day, then Ranabaali")
+        eq(entries[2].releaseLanguages, ["te"], "\"Telugu HQ HDRip\": Telugu")
+        let spiderMan = entries.first { $0.item.imdbId == "tt22084616" }!
+        eq(spiderMan.seeders, 7560 + 3397, "Spider-Man: the \"HQ Pre\" copy's 2,758 seeders do not count")
+        eq(spiderMan.releaseLanguages, nil, "its most seeded release names no language")
+        check(!entries.contains { ($0.releaseName ?? "").contains("TELESYNC") }, "The Odyssey's TELESYNC has no id anyway, and is a recording")
+    }
+
+    func testReadingsOfReleaseNames() {
+        // What a release without an IMDb id reads as: the Top 100 grid's reading of a name
+        // (`ReleaseMatch.movieTitleCandidates`, `showReadings`), as "title|year" keys.
+        let movies: [(String, [String])] = [
+            ("Resident Evil 2026 REPACK 1080p AMZN WEB-DL DDP5 1 Atmos H 264-Kitsune", ["residentevil|2026"]),
+            ("The Odyssey (2026) 1080p WEBRip x265 10bit 5.1-LAMA", ["odyssey|2026"]),
+            ("Spider-Man: Brand New Day 2026.1080p.WEB", ["spidermanbrandnewday|2026"]),
+            // Two years in a row read as several films (`isPackOrExtras`): left out, the safe side.
+            ("Wonder.Woman.1984.2020.1080p.WEB", []),
+            ("Fantastic Four 1994 Remastered 2023 1080p", ["fantasticfour|1994", "fantasticfour1994|2023"]),
+            ("Avengers Endgame Encore (2026) 1080p HDRip", ["avengersendgame|2026"]),
+            ("Avengers.Endgame.Encore.2026.1080p.IMAX.DSNP.WEB-DL", ["avengersendgame|2026"]),
+            ("Blade Runner Director's Cut 1982 1080p", ["bladerunner|1982"]),
+            ("Akira Kurosawa Boxset", []), ("Disney MEGA Collection 1937-2008", []), ("Project Hail Mary 1080p WEBRip", []),
+            ("Star Wars 14 Movie Collection 1977-2019 - threesixtyp", []), ("Rome - Seasons 1 and 2 - HBO", []),
+            ("Lupin.2021.S04.1080p.NF.WEB-DL", []), ("The Complete Matrix 1999 1080p", []),
+        ]
+        for (name, keys) in movies { eq(HomeParse.readings(ofRelease: name, kind: .movie), keys, "movie: \(name)") }
+        // "Encore" is read as an edition here only: the Top 100 grid and the source picker keep
+        // their reading of the name.
+        eq(ReleaseMatch.movieTitleCandidates("Avengers Endgame Encore (2026) iMAX 1080p").first?.title, "avengers endgame encore",
+           "the grid's reading of an Encore")
+        check(!ReleaseMatch.editionWords.contains("encore"), "not one of the shared edition words")
+        let shows: [(String, [String])] = [
+            ("MobLand S02E09 Nervous Breakdown 1080p AMZN WEB-DL DDP5 1 H 264-RAWR", ["mobland"]),
+            ("The Office (US) (2005) Season 1-9 S01-S09 (1080p BluRay x265 HEV", ["office|2005"]),
+            ("The Last of Us S02E01 1080p WEB", ["last|US", "lastofus"]),
+            ("Greys.Anatomy.S14.1080p.WEBRip.AV1.Opus.5.1-heTOrico", ["greysanatomy"]),
+            ("UFC 334 1080p ENG", []), ("AEW Full Gear 2026 MyAEW 720p WEB H264-XWT [TJET]", []),
+        ]
+        for (name, keys) in shows { eq(HomeParse.readings(ofRelease: name, kind: .show), keys, "show: \(name)") }
+        // And what a known title answers to.
+        eq(HomeParse.readings(ofTitle: "Amélie", year: 2001, kind: .movie), ["amelie|2001", "amlie|2001"], "accents folded, or dropped")
+        eq(HomeParse.readings(ofTitle: "The Odyssey", year: nil, kind: .movie), [], "a movie without a year: none")
+        eq(HomeParse.readings(ofTitle: "Doctor Who (2005)", year: 2005, kind: .show), ["doctorwho", "doctorwho|2005"], "a show: its name, and with its year")
+    }
+
+    func testTheaterRecordingsAndScreeners() {
+        // The spellings of a theater copy or a pre-release screener, from the Top 100 of
+        // 2026-11-16 and the usual variants: never ranked on the Home, last among a title's sources.
+        for name in ["Donga Naa Koduku (2026) 720p Telugu DVDScr x264 AAC", "The.Odyssey.2026.1080p.TELESYNC.HEVC.AAC2.0-SPLiCE",
+                     "Spider-Man: Brand New Day 2026.1080p.HQ Pre.Multi.AAC 2.0.x264", "Movie.2026.1080p.HDTS.x264-GRP",
+                     "Movie 2026 1080p HD-TS x264", "Movie 2026 720p HDTSRip", "Movie 2026 HDCAM x264", "Movie 2026 HDCAMRip x264",
+                     "Movie.2026.CAM.x264", "Movie (2026) HQ PreDVD 720p", "Movie (2026) 1080p Pre-DVD x264", "Movie.2026.PreDVDRip.x264",
+                     "Movie.2026.DVDScreener.XviD", "Movie 2026 BDScr 1080p", "Movie.2026.HDTC.x264", "Movie 2026 720p HD-TC x264",
+                     "Movie 2026 TeleCine x264", "Movie 2026 HQCam 720p",
+                     "Movie (2026) 1080p HQ S-Print x264 AAC", "Movie (2026) 720p S Print", "Movie 2026 720p SPrint x264",
+                     "Movie (2026) 1080p Pre-HDRip x264", "Movie (2026) PreHDRip 720p", "Movie.2026.1080p.TC.x264", "Movie 2026 TC x264"] {
+            check(VideoTags.parse(name).contains(.cam), "a recording: \(name)")
+        }
+        for name in ["Ranabaali (2026) 1080p Telugu HQ HDRip HEVC x265 DD+5.1 192Kbps AAC-ESub", "Coyote.vs.Acme.2026.1080p.DCPRIP.HEVC.x265.RMTeam",
+                     "The.Pre.Party.2023.1080p.WEB-DL.x264", "Pre.Dvd.Things.2020.1080p.WEB", "Cam.2018.1080p.NF.WEB-DL", "Movie.2026.1080p.WEB.TC.x264",
+                     "The Odyssey (2026) [1080p] [BluRay] [5.1]", "Movie 2026 1080p HD WEB-DL", "Movie (2026).ts",
+                     "Sprint.2024.S01E01.1080p.NF.WEB-DL", "Pre.HDRip.Story.2020.1080p.WEB", "The.Print.2020.1080p.WEB", "Show.S01E05.1080p.WEB.x264"] {
+            check(!VideoTags.parse(name).contains(.cam), "not a recording: \(name)")
+        }
+    }
+
     func testApibayUHDBadges() {
-        let entries = HomeFixture.entries("tpb_211.json", .apibay(.movie))
+        let entries = HomeBuilder.attachingPending(HomeFixture.entries("tpb_211.json", .apibay(.movie)), known: [:], pooled: [])
         eq(entries.prefix(3).map(\.item.imdbId), ["tt35538033", "tt33764258", "tt12042730"], "Resident Evil, The Odyssey, Project Hail Mary")
-        eq(entries[0].seeders, 1747 + 548 + 512, "Resident Evil: three releases with its id")
+        eq(entries[0].seeders, 1747 + 548 + 512 + 402, "Resident Evil: three releases with its id, and the MIRCrew one without")
         eq(entries[0].item.badges, [.uhd, .dolbyVision, .hdr, .atmos], "DV.HDR10+ … Atmos")
         eq(entries[1].item.badges, [.uhd, .hdr], "The Odyssey: HDR, DTS-HD MA (no Dolby Vision, no Atmos)")
         eq(entries[2].item.badges, [.uhd, .dolbyVision, .hdr, .atmos], "Project Hail Mary: the badges of all its releases")

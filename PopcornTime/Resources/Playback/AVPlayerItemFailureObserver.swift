@@ -1035,6 +1035,9 @@ final class PlaybackStarvationRecovery {
     private var snapshotGeneration = 0
     private var snapshotPending = false
     private var replacement: AVPlayerItem?
+    /// The item this recovery put in place (nil before its rebuild, and once
+    /// it is over) — logs only.
+    var replacementItem: AVPlayerItem? { replacement }
     private var statusObservation: NSKeyValueObservation?
     private var selectionApplied = false
     private var isSeeking = false
@@ -1640,7 +1643,11 @@ final class PlaybackStarvationRecovery {
         let step = Int(waited / 15)
         if step > loggedWaitSteps {
             loggedWaitSteps = step
-            print("[Player] starvation recovery: still waiting for data at \(Self.seconds(time)) after \(Int(waited)) s")
+            // A jump's wait is no download slower than playback: it waits
+            // for the media the conversion writes at the jump's target.
+            print(isWaitingForJump
+                  ? "[Player] jump wait: still waiting for the media at \(Self.seconds(time)) after \(Int(waited)) s"
+                  : "[Player] starvation recovery: still waiting for data at \(Self.seconds(time)) after \(Int(waited)) s")
         }
         return false
     }
@@ -1666,10 +1673,50 @@ final class PlaybackStarvationRecovery {
         onRetarget?(time)
     }
 
+    /// The jump's navigation came about this long (s) before its wait moved
+    /// here (the jump's grace, plus a margin): the old item's errors since
+    /// then are the jump's.
+    static let jumpLogMarginSeconds: TimeInterval = 2
+
+    /// "[Player] jump wait: the old item before its replacement — playing at
+    /// 1352.0 s, rate 1.0, item ready, picture 3840×2160, errors since the
+    /// jump: -12880 ×1" (the error log's codes since `since`).
+    static func oldItemLine(player: AVPlayer, since: Date) -> String {
+        let item = player.currentItem
+        let state: String
+        switch player.timeControlStatus {
+        case .playing: state = "playing"
+        case .paused: state = "paused"
+        case .waitingToPlayAtSpecifiedRate: state = "waiting"
+        @unknown default: state = "?"
+        }
+        var line = "[Player] jump wait: the old item before its replacement — \(state) at "
+            + String(format: "%.1f s, rate %.1f", player.currentTime().seconds, player.rate)
+        guard let item = item else { return line + ", no item" }
+        switch item.status {
+        case .readyToPlay: line += ", item ready"
+        case .failed: line += ", item failed"
+        default: line += ", item unknown"
+        }
+        let size = item.presentationSize
+        line += size.width > 0 ? String(format: ", picture %.0f×%.0f", size.width, size.height) : ", no picture size"
+        var counts: [Int: Int] = [:]
+        for event in item.errorLog()?.events ?? [] where (event.date ?? .distantPast) >= since {
+            counts[event.errorStatusCode, default: 0] += 1
+        }
+        let codes = counts.keys.sorted().map { "\($0) ×\(counts[$0] ?? 0)" }
+        return line + ", errors since the jump: " + (codes.isEmpty ? "none" : codes.joined(separator: ", "))
+    }
+
     private func rebuild(_ current: Int) {
         guard let player = player, let item = makeItem?() else {
             giveUp("Reprise après famine impossible")
             return
+        }
+        if isWaitingForJump {
+            // Logs only: was the old item already playing at the target, with
+            // a picture — or picture-dead (-12880) while its audio ran on?
+            print(Self.oldItemLine(player: player, since: failureDate.addingTimeInterval(-Self.jumpLogMarginSeconds)))
         }
         // The pause below is the recovery's, not the user's.
         rateObserver = nil

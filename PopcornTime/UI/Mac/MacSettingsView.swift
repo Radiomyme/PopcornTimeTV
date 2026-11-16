@@ -17,6 +17,8 @@ struct MacSettingsView: View {
     @AppStorage("autoSelectQuality") private var autoSelectQuality = "Balanced"
     /// « Autoplay next episode » (decision D8: on unless turned off).
     @AppStorage(UpNextPreferences.autoPlayNextKey) private var autoPlayNext = true
+    /// « Next Episode Card » (seconds before the end; absent = 60).
+    @AppStorage(UpNextPreferences.cardLeadKey) private var storedCardLead = Int(UpNextCountdown.defaultCardLead)
     // Localized language NAME ("Français"), same convention as tvOS Settings.
     @AppStorage(PlaybackLanguagePreferences.audioLanguageDefaultsKey)    private var preferredAudioLanguage: String?
     @AppStorage(PlaybackLanguagePreferences.subtitleLanguageDefaultsKey) private var preferredSubtitleLanguage: String?
@@ -29,6 +31,12 @@ struct MacSettingsView: View {
     @State private var sendsFollowedShows = Library.shared.isBulkEpisodeLookupEnabled
     /// The list open in a sheet over the window.
     @State private var homeList: HomeList?
+
+    /// The stored card time, one of the choices (anything else reads as 60 s).
+    private var upNextCardLead: Binding<Int> {
+        Binding(get: { Int(UpNextCountdown.cardLead(stored: storedCardLead)) },
+                set: { storedCardLead = Int(UpNextCountdown.cardLead(stored: $0)) })
+    }
 
     /// The two lists behind the Home's rows.
     private enum HomeList: String, Identifiable {
@@ -117,6 +125,15 @@ struct MacSettingsView: View {
             // nothing starts by itself (episode chaining).
             Toggle("Settings.AutoPlayNext", isOn: $autoPlayNext)
                 .accessibilityIdentifier("Settings.AutoPlayNext")
+            // « Next Episode Card »: 30 / 45 / 60 / 90 s before the end
+            // (an unknown stored value reads as the default, 60 s).
+            Picker("Settings.UpNextCard", selection: upNextCardLead) {
+                ForEach(UpNextCountdown.cardLeadChoices, id: \.self) { seconds in
+                    Text(UpNextPreferences.cardLeadText(seconds)).tag(seconds)
+                }
+            }
+            .pickerStyle(.menu)
+            .accessibilityIdentifier("Settings.UpNextCard")
         } header: {
             Text("Playback")
         } footer: {

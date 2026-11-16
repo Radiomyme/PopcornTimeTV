@@ -27,6 +27,12 @@ public final class PlaybackStartMeasure {
         /// The first status with a piece of the selected file verified on
         /// disk (same sampling).
         case firstPiece = "first piece"
+        /// The head the engine waits for before `readyToPlay` (`Readiness`)
+        /// is on disk in full (sampled like the first piece, and at ready).
+        case headOnDisk = "head on disk"
+        /// Its tail (the file's last 1 or 2 pieces) is on disk in full. The
+        /// later of the two ends the start buffer.
+        case tailOnDisk = "tail on disk"
         /// PopcornTorrent's `readyToPlay`: the pieces it waits for are there.
         case ready
         /// The remux's first segments are written (`[Start] remux prepare`):
@@ -178,9 +184,14 @@ public final class PlaybackStartMeasure {
     private var geometryLogged = false
     /// The segment the start's `jumpDecided` line named.
     private var decidedJumpSegment: Int?
+    /// When `ready` was logged (`clock`): the resume steering says how long after it came.
+    private var readyAt: TimeInterval?
+    private let clock: () -> TimeInterval
 
-    public init(log: @escaping (String) -> Void = { print($0) }) {
+    public init(log: @escaping (String) -> Void = { print($0) },
+                clock: @escaping () -> TimeInterval = { ProcessInfo.processInfo.systemUptime }) {
         self.log = log
+        self.clock = clock
     }
 
     // MARK: Recording
@@ -216,9 +227,55 @@ public final class PlaybackStartMeasure {
         }
         reached.insert(step)
         if step == .jumpDecided { decidedJumpSegment = segment }
+        let now = clock()
+        if step == .ready { readyAt = now }
+        var detail = detail
+        if step == .resumeSteering, let ready = readyAt {
+            // A decided start steers as soon as the remux knows the target:
+            // what lies between the engine's ready and that.
+            let after = "\(Self.milliseconds(now - ready)) ms after ready"
+            detail = detail.map { "\($0), \(after)" } ?? after
+        }
         lock.unlock()
         log(Self.line(step, sample: sample, sinceTrace: sinceTrace, detail: detail))
         return true
+    }
+
+    /// The selected file's place in the torrent, from the selection's file
+    /// list when it was seen (else the file alone, assumed piece-aligned).
+    public func geometry(pieceLength: Int64, fileSize: Int64) -> Geometry {
+        lock.lock()
+        let files = self.files
+        lock.unlock()
+        return files.flatMap { Geometry(pieceLength: pieceLength, fileSize: fileSize, sizes: $0.sizes, selected: $0.selected) }
+            ?? Geometry(pieceLength: pieceLength, fileSize: fileSize)
+    }
+
+    /// The `headOnDisk` / `tailOnDisk` steps due now (pure): the engine's
+    /// required head is `headBytes` of the file from its start, its required
+    /// tail the file's last `tailBytes`; `headOnDisk` is the file's first
+    /// missing byte, `tailOnDisk` whether the tail is all on disk. With the
+    /// step's detail. `atReady`: the engine just said `readyToPlay`, so the
+    /// head it waited for is on disk whatever the app computed — in bounded
+    /// storage `headBytes` is only an upper bound (the engine waits for no
+    /// more than its window, which it does not publish), and a head not seen
+    /// yet is logged now, « seen at ready » (it came at that moment at the
+    /// latest), so that a lone `tail on disk` line never reads as the end of
+    /// the start buffer.
+    public static func requiredEnds(_ rule: Readiness, fileSize: Int64, headOnDisk: Int64,
+                                    tailOnDisk: Bool, atReady: Bool = false) -> [(Step, String)] {
+        var due: [(Step, String)] = []
+        if rule.headBytes > 0, headOnDisk >= min(rule.headBytes, fileSize) {
+            due.append((.headOnDisk, (rule.headIsUpperBound ? "at most " : "")
+                        + "\(rule.headPieces) piece(s) = \(rule.headBytes) B of the file"))
+        } else if atReady, rule.headIsUpperBound {
+            due.append((.headOnDisk, "seen at ready: bounded storage waits for at most \(rule.headPieces) piece(s) "
+                        + "(its window, not published), \(headOnDisk) B of the file on disk"))
+        }
+        if rule.tailBytes > 0, tailOnDisk {
+            due.append((.tailOnDisk, "\(rule.tailPieces) piece(s) = \(rule.tailBytes) B from \(fileSize - rule.tailBytes)"))
+        }
+        return due
     }
 
     /// The torrent's and the readiness requirement's lines, once, when the

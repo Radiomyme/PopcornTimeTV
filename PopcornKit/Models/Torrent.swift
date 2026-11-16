@@ -1248,9 +1248,27 @@ public struct VideoTags: OptionSet, Codable {
             // Release type
             case "remux", "bdremux", "uhdremux":
                 tags.insert(.remux)
-            case "cam", "camrip", "hdcam", "hqcam", "hdts", "telesync", "tsrip", "hdtc", "telecine",
-                 "dvdscr", "bdscr", "screener", "scr", "pdvd", "predvd":
+            case "cam", "camrip", "hdcam", "hdcamrip", "hqcam", "hdts", "hdtsrip", "telesync", "tsrip", "hdtc", "telecine",
+                 "dvdscr", "dvdscreener", "bdscr", "screener", "scr", "pdvd", "predvd", "predvdrip", "prehdrip", "sprint":
                 if wordTags[i] { tags.insert(.cam) }
+            case "pre":
+                // "Pre-DVD", "PreDVD", "Pre-HDRip" spelt apart, and "HQ Pre" (the Top 100
+                // of 2026-11-16: "Spider-Man: Brand New Day 2026.1080p.HQ Pre.Multi…"):
+                // a theater copy. Never the word alone ("The.Pre.Party.2023").
+                if wordTags[i], prev == "hq" || ["dvd", "dvdrip", "hdrip"].contains(next) { tags.insert(.cam) }
+            case "s":
+                // "HQ S-Print" / "S Print": a copy of a theater print.
+                if wordTags[i], next == "print" { tags.insert(.cam) }
+            case "tc":
+                // "HD-TC" / "HQ-TC", or a bare "TC" right after the year or the
+                // resolution ("Movie.2026.1080p.TC.x264"): telecine.
+                // Elsewhere ("WEB.TC") a bare "TC" is left alone.
+                let afterYear = prev.count == 4 && Int(prev).map { (1900...2099).contains($0) } == true
+                let afterResolution = prev == "p" && ["480", "720", "1080", "2160"].contains(at(i - 2))
+                if wordTags[i], prev == "hd" || prev == "hq" || afterYear || afterResolution { tags.insert(.cam) }
+            case "ts" where prev == "hd" || prev == "hq":
+                // "HD-TS" / "HQ.TS": telesync.
+                if wordTags[i], !raw.lowercased().trimmingCharacters(in: .whitespaces).hasSuffix(".ts") { tags.insert(.cam) }
             case "ts":
                 // A bare "TS" (telesync) right after the year or the resolution,
                 // or right before the codec: "IT 2017 TS x264",
@@ -1739,6 +1757,25 @@ public struct Torrent: Mappable, Equatable, Comparable {
     func replacingURL(_ newURL: String) -> Torrent {
         var copy = Torrent(health: health, url: newURL, quality: "", seeds: seeds, peers: peers, size: size, tags: tags,
                            fileName: releaseFileName)
+        copy._qualityOverride = _qualityOverride
+        copy.qualityValue = qualityValue
+        copy.tags = tags
+        copy.mediaRuntime = mediaRuntime
+        return copy
+    }
+
+    /// Copy with `releaseFileName` set to `fileName` (same URL, label, tags,
+    /// swarm figures and runtime): a listed release that lacks the file name
+    /// a remembered one carries (« Resume » of a season pack).
+    /// The size is kept only when it already counted as the file's (the
+    /// entry's own name, file name else `dn`, names one episode): a pack-only
+    /// entry's size is the whole pack's, and the episode's file name would
+    /// otherwise make it pass for the file's (a bitrate of pack ÷ runtime).
+    /// Same rule as `RememberedRelease.makeTorrent`.
+    public func withReleaseFileName(_ fileName: String?) -> Torrent {
+        let fileSize = Torrent.streamedFileBytes(size: size, url: url, fileName: releaseFileName) != nil ? size : nil
+        var copy = Torrent(health: health, url: url, quality: "", seeds: seeds, peers: peers, size: fileSize, tags: tags,
+                           fileName: fileName)
         copy._qualityOverride = _qualityOverride
         copy.qualityValue = qualityValue
         copy.tags = tags

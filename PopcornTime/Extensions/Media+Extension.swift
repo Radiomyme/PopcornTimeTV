@@ -14,6 +14,7 @@ extension Media {
      Start playing movie or episode locally.
      
      - Parameter fromFileOrMagnetLink:  The url pointing to a .torrent file, a web adress pointing to a .torrent file to be downloaded or a magnet link.
+     - Parameter torrent:               The release `url` belongs to, when the caller has it (`AppDelegate.play`): « Resume » plays the remembered release by a short magnet that the title's list does not hold — its quality, size, tags and file name come from here (`PlaybackStreamContext.playingRelease`).
      - Parameter nextEpisodeInSeries:   If media is an episode, pass in the next episode of the series, if applicable, for a better UX for the user.
      - Parameter loadingViewController: The view controller that will be presented while the torrent is processing to display updates to the user.
      - Parameter playViewController:    View controller to be presented to start playing the movie when loading is complete.
@@ -25,6 +26,7 @@ extension Media {
      */
     func play(
         fromFileOrMagnetLink url: String,
+        torrent: Torrent? = nil,
         nextEpisodeInSeries nextEpisode: Episode? = nil,
         loadingViewController: PreloadTorrentViewController,
         playViewController: UIViewController,
@@ -105,7 +107,7 @@ extension Media {
             // then plays the release through the normal flow, starting where
             // the other one was (taken by the new stream's context).
             let context = PlaybackStreamContext.attach(to: streamer, media: self,
-                                                       sourceURL: loadingViewController.sourceURL ?? url)
+                                                       sourceURL: loadingViewController.sourceURL ?? url, torrent: torrent)
             context.onSwitch = { [media = self] torrent, fraction in
                 PlaybackStreamContext.requestStart(fraction, forURL: torrent.url)
                 AppDelegate.shared.play(media, torrent: torrent)
@@ -179,7 +181,7 @@ extension Media {
                 DispatchQueue.main.async {
                     guard !loadingViewController.isCancelled else { return }
                     guard let url = url, error == nil else { errorBlock(error!.localizedDescription); return }
-                    self.play(fromFileOrMagnetLink: url, nextEpisodeInSeries: nextEpisode, loadingViewController: loadingViewController, playViewController: playViewController, progress: progress, loadingBlock: loadingBlock, playBlock: playBlock, errorBlock: errorBlock, streamFailureBlock: streamFailureBlock, finishedLoadingBlock: finishedLoadingBlock)
+                    self.play(fromFileOrMagnetLink: url, torrent: torrent, nextEpisodeInSeries: nextEpisode, loadingViewController: loadingViewController, playViewController: playViewController, progress: progress, loadingBlock: loadingBlock, playBlock: playBlock, errorBlock: errorBlock, streamFailureBlock: streamFailureBlock, finishedLoadingBlock: finishedLoadingBlock)
                 }
             })
         }

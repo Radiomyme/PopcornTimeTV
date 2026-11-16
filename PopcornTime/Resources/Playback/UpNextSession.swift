@@ -48,6 +48,46 @@ enum UpNextPreferences {
         set { UserDefaults.standard.set(newValue, forKey: autoPlayNextKey) }
     }
 
+    /// The setting « Next Episode Card » (« Carte Épisode suivant »): how
+    /// many seconds before the end of an episode its card comes, one of
+    /// `UpNextCountdown.cardLeadChoices` (30 / 45 / 60 / 90); absent or
+    /// anything else = 60 (`UpNextCountdown.defaultCardLead`). An Int; the
+    /// rows of the three platforms read and write it here.
+    static let cardLeadKey = "upNextCardLead"
+
+    static var cardLead: TimeInterval {
+        get { UpNextCountdown.cardLead(stored: UserDefaults.standard.object(forKey: cardLeadKey)) }
+        set { UserDefaults.standard.set(Int(UpNextCountdown.cardLead(stored: Int(newValue))), forKey: cardLeadKey) }
+    }
+
+    /// `cardLead` in whole seconds (the settings rows).
+    static var cardLeadSeconds: Int {
+        get { Int(cardLead) }
+        set { cardLead = TimeInterval(newValue) }
+    }
+
+    /// The card of before 5.3 (no session: native proposal without a show
+    /// guide) at the same time as the session's: the setting, at most a
+    /// third of a file of `duration` seconds.
+    static func legacyCardLead(duration: TimeInterval, lead: TimeInterval = cardLead) -> TimeInterval {
+        UpNextCountdown.effectiveCardLead(lead, duration: duration)
+    }
+
+    /// The card of before 5.3, at each 1 s tick of its countdown: the seconds left are the
+    /// file's own (`remaining`: duration − current time), at most `total` — a pause or a stall
+    /// holds the count, and the next episode starts at the end of the file, not 60–90 s of wall
+    /// clock after the card came. Not known (no item, no duration): one second less than
+    /// `previous`. 0: the end — the next episode starts.
+    static func legacySecondsLeft(remaining: TimeInterval?, total: Int, previous: Int) -> Int {
+        guard let remaining = remaining, remaining.isFinite else { return max(0, previous - 1) }
+        return min(total, max(0, Int(remaining.rounded())))
+    }
+
+    /// "60 s before the end" (« 60 s avant la fin »).
+    static func cardLeadText(_ seconds: Int) -> String {
+        String(format: "Settings.UpNextCard.Value".localized, seconds)
+    }
+
     /// The quality setting is « Always Ask ». Apple TV: "autoSelectQuality"
     /// absent or not one of Highest / Balanced / Lowest (stored localized,
     /// `GlassSettingsStore`); iPhone / iPad and Mac: "" (absent = Balanced).
@@ -199,7 +239,7 @@ final class UpNextSession: ObservableObject {
             guard let showID = episode.show?.id else { return completion(EpisodeSourceResolver.Sources()) }
             EpisodeSourceResolver.shared.resolve(showId: showID, showTitle: episode.show?.title, season: episode.season,
                                                  episode: episode.episode,
-                                                 isEnough: { $0.count > 0 && $0.awaited.isEmpty },
+                                                 isEnough: { $0.count > 0 && $0.awaited.isEmpty }, askedAhead: true,
                                                  completion: completion)
         }
         var prefetchSubtitles: (Episode) -> Void = { SubtitleSearch.shared.prefetch(for: $0, showId: $0.show?.id) }
@@ -213,10 +253,12 @@ final class UpNextSession: ObservableObject {
         var log: (String) -> Void = { print($0) }
         var date: () -> Date = Date.init
 
-        /// The app's: the clocks, the resolver, the settings — and the DEBUG
-        /// bench's tuning (`-PTDebugUpNextCardAt`, `-PTDebugUpNextStillAfter`).
+        /// The app's: the clocks, the resolver, the settings (the card's
+        /// time: « Next Episode Card ») — and the DEBUG bench's tuning
+        /// (`-PTDebugUpNextCardAt`, which wins, `-PTDebugUpNextStillAfter`).
         static var live: Environment {
             var environment = Environment()
+            environment.tuning.cardLead = UpNextPreferences.cardLead
             #if DEBUG
             environment.tuning = UpNextDebugHooks.tuning(environment.tuning)
             #endif
@@ -242,6 +284,10 @@ final class UpNextSession: ObservableObject {
     private var prefetchedAt: TimeInterval?
     private var isOver = false
     private var lastPhase: UpNextCountdown.Phase = .idle
+    /// When the session published its card (of the kind on screen): how
+    /// long it has been up, for the accept line when the screen does not
+    /// say (AVKit shows its proposal a second or two later).
+    private var cardShownAt: TimeInterval?
     #if DEBUG
     private var debugAnswerScheduled = false
     #endif
@@ -326,10 +372,14 @@ final class UpNextSession: ObservableObject {
         end(reason: "player closed")
     }
 
-    /// « Play Now » (and « Continue » on « Still watching? »).
-    func accept() {
+    /// « Play Now » (and « Continue » on « Still watching? »). `source`:
+    /// which press or path accepted, logged with how long the card had
+    /// been on screen — "[UpNext] outcome accepted (Play Now, card up
+    /// 12.4 s)": an accidental press as the card slid in reads « 0.3 s ».
+    func accept(source: UpNextAcceptSource = .cardButton) {
         guard !isOver else { return }
-        environment.log("[UpNext] outcome accepted")
+        let sessionCardUp = cardShownAt.map { environment.now() - $0 }
+        environment.log("[UpNext] outcome accepted (\(source.logText(sessionCardUp: sessionCardUp)))")
         handle(countdown.accept(now: environment.now()))
     }
 
@@ -521,6 +571,7 @@ final class UpNextSession: ObservableObject {
     private func refreshCard() {
         guard !isOver, let shown = countdown.card else {
             if card != nil { card = nil }
+            cardShownAt = nil
             return
         }
         let line: String?
@@ -543,6 +594,7 @@ final class UpNextSession: ObservableObject {
                                     message: message)
         guard state != card else { return }
         if card?.kind != state.kind {
+            cardShownAt = environment.now()
             environment.log("[UpNext] card shown: \(state.kind.rawValue)"
                             + (state.secondsLeft.map { ", \($0) s" } ?? ", no countdown") + (line.map { " — \($0)" } ?? ""))
             #if DEBUG
@@ -564,7 +616,8 @@ final class UpNextSession: ObservableObject {
     }
 
     private func logPhase(from old: UpNextCountdown.Phase, to new: UpNextCountdown.Phase) {
-        if old == .idle, new == .armed || new == .preparing || new == .offered {
+        // (A plan known before the length — the same pack — arms straight to « ready ».)
+        if old == .idle, new == .armed || new == .preparing || new == .ready || new == .offered {
             environment.log("[UpNext] armed \(Self.name(episode)) → \(Self.name(next)): prefetch at "
                             + "\(Int(countdown.prefetchAt ?? -1)) s, card at \(Int(countdown.cardAt ?? -1)) s "
                             + "(duration \(Int(countdown.duration ?? -1)) s)")

@@ -419,6 +419,7 @@ class PreloadTorrentViewController: UIViewController {
             isCancelled = true
             stopPhaseUpdates()
             // nil until a download's `play` answers (it is set in that handler).
+            print(streamer == nil ? "[Loading] Back: no stream yet to cancel" : "[Loading] Back: stream cancelled, data kept")
             streamer?.cancelStreamingAndDeleteData(false)
         }
         dismissWhenPossible()

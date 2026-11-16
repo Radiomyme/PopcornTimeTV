@@ -70,10 +70,10 @@ final class PlaybackStreamContext {
 
     /// Attaches a context to `streamer` (before it starts) and starts
     /// measuring the connection (`ConnectionSpeed.start`, idempotent).
-    /// `torrent`: the release (default: the one of `media.torrents` with
-    /// `sourceURL`); `sources`: the title's releases (default
-    /// `media.torrents`); `decidedStart`: see `decidedStart` (default: a
-    /// start requested for `sourceURL` with `requestStart`).
+    /// `torrent`: the release the caller plays (see `playingRelease` for
+    /// how it meets the title's list); `sources`: the title's releases
+    /// (default `media.torrents`); `decidedStart`: see `decidedStart`
+    /// (default: a start requested for `sourceURL` with `requestStart`).
     @discardableResult
     static func attach(to streamer: PTTorrentStreamer, media: Media, sourceURL: String,
                        torrent: Torrent? = nil, sources: [Torrent]? = nil,
@@ -83,9 +83,10 @@ final class PlaybackStreamContext {
         func withRuntime(_ torrent: Torrent) -> Torrent {
             torrent.mediaRuntime == nil ? torrent.withMediaRuntime(runtime) : torrent
         }
-        var list = withDebugSources(sources ?? knownSources(of: media)).map(withRuntime)
-        let playing = withRuntime(torrent ?? list.first { $0.url == sourceURL } ?? Torrent(url: sourceURL))
-        if !list.contains(where: { $0.url == playing.url }) { list.append(playing) }
+        let found = playingRelease(sourceURL: sourceURL, passed: torrent,
+                                   list: withDebugSources(sources ?? knownSources(of: media)).map(withRuntime))
+        let playing = withRuntime(found.playing)
+        let list = found.sources
         let context = PlaybackStreamContext(streamer: streamer, media: media, sourceURL: sourceURL,
                                             torrent: playing, sources: list)
         context.decidedStart = decidedStart ?? takeRequestedStart(for: sourceURL)
@@ -97,6 +98,36 @@ final class PlaybackStreamContext {
               + (playing.estimatedBitrate.map { String(format: ", ≈ %.0f Mb/s", StreamBandwidth.megabitsPerSecond($0)) } ?? "")
               + (context.decidedStart.map { String(format: ", decided start %.0f %%", $0 * 100) } ?? ""))
         return context
+    }
+
+    /// The release a stream of `sourceURL` plays, and the title's releases
+    /// with it (pure). « Resume » plays the remembered release by its SHORT
+    /// magnet (`RememberedRelease.link`), never equal to the listed one; a
+    /// chained start of the same pack plays a copy without a file name
+    /// (`UpNextPlanner`'s pack torrent). So:
+    /// 1. the list's entry with the same URL, else the same info-hash
+    ///    (`MagnetLink.sourceKey`), one that carries a file name first —
+    ///    it keeps the file name of `passed` when it has none;
+    /// 2. else `passed` (after a relaunch the list may not hold it: the
+    ///    remembered release brings its quality, size, tags and file);
+    /// 3. else a bare `Torrent(url:)`, appended to the list.
+    /// The list is told apart by info-hash: a release found there is not
+    /// counted twice.
+    static func playingRelease(sourceURL: String, passed: Torrent?, list: [Torrent]) -> (playing: Torrent, sources: [Torrent]) {
+        let key = MagnetLink.sourceKey(of: sourceURL)
+        let exact = list.filter { $0.url == sourceURL }
+        let sameHash = list.filter { $0.url != sourceURL && MagnetLink.sourceKey(of: $0.url) == key }
+        let matches = exact + sameHash
+        if let listed = matches.first(where: { $0.releaseFileName != nil }) ?? matches.first {
+            if listed.releaseFileName == nil, let name = passed?.releaseFileName {
+                return (listed.withReleaseFileName(name), list)
+            }
+            return (listed, list)
+        }
+        let playing = passed ?? Torrent(url: sourceURL)
+        let playingKey = MagnetLink.sourceKey(of: playing.url)
+        guard !list.contains(where: { MagnetLink.sourceKey(of: $0.url) == playingKey }) else { return (playing, list) }
+        return (playing, list + [playing])
     }
 
     /// `decidedStart`, once: the first player of the stream starts there; a

@@ -758,6 +758,12 @@ final class MKVToHLSRemuxSession {
     /// needs). Thread-safe.
     var consumedInputOffset: Int64 { lock.withLock { lockedConsumedInput } }
 
+    /// Where the demuxer last found zeros (bytes not downloaded yet) and gave
+    /// up its Cluster, while they are still zeros as far as it knows; nil
+    /// when it is not blocked so. A late jump's wait asks the engine for them
+    /// (`RemuxWaitNudge`). Pump queue.
+    var demuxerBlockedOffset: Int64? { demuxer.blockedOffset.map { Int64(clamping: $0) } }
+
     /// Publishes the demuxer's position (`consumedInputOffset`, forward only
     /// between two jumps). Pump queue.
     private func noteInputConsumed() {

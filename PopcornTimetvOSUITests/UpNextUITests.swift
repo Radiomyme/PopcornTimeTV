@@ -8,8 +8,10 @@ import XCTest
 /// stand-in for the player by the DEBUG fixture `-PTDebugUpNextCard`: no
 /// stream, no session, nothing can play. The fixture's buttons only write
 /// what they did into a label, `UpNext.Fixture.Log` (« accept », « cancel »,
-/// « choose », « deadline » when its 30 s countdown ran out — the tests end
-/// well before). Runs like `NavigationUITests`: tvOS 26.5 simulator, DEBUG
+/// « choose », « deadline » when its countdown ran out — 60 s, the setting's
+/// default: the tests end well before). « Play Now » counts one second after
+/// the card appeared (`UpNextPressGuard`: a press meant for the player as the
+/// card slid in started the next episode on the device). Runs like `NavigationUITests`: tvOS 26.5 simulator, DEBUG
 /// build of the app.
 final class UpNextUITests: XCTestCase {
 
@@ -54,8 +56,29 @@ final class UpNextUITests: XCTestCase {
         launch("countdown")
         XCTAssertTrue(playNow.waitForExistence(timeout: 30), "no card")
         XCTAssertTrue(waitForFocus(on: playNow), "« Play Now » does not have the focus")
+        // Past the card's first second on screen.
+        pause(1.5)
         remote.press(.select)
         XCTAssertTrue(waitForLog("accept"), "Select on « Play Now » did not accept: \(log.label)")
+    }
+
+    /// A Select as the card appears (the viewer was pressing for the player)
+    /// is not « Play Now »; one past the guard is. A runner's press takes
+    /// about a second to arrive: the guard is stretched to 6 s here
+    /// (`-PTDebugUpNextPressGuard`), the rule is the same.
+    func testASelectAsTheCardAppearsIsIgnored() {
+        launch("countdown", extra: ["-PTDebugUpNextPressGuard", "6"])
+        XCTAssertTrue(playNow.waitForExistence(timeout: 30), "no card")
+        let shown = Date()
+        remote.press(.select)
+        pause(1)
+        XCTAssertLessThan(Date().timeIntervalSince(shown), 5, "the press came too late to test the guard")
+        XCTAssertEqual(log.label, "-", "a press within the guard answered the card")
+        pause(max(0, 7 - Date().timeIntervalSince(shown)))
+        XCTAssertEqual(log.label, "-", "the ignored press answered later")
+        XCTAssertTrue(waitForFocus(on: playNow), "« Play Now » does not have the focus")
+        remote.press(.select)
+        XCTAssertTrue(waitForLog("accept"), "Select past the guard did not accept: \(log.label)")
     }
 
     /// Menu on the card is « Back to the Video » (the player under it stays).
@@ -104,7 +127,7 @@ final class UpNextUITests: XCTestCase {
     private var choose: XCUIElement { app.buttons["UpNext.Button.ChooseVersion"] }
     private var log: XCUIElement { app.staticTexts["UpNext.Fixture.Log"] }
 
-    private func launch(_ card: String) {
+    private func launch(_ card: String, extra: [String] = []) {
         let app = XCUIApplication()
         app.launchArguments = [
             "-tosAccepted", "YES",
@@ -114,7 +137,7 @@ final class UpNextUITests: XCTestCase {
             "-AppleLocale", "en_US",
             "-PTDebugLibraryInMemory", "YES",
             "-PTDebugUpNextCard", card,
-        ]
+        ] + extra
         app.launch()
         self.app = app
     }

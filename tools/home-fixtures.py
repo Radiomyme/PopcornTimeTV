@@ -4,7 +4,7 @@
 # the record of what was cut; run it again on new recordings to refresh the fixtures (the
 # tests assert on titles and dates of that day: they change with the fixtures).
 #
-#   python3 -I tools/home-fixtures.py <recordings> <lookups> PopcornTimeTests/Fixtures/Home
+#   python3 -I tools/home-fixtures.py <recordings> <lookups> PopcornTimeTests/Fixtures/Home <top100>
 #
 # <recordings>: one file per request, named as below.
 #   cm_movie_top.json               https://v3-cinemeta.strem.io/catalog/movie/top.json
@@ -19,11 +19,22 @@
 #   tvmaze_schedule_web_today.json  https://api.tvmaze.com/schedule/web?date=2026-11-14
 #   apibay_top100_48h_208.json, apibay_top100_48h_207.json, apibay_top100_211.json
 #                                   https://apibay.org/precompiled/data_top100_<list>.json
-# <lookups>: the cards of the Top 48 h titles no list had, recorded the same day.
+# <top100> (required): the Top 100 of HD movies and of HD episodes, the two rankings since the
+#   Home read them (recorded on 2026-11-16, after the other answers: their titles are matched
+#   against the lists of 11-14). It also holds the cards of Coyote vs. Acme and Buddy
+#   (cm_meta_movie_<tt>.json), two of the movies' leading titles no list knows: without it the
+#   fixtures would disagree.
+#   apibay_top100_207.json          https://apibay.org/precompiled/data_top100_207.json
+#   apibay_top100_208.json          https://apibay.org/precompiled/data_top100_208.json
+#   The 48 h lists (tpb_48h_207.json, tpb_48h_208.json) are no longer asked: kept as the record
+#   of what the shelves were, for the parser's tests and the tests of the change.
+# <lookups>: the cards of the rankings' titles no list had, recorded the same day.
 #   cm_last_videos_top48h.json      https://v3-cinemeta.strem.io/catalog/series/last-videos/lastVideosIds=<12 ids>.json
 #   cm_meta_movie_<tt>.json         https://v3-cinemeta.strem.io/meta/movie/<tt>.json (four ids)
 import json, sys, datetime, os
-FEEDS, EXTRA, OUT = sys.argv[1], sys.argv[2], sys.argv[3]
+if len(sys.argv) != 5:
+    sys.exit("usage: home-fixtures.py <recordings> <lookups> <out> <top100>")
+FEEDS, EXTRA, OUT, TOP100 = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4]
 NOW = datetime.datetime(2026, 11, 14, 14, 40, tzinfo=datetime.timezone.utc)
 def J(name): return json.load(open(os.path.join(FEEDS, name)))
 def iso(t):
@@ -147,8 +158,13 @@ def tpb(release):
 write("tpb_48h_208.json", [tpb(r) for r in J("apibay_top100_48h_208.json")[:32]])
 write("tpb_48h_207.json", [tpb(r) for r in J("apibay_top100_48h_207.json")[:30]])
 write("tpb_211.json", [tpb(r) for r in J("apibay_top100_211.json")[:30]])
+# 45 releases: 26 titles once the theater copies (9) and the releases without an id (7) are left out
+# (the list's own minimum is 20).
+write("tpb_207.json", [tpb(r) for r in json.load(open(os.path.join(TOP100, "apibay_top100_207.json")))[:45]])
+# The whole list: 100 releases, 26 titles and 10 releases without an id (the list's own minimum is 10).
+write("tpb_208.json", [tpb(r) for r in json.load(open(os.path.join(TOP100, "apibay_top100_208.json")))])
 
-# Lookups of the Top 48 h titles no list knows: Cinemeta's last-videos (shows) and a movie meta.
+# Lookups of the rankings' titles no list knows: Cinemeta's last-videos (shows) and a movie meta.
 def X(name): return json.load(open(os.path.join(EXTRA, name)))
 # Six of the twelve shows asked: the test answers "unknown" for the others, as Cinemeta does
 # for an id it does not have.
@@ -159,4 +175,8 @@ write("cm_last_videos.json", {"metasDetailed": [cm(m, True, described=False) for
 metas = {}
 for imdb in ("tt4154796", "tt27419420", "tt47791876", "tt29256561"):
     metas[imdb] = {"meta": cm(X("cm_meta_movie_%s.json" % imdb)["meta"], described=False)}
+# The two unknown movies of the Top 100's leading titles (<top100>/cm_meta_movie_<tt>.json,
+# recorded with it).
+for imdb in ("tt1756855", "tt37281055"):
+    metas[imdb] = {"meta": cm(json.load(open(os.path.join(TOP100, "cm_meta_movie_%s.json" % imdb)))["meta"], described=False)}
 write("cm_meta_movies.json", metas)

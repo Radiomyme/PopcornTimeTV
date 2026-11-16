@@ -18,8 +18,13 @@ import Foundation
 /// offered ──(rewind before cardAt)──▶ ready|preparing    the card goes
 /// any ──closed──▶ closed
 /// ```
-/// - `prefetchAt` = the earlier of 90 % and `duration − 300 s`; `cardAt` =
-///   `duration − 30 s` (decision D7, the three platforms).
+/// - `prefetchAt` = the earlier of 90 % and `duration − 300 s`, never after
+///   the card; `cardAt` = `duration − cardLead`, `cardLead` the setting
+///   « Next Episode Card » (30 / 45 / 60 / 90 s, default 60 s: decision D7,
+///   60 s since 5.3.0's device session), at most a third of a short file.
+///   An earlier card only offers the skip earlier: the countdown runs to
+///   the end of the file, and the next episode starts there (or on « Play
+///   Now »).
 /// - The setting « Autoplay next episode » off: the card has no countdown,
 ///   nothing starts on its own.
 /// - The countdown of `offered` is the file's own time: a pause freezes it.
@@ -31,7 +36,12 @@ public struct UpNextCountdown: Equatable {
     public struct Tuning: Equatable {
         public var prefetchFraction = 0.9
         public var prefetchLead: TimeInterval = 300
-        public var cardLead: TimeInterval = 30
+        /// How long before the end of the file the card comes (the
+        /// setting, `UpNextCountdown.cardLead(stored:)`).
+        public var cardLead: TimeInterval = UpNextCountdown.defaultCardLead
+        /// A short file's card comes at most this fraction of its length
+        /// before its end (a 3 min episode: 60 s at most).
+        public var cardLeadMaxFraction = 1.0 / 3
         /// The after-play card's countdown.
         public var postPlaySeconds: TimeInterval = 10
         /// How long an accepted card waits for its plan before the chooser.
@@ -47,6 +57,33 @@ public struct UpNextCountdown: Equatable {
         public init() {}
 
         public static let standard = Tuning()
+    }
+
+    // MARK: The card's time (setting « Next Episode Card »)
+
+    /// The choices the settings offer, in seconds before the end.
+    public static let cardLeadChoices: [Int] = [30, 45, 60, 90]
+    /// Without a choice, or with a value the settings do not offer.
+    public static let defaultCardLead: TimeInterval = 60
+
+    /// The stored setting (seconds, any number type) as a lead: one of
+    /// `cardLeadChoices`, else the default.
+    public static func cardLead(stored: Any?) -> TimeInterval {
+        let value: Int?
+        switch stored {
+        case let number as NSNumber: value = number.doubleValue.isFinite ? Int(exactly: number.doubleValue) : nil
+        case let text as String: value = Int(text.trimmingCharacters(in: .whitespaces))
+        default: value = nil
+        }
+        guard let seconds = value, cardLeadChoices.contains(seconds) else { return defaultCardLead }
+        return TimeInterval(seconds)
+    }
+
+    /// Seconds before the end of a file of `duration` that the card comes:
+    /// `lead`, but at most `maxFraction` of the file.
+    public static func effectiveCardLead(_ lead: TimeInterval, duration: TimeInterval, maxFraction: Double = 1.0 / 3) -> TimeInterval {
+        guard duration.isFinite, duration > 0 else { return max(0, lead) }
+        return max(0, min(lead, duration * maxFraction))
     }
 
     public enum Phase: Equatable {
@@ -318,7 +355,8 @@ public struct UpNextCountdown: Equatable {
     private mutating func arm(_ duration: TimeInterval) {
         guard self.duration != duration else { return }
         self.duration = duration
-        let card = tuning.cardAtOverride.map { min($0, duration) } ?? max(0, duration - tuning.cardLead)
+        let lead = UpNextCountdown.effectiveCardLead(tuning.cardLead, duration: duration, maxFraction: tuning.cardLeadMaxFraction)
+        let card = tuning.cardAtOverride.map { min($0, duration) } ?? max(0, duration - lead)
         cardAt = card
         prefetchAt = min(max(0, min(duration * tuning.prefetchFraction, duration - tuning.prefetchLead)), card)
         if phase == .idle { phase = .armed }

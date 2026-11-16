@@ -258,6 +258,29 @@ final class RemuxResumeEngineTests: RemuxSessionTestCase {
         }
     }
 
+    func testAnIndexReadWhileSegment0IsSlowIsNoReasonForVLC() {
+        // The rig's case I1: « Resume » with a seed slower than the film. The keyframe index is
+        // read at once, but segment 0 — after which the plan is made — waits for head pieces
+        // that come one every few seconds: past 8 s the session still says `.pending`.
+        guard let rig = rig(have: [0..<4, 418..<446]) else { return }
+        rig.remux.prepareResume(atFraction: Self.seventyPercent, decided: true)
+        tick(rig, 2)
+        check(rig.session.indexedKeyframeCount > 0, "the keyframe index is read")
+        eq(rig.session.jumpCapability, .pending, "segment 0 is not cut: no plan yet")
+        check(rig.remux.isKeyframeIndexRead, "the players hear the index is read")
+        tick(rig, 12)
+        eq(rig.remux.resumeReadiness, .pending, "fourteen seconds in, still pending: a slow head is no reason for VLC")
+        download(rig, 4..<16)
+        tick(rig)
+        drainMain()
+        eq(rig.remux.resumeReadiness, .native, "once segments 0 and 1 are written: native")
+        // The pure rule.
+        check(RemuxPlayback.isKeyframeIndexRead(capability: .available, indexedKeyframes: 0), "a plan: read")
+        check(RemuxPlayback.isKeyframeIndexRead(capability: .pending, indexedKeyframes: 90), "an index waiting for segment 0: read")
+        check(!RemuxPlayback.isKeyframeIndexRead(capability: .pending, indexedKeyframes: 0), "no index yet: not read")
+        check(!RemuxPlayback.isKeyframeIndexRead(capability: .unavailable("x"), indexedKeyframes: 90), "ruled out: not read")
+    }
+
     func testAResumeInsideWhatTheHeadPassWroteNeedsNoSteering() {
         guard let rig = rig(have: [0..<60]) else { return }
         rig.remux.prepareResume(atFraction: 0.035)   // 21 s: segment 3

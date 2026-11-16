@@ -41,7 +41,7 @@ enum HomeFixture {
             list(.tvmaze(web: true, day: "2026-11-13"), "tvm_web_2026-11-13.json"),
             list(.tvmaze(web: false, day: "2026-11-13"), "tvm_us_2026-11-13.json"),
             list(.tvmaze(web: true, day: "2026-11-14"), "tvm_web_2026-11-14.json"),
-            list(.top48hShows, "tpb_48h_208.json"), list(.top48hMovies, "tpb_48h_207.json"), list(.topUHD, "tpb_211.json"),
+            list(.topShows, "tpb_208.json"), list(.topMovies, "tpb_207.json"), list(.topUHD, "tpb_211.json"),
         ]
         return Dictionary(uniqueKeysWithValues: lists.map { ($0.key, $0) })
     }
@@ -169,8 +169,8 @@ final class HomeFakeNetwork: @unchecked Sendable {
             if path == "/schedule/web?date=2026-11-14" { return HomeFixture.data("tvm_web_2026-11-14.json") }
             return Data("[]".utf8)
         case .apibay:
-            if path.hasSuffix("data_top100_48h_208.json") { return HomeFixture.data("tpb_48h_208.json") }
-            if path.hasSuffix("data_top100_48h_207.json") { return HomeFixture.data("tpb_48h_207.json") }
+            if path.hasSuffix("data_top100_208.json") { return HomeFixture.data("tpb_208.json") }
+            if path.hasSuffix("data_top100_207.json") { return HomeFixture.data("tpb_207.json") }
             if path.hasSuffix("data_top100_211.json") { return HomeFixture.data("tpb_211.json") }
             return nil
         }

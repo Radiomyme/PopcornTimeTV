@@ -227,6 +227,110 @@ final class UserNavigationTests: CheckedTestCase {
         eq(StarvationPolicy.userSeekTarget(observed: 898.9, lastObserved: 898.4, playing: true, elapsed: 1), nil,
            "under the threshold: nothing")
     }
+
+    // MARK: Chained presses (Apple TV, 16 November 2026, log-audit A1)
+
+    /// The device: playing at 3648.6 s, +10 s (3648.6 → 3658.6), and while that seek was still
+    /// held a second +10 s, which AVKit counts from the first one's target (3658.6 → 3668.6). The
+    /// player still read 3648.6 s: the second target was dropped as « elsewhere » and the log named
+    /// the first one. The second move keeps the first one's origin: the newest target is wanted.
+    func testAPressChainedOnAPendingOneKeepsTheOriginAndIsWanted() {
+        var navigation = UserNavigationTarget()
+        navigation.navigated(from: navigation.origin(ofMoveFrom: 3648.6, current: 3648.6), to: 3658.6, played: 3648.6, clock: 100)
+        eq(navigation.wanted(current: 3648.6, played: 3648.6, clock: 100.9), 3658.6, "the first press: pending, wanted")
+        let origin = navigation.origin(ofMoveFrom: 3658.6, current: 3648.6)
+        eq(origin, 3648.6, "AVKit counts the second press from the first target: the origin is where the player reads")
+        navigation.navigated(from: origin, to: 3668.6, played: 3648.6, clock: 101)
+        for tick in 0..<5 {
+            eq(navigation.wanted(current: 3648.6, played: 3648.6, clock: 101 + Double(tick)), 3668.6,
+               "tick \(tick): the newest target is wanted")
+        }
+        eq(navigation.lastDrop, nil, "nothing dropped")
+        eq(navigation.dropCount, 0, "no drop counted")
+        eq(navigation.wanted(current: 3668.7, played: 3648.6, clock: 107), 3668.7, "the seek shows: currentTime()")
+    }
+
+    /// The defect itself (before: `from` = AVKit's `old`), and the log's name for the target dropped.
+    func testWithoutTheOriginTheChainedPressWasDroppedAndTheDropNamesItsTarget() {
+        var navigation = UserNavigationTarget()
+        navigation.navigated(from: 3648.6, to: 3658.6, played: 3648.6, clock: 100)
+        navigation.navigated(from: 3658.6, to: 3668.6, played: 3648.6, clock: 101)
+        eq(navigation.wanted(current: 3648.6, played: 3648.6, clock: 101), 3648.6, "dropped: the old playhead is « wanted »")
+        eq(navigation.lastDrop, .elsewhere, "as « elsewhere »")
+        eq(navigation.lastDroppedTarget, 3668.6, "the target really dropped is the second one (the log named the first)")
+        eq(navigation.dropCount, 1, "one drop")
+        navigation.navigated(from: 3648.6, to: 3700, played: 3648.6, clock: 102)
+        eq(navigation.lastDroppedTarget, nil, "a new move: no drop yet")
+    }
+
+    func testTheOriginIsKeptOnlyForAPressChainedOnThePendingTarget() {
+        var navigation = UserNavigationTarget()
+        eq(navigation.origin(ofMoveFrom: 500, current: 400), 500, "nothing pending: AVKit's origin")
+        eq(navigation.origin(ofMoveFrom: nil, current: 400), nil, "unknown stays unknown")
+        navigation.navigated(from: 400, to: 500, played: 400, clock: 10)
+        eq(navigation.origin(ofMoveFrom: 500.8, current: 400), 400, "within the threshold of the pending target, held: its origin")
+        eq(navigation.origin(ofMoveFrom: 500.8, current: nil), 400, "the player's time unknown: its origin")
+        eq(navigation.origin(ofMoveFrom: 501.5, current: 400), 501.5, "further: AVKit's origin")
+        eq(navigation.origin(ofMoveFrom: 500.3, current: 500.3), 500.3, "the seek already shows: AVKit's origin, where the player is")
+        check(navigation.origin(ofMoveFrom: .nan, current: 400)?.isNaN == true, "a NaN origin is passed on as it is (`navigated` drops it)")
+        navigation.navigated(from: nil, to: 600, played: 400, clock: 11)
+        eq(navigation.origin(ofMoveFrom: 600, current: 400), 600, "no origin known for the pending move: AVKit's")
+        navigation.clear()
+        eq(navigation.origin(ofMoveFrom: 600, current: 400), 600, "cleared: AVKit's")
+    }
+
+    /// The loopback rig (three quick +10 s presses right after a resume, media on disk for the
+    /// first): the first seek completed at once — the player read 704.3 s, its target 704.0 s still
+    /// pending (no playback recorded since). AVKit counted the second press from 704.3 s, where the
+    /// player really was: that origin is kept, and the second target is wanted, not dropped.
+    func testAChainedPressAfterASeekThatAlreadyShowsKeepsAVKitsOrigin() {
+        var navigation = UserNavigationTarget()
+        navigation.navigated(from: navigation.origin(ofMoveFrom: 694.0, current: 694.1), to: 704.0, played: 694.0, clock: 18.8)
+        let origin = navigation.origin(ofMoveFrom: 704.3, current: 704.3)
+        eq(origin, 704.3, "the first seek shows: AVKit's origin")
+        navigation.navigated(from: origin, to: 714.3, played: 694.0, clock: 19.3)
+        eq(navigation.wanted(current: 704.3, played: 694.0, clock: 19.3), 714.3, "the second target is wanted")
+        eq(navigation.lastDrop, nil, "nothing dropped")
+        eq(navigation.wanted(current: 714.3, played: 694.0, clock: 19.4), 714.3, "and the seek shows")
+    }
+
+    /// The question the sceptic left open: a wanted position that falls back to the old playhead
+    /// right after a jump — can it move the pass back? Yes, when the old playhead's lookahead
+    /// reaches the old frontier (a press near the remux frontier): the planner sends the pass back
+    /// there (`.rewind`), away from the target the user is waiting for. With the origin kept, the
+    /// newest target stays wanted and the pass stays at it. (6 s grid, 30 segments of lookahead.)
+    func testAChainedPressAfterAJumpKeepsThePassAtTheNewestTarget() {
+        func segment(_ seconds: Double) -> Int { Int(seconds / 6) }
+        func step(next: Int, highWater: Int, holes: IndexSet, wanted: Double) -> RemuxRunPlanner.Step {
+            let low = segment(wanted)
+            return RemuxRunPlanner.step(next: next, highWater: highWater, holes: holes, pruned: [], low: low,
+                                        limitLow: low + 30, anchor: low, limitAnchor: low + 30, canJump: true,
+                                        explicitTarget: nil, isFar: { _ in true })
+        }
+        // Playing at 1000 s (segment 166), the conversion's frontier at segment 175. +10 min: the
+        // press's target is far, its bytes are not on disk — the pass jumps there.
+        var navigation = UserNavigationTarget()
+        navigation.navigated(from: navigation.origin(ofMoveFrom: 1000, current: 1000), to: 1600, played: 1000, clock: 50)
+        let first = navigation.wanted(current: 1000, played: 1000, clock: 50.2) ?? -1
+        eq(step(next: 175, highWater: 175, holes: [], wanted: first), .jump(toSegment: 266, reason: .farSeek),
+           "the first press: the pass jumps to the target's segment")
+        // After the jump: segments 266, 267 written, 175…265 a hole.
+        let holes = IndexSet(175..<266)
+        // A second press within the second, chained on the first (AVKit: 1600 → 1610).
+        var fixed = navigation
+        fixed.navigated(from: fixed.origin(ofMoveFrom: 1600, current: 1000), to: 1610, played: 1000, clock: 50.8)
+        let wanted = fixed.wanted(current: 1000, played: 1000, clock: 51) ?? -1
+        eq(wanted, 1610, "the newest target is wanted")
+        eq(step(next: 268, highWater: 268, holes: holes, wanted: wanted), .pump(maxNewSegments: 2),
+           "the pass stays at the target and writes on")
+        // Before the fix: the chained press was dropped, the old playhead « wanted ».
+        var before = navigation
+        before.navigated(from: 1600, to: 1610, played: 1000, clock: 50.8)
+        let fellBack = before.wanted(current: 1000, played: 1000, clock: 51) ?? -1
+        eq(fellBack, 1000, "before: the old playhead")
+        eq(step(next: 268, highWater: 268, holes: holes, wanted: fellBack), .jump(toSegment: 175, reason: .rewind),
+           "before: the pass went back to the old frontier, away from the target the user waits for")
+    }
 }
 
 /// What the starvation recovery does with a user navigation, and the paused jump wait that

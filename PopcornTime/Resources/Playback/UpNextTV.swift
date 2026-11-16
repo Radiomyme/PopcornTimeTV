@@ -335,6 +335,11 @@ final class UpNextOverlayViewController: UIViewController {
     private var subscription: AnyCancellable?
     /// DEBUG fixture: what the buttons do instead of a session.
     var fixtureAction: ((String) -> Void)?
+    /// The fixture's card kind (no session).
+    var fixtureKind: UpNextCardState.Kind?
+    /// When the card was on screen (`viewDidAppear`): « Play Now » /
+    /// « Continue » count one second later (`UpNextPressGuard`).
+    private var appearedAt: TimeInterval?
 
     init(session: UpNextSession?, summary: String?) {
         self.session = session
@@ -372,6 +377,15 @@ final class UpNextOverlayViewController: UIViewController {
         }
     }
 
+    override func viewDidAppear(_ animated: Bool) {
+        super.viewDidAppear(animated)
+        if appearedAt == nil {
+            appearedAt = ProcessInfo.processInfo.systemUptime
+            // « Play Now » / « Continue » count a second from here (`UpNextPressGuard`).
+            print("[UpNext] card on screen (overlay\(fixtureAction != nil ? ", fixture" : ""))")
+        }
+    }
+
     /// The fixture's card (no session).
     func show(_ card: UpNextCardState) {
         loadViewIfNeeded()
@@ -379,10 +393,17 @@ final class UpNextOverlayViewController: UIViewController {
     }
 
     private func answer(_ action: String) {
+        // A press meant for the player as the card came: not an answer.
+        var cardUp: TimeInterval?
+        if action == "accept" {
+            let button = (session?.card?.kind ?? fixtureKind) == .stillWatching ? "Continue" : "Play Now"
+            guard let seconds = UpNextPressGuard.check(appearedAt: appearedAt, button: button) else { return }
+            cardUp = seconds
+        }
         if let fixtureAction = fixtureAction { return fixtureAction(action) }
         guard let session = session else { return }
         switch action {
-        case "accept": session.accept()
+        case "accept": session.accept(source: .overlay(cardUp: cardUp))
         case "cancel": session.cancel()
         default: session.chooseVersion()
         }
@@ -430,7 +451,9 @@ enum UpNextTVResumeHook {
 
 /// `-PTDebugUpNextCard <countdown|postPlay|stillWatching>` (UI tests): the
 /// card over a black stand-in for the player, with made-up texts and a
-/// countdown from 30 s that starts nothing. Its buttons only write what
+/// countdown from the setting « Next Episode Card » (60 s by default) that
+/// starts nothing. Its « Play Now » / « Continue » has the real card's
+/// one-second guard (`UpNextPressGuard`). Its buttons only write what
 /// they did into a label (`UpNext.Fixture.Log`): « accept », « cancel »,
 /// « choose », « deadline » when the countdown ran out. No stream, no session.
 enum UpNextTVFixture {
@@ -459,7 +482,9 @@ enum UpNextTVFixture {
         var answers: [String] = []
         let overlay = UpNextOverlayViewController(session: nil,
                                                   summary: "Episode 2 of the bench. A made-up synopsis long enough to take two lines on the card, as a real one would.")
-        var left = 30
+        let lead = UpNextPreferences.cardLeadSeconds
+        var left = lead
+        overlay.fixtureKind = kind
         func card() -> UpNextCardState {
             let title = String(format: "UpNext.EpisodeTitle".localized, 1, 2, "Test Episode 2")
             let headline: String
@@ -472,7 +497,7 @@ enum UpNextTVFixture {
             return UpNextCardState(kind: kind, episodeID: "tt0000001-s1e2", headline: headline, title: title,
                                    showTitle: "PT Test Show",
                                    versionLine: kind == .stillWatching ? nil : String(format: "UpNext.SamePack".localized, "1080p HEVC"),
-                                   imageURL: nil, secondsLeft: countdown, total: kind == .postPlay ? 10 : 30,
+                                   imageURL: nil, secondsLeft: countdown, total: kind == .postPlay ? 10 : lead,
                                    message: kind == .stillWatching ? String(format: "UpNext.StillWatching.Message".localized, 3) : nil)
         }
         overlay.fixtureAction = { action in

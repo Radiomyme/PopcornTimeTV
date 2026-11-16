@@ -191,4 +191,72 @@ final class PlaybackStartMeasureTests: CheckedTestCase {
         check(PlaybackStartMeasure.admits(.ready, reached: [.firstFrame], decidedSegment: nil, segment: nil),
               "the other steps are not concerned")
     }
+
+    // MARK: Head and tail on disk, the steering after ready (chantier « attente »)
+
+    /// The two ends the engine waits for before `readyToPlay`: a line for each the first time
+    /// it is all on disk (the later of the two ended the start buffer).
+    func testTheHeadAndTheTailAreDueOnceAllOnDisk() {
+        let geometry = PlaybackStartMeasure.Geometry(pieceLength: 8 << 20, fileSize: 12_607_042_523)
+        guard let rule = PlaybackStartMeasure.Readiness.engineRule(geometry, bounded: false) else { return check(false, "a rule") }
+        let size = geometry.fileSize
+        eq(PlaybackStartMeasure.requiredEnds(rule, fileSize: size, headOnDisk: 0, tailOnDisk: false).map(\.0), [],
+           "nothing on disk: nothing due")
+        eq(PlaybackStartMeasure.requiredEnds(rule, fileSize: size, headOnDisk: rule.headBytes - 1, tailOnDisk: true).map(\.0),
+           [.tailOnDisk], "the tail first, the head one byte short")
+        let both = PlaybackStartMeasure.requiredEnds(rule, fileSize: size, headOnDisk: 244_304_933, tailOnDisk: true)
+        eq(both.map(\.0), [.headOnDisk, .tailOnDisk], "a head beyond the 20 pieces and the tail: both")
+        eq(both.first?.1, "20 piece(s) = 167772160 B of the file", "the head's detail")
+        eq(both.last?.1, "2 piece(s) = \(rule.tailBytes) B from \(size - rule.tailBytes)", "the tail's detail")
+    }
+
+    /// Bounded storage: the engine waits for no more head pieces than its window (unpublished),
+    /// so the app's 20-piece head can still be missing at ready. The head is then logged at
+    /// ready, « seen at ready », never left out (a lone tail line would read as the end of the
+    /// start buffer).
+    func testInBoundedStorageTheHeadIsLoggedAtReadyAtTheLatest() {
+        let geometry = PlaybackStartMeasure.Geometry(pieceLength: 8 << 20, fileSize: 12_607_042_523)
+        guard let rule = PlaybackStartMeasure.Readiness.engineRule(geometry, bounded: true) else { return check(false, "a rule") }
+        let size = geometry.fileSize
+        let window: Int64 = 4 * (8 << 20)
+        eq(PlaybackStartMeasure.requiredEnds(rule, fileSize: size, headOnDisk: window, tailOnDisk: true).map(\.0),
+           [.tailOnDisk], "a sample before ready: 4 pieces of an upper bound of 20 are not the head yet")
+        let atReady = PlaybackStartMeasure.requiredEnds(rule, fileSize: size, headOnDisk: window, tailOnDisk: true, atReady: true)
+        eq(atReady.map(\.0), [.headOnDisk, .tailOnDisk], "at ready the engine's head is on disk: both")
+        check(atReady.first?.1.hasPrefix("seen at ready: bounded storage waits for at most 20 piece(s)") ?? false,
+              "marked as seen at ready", atReady.first?.1 ?? "")
+        let full = PlaybackStartMeasure.Readiness.engineRule(geometry, bounded: false)!
+        eq(PlaybackStartMeasure.requiredEnds(full, fileSize: size, headOnDisk: window, tailOnDisk: true, atReady: true).map(\.0),
+           [.tailOnDisk], "full storage: the rule is exact, nothing guessed at ready")
+    }
+
+    func testTheHeadAndTheTailAreLoggedOnceEach() {
+        var lines: [String] = []
+        let measure = PlaybackStartMeasure(log: { lines.append($0) })
+        let sample = PlaybackStartMeasure.Sample(fileBytes: 0, downloadRate: 0, peers: 1, seeds: 1)
+        check(measure.reach(.tailOnDisk, sample: sample, sinceTrace: 30, detail: "2 piece(s)"), "the tail")
+        check(!measure.reach(.tailOnDisk, sample: sample, sinceTrace: 31), "once")
+        check(measure.reach(.headOnDisk, sample: sample, sinceTrace: 44.6, detail: "20 piece(s)"), "then the head")
+        eq(lines.map { $0.components(separatedBy: ":").first ?? "" }, ["[Measure] tail on disk", "[Measure] head on disk"],
+           "two lines")
+        check(lines.last?.hasPrefix("[Measure] head on disk: t+44600 ms") ?? false, "with its time", lines.last ?? "")
+    }
+
+    /// A decided start steers as soon as the remux knows the target: its line says how long
+    /// after the engine's ready that was.
+    func testTheSteeringSaysHowLongAfterReady() {
+        var lines: [String] = []
+        var now: TimeInterval = 100
+        let measure = PlaybackStartMeasure(log: { lines.append($0) }, clock: { now })
+        let sample = PlaybackStartMeasure.Sample(fileBytes: 0, downloadRate: 0, peers: 1, seeds: 1)
+        measure.reach(.ready, sample: sample, sinceTrace: 44.6)
+        now += 0.4
+        measure.reach(.resumeSteering, sample: sample, sinceTrace: 45.0, detail: "read offset 5732921423, segment 132")
+        check(lines.last?.hasSuffix("read offset 5732921423, segment 132, 400 ms after ready") ?? false, "400 ms after ready",
+              lines.last ?? "")
+        var alone: [String] = []
+        let noReady = PlaybackStartMeasure(log: { alone.append($0) }, clock: { now })
+        noReady.reach(.resumeSteering, sample: sample, sinceTrace: 1, detail: "read offset 1")
+        check(alone.last?.hasSuffix("read offset 1") ?? false, "no ready logged: nothing added", alone.last ?? "")
+    }
 }
