@@ -230,32 +230,27 @@ public enum OpenMetadata {
 
     // MARK: - Cinemeta / TVMaze requests
 
-    private static let cinemeta = "https://v3-cinemeta.strem.io"
-
-    /// Catalogs are large (100–600 KB): keep the ones already fetched.
-    private static let catalogCache = NSCache<NSString, NSArray>()
-
+    /// Cinemeta's popular titles of a genre, through `CinemetaClient` (one
+    /// page, without the episode lists, kept 4 h: the Shows grid asks the
+    /// same pages).
     private static func catalog(type: String, genre: String, completion: @escaping ([[String: Any]]) -> Void) {
-        let key = "\(type)/\(genre)" as NSString
-        if let hit = catalogCache.object(forKey: key) as? [[String: Any]] { return completion(hit) }
-        let encoded = genre.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? genre
-        json("\(cinemeta)/catalog/\(type)/top/genre=\(encoded).json") { object in
-            let metas = (object as? [String: Any])?["metas"] as? [[String: Any]] ?? []
-            if !metas.isEmpty { catalogCache.setObject(metas as NSArray, forKey: key) }
-            completion(metas)
-        }
+        guard let kind = CinemetaClient.Kind(rawValue: type) else { return completion([]) }
+        CinemetaClient.catalog(kind, .top, genre: genre) { completion($0 ?? []) }
     }
 
+    /// A title's meta, through `CinemetaClient` (kept 6 h: the page that
+    /// just loaded the movie asked for it already).
     private static func cinemetaMeta(type: String, imdbId: String, completion: @escaping ([String: Any]?) -> Void) {
-        json("\(cinemeta)/meta/\(type)/\(imdbId).json") { object in
-            completion((object as? [String: Any])?["meta"] as? [String: Any])
-        }
+        guard let kind = CinemetaClient.Kind(rawValue: type) else { return completion(nil) }
+        CinemetaClient.meta(kind, imdbId: imdbId, completion: completion)
     }
 
+    /// The show's TVMaze id, from its record (`TVMazeShowDirectory`: the
+    /// show's page has just asked for it, and it is kept on disk).
     private static func tvmazeShowId(imdbId: String, completion: @escaping (Int?) -> Void) {
-        // Answers with a 301 to /shows/{id}, which URLSession follows.
-        json("https://api.tvmaze.com/lookup/shows?imdb=\(imdbId)") { object in
-            completion((object as? [String: Any])?["id"] as? Int)
+        TVMazeShowDirectory.shared.record(imdbId) { lookup in
+            guard case .known(let record) = lookup else { return completion(nil) }
+            completion(record["id"] as? Int)
         }
     }
 

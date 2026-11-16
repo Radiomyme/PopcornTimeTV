@@ -20,7 +20,7 @@ public struct Episode: Media, Equatable {
     /// The summary of the episode. Will default to "No summary available.".localized if there is no summary available on the popcorn-api.
     public var summary: String
     
-    /// The tvdb id of the episode.
+    /// The id of the episode: "<show IMDb id>-s<season>e<number>" since 5.0.0 (what the providers build and what the watched state is keyed by); its TVDB number in 4.x and for an episode loaded from Trakt.
     public let id: String
     
     /// IMDB id of the episode. This will be `nil` unless explicitly set by calling `getEpisodeMetadata:showId:episodeNumber:seasonNumber:completion:` on `TraktManager` or the episode was loaded from Trakt.
@@ -82,7 +82,7 @@ public struct Episode: Media, Equatable {
             self.episode = try map.value("number")
         } else {
             self.episode = try map.value("episode")
-            self.id = try map.value("tvdb_id", using: StringTransform()).replacingOccurrences(of: "-", with: "")
+            self.id = try map.value("tvdb_id", using: EpisodeIDTransform())
             if let torrents = map["torrents"].currentValue as? [String: [String: Any]] {
                 for (quality, torrent) in torrents {
                     if var torrent = Mapper<Torrent>().map(JSONObject: torrent) , quality != "0" {
@@ -180,7 +180,7 @@ public struct Episode: Media, Equatable {
                 self = episode
             }
         case .toJSON:
-            id >>> (map["tvdb_id"], StringTransform())
+            id >>> (map["tvdb_id"], EpisodeIDTransform())
             tmdbId >>> map["ids.tmdb"]
             imdbId >>> map["ids.imdb"]
             firstAirDate >>> (map["first_aired"], DateTransform())

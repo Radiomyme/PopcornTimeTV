@@ -177,7 +177,9 @@ final class BoundedStorageSession {
 
     /// Remux route: can a hand-off to VLC (or any HTTP player) resume at
     /// `playerSeconds` (AVPlayer's timeline) — is the torrent data from the
-    /// cluster before that position still there or still downloadable?
+    /// cluster before that position (`BoundedStorage.remuxHandOffSourceOffset`:
+    /// the segment's own, past what a native jump skipped) still there or
+    /// still downloadable?
     /// False when it was deleted (behind `lowestAvailableOffset`) or skipped
     /// and released (a gap the remux read past): VLC would get HTTP 410
     /// there. A position past the remux's reader is downloadable (a far seek
@@ -198,8 +200,13 @@ final class BoundedStorageSession {
         let segment = RemuxPlayback.segmentIndex(coveringPlayerSeconds: max(0, playerSeconds),
                                                  durations: snapshot.playerDurations,
                                                  targetDuration: snapshot.targetDuration)
-        guard segment < snapshot.segmentSourceOffsets.count else { return true }   // past the remux: downloadable
-        let offset = snapshot.segmentSourceOffsets[max(0, segment - 1)]
+        let segmentStart = RemuxPlayback.segmentStart(index: segment, durations: snapshot.playerDurations,
+                                                      targetDuration: snapshot.targetDuration)
+        guard let offset = BoundedStorage.remuxHandOffSourceOffset(segment: segment,
+                                                                   secondsIntoSegment: max(0, playerSeconds) - segmentStart,
+                                                                   segmentSourceOffsets: snapshot.segmentSourceOffsets,
+                                                                   neverWritten: snapshot.neverWritten)
+        else { return true }   // past the remux: downloadable
         if offset < streamer.lowestAvailableOffset { return false }
         if offset >= snapshot.readerOffset { return true }
         // Behind the reader: everything from there up to the reader must be on
@@ -207,21 +214,36 @@ final class BoundedStorageSession {
         return streamer.contiguousAvailableOffset(before: snapshot.readerOffset) <= offset
     }
 
-    /// HTTP routes: the rewind floor is a part of the file that was never
-    /// downloaded (VLC started at a resume point, the gap a forward seek
-    /// left), not deleted data — the first byte missing below the server's
-    /// read position lies above everything consumed. False on the remux
-    /// route (its floor is pruned HLS) and outside bounded mode. Any thread.
+    /// The rewind floor is a part of the film that was never downloaded, not
+    /// deleted data. HTTP routes (VLC started at a resume point, the gap a
+    /// forward seek left): the first byte missing below the server's read
+    /// position lies above everything consumed. Remux route: what lies just
+    /// below the floor is media a native jump skipped — a resume at a saved
+    /// position, a far seek — and never wrote
+    /// (`remuxRewindFloorIsNeverWritten`); false when the disk budget deleted
+    /// it (the usual floor: pruned HLS). False outside bounded mode. Any
+    /// thread.
     var isRewindFloorNeverDownloaded: Bool {
         guard isBounded, let streamer = streamer else { return false }
         let (remux, target, played) = lock.withLock { (lockedRemux, lockedLastLimitedTarget, lockedPlayed) }
-        if let remux = remux, !remux.isStoppedForBounded { return false }
+        if let remux = remux, !remux.isStoppedForBounded { return Self.remuxRewindFloorIsNeverWritten(remux) }
         // The rewind went back into something the user played: its data was
         // downloaded, then deleted — even when a gap a forward seek left
         // above it is what the floor shows (part-3 coverage td1, md2).
         if let target = target, played.contains(target) { return false }
         let floor = streamer.contiguousAvailableOffset(before: max(1, streamer.servedOffset))
         return floor > 0 && floor > streamer.lowestAvailableOffset
+    }
+
+    /// Remux route: the floor of a rewind from where playback stands — the
+    /// last position `remux` was told playback reached (the reference the
+    /// players limit a rewind from), else the one it needs data for — is the
+    /// edge of media that was never written: a native jump skipped it
+    /// (`RemuxPlayback.rewindFloorIsNeverWritten`). False for a floor the
+    /// disk budget made, and while no position was reported. Any thread.
+    static func remuxRewindFloorIsNeverWritten(_ remux: RemuxPlayback) -> Bool {
+        guard let snapshot = remux.boundedSnapshot(), let reference = snapshot.played ?? snapshot.wanted else { return false }
+        return remux.rewindFloorIsNeverWritten(fromPlayerSeconds: reference)
     }
 
     // MARK: Consumers
@@ -516,21 +538,9 @@ final class BoundedStorageSession {
     /// (`BoundedStorage.remuxConsumedBefore`). The read position itself is
     /// reported by the remux's pump after every tick.
     private func driveRemux(_ streamer: PTTorrentStreamer, snapshot: RemuxPlayback.BoundedSnapshot, split: StorageBudget) {
+        guard let release = Self.remuxRelease(snapshot, keepBehindBytes: split.torrentKeepBehindBytes) else { return }
         let reader = snapshot.readerOffset
-        guard reader > 0 else { return }
-        var playheadOffset: Int64?
-        let positions = [snapshot.played, snapshot.wanted].compactMap { $0 }
-        if let position = positions.min(), !snapshot.segmentSourceOffsets.isEmpty {
-            let segment = RemuxPlayback.segmentIndex(coveringPlayerSeconds: max(0, position),
-                                                     durations: snapshot.playerDurations,
-                                                     targetDuration: snapshot.targetDuration)
-            // The segment before the playhead's: VLC seeks to the keyframe at
-            // or before its target.
-            let index = min(max(0, segment - 1), snapshot.segmentSourceOffsets.count - 1)
-            playheadOffset = snapshot.segmentSourceOffsets[index]
-        }
-        // Nothing reported yet (the item loads at 0): keep everything.
-        guard let playheadOffset = playheadOffset else { return }
+        let playheadOffset = release.playheadOffset
         // What the torrent can still hold between the playhead and the
         // reader: below `lowestAvailableOffset` the file is deleted for good
         // (`consumedBefore` only grows, nothing is downloaded again). After a
@@ -540,9 +550,32 @@ final class BoundedStorageSession {
         // follows this measure.
         let keptFrom = max(playheadOffset, streamer.lowestAvailableOffset)
         lock.withLock { lockedFailoverObserved = max(0, reader - keptFrom) }
+        if release.consumedBefore > streamer.consumedBefore { streamer.consumedBefore = release.consumedBefore }
+    }
+
+    /// What `driveRemux` releases, from the remux's snapshot alone (pure: the
+    /// tests hold it to the remux's rules — during a provisional jump the
+    /// snapshot's reader is the head's floor, and nothing above it may go,
+    /// whatever the player reports): the source offset of the segment before
+    /// the playhead's, and the offset below which the torrent may delete.
+    /// Nil while nothing was read, or nothing is reported (the item loads at
+    /// 0): everything is kept.
+    static func remuxRelease(_ snapshot: RemuxPlayback.BoundedSnapshot,
+                             keepBehindBytes: Int64) -> (playheadOffset: Int64, consumedBefore: Int64)? {
+        let reader = snapshot.readerOffset
+        guard reader > 0 else { return nil }
+        let positions = [snapshot.played, snapshot.wanted].compactMap { $0 }
+        guard let position = positions.min(), !snapshot.segmentSourceOffsets.isEmpty else { return nil }
+        let segment = RemuxPlayback.segmentIndex(coveringPlayerSeconds: max(0, position),
+                                                 durations: snapshot.playerDurations,
+                                                 targetDuration: snapshot.targetDuration)
+        // The segment before the playhead's: VLC seeks to the keyframe at
+        // or before its target.
+        let index = min(max(0, segment - 1), snapshot.segmentSourceOffsets.count - 1)
+        let playheadOffset = snapshot.segmentSourceOffsets[index]
         let consumed = BoundedStorage.remuxConsumedBefore(readerOffset: reader, playheadSourceOffset: playheadOffset,
-                                                          keepBehindBytes: split.torrentKeepBehindBytes)
-        if consumed > streamer.consumedBefore { streamer.consumedBefore = consumed }
+                                                          keepBehindBytes: keepBehindBytes)
+        return (playheadOffset, consumed)
     }
 
     /// Remux route: anchors for a later hand-off to VLC — segment K's media

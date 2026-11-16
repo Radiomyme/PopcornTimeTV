@@ -112,6 +112,24 @@ public struct Show: Media, Equatable {
     
     /// The genres associated with the show. Empty by default. Must be filled by calling `getInfo:imdbId:completion` on `ShowManager`.
     public var genres = [String]()
+
+    /// The day the show premiered, when the source gives it (Cinemeta,
+    /// TVMaze). Nil otherwise.
+    public var releaseDate: Date?
+
+    /// The transparent title logo, when the source gives one (Cinemeta).
+    /// `OpenMetadata.logoURL(imdbId:)` builds the same address for any title,
+    /// without saying whether the image exists.
+    public var logoImage: String?
+
+    /// When the latest episode aired, as the list the show came from knew
+    /// it (Cinemeta's catalogs). Nil when the source does not say.
+    public var latestEpisodeDate: Date?
+
+    /// The number of seasons aired so far, as the list knew it (Cinemeta's
+    /// catalogs: the season of the latest aired episode). Nil when the
+    /// source does not say; a loaded show has `seasonNumbers`.
+    public var seasonCount: Int?
     
     public init?(map: Map) {
         do { self = try Show(map) }
@@ -137,6 +155,12 @@ public struct Show: Media, Equatable {
             self.slug = try map.value("slug")
             self.airDay = try? map.value("air_day")
             self.airTime = try? map.value("air_time")
+            self.logoImage = try? map.value("images.logo")
+            let released: String? = try? map.value("released")
+            self.releaseDate = released.flatMap(CatalogDates.date(from:))
+            let aired: String? = try? map.value("last_aired")
+            self.latestEpisodeDate = aired.flatMap(CatalogDates.date(from:))
+            self.seasonCount = try? map.value("seasons")
         }
         self.summary = ((try? map.value("synopsis")) ?? "No summary available.".localized).strippedOfHtml
         var title: String = try map.value("title")
@@ -184,12 +208,15 @@ public struct Show: Media, Equatable {
         self.largeBackgroundImage = self.largeCoverImage
         self.airDay  = ((dict["schedule"] as? [String: Any])?["days"] as? [String])?.first
         self.airTime = (dict["schedule"] as? [String: Any])?["time"] as? String
+        self.releaseDate = premiered.isEmpty ? nil : CatalogDates.date(from: premiered)
         self.episodes = episodes
         self.episodes.sort { $0.season == $1.season ? $0.episode < $1.episode : $0.season < $1.season }
     }
 
     /// A Cinemeta (Stremio's public catalog) series: `id` is the IMDb id. Used
-    /// for related titles; the detail page loads the full show by id.
+    /// for the Shows grid, related titles, the Top 100 and search results;
+    /// the detail page loads the full show by id. Keeps the premiere date,
+    /// the status, the runtime and the logo when the meta has them.
     public init?(cinemeta dict: [String: Any]) {
         guard let imdb = dict["imdb_id"] as? String ?? dict["id"] as? String, imdb.hasPrefix("tt"),
               let name = dict["name"] as? String, !name.isEmpty else { return nil }
@@ -205,6 +232,14 @@ public struct Show: Media, Equatable {
         self.genres  = (dict["genres"] as? [String]) ?? (dict["genre"] as? [String]) ?? []
         self.largeCoverImage      = (dict["poster"] as? String).map { OpenMetadata.largerPoster($0) }
         self.largeBackgroundImage = dict["background"] as? String
+        self.logoImage   = (dict["logo"] as? String).flatMap { $0.isEmpty ? nil : $0 }
+        self.releaseDate = (dict["released"] as? String).flatMap(CatalogDates.date(from:))
+        self.status      = (dict["status"] as? String).flatMap { $0.isEmpty ? nil : $0 }
+        // "45 min"
+        self.runtime     = Int(((dict["runtime"] as? String) ?? "").prefix { $0.isNumber })
+        // What a catalog page keeps of the episode list (`CinemetaClient.catalogMetas`).
+        self.latestEpisodeDate = (dict[CinemetaClient.lastAiredField] as? String).flatMap(CatalogDates.date(from:))
+        self.seasonCount = dict[CinemetaClient.seasonsField] as? Int
     }
 
     /// Convenience init mapping a Time4Popcorn (`api.apiabcd.com`) show list
@@ -262,6 +297,10 @@ public struct Show: Media, Equatable {
             rating >>> map["rating.percentage"]
             largeCoverImage >>> map["images.poster"]
             largeBackgroundImage >>> map["images.fanart"]
+            logoImage >>> map["images.logo"]
+            releaseDate.map(CatalogDates.isoString) >>> map["released"]
+            latestEpisodeDate.map(CatalogDates.isoString) >>> map["last_aired"]
+            seasonCount >>> map["seasons"]
             title >>> map["title"]
             runtime >>> (map["runtime"], IntTransform())
             summary >>> map["synopsis"]

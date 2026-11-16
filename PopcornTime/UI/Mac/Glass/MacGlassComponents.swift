@@ -66,6 +66,23 @@ extension EnvironmentValues {
     }
 }
 
+#if DEBUG
+private struct MacGlassDebugHoverKey: EnvironmentKey {
+    static let defaultValue = false
+}
+
+extension EnvironmentValues {
+    /// DEBUG (`-PTDebugTour lift:<n>`, MacDebugHooks): the
+    /// MacGlassHoverButtonStyle buttons inside are drawn as under the
+    /// pointer. A verification run's app is not in front and gets no
+    /// pointer events: this shows the lift in a snapshot all the same.
+    var macGlassDebugHover: Bool {
+        get { self[MacGlassDebugHoverKey.self] }
+        set { self[MacGlassDebugHoverKey.self] = newValue }
+    }
+}
+#endif
+
 /// A plain button that hands its hover / focus / press state to its label
 /// (environment `macGlassHovered`, `macGlassPressed`): posters, stills and
 /// headshots lift their image (`macGlassLift`), not their caption.
@@ -79,11 +96,16 @@ struct MacGlassHoverButtonStyle: ButtonStyle {
         @State private var isHovering = false
         @Environment(\.isFocused) private var isFocused
         @Environment(\.isEnabled) private var isEnabled
+        #if DEBUG
+        @Environment(\.macGlassDebugHover) private var isHoverForced
+        #else
+        private let isHoverForced = false
+        #endif
 
         var body: some View {
             configuration.label
                 .contentShape(Rectangle())
-                .environment(\.macGlassHovered, isEnabled && (isHovering || isFocused))
+                .environment(\.macGlassHovered, isEnabled && (isHovering || isFocused || isHoverForced))
                 .environment(\.macGlassPressed, configuration.isPressed)
                 .onHover { isHovering = $0 }
         }

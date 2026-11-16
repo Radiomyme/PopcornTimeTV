@@ -1,246 +1,359 @@
 
 
+import Foundation
 import SwiftUI
 import PopcornKit
 
-// MARK: - Movies
+// MARK: - Catalogue model (Movies, Shows)
 
+typealias MacMoviesModel = MacCatalogModel<Movie, MovieManager.Filters>
+typealias MacShowsModel = MacCatalogModel<Show, ShowManager.Filters>
+
+/// One catalogue grid's state: its filter and genre, its pages
+/// (`CatalogPager`, PopcornKit: stale answers, repeated titles, the end of
+/// the list, refresh) and where it is scrolled. Owned by the window's
+/// `MacNavigator`, not by the grid view: the section can go and come back
+/// without loading anything again.
 @MainActor
-final class MacMoviesViewModel: ObservableObject {
-    @Published var movies: [Movie] = []
-    @Published var isLoading = false
-    @Published var hasMore = true
-    @Published var errorMessage: String?
-    @Published var errorTitle: String?
+final class MacCatalogModel<Item: MacCatalogItem, Filter: Hashable>: ObservableObject {
+    /// Loads one page; calls back on any queue. `snapshot` (the first page
+    /// of a new list only): the page saved by an earlier load, handed over
+    /// before `completion` gets the network's (`PopcornKit.loadMovies(…,
+    /// snapshot:completion:)`).
+    typealias Loader = (_ page: Int, _ filter: Filter, _ genre: NetworkManager.Genres,
+                        _ snapshot: (([Item]) -> Void)?,
+                        _ completion: @escaping ([Item]?, NSError?) -> Void) -> Void
 
-    private var currentPage = 1
-    private(set) var filter: MovieManager.Filters = .trending
-    private(set) var genre: NetworkManager.Genres = .all
-    /// Bumped by `reload`: a load started for an older list is ignored when
-    /// it lands, and never keeps the grid "loading".
-    private var generation = 0
+    @Published private(set) var pager = CatalogPager<Item>(id: { $0.id })
+    @Published private(set) var filter: Filter
+    @Published private(set) var genre: NetworkManager.Genres = .all
+    /// The poster at the top of the grid (`scrollPosition`): where the
+    /// grid opens again when its section comes back. Not published:
+    /// scrolling must not redraw the grid.
+    var scrolledID: String?
+    /// The grid's scroll view identity: a new one for another list (and a
+    /// refreshed one), which opens at its top. Clearing `scrolledID` alone
+    /// would not scroll: the view keeps its offset, only clamped to the
+    /// skeleton's height.
+    @Published private(set) var listID = 0
+    /// The posters whose cells exist in that scroll view (`onAppear` /
+    /// `onDisappear`), and when the last one asks for the next page. Not
+    /// published.
+    private var cells = LastPosterWatch()
 
-    init() {
-        #if DEBUG
-        MacDebugHooks.applySourceSwitches()
-        if let filter = MacDebugHooks.movieFilter { self.filter = filter }
-        #endif
+    /// The filters offered, in menu order, and their names.
+    let filters: [Filter]
+    let filterTitle: (Filter) -> String
+    /// The genres offered: the ones this catalogue's sources know
+    /// (`NetworkManager.Genres.movies` / `.shows`).
+    let genres: [NetworkManager.Genres]
+    private let load: Loader
+    /// The order a filter keeps the whole list in (nil: the source's).
+    private let order: (Filter) -> ((Item, Item) -> Bool)?
+
+    init(filter: Filter, filters: [Filter], filterTitle: @escaping (Filter) -> String, genres: [NetworkManager.Genres],
+         order: @escaping (Filter) -> ((Item, Item) -> Bool)? = { _ in nil }, load: @escaping Loader) {
+        self.filter = filter
+        self.filters = filters
+        self.filterTitle = filterTitle
+        self.genres = genres
+        self.order = order
+        self.load = load
     }
 
-    func setFilter(_ newFilter: MovieManager.Filters) {
-        filter = newFilter
-        reload()
+    var items: [Item] { pager.items }
+
+    /// The first page, the first time the grid shows.
+    func loadIfNeeded() {
+        if pager.isIdle { startOver() }
+    }
+
+    /// The next page (the grid's last poster appeared).
+    func loadMore() {
+        if let request = pager.next() { run(request) }
+    }
+
+    /// A poster's cell appeared in the scroll view `list` (the `listID` it
+    /// was drawn for): the last one asks for the next page.
+    func posterAppeared(_ id: String, in list: Int) {
+        if cells.appeared(id, in: list, last: pager.items.last?.id) { loadMore() }
+    }
+
+    func posterDisappeared(_ id: String, in list: Int) {
+        cells.disappeared(id, in: list)
+    }
+
+    /// After an answer: a last poster whose cell was already there (the
+    /// network's first page in place of the saved one with the same titles,
+    /// an A–Z page that left the last title in place) gets no new
+    /// `onAppear`: the next page is asked now — a few times in a row at
+    /// most (`LastPosterWatch`: an A–Z list went on to the end of the
+    /// catalogue, page after page, while its last poster stayed on screen).
+    private func loadMoreIfLastIsShown() {
+        if cells.answered(last: pager.items.last?.id) { loadMore() }
+    }
+
+    /// Try Again: what failed, again — the page that is missing, or the
+    /// refresh (the posters stay, as for ⌘R).
+    func retry() {
+        if let request = pager.retry() { run(request) }
+    }
+
+    /// ⌘R: the list from its first page. The posters stay until it lands;
+    /// with nothing on screen to keep, the pager makes it a plain first load.
+    func refresh() {
+        guard !pager.isRefreshing else { return }
+        // An explicit refresh: the first pages PopcornKit keeps on disk are
+        // asked to the network again, however recent.
+        PopcornKit.refreshCatalogs()
+        run(pager.refresh())
+    }
+
+    /// The current filter and genre from their first page: the list
+    /// empties, a page still on its way is dropped when it lands. A genre
+    /// is filtered by the source page by page (the Top 100): an empty page
+    /// is then not the end of the list.
+    private func startOver() {
+        run(pager.reset(filtered: genre != .all))
+    }
+
+    func setFilter(_ newFilter: Filter) {
+        show(filter: newFilter, genre: genre)
     }
 
     func setGenre(_ newGenre: NetworkManager.Genres) {
-        genre = newGenre
-        reload()
+        show(filter: filter, genre: newGenre)
     }
 
-    func reload() {
-        generation += 1
-        currentPage = 1
-        movies = []
-        hasMore = true
-        errorMessage = nil
-        errorTitle = nil
-        isLoading = false
-        loadMore()
-    }
-
-    func loadMore() {
-        guard !isLoading, hasMore else { return }
-        isLoading = true
-        let page = currentPage
-        let captured = (filter, genre)
-        let generation = self.generation
-        PopcornKit.loadMovies(page, filterBy: captured.0, genre: captured.1) { [weak self] results, error in
-            DispatchQueue.main.async {
-                guard let self = self, self.generation == generation else { return }
-                self.isLoading = false
-                if let error = error {
-                    self.errorTitle = MacGridError.title(for: error)
-                    self.errorMessage = MacGridError.message(for: error)
-                    self.hasMore = false
-                    return
-                }
-                let new = results ?? []
-                if new.isEmpty { self.hasMore = false } else {
-                    self.movies.append(contentsOf: new.filter { incoming in
-                        !self.movies.contains(where: { $0.id == incoming.id })
-                    })
-                    self.currentPage = page + 1
-                }
-            }
-        }
-    }
-}
-
-struct MacMoviesGridView: View {
-    @StateObject private var viewModel = MacMoviesViewModel()
-
-    var body: some View {
-        ScrollView {
-            LazyVGrid(columns: MacPosterGrid.columns, spacing: 22) {
-                ForEach(viewModel.movies, id: \.id) { movie in
-                    NavigationLink(value: movie) {
-                        MacPosterCard(title: movie.title, subtitle: movie.year, imageURL: movie.smallCoverImage)
-                    }
-                    .buttonStyle(.plain)
-                    .onAppear {
-                        if movie.id == viewModel.movies.last?.id { viewModel.loadMore() }
-                    }
-                }
-            }
-            .padding(20)
-            if viewModel.isLoading { ProgressView().padding() }
-            MacGridStatus(isEmpty: viewModel.movies.isEmpty, isLoading: viewModel.isLoading,
-                          hasMore: viewModel.hasMore, errorTitle: viewModel.errorTitle,
-                          errorMessage: viewModel.errorMessage, systemImage: "film") { viewModel.reload() }
-        }
-        .navigationTitle(Text("Movies"))
-        .toolbar {
-            Picker("Filter", selection: Binding(get: { viewModel.filter },
-                                                set: { viewModel.setFilter($0) })) {
-                Text("Trending").tag(MovieManager.Filters.trending)
-                Text("Top 100").tag(MovieManager.Filters.top100)
-                Text("Popular").tag(MovieManager.Filters.popularity)
-                Text("Top Rated").tag(MovieManager.Filters.rating)
-                Text("Recently Added").tag(MovieManager.Filters.date)
-            }
-            .pickerStyle(.menu)
-            Picker("Genre", selection: Binding(get: { viewModel.genre },
-                                               set: { viewModel.setGenre($0) })) {
-                ForEach(NetworkManager.Genres.array, id: \.self) { genre in
-                    Text(genre.string).tag(genre)
-                }
-            }
-            .pickerStyle(.menu)
-        }
-        .task { if viewModel.movies.isEmpty { viewModel.loadMore() } }
-    }
-}
-
-// MARK: - Shows
-
-@MainActor
-final class MacShowsViewModel: ObservableObject {
-    @Published var shows: [Show] = []
-    @Published var isLoading = false
-    @Published var hasMore = true
-    @Published var errorMessage: String?
-    @Published var errorTitle: String?
-
-    private var currentPage = 1
-    private(set) var filter: ShowManager.Filters = .trending
-    private(set) var genre: ShowManager.Genres = .all
-    /// Bumped by `reload`: a load started for an older list is ignored when
-    /// it lands, and never keeps the grid "loading".
-    private var generation = 0
-
-    init() {
-        #if DEBUG
-        MacDebugHooks.applySourceSwitches()
-        if let filter = MacDebugHooks.showFilter { self.filter = filter }
-        #endif
-    }
-
-    func setFilter(_ newFilter: ShowManager.Filters) {
+    /// Another list: emptied, back to the top, its first page asked for.
+    func show(filter newFilter: Filter, genre newGenre: NetworkManager.Genres) {
+        guard newFilter != filter || newGenre != genre else { return loadIfNeeded() }
         filter = newFilter
-        reload()
-    }
-
-    func setGenre(_ newGenre: ShowManager.Genres) {
         genre = newGenre
-        reload()
+        backToTop()
+        startOver()
     }
 
-    func reload() {
-        generation += 1
-        currentPage = 1
-        shows = []
-        hasMore = true
-        errorMessage = nil
-        errorTitle = nil
-        isLoading = false
-        loadMore()
+    /// A new scroll view, at its top: none of its cells exists yet, and
+    /// those of the one it replaces no longer count (a refreshed list asked
+    /// for its second page at once when the end of the first was on screen
+    /// before the refresh).
+    private func backToTop() {
+        scrolledID = nil
+        listID += 1
+        cells.start(list: listID)
     }
 
-    func loadMore() {
-        guard !isLoading, hasMore else { return }
-        isLoading = true
-        let page = currentPage
-        let captured = (filter, genre)
-        let generation = self.generation
-        PopcornKit.loadShows(page, filterBy: captured.0, genre: captured.1) { [weak self] results, error in
+    #if DEBUG
+    /// `-PTDebugTour scroll:<n>`: the n-th poster at the top of the grid.
+    func debugScroll(toIndex index: Int) {
+        guard pager.items.indices.contains(index) else { return }
+        scrolledID = pager.items[index].id
+        // `scrolledID` is not published: the grid reads it again now.
+        objectWillChange.send()
+    }
+
+    /// `-PTDebugTour fail | failmore | empty`: a made-up answer to the next
+    /// page (after emptying the list when `fromStart`), to show the states
+    /// a healthy network never does.
+    func debugAnswer(_ result: Result<[Item], NSError>, fromStart: Bool) {
+        if let request = fromStart ? pager.reset() : pager.next() { pager.receive(result, for: request) }
+    }
+    #endif
+
+    private func run(_ request: CatalogPager<Item>.Request) {
+        let filter = self.filter
+        // The first page of a new list: the one saved by an earlier load at
+        // once (a launch paints the grid without waiting), then the
+        // network's in its place. Not for a refresh: its list stays.
+        let saved: (([Item]) -> Void)? = request.page == 1 && !request.isRefresh ? { [weak self] items in
             DispatchQueue.main.async {
-                guard let self = self, self.generation == generation else { return }
-                self.isLoading = false
-                if let error = error {
-                    self.errorTitle = MacGridError.title(for: error)
-                    self.errorMessage = MacGridError.message(for: error)
-                    self.hasMore = false
-                    return
+                guard let self = self else { return }
+                self.pager.receiveSnapshot(items, for: request, arrange: self.arrangement(for: filter))
+            }
+        } : nil
+        load(request.page, filter, genre, saved) { [weak self] items, error in
+            DispatchQueue.main.async {
+                guard let self = self else { return }
+                let result: Result<[Item], NSError>
+                if let error { result = .failure(error) } else { result = .success(items ?? []) }
+                // A page of titles already listed adds no poster: nothing
+                // would ever scroll into view to ask for the next one.
+                switch self.pager.receive(result, for: request, arrange: self.arrangement(for: filter)) {
+                case .continueWith(let next):
+                    self.run(next)
+                case .applied:
+                    // A refreshed list opens at its top, as another list does.
+                    if request.isRefresh, case .success(let page) = result, !page.isEmpty { self.backToTop() }
+                    self.loadMoreIfLastIsShown()
+                case .stale:
+                    break
                 }
-                let new = results ?? []
-                if new.isEmpty { self.hasMore = false } else {
-                    self.shows.append(contentsOf: new.filter { incoming in
-                        !self.shows.contains(where: { $0.id == incoming.id })
-                    })
-                    // "A - Z": each page is an unordered batch, re-sort the list.
-                    if captured.0 == .name {
-                        self.shows.sort { $0.title.localizedCaseInsensitiveCompare($1.title) == .orderedAscending }
-                    }
-                    self.currentPage = page + 1
-                }
+            }
+        }
+    }
+
+    private func arrangement(for filter: Filter) -> (([Item]) -> [Item])? {
+        order(filter).map { areInOrder in { (items: [Item]) in items.sorted(by: areInOrder) } }
+    }
+}
+
+extension MacCatalogModel where Item == Movie, Filter == MovieManager.Filters {
+    static func movies(filter: MovieManager.Filters = .trending) -> MacMoviesModel {
+        MacMoviesModel(filter: filter, filters: MovieManager.Filters.array, filterTitle: { $0.string },
+                       genres: NetworkManager.Genres.movies) { page, filter, genre, snapshot, completion in
+            if let snapshot {
+                PopcornKit.loadMovies(page, filterBy: filter, genre: genre, snapshot: snapshot, completion: completion)
+            } else {
+                PopcornKit.loadMovies(page, filterBy: filter, genre: genre, completion: completion)
             }
         }
     }
 }
 
-struct MacShowsGridView: View {
-    @StateObject private var viewModel = MacShowsViewModel()
+extension MacCatalogModel where Item == Show, Filter == ShowManager.Filters {
+    static func shows(filter: ShowManager.Filters = .trending) -> MacShowsModel {
+        MacShowsModel(filter: filter, filters: ShowManager.Filters.array, filterTitle: { $0.string },
+                      genres: NetworkManager.Genres.shows,
+                      order: { filter -> ((Show, Show) -> Bool)? in
+                          // "A - Z": each page is an unordered batch, the list is kept sorted.
+                          guard filter == .name else { return nil }
+                          return { $0.title.localizedCaseInsensitiveCompare($1.title) == .orderedAscending }
+                      }) { page, filter, genre, snapshot, completion in
+            if let snapshot {
+                PopcornKit.loadShows(page, filterBy: filter, genre: genre, snapshot: snapshot, completion: completion)
+            } else {
+                PopcornKit.loadShows(page, filterBy: filter, genre: genre, completion: completion)
+            }
+        }
+    }
+}
+
+// MARK: - Catalogue grid
+
+/// The Movies / Shows page: posters by pages on the Home's black and its
+/// grid, the sort and genre menus and Refresh in the toolbar.
+struct MacCatalogGridView<Item: MacCatalogItem, Filter: Hashable>: View {
+    @ObservedObject var model: MacCatalogModel<Item, Filter>
+    let title: Text
+    /// Symbol of the "No results" state.
+    let systemImage: String
+
+    @State private var width = MacPosterGrid.defaultWidth
 
     var body: some View {
-        ScrollView {
-            LazyVGrid(columns: MacPosterGrid.columns, spacing: 22) {
-                ForEach(viewModel.shows, id: \.id) { show in
-                    NavigationLink(value: show) {
-                        MacPosterCard(title: show.title, subtitle: show.year, imageURL: show.smallCoverImage)
-                    }
-                    .buttonStyle(.plain)
-                    .onAppear {
-                        if show.id == viewModel.shows.last?.id { viewModel.loadMore() }
+        let pager = model.pager
+        let grid = MacPosterGrid(width: width)
+        // The scroll view the cells below are made for: what they report
+        // after another one took its place is not about the new list.
+        let list = model.listID
+        // A container of its own, not a Group: before the first load the
+        // status draws nothing, and modifiers on nothing (`task`, the
+        // toolbar) would never take effect.
+        ZStack {
+            if pager.items.isEmpty && !pager.isLoading {
+                // Nothing to scroll: the status takes the page (as an
+                // overlay of an empty scroll view it is given no height).
+                MacGridStatus(error: pager.error, isEnded: !pager.hasMore, systemImage: systemImage) { model.retry() }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else {
+                ScrollView {
+                    MacPageTitle(title: title, sideInset: grid.sideInset)
+                    if pager.items.isEmpty {
+                        MacPosterSkeleton(grid: grid)
+                    } else {
+                        LazyVGrid(columns: grid.columns, alignment: .leading, spacing: MacPosterGrid.rowSpacing) {
+                            ForEach(pager.items, id: \.id) { item in
+                                MacPosterLink(item: item, size: grid.cellSize)
+                                    .onAppear { model.posterAppeared(item.id, in: list) }
+                                    .onDisappear { model.posterDisappeared(item.id, in: list) }
+                            }
+                        }
+                        .scrollTargetLayout()
+                        // 4K on nearly every card tells nothing: not drawn then.
+                        .environment(\.homeHiddenBadges, HomeListBadges.hidden(items: pager.items.prefix(40).map { MacGridCard.sourceItem($0) }))
+                        .padding(.horizontal, grid.sideInset)
+                        .padding(.top, 14)
+                        .padding(.bottom, 28)
+                        MacGridFooter(isLoading: pager.isLoading && !pager.isRefreshing, error: pager.error) { model.retry() }
                     }
                 }
+                // Where the grid was when its section was left (the model
+                // outlives the view): the row of that poster is at the top again.
+                .scrollPosition(id: Binding(get: { model.scrolledID }, set: { model.scrolledID = $0 }), anchor: .top)
+                .id(list)
             }
-            .padding(20)
-            if viewModel.isLoading { ProgressView().padding() }
-            MacGridStatus(isEmpty: viewModel.shows.isEmpty, isLoading: viewModel.isLoading,
-                          hasMore: viewModel.hasMore, errorTitle: viewModel.errorTitle,
-                          errorMessage: viewModel.errorMessage, systemImage: "tv") { viewModel.reload() }
         }
-        .navigationTitle(Text("Shows"))
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .macGridWidth($width)
+        .macPageBackground()
+        .navigationTitle(title)
+        .modifier(MacNoBarTitle())
         .toolbar {
-            Picker("Filter", selection: Binding(get: { viewModel.filter },
-                                                set: { viewModel.setFilter($0) })) {
-                Text("Trending").tag(ShowManager.Filters.trending)
-                Text("Top 100").tag(ShowManager.Filters.top100)
-                Text("Popular").tag(ShowManager.Filters.popularity)
-                Text("Top Rated").tag(ShowManager.Filters.rating)
-                Text("Recently Added").tag(ShowManager.Filters.date)
-                Text("A - Z").tag(ShowManager.Filters.name)
-            }
-            .pickerStyle(.menu)
-            Picker("Genre", selection: Binding(get: { viewModel.genre },
-                                               set: { viewModel.setGenre($0) })) {
-                ForEach(NetworkManager.Genres.array, id: \.self) { genre in
-                    Text(genre.string).tag(genre)
+            ToolbarItemGroup {
+                MacToolbarChoice(label: "Filter", current: model.filterTitle(model.filter),
+                                 options: model.filters.map { ($0, model.filterTitle($0)) },
+                                 selection: model.filter) { model.setFilter($0) }
+                MacToolbarChoice(label: "Genre", current: model.genre.string,
+                                 options: model.genres.map { ($0, $0.string) },
+                                 selection: model.genre) { model.setGenre($0) }
+                if pager.isRefreshing {
+                    // In the button's place while the new first page loads.
+                    ProgressView()
+                        .controlSize(.small)
+                        .frame(width: 28)
+                } else {
+                    Button {
+                        model.refresh()
+                    } label: {
+                        Label("Refresh", systemImage: "arrow.clockwise")
+                    }
+                    .help(Text("Refresh"))
                 }
             }
-            .pickerStyle(.menu)
         }
-        .task { if viewModel.shows.isEmpty { viewModel.loadMore() } }
+        .task { model.loadIfNeeded() }
+    }
+}
+
+/// A sort or genre of a grid, in the toolbar: what is chosen, in white
+/// semibold, its chevron right after it (not a pale menu with its
+/// indicator far off), the choices in a menu with a tick.
+struct MacToolbarChoice<Value: Hashable>: View {
+    let label: LocalizedStringKey
+    let current: String
+    let options: [(Value, String)]
+    let selection: Value
+    let choose: (Value) -> Void
+
+    var body: some View {
+        Menu {
+            ForEach(options, id: \.0) { option in
+                Button {
+                    choose(option.0)
+                } label: {
+                    if option.0 == selection {
+                        Label(option.1, systemImage: "checkmark")
+                    } else {
+                        Text(verbatim: option.1)
+                    }
+                }
+            }
+        } label: {
+            HStack(spacing: 5) {
+                Text(verbatim: current)
+                Image(systemName: "chevron.down")
+                    .font(.system(size: 9, weight: .bold))
+            }
+            .font(.system(size: 13, weight: .semibold))
+            .foregroundStyle(GlassPalette.primaryText)
+            .padding(.horizontal, 6)
+        }
+        .menuIndicator(.hidden)
+        .fixedSize()
+        .accessibilityLabel(Text(label))
+        .accessibilityValue(Text(verbatim: current))
+        .help(Text(label))
     }
 }
 
@@ -258,185 +371,63 @@ enum MacGridError {
     }
 }
 
-/// Under a grid: the load error (a full message with Try Again while the
-/// grid is empty, a line under the posters otherwise), or "No results" for a
-/// list that came back empty (the Top 100 filtered by a genre none of its
-/// titles has, say).
+/// An empty grid that is not loading: the load error with Try Again, or
+/// "No results" for a list that came back empty (the Top 100 filtered by
+/// a genre none of its titles has, say). An empty page for a grid not
+/// asked for yet.
 struct MacGridStatus: View {
-    let isEmpty: Bool
-    let isLoading: Bool
-    let hasMore: Bool
-    let errorTitle: String?
-    let errorMessage: String?
+    let error: NSError?
+    /// The list is complete (and empty).
+    let isEnded: Bool
     let systemImage: String
     let retry: () -> Void
 
     var body: some View {
-        if let errorMessage {
-            if isEmpty {
-                ContentUnavailableView {
-                    Label { Text(verbatim: errorTitle ?? "Error".localized) } icon: {
-                        Image(systemName: "exclamationmark.triangle")
-                    }
-                } description: {
-                    Text(verbatim: errorMessage)
-                } actions: {
-                    Button("Try Again", action: retry)
+        if let error {
+            ContentUnavailableView {
+                Label { Text(verbatim: MacGridError.title(for: error)) } icon: {
+                    Image(systemName: "exclamationmark.triangle")
                 }
-                .padding(.top, 60)
-            } else {
-                Text(verbatim: errorMessage).foregroundStyle(.secondary).padding()
+            } description: {
+                Text(verbatim: MacGridError.message(for: error))
+            } actions: {
+                Button("Try Again", action: retry)
+                    .keyboardShortcut(.defaultAction)
             }
-        } else if isEmpty && !isLoading && !hasMore {
+        } else if isEnded {
             ContentUnavailableView {
                 Label { Text("No results") } icon: { Image(systemName: systemImage) }
             }
-            .padding(.top, 60)
+        } else {
+            Color.clear
         }
     }
 }
 
-// MARK: - Search
-
-struct MacSearchView: View {
-    @State private var query = ""
-    @State private var movies: [Movie] = []
-    @State private var shows: [Show] = []
-    @State private var searching = false
-
-    var body: some View {
-        ScrollView {
-            if searching { ProgressView().padding() }
-            if !movies.isEmpty {
-                sectionHeader(Text("Movies"))
-                LazyVGrid(columns: MacPosterGrid.columns, spacing: 22) {
-                    ForEach(movies, id: \.id) { movie in
-                        NavigationLink(value: movie) {
-                            MacPosterCard(title: movie.title, subtitle: movie.year, imageURL: movie.smallCoverImage)
-                        }.buttonStyle(.plain)
-                    }
-                }.padding(.horizontal, 20)
-            }
-            if !shows.isEmpty {
-                sectionHeader(Text("Shows"))
-                LazyVGrid(columns: MacPosterGrid.columns, spacing: 22) {
-                    ForEach(shows, id: \.id) { show in
-                        NavigationLink(value: show) {
-                            MacPosterCard(title: show.title, subtitle: show.year, imageURL: show.smallCoverImage)
-                        }.buttonStyle(.plain)
-                    }
-                }.padding(.horizontal, 20)
-            }
-        }
-        .navigationTitle(Text("Search"))
-        .searchable(text: $query, prompt: Text("Movie or show title"))
-        .onSubmit(of: .search) { performSearch() }
-    }
-
-    private func sectionHeader(_ title: Text) -> some View {
-        HStack {
-            title.font(.title3.weight(.semibold))
-            Spacer()
-        }.padding(.horizontal, 20).padding(.top, 14)
-    }
-
-    private func performSearch() {
-        let q = query.trimmingCharacters(in: .whitespaces)
-        guard !q.isEmpty else { return }
-        searching = true
-        movies = []; shows = []
-        let group = DispatchGroup()
-        group.enter()
-        PopcornKit.loadMovies(searchTerm: q) { results, _ in
-            DispatchQueue.main.async { movies = results ?? []; group.leave() }
-        }
-        group.enter()
-        PopcornKit.loadShows(searchTerm: q) { results, _ in
-            DispatchQueue.main.async { shows = results ?? []; group.leave() }
-        }
-        group.notify(queue: .main) { searching = false }
-    }
-}
-
-// MARK: - Watchlist
-
-/// Movies and shows saved with the detail page's Watchlist button
-/// (WatchlistManager, synced with Trakt when signed in). Read again every
-/// time the section shows, e.g. back from a page where one was removed.
-struct MacWatchlistView: View {
-    @State private var movies: [Movie] = []
-    @State private var shows: [Show] = []
-    /// Pages pushed over the grid (MacRootView's stack).
-    @Environment(\.macStackDepth) private var stackDepth
+/// Under the posters: the next page loading, or the error of a page (or of
+/// a refresh) that failed, with Try Again — the posters stay.
+struct MacGridFooter: View {
+    let isLoading: Bool
+    let error: NSError?
+    let retry: () -> Void
 
     var body: some View {
-        Group {
-            if movies.isEmpty && shows.isEmpty {
-                ContentUnavailableView {
-                    Label { Text("Watchlist Empty") } icon: { Image(systemName: "bookmark") }
-                } description: {
-                    Text("Try adding movies or shows to your watchlist.")
-                }
-            } else {
-                ScrollView {
-                    if !movies.isEmpty {
-                        sectionHeader(Text("Movies"))
-                        LazyVGrid(columns: MacPosterGrid.columns, spacing: 22) {
-                            ForEach(movies, id: \.id) { movie in
-                                NavigationLink(value: movie) {
-                                    MacPosterCard(title: movie.title, subtitle: movie.year, imageURL: movie.smallCoverImage)
-                                }
-                                .buttonStyle(.plain)
-                            }
-                        }
-                        .padding(.horizontal, 20)
-                    }
-                    if !shows.isEmpty {
-                        sectionHeader(Text("Shows"))
-                        LazyVGrid(columns: MacPosterGrid.columns, spacing: 22) {
-                            ForEach(shows, id: \.id) { show in
-                                NavigationLink(value: show) {
-                                    MacPosterCard(title: show.title, subtitle: show.year, imageURL: show.smallCoverImage)
-                                }
-                                .buttonStyle(.plain)
-                            }
-                        }
-                        .padding(.horizontal, 20)
-                    }
-                }
-                .padding(.bottom, 20)
+        if let error {
+            HStack(spacing: 12) {
+                Image(systemName: "exclamationmark.triangle")
+                    .foregroundStyle(.secondary)
+                Text(verbatim: MacGridError.message(for: error))
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.leading)
+                Button("Try Again", action: retry)
             }
+            .frame(maxWidth: 640)
+            .padding(.horizontal, 20)
+            .padding(.bottom, 24)
+        } else if isLoading {
+            ProgressView()
+                .controlSize(.small)
+                .padding(.bottom, 24)
         }
-        .navigationTitle(Text("Watchlist"))
-        .onAppear(perform: reload)
-        // Back to the grid: no onAppear then (the stack keeps it in place).
-        .onChange(of: stackDepth) { _, depth in
-            if depth == 0 { reload() }
-        }
-    }
-
-    private func sectionHeader(_ title: Text) -> some View {
-        HStack {
-            title.font(.title3.weight(.semibold))
-            Spacer()
-        }
-        .padding(.horizontal, 20)
-        .padding(.top, 14)
-    }
-
-    /// The local lists now; Trakt's when it answers (signed in only).
-    private func reload() {
-        movies = unique(WatchlistManager<Movie>.movie.getWatchlist { updated in
-            DispatchQueue.main.async { movies = unique(updated) }
-        })
-        shows = unique(WatchlistManager<Show>.show.getWatchlist { updated in
-            DispatchQueue.main.async { shows = unique(updated) }
-        })
-    }
-
-    /// One entry per id (the list is append-only JSON).
-    private func unique<T: Media>(_ items: [T]) -> [T] {
-        var seen = Set<String>()
-        return items.filter { seen.insert($0.id).inserted }
     }
 }

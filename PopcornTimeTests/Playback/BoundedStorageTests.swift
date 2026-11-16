@@ -3,8 +3,8 @@
 //  PopcornTimeTests
 //
 //  The app side of bounded storage (BoundedStorage.swift): the budget split, the space a
-//  refused stream asks for, remuxConsumedBefore, the native rewind's earliest segment,
-//  MediaByteMap and the HTTP sample filter. (Port of the bounded-storage unit harness:
+//  refused stream asks for, remuxConsumedBefore, the native rewind's earliest segment, the
+//  source offset a hand-off to VLC reads from, MediaByteMap and the HTTP sample filter. (Port of the bounded-storage unit harness:
 //  58 checks.)
 //
 
@@ -157,6 +157,25 @@ final class BoundedStorageTests: CheckedTestCase {
             expect(BoundedStorage.earliestContiguousKeptSegment(playheadSegment: 50, written: 130, pruned: pruned) == 0, "K4 nothing pruned: segment 0")
             pruned = IndexSet([5, 60])
             expect(BoundedStorage.earliestContiguousKeptSegment(playheadSegment: 100, written: 130, pruned: pruned) == 61, "K5 the nearest hole bounds it")
+        }
+
+        print("L. remuxHandOffSourceOffset")
+        do {
+            // Segment k's Cluster at k × 10 MB; a native resume at segment 70 skipped 2…69.
+            let offsets = (0..<100).map { Int64($0) * 10_000_000 }
+            let skipped = IndexSet(2..<70)
+            func offset(_ segment: Int, _ into: Double, _ neverWritten: IndexSet = skipped) -> Int64? {
+                BoundedStorage.remuxHandOffSourceOffset(segment: segment, secondsIntoSegment: into,
+                                                        segmentSourceOffsets: offsets, neverWritten: neverWritten)
+            }
+            expect(offset(80, 3) == offsets[79], "L1 the Cluster of the segment before, as before")
+            expect(offset(70, 3) == offsets[70], "L2 well into the first segment after a skipped span: its own Cluster (the one before was never downloaded)")
+            expect(offset(70, 0.5) == offsets[69], "L3 at its very start: the position may map before its keyframe — the segment before, as before")
+            expect(offset(71, 0.5) == offsets[70], "L4 the next segment: the one before is written")
+            expect(offset(70, 3, IndexSet()) == offsets[69], "L5 the segment before deleted by the disk budget (it was downloaded): unchanged")
+            expect(offset(69, 3) == offsets[68], "L6 inside the skipped span: unchanged")
+            expect(offset(0, 1) == offsets[0], "L7 segment 0: its own Cluster")
+            expect(offset(100, 1) == nil, "L8 past the remux's map: nil (downloadable)")
         }
 
         print("D. MediaByteMap")

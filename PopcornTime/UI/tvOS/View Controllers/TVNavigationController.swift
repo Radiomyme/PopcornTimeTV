@@ -45,19 +45,34 @@ class TVNavigationController: UINavigationController, UINavigationControllerDele
 
     /// The screen shown last (`didShow`): a tab selected again shows it again.
     private weak var lastShownViewController: UIViewController?
+    /// Whether `didShow` has run once: `lastShownViewController` is weak, and
+    /// nil also when the screen shown last was released since (the loading
+    /// screen replaced by the page while another tab was shown).
+    private var hasShownAScreen = false
 
     /// A screen pushed or shown again (a pop, the loading screen replaced by
     /// the page) while the focus is in the tab bar gets the focus: it lands
     /// there when the screen before had nothing focusable, and Menu pressed
     /// in the tab bar would leave the app instead of going back. Only when
-    /// the screen changed within the tab: never for a tab's first display or
-    /// a tab selected again (the focus stays on the tabs then, as in every
-    /// tvOS app). A grid gets it on its collection view, which puts it back
-    /// on the poster that was opened.
+    /// the screen changed within the tab: never for a tab's first display
+    /// (of its first screen) or a tab selected again (the focus stays on the
+    /// tabs then, as in every tvOS app). A grid gets it on its collection
+    /// view, which puts it back on the poster that was opened.
     public func navigationController(_ navigationController: UINavigationController, didShow viewController: UIViewController, animated: Bool) {
         let previous = lastShownViewController
+        let isFirstDisplay = !hasShownAScreen
         lastShownViewController = viewController
-        guard let previous, previous !== viewController,
+        hasShownAScreen = true
+        // A screen pushed on a tab that had never been shown (a link opens a
+        // page on another tab) is a change too: the tab's first display is
+        // then that screen, not its first one. Left in the tab bar, the
+        // focus fell back to the first tab when the page replaced the
+        // loading screen, and the focus on a tab selects it: the app showed
+        // Movies instead of the page. A screen shown last and released since
+        // (the page replaced the loading screen while another tab was shown)
+        // is not a change: the tab is selected again, the focus stays on it.
+        let changed = previous.map { $0 !== viewController } ?? (isFirstDisplay && viewController !== viewControllers.first)
+        guard changed,
               let tabBarController = tabBarController as? TVTabBarController,
               tabBarController.selectedViewController === self,
               tabBarController.focusIsInTabBar else { return }
@@ -74,8 +89,7 @@ class TVNavigationController: UINavigationController, UINavigationControllerDele
     /// one per press.
     private(set) var pendingBackCount = 0
 
-    /// Whether a Back is waiting for a transition to end: the loading screen
-    /// then does not open the page (`MainViewController.loadDetail`).
+    /// Whether a Back is waiting for a transition to end.
     var isGoingBack: Bool { return pendingBackCount > 0 }
 
     override func popViewController(animated: Bool) -> UIViewController? {

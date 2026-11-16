@@ -74,9 +74,24 @@ public enum PlaybackCapabilities {
     /// while it sleeps), which changed the merge a test checks.
     static var pinnedForTesting: Snapshot?
 
+    #if DEBUG
+    /// `-PTDebugCapabilities everything` (simulator benches): the answer of
+    /// a device that decodes HEVC / AV1 in hardware with an HDR / Dolby
+    /// Vision display — the simulator has no HEVC decoder, so every HEVC
+    /// release was penalized there and the choices differed from an Apple TV's.
+    private static let debugPinned: Snapshot? = {
+        guard UserDefaults.standard.string(forKey: "PTDebugCapabilities") == "everything" else { return nil }
+        print("[Debug] -PTDebugCapabilities everything: \(Snapshot.everything)")
+        return .everything
+    }()
+    #endif
+
     /// Cached snapshot of the capabilities (thread-safe).
     public static var current: Snapshot {
         if let pinned = pinnedForTesting { return pinned }
+        #if DEBUG
+        if let pinned = debugPinned { return pinned }
+        #endif
         _ = displayObservers   // installs the invalidation observers once
         let now = ProcessInfo.processInfo.systemUptime
         lock.lock()

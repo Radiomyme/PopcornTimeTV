@@ -166,6 +166,31 @@ enum BoundedStorage {
         while first > 0 && !pruned.contains(first - 1) { first -= 1 }
         return first
     }
+
+    /// How far into its segment a hand-off position must be for an HTTP
+    /// player to be trusted to seek to that segment's own keyframe: the
+    /// position reaches it as a fraction of AVPlayer's duration, which maps a
+    /// moment or so off on the player's own timeline.
+    static let handOffKeyframeMarginSeconds: Double = 2
+
+    /// Remux route: the source offset an HTTP player (VLC) resuming at a
+    /// position in `segment` reads from — the data that must still be there
+    /// (`BoundedStorageSession.canResumeOverHTTP`). Normally the Cluster of
+    /// the segment before (a position at the start of a segment may map just
+    /// before its keyframe). When that segment was never written — the span a
+    /// native jump skipped, whose data was never downloaded — and the
+    /// position is well into `segment`, the player's seek lands on
+    /// `segment`'s own keyframe: its own Cluster. nil past the remux's map.
+    static func remuxHandOffSourceOffset(segment: Int, secondsIntoSegment: Double, segmentSourceOffsets: [Int64],
+                                         neverWritten: IndexSet,
+                                         keyframeMargin: Double = handOffKeyframeMarginSeconds) -> Int64? {
+        guard segment >= 0, segment < segmentSourceOffsets.count else { return nil }
+        if segment > 0, neverWritten.contains(segment - 1), !neverWritten.contains(segment),
+           secondsIntoSegment >= keyframeMargin {
+            return segmentSourceOffsets[segment]
+        }
+        return segmentSourceOffsets[max(0, segment - 1)]
+    }
 }
 
 // MARK: - Budget split (report_4 B4)

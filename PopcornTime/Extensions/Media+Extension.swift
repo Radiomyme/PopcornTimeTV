@@ -60,6 +60,7 @@ extension Media {
             loadingViewController.sourceURL = url
         }
         if let download = completedDownload {
+            download.startTrace = loadingViewController.startTrace
             return download.play { (videoFileURL, videoFilePath) in
                 // The SPM PopcornTorrent answers a finished download at once,
                 // with its file URL (no web server): keep the asynchronous
@@ -67,7 +68,8 @@ extension Media {
                 DispatchQueue.main.async {
                     guard !loadingViewController.isCancelled else { return }
                     loadingViewController.streamer = download
-                    playBlock(videoFileURL, videoFilePath, self, nextEpisode, progress, playViewController, download)
+                    download.noteStartBuffered(fileName: videoFilePath.lastPathComponent)
+                    playBlock(videoFileURL, videoFilePath, self.withSubtitlesFound(), nextEpisode, progress, playViewController, download)
                     finishedLoadingBlock(loadingViewController, playViewController)
                 }
             }
@@ -94,6 +96,7 @@ extension Media {
             // A new streamer per stream (the SPM PopcornTorrent has no
             // singleton); it is the current one until the next stream.
             let streamer = PTTorrentStreamer.startNew()
+            streamer.startTrace = loadingViewController.startTrace
             loadingViewController.streamer = streamer
             // The release, this title's other releases (an episode's are the
             // augmented list `chooseQuality` merged) and how to switch: the
@@ -140,6 +143,7 @@ extension Media {
                 DispatchQueue.main.async { loadingBlock(status, loadingViewController) }
                 }, readyToPlay: { (videoFileURL, videoFilePath) in
                     print("[Streamer] readyToPlay url=\(videoFileURL)")
+                    streamer.noteStartBuffered(fileName: videoFilePath.lastPathComponent)
                     // The streamer reports `http://0.0.0.0:<port>/`: the
                     // players get 127.0.0.1 and the payload's name, as on
                     // macOS (VLC opens it directly).
@@ -147,7 +151,9 @@ extension Media {
                     DispatchQueue.main.async {
                         // Ready as Back was pressed: no player (the stream is stopped by `cancel`).
                         guard !loadingViewController.isCancelled else { return }
-                        playBlock(playableURL, videoFilePath, self, nextEpisode, progress, playViewController, streamer)
+                        // With the subtitles found while the stream prepared
+                        // (the search runs alongside it: `AppDelegate.play`).
+                        playBlock(playableURL, videoFilePath, self.withSubtitlesFound(), nextEpisode, progress, playViewController, streamer)
                         finishedLoadingBlock(loadingViewController, playViewController)
                     }
                 }, failure: { error in
@@ -166,7 +172,7 @@ extension Media {
                             errorBlock(message)
                         }
                     }
-            }, selectFileToStream: PTTorrentStreamer.fileSelection(for: url, media: self, torrent: context.torrent))
+            }, selectFileToStream: streamer.measuringSelection(PTTorrentStreamer.fileSelection(for: url, media: self, torrent: context.torrent)))
         } else {
             PopcornKit.downloadTorrentFile(url, completion: { (url, error) in
                 // Alamofire hands the response back on its own queue too.
@@ -187,19 +193,25 @@ extension Media {
      - Parameter completion: The completion handler for the request containing an array of subtitles
      */
     func getSubtitles(forId id: String? = nil, completion: @escaping ([Subtitle]) -> Void) {
-        let id = id ?? self.id
-        if let episode = self as? Episode {
-            // OpenSubtitles indexes episodes by SHOW imdb id + season +
-            // episode — no Trakt roundtrip needed to resolve the episode's
-            // own imdb id.
-            SubtitlesManager.shared.search(episode, imdbId: episode.show?.id) { (subtitles, _) in
-                completion(subtitles)
-            }
-        } else {
+        if let id = id, id != self.id, !(self is Episode) {
             SubtitlesManager.shared.search(imdbId: id) { (subtitles, _) in
                 completion(subtitles)
             }
+            return
         }
+        // The shared search (`SubtitleSearch`): one request per title, its
+        // answer kept — OpenSubtitles indexes episodes by SHOW imdb id +
+        // season + episode.
+        SubtitleSearch.shared.search(for: self, completion: completion)
+    }
+
+    /// This movie or episode with the OpenSubtitles list the search has
+    /// found (`SubtitleSearch`), when it has none of its own yet.
+    func withSubtitlesFound() -> Media {
+        guard subtitles.isEmpty, let found = SubtitleSearch.shared.answer(for: self), !found.isEmpty else { return self }
+        var media: Media = self
+        media.subtitles = found
+        return media
     }
     
     /// The download, either completed or downloading, that is associated with this media object.

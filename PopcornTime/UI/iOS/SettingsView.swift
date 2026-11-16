@@ -3,93 +3,178 @@
 import SwiftUI
 import PopcornKit
 
+/// Settings, opened by the gear of the root screens (a sheet of
+/// `RootTabView`). Same UserDefaults keys as the tvOS and macOS settings, so
+/// a preference means the same on every platform.
 struct SettingsView: View {
     @AppStorage("autoSelectQuality") private var autoSelectQuality = "Balanced"
-    @AppStorage("streamOnCellular")  private var streamOnCellular  = false
+    @AppStorage(CellularStreamingPolicy.defaultsKey) private var streamOnCellular = false
+    /// « Autoplay next episode » (episode chaining, on by default: D8).
+    @AppStorage(UpNextPreferences.autoPlayNextKey) private var autoPlayNext = true
     // Localized language NAME ("Français"), same convention as tvOS Settings.
     @AppStorage(PlaybackLanguagePreferences.audioLanguageDefaultsKey)    private var preferredAudioLanguage: String?
     @AppStorage(PlaybackLanguagePreferences.subtitleLanguageDefaultsKey) private var preferredSubtitleLanguage: String?
-    @State private var traktAuthURL: IdentifiableURL?
     @State private var isTraktSignedIn = TraktManager.shared.isSignedIn()
     /// The release notes of this version, again (they show once at launch).
     @State private var showWhatsNew = false
+    /// The Home's settings, as their rows sum them up; read again whenever
+    /// the screen shows (back from one of their lists).
+    @State private var homeLanguages: String?
+    @State private var homeHiddenShelves = ""
+    @State private var sendsFollowedShows = Library.shared.isBulkEpisodeLookupEnabled
 
     var body: some View {
         Form {
-            Section("Lecture") {
-                Picker("Qualité automatique", selection: $autoSelectQuality) {
-                    Text("Équilibré (démarrage rapide)").tag("Balanced")
-                    Text("La plus haute").tag("Highest")
-                    Text("La plus basse").tag("Lowest")
-                    Text("Choisir à chaque fois").tag("")
+            Section {
+                // Labels only: the stored tags stay "Balanced" / "Highest" /
+                // "Lowest" / "" (the tvOS / macOS settings).
+                Picker("Auto Select Quality", selection: $autoSelectQuality) {
+                    Text("Balanced (quick start)").tag("Balanced")
+                    Text("Highest").tag("Highest")
+                    Text("Lowest").tag("Lowest")
+                    Text("Always Ask").tag("")
                 }
-                .pickerStyle(.menu)
+                // The value on the label's line, or under it aligned with
+                // it: a menu's long French value wrapped off the label.
+                .pickerStyle(.navigationLink)
 
-                Toggle("Streamer en données mobiles", isOn: $streamOnCellular)
+                Toggle("Stream on Cellular Data", isOn: $streamOnCellular)
+            } header: {
+                Text("Playback")
+            } footer: {
+                Text("When this is off, Popcorn Time asks before it starts a stream on cellular data or a personal hotspot.")
             }
 
             Section {
-                languagePicker("Langue audio préférée", storage: $preferredAudioLanguage)
-                languagePicker("Langue des sous-titres", storage: $preferredSubtitleLanguage)
-            } header: {
-                Text("Langues")
+                Toggle("Settings.AutoPlayNext", isOn: $autoPlayNext)
+                    .accessibilityIdentifier("Settings.AutoPlayNext")
             } footer: {
-                Text("Choisies automatiquement au lancement de la lecture quand le fichier (ou OpenSubtitles) les propose.")
+                Text("Settings.AutoPlayNext.Footer")
             }
 
-            Section("Compte Trakt") {
-                if isTraktSignedIn {
-                    Label("Connecté à Trakt", systemImage: "checkmark.seal.fill")
+            Section {
+                languagePicker("Audio Language", storage: $preferredAudioLanguage)
+                languagePicker("Subtitle Language", storage: $preferredSubtitleLanguage)
+            } header: {
+                Text("Languages")
+            } footer: {
+                Text("Audio and subtitles in these languages are picked automatically when the file or OpenSubtitles offers them.")
+            }
+
+            homeSections
+
+            // Trakt refuses the app's key, so nothing offers to sign in any
+            // more. An account connected by an earlier version can still be
+            // disconnected here.
+            if isTraktSignedIn {
+                Section("Trakt Account") {
+                    Label("Signed In to Trakt", systemImage: "checkmark.seal.fill")
                         .foregroundStyle(.green)
                     Button(role: .destructive) {
                         try? TraktManager.shared.logout()
                         isTraktSignedIn = TraktManager.shared.isSignedIn()
                     } label: {
-                        Label("Se déconnecter", systemImage: "rectangle.portrait.and.arrow.right")
-                    }
-                } else {
-                    Button {
-                        traktAuthURL = IdentifiableURL(url: TraktManager.shared.iOSAuthorizationURL())
-                    } label: {
-                        Label("Se connecter à Trakt", systemImage: "person.crop.circle.badge.plus")
+                        Label("Sign Out", systemImage: "rectangle.portrait.and.arrow.right")
                     }
                 }
             }
 
             Section("Sources") {
-                LabeledContent("API Films", value: "movies-api.accel.li")
-                LabeledContent("API Séries", value: "eztvx.to (+ miroirs)")
-                LabeledContent("Métadonnées", value: "TVMaze + TMDB")
+                LabeledContent("Movies", value: "YTS · Time4Popcorn")
+                LabeledContent("Shows", value: "EZTV · TVMaze · Time4Popcorn")
+                LabeledContent("Torrents", value: "Torrentio · The Pirate Bay · Knaben")
+                LabeledContent("Metadata", value: "Cinemeta · TVMaze · metahub")
             }
 
-            Section("À propos") {
+            Section("About") {
                 LabeledContent("Version", value: Bundle.main.shortVersion)
                 Button {
                     showWhatsNew = true
                 } label: {
-                    Label("Nouveautés", systemImage: "sparkles")
+                    Label("What's New", systemImage: "sparkles")
                 }
-                Link(destination: URL(string: "https://github.com/PopcornTimeTV/PopcornTimeTV")!) {
-                    Label("Code source", systemImage: "chevron.left.forwardslash.chevron.right")
+                Link(destination: URL(string: "https://github.com/Radiomyme/PopcornTimeTV")!) {
+                    Label("Source Code", systemImage: "chevron.left.forwardslash.chevron.right")
                 }
             }
-        }
-        .sheet(item: $traktAuthURL) { item in
-            SafariSheet(url: item.url)
         }
         .sheet(isPresented: $showWhatsNew) {
             WhatsNewView { showWhatsNew = false }
         }
+        .onAppear(perform: reloadHomeSettings)
         .onReceive(NotificationCenter.default.publisher(for: .traktDidAuthenticate)) { _ in
             isTraktSignedIn = TraktManager.shared.isSignedIn()
-            traktAuthURL = nil
         }
     }
 
-    /// "Aucune" + common languages (localized names). The selection is the
+    // MARK: Home
+
+    /// The Home: which original languages its shelves keep, which shelves
+    /// show, and whether the followed shows go to Cinemeta in one request.
+    /// The same stored values as on the other platforms (`HomeSettings`,
+    /// `Library.bulkEpisodeLookupKey`).
+    @ViewBuilder
+    private var homeSections: some View {
+        Section {
+            NavigationLink {
+                HomeLanguagesSettingsView(state: IOSHome.state)
+            } label: {
+                LabeledContent {
+                    // "All": the list is not filtered.
+                    if let homeLanguages { Text(verbatim: homeLanguages) } else { Text("Home.Settings.AllLanguages.Value") }
+                } label: {
+                    Text("Home.Settings.Languages")
+                }
+            }
+            .accessibilityIdentifier("Settings.Home.Languages")
+        } header: {
+            Text("Home")
+        } footer: {
+            Text("Home.Settings.Languages.Footer")
+        }
+
+        Section {
+            NavigationLink {
+                HomeShelvesSettingsView(state: IOSHome.state)
+            } label: {
+                // "Rangées — Toutes": the page it opens lists the shelves
+                // shown, switched on.
+                LabeledContent {
+                    Text(verbatim: homeHiddenShelves)
+                } label: {
+                    Text("Home.Settings.Shelves")
+                }
+            }
+            .accessibilityIdentifier("Settings.Home.Shelves")
+        } footer: {
+            Text("Home.Settings.Shelves.Footer")
+        }
+
+        Section {
+            Toggle("Home.Settings.BulkLookup", isOn: Binding(get: { sendsFollowedShows }, set: { on in
+                sendsFollowedShows = on
+                Library.shared.isBulkEpisodeLookupEnabled = on
+            }))
+            .accessibilityIdentifier("Settings.Home.BulkLookup")
+        } footer: {
+            Text("Home.Settings.BulkLookup.Footer")
+        }
+    }
+
+    private func reloadHomeSettings() {
+        let model = HomeSettingsModel(settings: HomeSettings())
+        homeLanguages = model.languageSummary
+        // "Toutes", or "12/16": how many shelves the Home shows.
+        let shelves = model.shelves(current: IOSHome.state.shelves)
+        let shown = shelves.filter(\.isShown).count
+        homeHiddenShelves = shown == shelves.count ? "Home.Settings.AllLanguages.Value".localized : "\(shown)/\(shelves.count)"
+        sendsFollowedShows = Library.shared.isBulkEpisodeLookupEnabled
+    }
+
+    /// "None" + common languages (localized names). The selection is the
     /// ISO code, the stored value the localized name (tvOS convention), so a
     /// name saved under another UI language still shows up selected.
-    private func languagePicker(_ title: String, storage: Binding<String?>) -> some View {
+    private func languagePicker(_ title: LocalizedStringKey, storage: Binding<String?>) -> some View {
         let selection = Binding<String>(
             get: { storage.wrappedValue.flatMap(PlaybackLanguagePreferences.isoCode(for:)) ?? "" },
             set: { storage.wrappedValue = $0.isEmpty ? nil : PlaybackLanguagePreferences.storedName(forCode: $0) }
@@ -99,9 +184,9 @@ struct SettingsView: View {
             codes.insert(selection.wrappedValue, at: 0)
         }
         return Picker(title, selection: selection) {
-            Text("Aucune").tag("")
+            Text("None").tag("")
             ForEach(codes, id: \.self) { code in
-                Text(PlaybackLanguagePreferences.displayName(forCode: code)).tag(code)
+                Text(verbatim: PlaybackLanguagePreferences.displayName(forCode: code)).tag(code)
             }
         }
         .pickerStyle(.menu)
@@ -109,6 +194,9 @@ struct SettingsView: View {
 }
 
 extension Notification.Name {
+    /// Posted once the `popcorntime://trakt` redirect was handled
+    /// (`PopcornTimeApp`): kept with the sign-out row for accounts connected
+    /// by an earlier version.
     static let traktDidAuthenticate = Notification.Name("popcornkit.trakt.didAuthenticate")
 }
 
@@ -121,6 +209,6 @@ private extension Bundle {
 }
 
 #Preview {
-    NavigationStack { SettingsView().navigationTitle("Réglages") }
+    NavigationStack { SettingsView().navigationTitle("Settings") }
         .preferredColorScheme(.dark)
 }

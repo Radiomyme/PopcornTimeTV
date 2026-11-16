@@ -51,29 +51,33 @@ public final class Time4PopcornClient {
     /// A page of movies for the grid / search. `searchTerm` uses the API's
     /// `keywords` filter; browse (nil term) is sorted by seeds. List entries
     /// carry metadata + TMDB posters but no torrents (those load on detail).
-    public func movies(page: Int, searchTerm: String?, completion: @escaping ([Movie]) -> Void) {
+    /// Nil when the host did not answer (a failure, or a host skipped after
+    /// one: `backoff`), which is not "no title": a list made without it is
+    /// not complete.
+    public func movies(page: Int, searchTerm: String?, completion: @escaping ([Movie]?) -> Void) {
         var query = "/list?sort=seeds&short=1&quality=\(Time4PopcornClient.qualityFilter)&page=\(max(page, 1))&ver=\(Time4PopcornClient.clientVersion)&os=mac&app_id=\(Time4PopcornClient.appId)"
         if let term = searchTerm, !term.isEmpty {
             let encoded = term.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? term
             query += "&keywords=\(encoded)"
         }
         get(path: query) { data in
-            let movies = Time4PopcornClient.parseList(data).compactMap { Movie(t4p: $0) }
-            print("[T4P] movies page \(page) term=\(searchTerm ?? "-") -> \(movies.count)")
+            let movies = data.map { Time4PopcornClient.parseList($0).compactMap { Movie(t4p: $0) } }
+            print("[T4P] movies page \(page) term=\(searchTerm ?? "-") -> \(movies.map { String($0.count) } ?? "no answer")")
             DispatchQueue.main.async { completion(movies) }
         }
     }
 
-    /// A page of shows for the grid / search.
-    public func shows(page: Int, searchTerm: String?, completion: @escaping ([Show]) -> Void) {
+    /// A page of shows for the grid / search; nil when the host did not
+    /// answer (see `movies`).
+    public func shows(page: Int, searchTerm: String?, completion: @escaping ([Show]?) -> Void) {
         var query = "/shows?sort=seeds&page=\(max(page, 1))&ver=\(Time4PopcornClient.clientVersion)&os=mac&app_id=\(Time4PopcornClient.appId)"
         if let term = searchTerm, !term.isEmpty {
             let encoded = term.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? term
             query += "&keywords=\(encoded)"
         }
         get(path: query) { data in
-            let shows = Time4PopcornClient.parseList(data).compactMap { Show(t4p: $0) }
-            print("[T4P] shows page \(page) term=\(searchTerm ?? "-") -> \(shows.count)")
+            let shows = data.map { Time4PopcornClient.parseList($0).compactMap { Show(t4p: $0) } }
+            print("[T4P] shows page \(page) term=\(searchTerm ?? "-") -> \(shows.map { String($0.count) } ?? "no answer")")
             DispatchQueue.main.async { completion(shows) }
         }
     }
@@ -92,8 +96,16 @@ public final class Time4PopcornClient {
     /// Full movie detail: metadata (so T4P-only titles are still openable when
     /// YTS lacks them) plus its torrents. Always calls back on the main queue.
     public func movieDetail(imdbId: String, completion: @escaping (Movie?, [Torrent]) -> Void) {
+        movieDetailAnswer(imdbId: imdbId) { movie, torrents, _ in completion(movie, torrents) }
+    }
+
+    /// The same, telling a failure from a title Time4Popcorn does not have:
+    /// `reached` is false when no host answered (a timeout, a host backing
+    /// off). For a caller that says why a page has nothing to play
+    /// (`MovieSources.failed`).
+    public func movieDetailAnswer(imdbId: String, completion: @escaping (Movie?, [Torrent], _ reached: Bool) -> Void) {
         guard imdbId.hasPrefix("tt") else {
-            DispatchQueue.main.async { completion(nil, []) }
+            DispatchQueue.main.async { completion(nil, [], true) }
             return
         }
         let query = "/movie?cb=&quality=\(Time4PopcornClient.qualityFilter)&page=1&imdb=\(imdbId)&ver=\(Time4PopcornClient.clientVersion)&os=mac&app_id=\(Time4PopcornClient.appId)"
@@ -111,7 +123,7 @@ public final class Time4PopcornClient {
                 movie = Movie(t4p: dict)
             }
             print("[T4P] movie \(imdbId) -> \(torrents.count) torrents, meta=\(movie != nil)")
-            DispatchQueue.main.async { completion(movie, torrents) }
+            DispatchQueue.main.async { completion(movie, torrents, data != nil) }
         }
     }
 
@@ -122,6 +134,18 @@ public final class Time4PopcornClient {
                                 season: Int,
                                 episode: Int,
                                 completion: @escaping ([Torrent]) -> Void) {
+        episodeAnswer(imdbId: imdbId, season: season, episode: episode) { completion($0 ?? []) }
+    }
+
+    /// The same, telling a failure from an episode the backend has nothing
+    /// for: nil when the host did not answer (timeout, HTTP error, skipped
+    /// after a failure: `backoff`) or not with JSON, an empty array for an
+    /// answer without that episode. For a caller that keeps the answer
+    /// (`EpisodeSourceResolver`): a failure is asked again, "nothing" is not.
+    public func episodeAnswer(imdbId: String,
+                              season: Int,
+                              episode: Int,
+                              completion: @escaping ([Torrent]?) -> Void) {
         guard imdbId.hasPrefix("tt") else {
             DispatchQueue.main.async { completion([]) }
             return
@@ -129,9 +153,8 @@ public final class Time4PopcornClient {
         let query = "/show?imdb=\(imdbId)&ver=\(Time4PopcornClient.clientVersion)&os=mac&app_id=\(Time4PopcornClient.appId)"
         get(path: query) { data in
             var torrents: [Torrent] = []
-            if let data = data,
-               let json = try? JSONSerialization.jsonObject(with: data),
-               let root = json as? [String: Any],
+            let json = data.flatMap { try? JSONSerialization.jsonObject(with: $0) }
+            if let root = json as? [String: Any],
                let episodes = root[String(season)] as? [[String: Any]] {
                 for ep in episodes {
                     let number = Int((ep["episode"] as? String) ?? "") ?? (ep["episode"] as? Int ?? -1)
@@ -142,7 +165,7 @@ public final class Time4PopcornClient {
                 }
             }
             print("[T4P] show \(imdbId) S\(season)E\(episode) -> \(torrents.count) torrents")
-            DispatchQueue.main.async { completion(torrents) }
+            DispatchQueue.main.async { completion(json == nil ? nil : torrents) }
         }
     }
 
@@ -186,17 +209,37 @@ public final class Time4PopcornClient {
         return torrent
     }
 
+    /// How long a host that did not answer (timeout, DNS, refused
+    /// connection) is skipped: the catalog and every detail page ask this
+    /// single plain-HTTP host, and each call used to wait out its 10 s
+    /// timeout again.
+    public static var backoff: TimeInterval = 120
+
+    private let healthLock = NSLock()
+    private var failedUntil: [String: Date] = [:]
+
     private func get(path: String, completion: @escaping (Data?) -> Void) {
-        var remaining = Time4PopcornClient.hosts
+        let now = Date()
+        healthLock.lock()
+        var remaining = Time4PopcornClient.hosts.filter { (failedUntil[$0] ?? .distantPast) <= now }
+        healthLock.unlock()
         func tryNext() {
             guard let host = remaining.first else { completion(nil); return }
             remaining.removeFirst()
-            session.request(host + path).validate().responseData { response in
+            session.request(host + path).validate().responseData { [weak self] response in
                 switch response.result {
                 case .success(let data):
                     completion(data)
                 case .failure(let error):
                     print("[T4P] \(host) FAILED: \(error.localizedDescription)")
+                    let code = (error.underlyingError as NSError?)?.code ?? 0
+                    let mute: Set<Int> = [NSURLErrorTimedOut, NSURLErrorCannotFindHost, NSURLErrorDNSLookupFailed,
+                                          NSURLErrorCannotConnectToHost, NSURLErrorSecureConnectionFailed]
+                    if response.response == nil, mute.contains(code), let self = self {
+                        self.healthLock.lock()
+                        self.failedUntil[host] = Date().addingTimeInterval(Time4PopcornClient.backoff)
+                        self.healthLock.unlock()
+                    }
                     tryNext()
                 }
             }

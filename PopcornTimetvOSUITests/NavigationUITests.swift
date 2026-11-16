@@ -14,6 +14,12 @@ import XCTest
 /// pressed on Play. Preferences come from launch arguments (the argument
 /// domain): nothing is written to the app's own defaults by the tests.
 ///
+/// A tab is asked for by its name (`-PTDebugTab movies`), never by its place
+/// in the bar: Home is the first tab and the one the app opens on. Its hub
+/// is fed from recorded answers (`-PTDebugHomeFixtures`, like
+/// `HomeUITests`): these tests are about the other screens, and Home's own
+/// requests would only add to what the simulator loads.
+///
 /// `PT_UITEST_SHOTS=<folder>` in the environment of the test runner
 /// (`TEST_RUNNER_PT_UITEST_SHOTS` on the xcodebuild command line) saves a
 /// screenshot before every remote press, at the end of each test, and while
@@ -75,46 +81,45 @@ final class NavigationUITests: XCTestCase {
     /// the poster that was opened, at the same place, and does not move once
     /// it is back (it used to jump and then settle).
     func testBackFromAMoviePageRestoresTheTop100Grid() throws {
-        launch(["-PTDebugTab", "0", "-PTDebugFilter", "top100"])
+        launch(["-PTDebugTab", "movies", "-PTDebugFilter", "top100"])
         try checkBackRestoresGrid(named: "MoviesViewController", shotsLabel: "top100")
     }
 
     /// The same on the Movies tab's default list (Trending, paginated).
     func testBackFromAMoviePageRestoresTheTrendingGrid() throws {
-        launch(["-PTDebugTab", "0"])
+        launch(["-PTDebugTab", "movies"])
         try checkBackRestoresGrid(named: "MoviesViewController", shotsLabel: "trending")
     }
 
     /// The same on the Shows tab (Top 100).
     func testBackFromAShowPageRestoresTheShowsGrid() throws {
-        launch(["-PTDebugTab", "1", "-PTDebugFilter", "top100"])
+        launch(["-PTDebugTab", "shows", "-PTDebugFilter", "top100"])
         try checkBackRestoresGrid(named: "ShowsViewController", shotsLabel: "shows-top100")
     }
 
-    /// Menu right after Select (the page still loading, the loading screen
-    /// still sliding in) goes back to the grid, and the page does not open
+    /// Menu right after Select (the page still sliding in, its sources still
+    /// loading) goes back to the grid, and the page does not come back
     /// afterwards.
-    func testMenuDuringTheLoadingScreenGoesBackToTheGrid() throws {
-        launch(["-PTDebugTab", "0"])
+    func testMenuWhileThePageSlidesInGoesBackToTheGrid() throws {
+        launch(["-PTDebugTab", "movies"])
         let grid = grid(named: "MoviesViewController")
         let cell = try focusPoster(in: grid)
         let label = cell.label
-        // No screenshot between the two presses: Menu while the loading
-        // screen still slides in.
+        // No screenshot between the two presses: Menu while the page still
+        // slides in.
         remoteControl.press(.select)
         pause(0.25)
         remoteControl.press(.menu)
         pause(6)
-        XCTAssertEqual(app.state, .runningForeground, "Menu on the loading screen left the app")
-        XCTAssertFalse(detailTitle.exists, "the page opened after Menu was pressed on the loading screen")
-        XCTAssertFalse(loadingScreen.exists, "the loading screen stayed after Menu")
+        XCTAssertEqual(app.state, .runningForeground, "Menu on the page sliding in left the app")
+        XCTAssertFalse(detailTitle.exists, "the page stayed, or came back, after Menu was pressed while it slid in")
         XCTAssertEqual(focusedCell(in: grid)?.label, label, "the focus is not back on the poster")
     }
 
     /// Menu on a tab's grid leaves the app for the Home screen (tvOS 26
     /// does it at once; earlier tvOS first gives the focus to the tab bar).
     func testMenuOnAGridGoesToTheHomeScreen() throws {
-        launch(["-PTDebugTab", "1"])
+        launch(["-PTDebugTab", "shows"])
         _ = try focusPoster(in: grid(named: "ShowsViewController"))
         expectMenuLeavesTheApp("Shows grid")
     }
@@ -127,22 +132,23 @@ final class NavigationUITests: XCTestCase {
     /// the tab bar is out of the way; back on the first row, the title,
     /// Sort / Genre and the tab bar are back where they were.
     func testTheGridHeaderScrollsWithThePosters() throws {
-        launch(["-PTDebugTab", "0", "-PTDebugFilter", "top100"])
+        launch(["-PTDebugTab", "movies", "-PTDebugFilter", "top100"])
         try checkHeaderScrollsWithThePosters(of: "MoviesViewController", title: "Movies", shotsLabel: "header-movies")
     }
 
     /// The same on the Shows tab (its default list, paginated).
     func testTheShowsGridHeaderScrollsWithThePosters() throws {
-        launch(["-PTDebugTab", "1"])
+        launch(["-PTDebugTab", "shows"])
         try checkHeaderScrollsWithThePosters(of: "ShowsViewController", title: "Shows", shotsLabel: "header-shows")
     }
 
     /// Up from the first row reaches Sort / Genre, even from the first
     /// column (the farthest from them), then the tab bar on the tab that was
     /// selected; Down from the tab bar goes back into the page. A genre
-    /// picked with Genre becomes the page title.
+    /// picked with Genre is what the Genre control says; the page keeps
+    /// its title.
     func testUpFromTheFirstRowReachesSortGenreThenTheTabBar() throws {
-        launch(["-PTDebugTab", "0"])
+        launch(["-PTDebugTab", "movies"])
         let grid = grid(named: "MoviesViewController")
         let sort = element("GridHeader.Sort"), genre = element("GridHeader.Genre"), title = element("GridHeader.Title")
         _ = try focusPoster(in: grid)
@@ -170,24 +176,31 @@ final class NavigationUITests: XCTestCase {
             XCTAssertEqual(cell.frame.minY, firstRowMinY, accuracy: 2, "Down from the tab bar did not land on the first row")
         }
 
-        // Genre: the genre picked becomes the title.
+        // Genre: the control says the genre picked, the title stays.
         for _ in 0..<3 where !genre.hasFocus {
             remote.press(sort.hasFocus ? .right : .up)
             pause(1)
         }
         guard genre.hasFocus else { return XCTFail("Genre never got the focus: \(focusedLabel)") }
+        let genreBefore = genre.label
         remote.press(.select)
-        let cancel = app.buttons["Cancel"]
-        XCTAssertTrue(cancel.waitForExistence(timeout: 5), "the genres did not open")
+        // A menu anchored to the control: its current entry ("All") shows.
+        let current = app.descendants(matching: .any).matching(NSPredicate(format: "label == %@", "All")).firstMatch
+        XCTAssertTrue(current.waitForExistence(timeout: 5), "the genres did not open")
         pause(1)
+        XCTAssertFalse(genre.hasFocus, "the focus stayed on Genre")
         remote.press(.down)
         pause(1)
         let picked = focusedLabel
-        XCTAssertFalse(["none", "All", "Cancel"].contains(picked), "no genre has the focus: \(picked)")
         remote.press(.select)
         pause(2)
-        XCTAssertFalse(cancel.exists, "the genres did not close")
-        XCTAssertEqual(title.label, picked, "the title is not the genre picked")
+        XCTAssertFalse(current.exists, "the genres did not close")
+        XCTAssertNotEqual(genre.label, genreBefore, "Genre still says the genre before")
+        XCTAssertTrue(genre.label.hasPrefix("Genre: "), "Genre does not say a genre: \(genre.label)")
+        if !["none", "", "All"].contains(picked) {
+            XCTAssertEqual(genre.label, "Genre: \(picked)", "Genre does not say the genre picked")
+        }
+        XCTAssertEqual(title.label, "Movies", "the page title changed with the genre")
     }
 
     // MARK: - Detail page
@@ -196,7 +209,7 @@ final class NavigationUITests: XCTestCase {
     /// the page.
     func testMenuClosesTheSummaryThenLeavesThePage() throws {
         // A show: its summary is long enough to be cut at three lines.
-        launch(["-PTDebugTab", "1", "-PTDebugOpenShow", "tt0903747", "-PTDebugFocusContent", "YES"])
+        launch(["-PTDebugTab", "shows", "-PTDebugOpenShow", "tt0903747", "-PTDebugFocusContent", "YES"])
         XCTAssertTrue(detailTitle.waitForExistence(timeout: 60), "the page never opened")
         pause(3)
         // Play (or Watchlist) has the focus; the summary card is above it.
@@ -224,7 +237,7 @@ final class NavigationUITests: XCTestCase {
     /// From the lowest shelves of a page (related titles, cast, information),
     /// Menu leaves the page in one press.
     func testMenuLeavesThePageFromItsShelves() throws {
-        launch(["-PTDebugTab", "0"])
+        launch(["-PTDebugTab", "movies"])
         let grid = grid(named: "MoviesViewController")
         let label = try openPoster(in: grid)
         pause(4) // related titles and cast arrive after the page
@@ -239,7 +252,7 @@ final class NavigationUITests: XCTestCase {
     /// A show's page: from the episodes (season pills, episode cards) Menu
     /// leaves the page in one press.
     func testMenuLeavesAShowPageFromTheEpisodes() throws {
-        launch(["-PTDebugTab", "1"])
+        launch(["-PTDebugTab", "shows"])
         let grid = grid(named: "ShowsViewController")
         let label = try openPoster(in: grid)
         pause(2)
@@ -255,7 +268,7 @@ final class NavigationUITests: XCTestCase {
     /// leaves the page. (The chooser comes from the DEBUG hook: a pick would
     /// only log.)
     func testMenuClosesTheQualityChooserThenLeavesThePage() throws {
-        launch(["-PTDebugTab", "0", "-PTDebugOpenItem", "0", "-PTDebugFocusContent", "YES",
+        launch(["-PTDebugTab", "movies", "-PTDebugOpenItem", "0", "-PTDebugFocusContent", "YES",
                 "-PTDebugQualityPicker", "YES"])
         XCTAssertTrue(detailTitle.waitForExistence(timeout: 60), "the page never opened")
         let chooser = app.descendants(matching: .any).matching(NSPredicate(format: "label == 'Choose Quality'")).firstMatch
@@ -271,45 +284,81 @@ final class NavigationUITests: XCTestCase {
         XCTAssertEqual(app.state, .runningForeground)
     }
 
-    /// A page that takes long to load: its loading screen has nothing to
-    /// focus but holds the focus (it fell into the tab bar, where Menu left
-    /// the app), and Menu goes back to the grid; the page never opens later.
-    func testMenuOnASlowLoadingScreenGoesBackToTheGrid() throws {
-        launch(["-PTDebugTab", "0", "-PTDebugOpenMovie", "tt9999999999"])
-        XCTAssertTrue(loadingScreen.waitForExistence(timeout: 20), "the loading screen never showed")
-        pause(4)
-        guard loadingScreen.exists else { throw XCTSkip("the title answered before the test could press Menu") }
-        XCTAssertFalse(tabBarHasFocus, "the focus fell into the tab bar on the loading screen")
+    /// A title whose record and sources take long: its page is there at once
+    /// (no loading screen any more), Play holds the focus (it fell into the
+    /// tab bar on the loading screen of 5.2, where Menu left the app), and
+    /// Menu goes back to the grid; nothing opens later.
+    func testMenuOnAPageStillLoadingGoesBackToTheGrid() throws {
+        launch(["-PTDebugTab", "movies", "-PTDebugOpenMovie", "tt15239678", "-PTDebugFocusContent", "YES",
+                "-PTDebugDetailMetadataDelay", "40", "-PTDebugDetailSourcesDelay", "40"])
+        XCTAssertTrue(detailTitle.waitForExistence(timeout: 20), "the page did not open before its record")
+        XCTAssertFalse(loadingScreen.exists, "a loading screen showed")
+        let play = element("Detail.Play")
+        XCTAssertTrue(play.waitForExistence(timeout: 5), "no Play button on a page still loading")
+        pause(3)
+        XCTAssertFalse(tabBarHasFocus, "the focus fell into the tab bar on a page still loading: \(focusedLabel)")
+        XCTAssertTrue(labelled("Looking for sources…").exists, "the page does not say its sources are searched")
         remote.press(.menu)
         pause(2)
-        XCTAssertEqual(app.state, .runningForeground, "Menu on the loading screen left the app")
-        XCTAssertFalse(loadingScreen.exists, "Menu did not leave the loading screen")
+        XCTAssertEqual(app.state, .runningForeground, "Menu on a page still loading left the app")
+        XCTAssertFalse(detailTitle.exists, "Menu did not leave the page")
         XCTAssertTrue(grid(named: "MoviesViewController").exists, "the grid is not back")
         pause(3)
-        XCTAssertFalse(detailTitle.exists || element("ErrorPage").exists, "a page opened after Menu")
+        XCTAssertFalse(detailTitle.exists, "a page opened after Menu")
     }
 
     /// A title that cannot be loaded (a movie's id opened as a show): the
-    /// error page has nothing to focus, and Menu still goes back to the grid.
-    func testMenuOnAnErrorPageGoesBackToTheGrid() throws {
-        launch(["-PTDebugTab", "1", "-PTDebugOpenShow", "tt0111161"])
-        let errorPage = element("ErrorPage")
-        let deadline = Date().addingTimeInterval(45)
-        while Date() < deadline, !errorPage.exists, !detailTitle.exists { pause(1) }
-        guard errorPage.exists else { throw XCTSkip("no error page: the title loaded or never answered") }
-        pause(1.5)
-        XCTAssertFalse(tabBarHasFocus, "the focus fell into the tab bar on the error page")
+    /// page says why and offers "Try Again", which holds the focus, and Menu
+    /// still goes back to the grid.
+    func testMenuOnAPageThatFailedGoesBackToTheGrid() throws {
+        launch(["-PTDebugTab", "shows", "-PTDebugOpenShow", "tt0111161", "-PTDebugFocusContent", "YES"])
+        XCTAssertTrue(detailTitle.waitForExistence(timeout: 20), "the page did not open at once")
+        let failure = element("Detail.LoadError")
+        guard failure.waitForExistence(timeout: 45) else { throw XCTSkip("no failure: the title loaded or never answered") }
+        let retry = element("Detail.Retry")
+        XCTAssertTrue(retry.exists, "no Try Again on a page that failed")
+        XCTAssertFalse(element("Detail.Play").exists, "Play is offered on a page with nothing to play")
+        pause(2.5)
+        XCTAssertFalse(tabBarHasFocus, "the focus fell into the tab bar on the page that failed: \(focusedLabel)")
         remote.press(.menu)
         pause(2)
-        XCTAssertEqual(app.state, .runningForeground, "Menu on the error page left the app")
-        XCTAssertFalse(errorPage.exists, "Menu did not leave the error page")
+        XCTAssertEqual(app.state, .runningForeground, "Menu on the page that failed left the app")
+        XCTAssertFalse(detailTitle.exists, "Menu did not leave the page that failed")
         XCTAssertTrue(grid(named: "ShowsViewController").exists, "the grid is not back")
+    }
+
+    /// Play pressed before the sources are in (a dry run: `-PTDebugPressPlay`,
+    /// whose chooser only logs a pick): the press is kept, « Looking for
+    /// sources… » comes over the page and takes the remote; Menu cancels it —
+    /// the card goes, the page stays, nothing starts.
+    func testMenuCancelsAPressThatWaitsForTheSources() throws {
+        launch(["-PTDebugTab", "movies", "-PTDebugOpenMovie", "tt15239678", "-PTDebugFocusContent", "YES",
+                "-PTDebugDetailSourcesDelay", "40", "-PTDebugPressPlay", "4"])
+        XCTAssertTrue(detailTitle.waitForExistence(timeout: 20), "the page never opened")
+        // The page's own quiet line has the same words as the card: the
+        // card is one more element saying them.
+        let saying = app.descendants(matching: .any).matching(NSPredicate(format: "label == %@", "Looking for sources…"))
+        pause(1.5)
+        let onThePage = saying.count
+        XCTAssertGreaterThan(onThePage, 0, "the page does not say its sources are searched")
+        let deadline = Date().addingTimeInterval(15)
+        while Date() < deadline, saying.count <= onThePage { pause(0.5) }
+        XCTAssertGreaterThan(saying.count, onThePage, "the card of a press that waits for the sources did not come")
+        remote.press(.menu)
+        pause(2)
+        XCTAssertEqual(saying.count, onThePage, "Menu did not close the card")
+        XCTAssertTrue(detailTitle.exists, "Menu on the card left the page")
+        XCTAssertFalse(labelled("Choose Quality").exists, "a chooser came after the press was cancelled")
+        remote.press(.menu)
+        pause(2)
+        XCTAssertFalse(detailTitle.exists, "Menu did not leave the page after the card")
+        XCTAssertEqual(app.state, .runningForeground)
     }
 
     /// Holding Select on a poster opens its menu (Play, watchlist, watched);
     /// Menu closes it and the poster keeps the focus. Nothing in it is chosen.
     func testLongPressOnAPosterOpensItsMenuAndMenuClosesIt() throws {
-        launch(["-PTDebugTab", "0"])
+        launch(["-PTDebugTab", "movies"])
         let grid = grid(named: "MoviesViewController")
         let cell = try focusPoster(in: grid)
         let label = cell.label
@@ -331,7 +380,7 @@ final class NavigationUITests: XCTestCase {
     /// Settings: Menu closes a choice sheet without changing anything, with
     /// the focus back on its row; Menu again leaves the app.
     func testMenuOnSettingsClosesThePickerThenLeavesTheApp() throws {
-        launch(["-PTDebugTab", "5", "-PTDebugFocusContent", "YES"])
+        launch(["-PTDebugTab", "settings", "-PTDebugFocusContent", "YES"])
         let picker = element("Settings.Picker")
         let row = element("Settings.Row.quality")
         XCTAssertTrue(row.waitForExistence(timeout: 10), "the Settings page never showed")
@@ -352,7 +401,7 @@ final class NavigationUITests: XCTestCase {
 
     /// Search: from the keyboard, Menu leaves the app.
     func testMenuOnSearchLeavesTheApp() throws {
-        launch(["-PTDebugTab", "3"])
+        launch(["-PTDebugTab", "search"])
         pause(3)
         remote.press(.down)
         pause(1.5)
@@ -416,7 +465,7 @@ final class NavigationUITests: XCTestCase {
     /// in quick succession: both pages close, the grid is back with the
     /// poster focused, and the app stays; Menu at the grid then leaves.
     func testMenuTwiceQuicklyFromTwoPagesGoesBackToTheGrid() throws {
-        launch(["-PTDebugTab", "0"])
+        launch(["-PTDebugTab", "movies"])
         let grid = grid(named: "MoviesViewController")
         let label = try openPoster(in: grid)
         let firstTitle = detailTitle.label
@@ -453,7 +502,7 @@ final class NavigationUITests: XCTestCase {
     /// the page comes in: the grid stays, with the poster focused, no page
     /// opens later, and the app stays (5.1.0 crashed here).
     func testSelectThenMenuThreeTimesQuicklyStaysOnTheGrid() throws {
-        launch(["-PTDebugTab", "0", "-PTDebugFilter", "top100"])
+        launch(["-PTDebugTab", "movies", "-PTDebugFilter", "top100"])
         let grid = grid(named: "MoviesViewController")
         let label = try focusPoster(in: grid).label
         remoteControl.press(.select)
@@ -469,9 +518,9 @@ final class NavigationUITests: XCTestCase {
     }
 
     /// The focus on a tab in the tab bar, at a tab's root (Movies, Shows,
-    /// Settings): Menu goes to the Home screen.
+    /// Settings, Home): Menu goes to the Home screen.
     func testMenuInTheTabBarAtATabsRootLeavesTheApp() throws {
-        for tab in ["0", "1", "5"] {
+        for tab in ["movies", "shows", "settings", "home"] {
             launch(["-PTDebugTab", tab])
             pause(4)
             for _ in 0..<4 where !tabBarHasFocus {
@@ -488,7 +537,7 @@ final class NavigationUITests: XCTestCase {
 
     /// Downloads (empty on a fresh simulator) and Watchlist: Menu leaves the app.
     func testMenuOnTheDownloadsAndWatchlistTabsLeavesTheApp() throws {
-        for tab in ["4", "2"] {
+        for tab in ["downloads", "watchlist"] {
             launch(["-PTDebugTab", tab])
             pause(3)
             remote.press(.down)
@@ -513,11 +562,273 @@ final class NavigationUITests: XCTestCase {
     /// The Top 100 that cannot be reached (The Pirate Bay off, no cached
     /// list): the error is shown and Menu still leaves the app.
     func testMenuOnTheTop100ErrorLeavesTheApp() throws {
-        launch(["-PTDebugTab", "0", "-PTDebugFilter", "top100", "-PTDebugTop100Offline", "YES"])
+        launch(["-PTDebugTab", "movies", "-PTDebugFilter", "top100", "-PTDebugTop100Offline", "YES"])
         pause(8)
         remote.press(.down)
         pause(1)
         expectMenuLeavesTheApp("Top 100 error")
+    }
+
+    // MARK: - Links into the app
+
+    /// A link to a show's page that comes while Settings is on screen: a tab
+    /// that cannot show a page (the link did nothing there), the Shows tab
+    /// never shown yet. The page opens on the Shows tab with the focus in it
+    /// (not on a tab: the focus on another tab selects it), and Menu goes
+    /// back to the Shows grid.
+    func testALinkOpensAShowPageFromSettings() throws {
+        launch(["-PTDebugTab", "settings", "-PTDebugOpenURL", "popcorntime://show/tt0903747"])
+        XCTAssertTrue(detailTitle.waitForExistence(timeout: 60), "the page never opened")
+        pause(3)
+        XCTAssertEqual(selectedTab, "shows", "the page is not on the Shows tab")
+        XCTAssertFalse(tabBarHasFocus, "the focus stayed in the tab bar: \(focusedLabel)")
+        remote.press(.menu)
+        pause(2)
+        XCTAssertFalse(detailTitle.exists, "Menu did not leave the page")
+        XCTAssertEqual(app.state, .runningForeground, "Menu on the page left the app")
+        XCTAssertTrue(grid(named: "ShowsViewController").exists, "the Shows grid is not there")
+        XCTAssertEqual(selectedTab, "shows", "the app left the Shows tab")
+    }
+
+    /// A show link with a season opens the page on that season (Breaking
+    /// Bad, nothing watched: the page would open on season 1).
+    func testASeasonLinkOpensThePageOnThatSeason() throws {
+        launch(["-PTDebugTab", "shows", "-PTDebugOpenURL", "popcorntime://show/tt0903747?season=3&episode=5"])
+        XCTAssertTrue(detailTitle.waitForExistence(timeout: 60), "the page never opened")
+        let seasonThree = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "S3 · E")).firstMatch
+        XCTAssertTrue(seasonThree.waitForExistence(timeout: 30), "no episode of season 3 on the page")
+        XCTAssertFalse(app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "S1 · E")).firstMatch.exists,
+                       "the page shows season 1")
+    }
+
+    /// A link to the page already on top (the Top Shelf picked twice, a
+    /// link to another episode of the show on screen) does not push a second
+    /// page: the one shown takes the link's season, and one Menu goes back
+    /// to the grid.
+    func testALinkToThePageOnTopDoesNotOpenItTwice() throws {
+        launch(["-PTDebugTab", "shows", "-PTDebugOpenURL", "popcorntime://show/tt0903747",
+                "-PTDebugOpenURL2", "popcorntime://show/tt0903747?season=3&episode=5", "-PTDebugOpenURL2After", "8",
+                "-PTDebugFocusContent", "YES"])
+        XCTAssertTrue(detailTitle.waitForExistence(timeout: 60), "the page never opened")
+        let seasonOne = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "S1 · E")).firstMatch
+        XCTAssertTrue(seasonOne.waitForExistence(timeout: 30), "the page did not open on season 1")
+        let second = NSPredicate(format: "label == %@", "opened twice")
+        expectation(for: second, evaluatedWith: linkResult)
+        waitForExpectations(timeout: 40)
+        let seasonThree = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "S3 · E")).firstMatch
+        XCTAssertTrue(seasonThree.waitForExistence(timeout: 10), "the second link did not select its season on the page shown")
+        XCTAssertFalse(seasonOne.exists, "the page still shows season 1")
+        pause(2)
+        remote.press(.menu)
+        pause(2.5)
+        XCTAssertFalse(detailTitle.exists, "a second copy of the page was under the first")
+        XCTAssertTrue(grid(named: "ShowsViewController").exists, "the grid is not back")
+        XCTAssertEqual(app.state, .runningForeground)
+    }
+
+    /// A link that comes while a Settings choice is open (a SwiftUI sheet
+    /// the link must not close) waits for it: Menu closes the choice, then
+    /// the page opens on the Shows tab.
+    func testALinkWaitsForASettingsChoiceToClose() throws {
+        launch(["-PTDebugTab", "settings", "-PTDebugOpenURL", "popcorntime://show/tt0903747",
+                "-PTDebugOpenURLAfter", "12"])
+        let picker = element("Settings.Picker")
+        let row = element("Settings.Row.quality")
+        XCTAssertTrue(row.waitForExistence(timeout: 10), "the Settings page never showed")
+        pause(2)
+        // Down from the Settings tab lands on the right column (Version):
+        // then left, and up to the first row.
+        for direction: XCUIRemote.Button in [.down, .left, .up, .up, .up, .up] where !row.hasFocus {
+            remote.press(direction)
+            pause(1)
+        }
+        XCTAssertTrue(row.hasFocus, "the first Settings row never got the focus")
+        remote.press(.select)
+        XCTAssertTrue(picker.waitForExistence(timeout: 3), "the quality choices did not open")
+        XCTAssertTrue(linkResult.waitForExistence(timeout: 40), "the link never reached the link handler")
+        XCTAssertEqual(linkResult.label, "refused", "the link was opened under the choices")
+        pause(2)
+        XCTAssertTrue(picker.exists, "the link closed the choices")
+        XCTAssertFalse(detailTitle.exists || loadingScreen.exists, "a page opened under the choices")
+        remote.press(.menu)
+        XCTAssertTrue(detailTitle.waitForExistence(timeout: 60), "the page never opened once the choices closed")
+        pause(2)
+        XCTAssertEqual(selectedTab, "shows", "the page is not on the Shows tab")
+        XCTAssertEqual(app.state, .runningForeground)
+    }
+
+    /// The same once the Shows tab has been shown and left for Downloads
+    /// with the remote: the link comes 25 s after the launch.
+    func testALinkOpensAShowPageOnATabShownBefore() throws {
+        launch(["-PTDebugTab", "shows", "-PTDebugOpenURL", "PopcornTime://show/tt0903747?title=Breaking%20Bad",
+                "-PTDebugOpenURLAfter", "24"])
+        XCTAssertTrue(grid(named: "ShowsViewController").waitForExistence(timeout: 10), "no Shows grid")
+        pause(2)
+        for _ in 0..<4 where !tabBarHasFocus {
+            remote.press(.up)
+            pause(0.8)
+        }
+        XCTAssertTrue(tabBarHasFocus, "the tab bar never got the focus")
+        for _ in 0..<6 where selectedTab != "downloads" {
+            remote.press(.right)
+            pause(0.8)
+        }
+        XCTAssertEqual(selectedTab, "downloads", "the remote never reached the Downloads tab")
+        XCTAssertTrue(detailTitle.waitForExistence(timeout: 60), "the page never opened")
+        pause(3)
+        XCTAssertEqual(selectedTab, "shows", "the page is not on the Shows tab")
+        XCTAssertFalse(tabBarHasFocus, "the focus stayed in the tab bar: \(focusedLabel)")
+        XCTAssertEqual(app.state, .runningForeground)
+    }
+
+    /// A link picked while the app is in the background (the Top Shelf),
+    /// the app left on Settings with the focus on that tab: back in the
+    /// foreground, the app shows the page on the Shows tab. (tvOS gives the
+    /// focus back to the Settings tab then, and selects a tab 0.3 s after
+    /// the focus lands on it.)
+    func testALinkPickedInTheBackgroundOpensItsPage() throws {
+        launch(["-PTDebugTab", "settings", "-PTDebugActivationURL", "popcorntime://show/tt0903747"])
+        XCTAssertTrue(element("Settings.Row.quality").waitForExistence(timeout: 10), "the Settings page never showed")
+        pause(2)
+        XCTAssertTrue(tabBarHasFocus, "the focus is not on the Settings tab")
+        remote.press(.menu)
+        XCTAssertTrue(waitUntilLeft(), "Menu on the Settings tab did not go to the Home screen")
+        pause(2)
+        app.activate()
+        XCTAssertTrue(detailTitle.waitForExistence(timeout: 60), "the page never opened")
+        pause(3)
+        XCTAssertEqual(selectedTab, "shows", "the page is not on the Shows tab")
+        XCTAssertFalse(tabBarHasFocus, "the focus stayed in the tab bar: \(focusedLabel)")
+        XCTAssertEqual(app.state, .runningForeground)
+    }
+
+    /// The Top Shelf link of 5.2.0 (`PopcornTime:?action=showMovie»{json}`,
+    /// here with « » in its title) still opens the movie's page, on the tab
+    /// that is shown (the Watchlist).
+    func testATopShelfLinkOf520OpensTheMoviePage() throws {
+        let json = "{\"imdb_id\":\"tt0816692\",\"title\":\"Interstellar « IMAX »\",\"year\":\"2014\"}"
+        let action = try XCTUnwrap(("showMovie»" + json).addingPercentEncoding(withAllowedCharacters: .alphanumerics))
+        launch(["-PTDebugTab", "watchlist", "-PTDebugOpenURL", "PopcornTime:?action=" + action])
+        XCTAssertTrue(detailTitle.waitForExistence(timeout: 60), "the page never opened")
+        pause(2)
+        XCTAssertEqual(selectedTab, "watchlist", "the page is not on the tab that was shown")
+        remote.press(.menu)
+        pause(2)
+        XCTAssertFalse(detailTitle.exists, "Menu did not leave the page")
+        XCTAssertEqual(app.state, .runningForeground, "Menu on the page left the app")
+    }
+
+    /// Links that are not links: a Top Shelf link whose JSON does not map
+    /// (5.2.0 crashed on it), an id that is not an IMDb id, an unknown tab.
+    /// The app stays where it was.
+    func testBrokenLinksDoNothing() throws {
+        for url in ["PopcornTime:?action=showMovie%C2%BB%7B%7D",
+                    "PopcornTime:?action=showShow%C2%BBnot-json",
+                    "popcorntime://movie/..%2F..%2Fetc",
+                    "popcorntime://tab/nowhere"] {
+            launch(["-PTDebugTab", "watchlist", "-PTDebugOpenURL", url])
+            XCTAssertTrue(linkResult.waitForExistence(timeout: 40), "\(url) never reached the link handler")
+            XCTAssertEqual(linkResult.label, "refused", "\(url) was not refused")
+            pause(2)
+            XCTAssertEqual(app.state, .runningForeground, "\(url) closed the app")
+            XCTAssertFalse(detailTitle.exists || loadingScreen.exists, "\(url) opened a page")
+            XCTAssertEqual(selectedTab, "watchlist", "\(url) changed the tab")
+            app.terminate()
+            pause(1)
+        }
+    }
+
+    /// `popcorntime://search?q=` searches on the Search tab,
+    /// `popcorntime://tab/` selects a tab.
+    func testSearchAndTabLinks() throws {
+        launch(["-PTDebugTab", "settings", "-PTDebugOpenURL", "popcorntime://search?q=star"])
+        let results = grid(named: "SearchViewController")
+        let deadline = Date().addingTimeInterval(40)
+        while Date() < deadline, !(results.exists && results.cells.count > 3) { pause(1) }
+        XCTAssertEqual(selectedTab, "search", "the search link did not select the Search tab")
+        guard results.exists, results.cells.count > 3 else { throw XCTSkip("the search found too few results") }
+        app.terminate()
+        pause(1)
+
+        launch(["-PTDebugTab", "movies", "-PTDebugOpenURL", "PopcornTime://Tab/Watchlist"])
+        pause(4)
+        XCTAssertEqual(selectedTab, "watchlist", "the tab link did not select the Watchlist")
+        XCTAssertEqual(app.state, .runningForeground)
+    }
+
+    // MARK: - The first launch and the first tab
+
+    /// A fresh install: the Terms of Service come first, and a link opens
+    /// nothing behind them. (Nothing is accepted: the test writes no
+    /// preference.)
+    func testTheTermsOfServiceComeFirstOnAFreshInstall() throws {
+        launch(["-PTDebugOpenURL", "popcorntime://show/tt0903747"], termsAccepted: false)
+        XCTAssertTrue(app.buttons["Accept"].waitForExistence(timeout: 15), "the Terms of Service never showed")
+        XCTAssertTrue(app.buttons["Leave"].exists, "no Leave button")
+        XCTAssertTrue(linkResult.waitForExistence(timeout: 40), "the link never reached the link handler")
+        XCTAssertEqual(linkResult.label, "refused", "the link was not refused")
+        pause(2)
+        XCTAssertTrue(app.buttons["Accept"].exists, "the Terms of Service went away")
+        XCTAssertFalse(detailTitle.exists || loadingScreen.exists, "the link opened a page behind the Terms of Service")
+        XCTAssertEqual(app.state, .runningForeground)
+    }
+
+    /// The first tab is Home, not a grid (SwiftUI in a hosting controller):
+    /// the Terms of Service still show on a fresh install (they were
+    /// presented from the first tab's grid).
+    func testTheTermsOfServiceShowOverHome() throws {
+        launch([], termsAccepted: false)
+        XCTAssertTrue(app.buttons["Accept"].waitForExistence(timeout: 15), "the Terms of Service never showed")
+        XCTAssertTrue(app.buttons["Leave"].exists, "no Leave button")
+        // (Nothing of the tab behind them is reachable: not even its name.)
+        XCTAssertFalse(element("Home.Play").exists, "the Home's buttons are reachable behind the Terms of Service")
+    }
+
+    /// The Home asks nothing of the network before the Terms of Service are accepted
+    /// (`[Home] the lists wait for the Terms of Service to be accepted` in the console): once
+    /// they are, its lists start and the page fills (recorded answers, their cache emptied at
+    /// launch: nothing is painted from disk).
+    func testTheHomeStartsOnceTheTermsOfServiceAreAccepted() throws {
+        launch([], termsAccepted: false)
+        let accept = app.buttons["Accept"]
+        XCTAssertTrue(accept.waitForExistence(timeout: 15), "the Terms of Service never showed")
+        // Accept sits right of Leave, under the text (the text may have the focus first).
+        for button in [XCUIRemote.Button.right, .down, .right, .down, .right] where !accept.hasFocus {
+            remote.press(button)
+            pause(0.5)
+        }
+        XCTAssertTrue(accept.hasFocus, "Accept never had the focus")
+        remote.press(.select)
+        XCTAssertTrue(element("Home.Hero.Title").waitForExistence(timeout: 30), "the Home did not fill once the terms were accepted")
+        XCTAssertFalse(accept.exists, "the Terms of Service are still up")
+    }
+
+    /// Home first: the other tabs are still found by their name, a link
+    /// opens its page on Home, and Menu goes back to it.
+    func testHomeFirstKeepsTheTabNamesAndLinks() throws {
+        launch([])
+        let billboard = element("Home.Hero")
+        XCTAssertTrue(billboard.waitForExistence(timeout: 20), "the first tab is not Home")
+        XCTAssertEqual(selectedTab, "home", "Home is not the selected tab")
+        app.terminate()
+        pause(1)
+
+        launch(["-PTDebugTab", "shows"])
+        XCTAssertTrue(grid(named: "ShowsViewController").waitForExistence(timeout: 10), "-PTDebugTab shows did not show the Shows grid")
+        XCTAssertEqual(selectedTab, "shows")
+        app.terminate()
+        pause(1)
+
+        launch(["-PTDebugOpenURL", "popcorntime://movie/tt0816692"])
+        XCTAssertTrue(detailTitle.waitForExistence(timeout: 60), "the page never opened")
+        pause(3)
+        XCTAssertEqual(selectedTab, "home", "the page is not on the first tab")
+        XCTAssertFalse(tabBarHasFocus, "the focus stayed in the tab bar: \(focusedLabel)")
+        remote.press(.menu)
+        pause(2)
+        XCTAssertFalse(detailTitle.exists, "Menu did not leave the page")
+        XCTAssertEqual(app.state, .runningForeground, "Menu on the page left the app")
+        XCTAssertTrue(billboard.exists, "Home is not back")
     }
 
     // MARK: - Steps
@@ -676,19 +987,30 @@ final class NavigationUITests: XCTestCase {
 
     // MARK: - Queries
 
+    /// - Parameter termsAccepted: false launches as a fresh install does
+    ///   (the Terms of Service not accepted yet).
     @discardableResult
-    private func launch(_ arguments: [String]) -> XCUIApplication {
+    private func launch(_ arguments: [String], termsAccepted: Bool = true) -> XCUIApplication {
         let app = XCUIApplication()
         app.launchArguments = [
-            "-tosAccepted", "YES",
+            "-tosAccepted", termsAccepted ? "YES" : "NO",
             "-lastWhatsNewVersion", "99",
             "-themeSongVolume", "0",
             "-AppleLanguages", "(en)",
             "-AppleLocale", "en_US",
+            "-PTDebugHomeFixtures", Self.homeFixtures,
         ] + arguments
         app.launch()
         self.app = app
         return app
+    }
+
+    /// The recorded answers Home is fed from, read by the app from the
+    /// source tree (the simulator shares the Mac's disk).
+    private static var homeFixtures: String {
+        if let folder = ProcessInfo.processInfo.environment["PT_UITEST_HOME_FIXTURES"], !folder.isEmpty { return folder }
+        return URL(fileURLWithPath: "\(#filePath)").deletingLastPathComponent().deletingLastPathComponent()
+            .appendingPathComponent("PopcornTimeTests/Fixtures/Home").path
     }
 
     private func grid(named name: String) -> XCUIElement {
@@ -705,6 +1027,8 @@ final class NavigationUITests: XCTestCase {
 
     private var detailTitle: XCUIElement { element("Detail.Title") }
     private var loadingScreen: XCUIElement { element("LoadingScreen") }
+    /// `-PTDebugOpenURL`'s answer: "opened" or "refused" (SceneDelegate).
+    private var linkResult: XCUIElement { element("Debug.LinkResult") }
 
     private static let focusedPredicate = NSPredicate(format: "hasFocus == true")
 
@@ -725,6 +1049,20 @@ final class NavigationUITests: XCTestCase {
 
     private var tabBarHasFocus: Bool {
         app.tabBars.descendants(matching: .any).matching(Self.focusedPredicate).firstMatch.exists
+    }
+
+    /// The selected tab's name: "movies", "settings"… (`DeepLink.Tab`). The
+    /// tab bar carries it in its identifier ("TabBar.shows"): the tvOS 26
+    /// tab bar does not say which of its buttons is selected.
+    private var selectedTab: String {
+        // The detail page hides the tab bar: the app's DEBUG marker says it then.
+        let bar = app.tabBars.firstMatch
+        guard bar.exists else {
+            let marker = app.descendants(matching: .any)["Debug.SelectedTab"]
+            return marker.exists ? marker.label : "none (no tab bar)"
+        }
+        let identifier = bar.identifier
+        return identifier.hasPrefix("TabBar.") ? String(identifier.dropFirst("TabBar.".count)) : "none (\(identifier))"
     }
 
     /// The page title and Sort / Genre of a grid (`MainViewController`).

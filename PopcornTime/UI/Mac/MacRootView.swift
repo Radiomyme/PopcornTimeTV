@@ -1,45 +1,30 @@
-
-
+import Foundation
+import AppKit
 import SwiftUI
 import PopcornKit
 
-/// Sidebar sections of the Mac app.
-enum MacSection: String, CaseIterable, Identifiable {
-    case movies = "Films"
-    case shows = "Séries"
-    case watchlist = "Watchlist"
-    case search = "Recherche"
-    var id: String { rawValue }
-    var symbol: String {
-        switch self {
-        case .movies: return "film"
-        case .shows: return "play.tv"
-        case .watchlist: return "bookmark"
-        case .search: return "magnifyingglass"
-        }
-    }
-    /// Sidebar label, through Localizable.strings ("Movies" = "Films",
-    /// "Watchlist" = "Ma liste"…); `rawValue` is only the id.
-    var title: Text {
-        switch self {
-        case .movies: return Text("Movies")
-        case .shows: return Text("Shows")
-        case .watchlist: return Text("Watchlist")
-        case .search: return Text("Search")
-        }
-    }
-}
-
-/// NavigationSplitView shell: sidebar → grid → detail (pushed on a stack so
-/// posters behave like links, same flow as the iOS app). The detail is the
-/// Liquid Glass page (MacGlassDetailScreen), as on tvOS.
+/// NavigationSplitView shell: sidebar → the section's page → detail pages
+/// pushed on a stack, so posters behave like links (same flow as the iOS
+/// app). The detail is the Liquid Glass page (MacGlassDetailScreen), as on
+/// tvOS.
+///
+/// The window's state lives in `MacNavigator` (sections, pushed pages, the
+/// grids' and the search's models, the library state): the pages below
+/// are only views of it, so a section left and selected again is exactly
+/// as it was. Sections are `MacSection`, « Accueil » (`MacHomeView`)
+/// first; the pages that can be pushed are `Movie`, `Show` and `MacRoute`
+/// values. popcorntime:// links arrive here (`onOpenURL`) and are shown by
+/// the navigator.
 struct MacRootView: View {
-    @State private var section: MacSection = .movies
-    /// The detail pages pushed over the section's grid (emptied when the
-    /// section changes).
-    @State private var path = NavigationPath()
-    /// Release notes, shown once per version (not on a fresh install).
+    @StateObject private var navigator = MacNavigator()
+    /// `.key` while this window has the keyboard (`MacFrontNavigator`).
+    @Environment(\.controlActiveState) private var controlActiveState
+    /// Opens the Settings window (a popcorntime://tab/settings link).
+    @Environment(\.openSettings) private var openSettings
+    /// Release notes, shown once per version (not on a fresh install, not
+    /// over a launch by link).
     @State private var showWhatsNew = false
+    @State private var whatsNewCheck = WhatsNewLaunchCheck()
     #if DEBUG
     /// `-PTDebugPlayTorrent` (BoundedStorageDebugHooks): the player sheet.
     @State private var debugPlayback: MacPendingPlayback?
@@ -48,39 +33,72 @@ struct MacRootView: View {
     var body: some View {
         // Read here, so that the destinations below get the current depth
         // (a value read only inside their closures can be stale).
-        let depth = path.count
+        let depth = navigator.path.count
         NavigationSplitView {
-            List(MacSection.allCases, selection: $section) { item in
+            List(MacSection.allCases, selection: $navigator.section) { item in
                 Label { item.title } icon: { Image(systemName: item.symbol) }
                     .tag(item)
             }
             .navigationSplitViewColumnWidth(min: 170, ideal: 190)
         } detail: {
-            NavigationStack(path: $path) {
-                Group {
-                    switch section {
-                    case .movies: MacMoviesGridView()
-                    case .shows: MacShowsGridView()
-                    case .watchlist: MacWatchlistView()
-                    case .search: MacSearchView()
+            NavigationStack(path: $navigator.path) {
+                page(sectionPage, depth: depth)
+                    .navigationDestination(for: Movie.self) {
+                        page(MacGlassDetailScreen(media: $0), depth: depth)
                     }
-                }
-                // A page covered by a pushed one gets no onDisappear, nor
-                // onAppear when it is on top again (Back) — the grid neither
-                // when the stack is popped to it: they follow the stack's
-                // depth instead. Set on each destination: an environment
-                // value set around the NavigationStack (or on its root)
-                // does not reach the pushed pages.
-                .environment(\.macStackDepth, depth)
-                .navigationDestination(for: Movie.self) {
-                    MacGlassDetailScreen(media: $0).environment(\.macStackDepth, depth)
-                }
-                .navigationDestination(for: Show.self) {
-                    MacGlassDetailScreen(media: $0).environment(\.macStackDepth, depth)
+                    .navigationDestination(for: Show.self) {
+                        page(MacGlassDetailScreen(media: $0), depth: depth)
+                    }
+                    // Pages named by value (`MacRoute`: the Home's cards,
+                    // the links), pushed with `navigator.open(_:)` or a
+                    // `NavigationLink(value:)`.
+                    .navigationDestination(for: MacRoute.self) {
+                        page(destination(for: $0), depth: depth)
+                    }
+            }
+            // The detail column is black before any page is in it, as the
+            // pages are: never the window's grey.
+            .background(HomePalette.background.ignoresSafeArea())
+        }
+        // The AppKit window, as soon as there is one (`MacWindowReader`).
+        .background(MacWindowReader())
+        .environmentObject(navigator)
+        .environmentObject(navigator.library)
+        // The Go menu acts on the window in front (MacCommands): the
+        // focused scene's navigator, else the last window that had the
+        // keyboard.
+        .focusedSceneObject(navigator)
+        .onAppear {
+            MacFrontNavigator.shared.windowAppeared(navigator)
+            navigator.openSettings = { openSettings() }
+        }
+        .onDisappear { MacFrontNavigator.shared.windowClosed(navigator) }
+        // popcorntime:// links (`DeepLink`): a title's page, a section, a
+        // search. Trakt's sign-in redirect has the same scheme and is not
+        // one of them (`navigator.open(url:)` is false for it).
+        .onOpenURL { url in
+            // A link that launched the app: no release notes over its page
+            // (they show at the next normal launch).
+            if whatsNewCheck.linkOpened() { showWhatsNew = false }
+            if navigator.open(url: url) { return }
+            // popcorntime://trakt?code=…&state=…, from the browser.
+            if url.scheme == "popcorntime", url.host == "trakt" {
+                TraktManager.shared.authenticate(url)
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+                    NotificationCenter.default.post(name: .macTraktDidAuthenticate, object: nil)
                 }
             }
         }
-        .onChange(of: section) { _, _ in path = NavigationPath() }
+        // A link goes to a window that is open, not to a new one.
+        .handlesExternalEvents(preferring: ["*"], allowing: ["*"])
+        .onChange(of: controlActiveState) { _, state in
+            if state == .key { MacFrontNavigator.shared.windowBecameKey(navigator) }
+        }
+        // Back on the section's page: Trakt's lists are asked again (the
+        // local changes already came through `.libraryDidChange`).
+        .onChange(of: depth) { _, depth in
+            if depth == 0 { navigator.library.reload() }
+        }
         .task {
             #if DEBUG
             // Verification runs (-PTDebug… launch arguments): no release
@@ -90,8 +108,10 @@ struct MacRootView: View {
                 return
             }
             #endif
-            showWhatsNew = WhatsNewGate.checkAtLaunch(isFreshInstall: WhatsNewGate.looksLikeFreshInstall(),
-                                                      launchedFromURL: false)
+            // A moment for the link of a launch by link (`onOpenURL`) to
+            // arrive first; if it comes after, it closes the notes.
+            try? await Task.sleep(for: .milliseconds(300))
+            showWhatsNew = whatsNewCheck.check(isFreshInstall: WhatsNewGate.looksLikeFreshInstall())
         }
         .sheet(isPresented: $showWhatsNew) {
             WhatsNewView { showWhatsNew = false }
@@ -101,38 +121,230 @@ struct MacRootView: View {
             MacPlayerView(playback: item)
                 .frame(minWidth: 1024, minHeight: 576)
         }
+        // `-PTDebugNoAnimation YES`: a window nobody sees gets no frame,
+        // and its animations would never end.
+        .transaction { transaction in
+            if MacDebugHooks.disablesAnimations {
+                transaction.animation = nil
+                transaction.disablesAnimations = true
+            }
+        }
         #endif
     }
 
+    /// The root of the detail stack: the section's page — over the Home,
+    /// which stays alive once it has been shown. A grid comes back as it
+    /// was because its model outlives it (`MacNavigator`); the Home's page
+    /// state is the views' own (where the page and each shelf are scrolled
+    /// to, the carousel's page, the artwork on screen), so the page itself
+    /// is kept, hidden: not drawn, not clickable, out of the keyboard loop
+    /// and of VoiceOver, its carousel stopped (`MacHomeView.isShown`).
+    private var sectionPage: some View {
+        let showsHome = navigator.section == .home
+        return ZStack {
+            if navigator.keepsHome {
+                MacHomeView(isShown: showsHome)
+                    .opacity(showsHome ? 1 : 0)
+                    .allowsHitTesting(showsHome)
+                    .disabled(!showsHome)
+                    .accessibilityHidden(!showsHome)
+            }
+            if !showsHome { sectionRoot(navigator.section) }
+        }
+        // Black from the window's first frame, under every section: no
+        // grey flash before the Home's page (or its placeholders) arrives.
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(HomePalette.background.ignoresSafeArea())
+        // The window's title is the section's: the Home sets none of its
+        // own (hidden, it would still be its page's), the other pages set
+        // this same one.
+        .navigationTitle(navigator.section.title)
+    }
+
+    /// The page of a sidebar section other than the Home.
+    @ViewBuilder
+    private func sectionRoot(_ section: MacSection) -> some View {
+        switch section {
+        case .home:
+            // Drawn by `sectionPage`, under the others.
+            EmptyView()
+        case .movies:
+            MacCatalogGridView(model: navigator.movies, title: section.title, systemImage: "film")
+        case .shows:
+            MacCatalogGridView(model: navigator.shows, title: section.title, systemImage: "tv")
+        case .watchlist:
+            MacWatchlistView()
+        case .search:
+            MacSearchView(model: navigator.search)
+        }
+    }
+
+    /// The page a `MacRoute` names.
+    @ViewBuilder
+    private func destination(for route: MacRoute) -> some View {
+        switch route {
+        // A placeholder with the IMDb id: the page loads the real title,
+        // then does what it was opened for (`MediaPageRequest`).
+        case .movie(let id, let title, let request):
+            MacGlassDetailScreen(media: Movie(title: title.isEmpty ? id : title, id: id), request: request)
+        case .show(let id, let title, let request):
+            MacGlassDetailScreen(media: Show(title: title.isEmpty ? id : title, id: id), request: request)
+        case .shelf(let id):
+            MacShelfGridView(shelfID: id)
+        }
+    }
+
+    /// What every page of the stack gets. A page covered by a pushed one
+    /// gets no onDisappear, nor onAppear when it is on top again (Back) —
+    /// the section's page neither when the stack is popped to it: they
+    /// follow the stack's depth instead. Set on each destination: a value
+    /// set around the NavigationStack (or on its root) does not reach the
+    /// pushed pages — the window's objects are passed the same way.
+    private func page<Content: View>(_ content: Content, depth: Int) -> some View {
+        content
+            .environment(\.macStackDepth, depth)
+            .environmentObject(navigator)
+            .environmentObject(navigator.library)
+    }
+
     #if DEBUG
-    /// `-PTDebugSection`, then `-PTDebugOpenMovie` / `-PTDebugOpenShow` (pushed
-    /// once the section change has emptied the stack; never plays), then the
-    /// window size and snapshot hooks (MacDebugHooks).
+    /// `-PTDebugSection`, `-PTDebugSearch`, then `-PTDebugOpenMovie` /
+    /// `-PTDebugOpenShow` / `-PTDebugOpenRoute` (pushed once the section
+    /// change has emptied the stack; never plays), `-PTDebugOpenURL` (a
+    /// link, as `onOpenURL` gets it), `-PTDebugTour`, then the window size
+    /// and snapshot hooks (MacDebugHooks).
     @MainActor
     private func runDebugHooks() async {
         await MacDebugHooks.prepareWindow()
         // `-PTDebugPlayTorrent <file>` (BoundedStorageDebugHooks): the
         // player on a local .torrent, as a placeholder movie.
-        if let file = BoundedStorageDebugHooks.torrentFile {
+        // `-PTDebugPlayEpisode S01E01` (UpNextDebugHooks): an episode of the
+        // made-up show instead, for episode chaining.
+        if let episode = MacUpNextDebug.playback {
+            try? await Task.sleep(nanoseconds: 1_000_000_000)
+            debugPlayback = episode
+        } else if let file = BoundedStorageDebugHooks.torrentFile {
             try? await Task.sleep(nanoseconds: 1_000_000_000)
             print("[BoundedDebug] playing \(file)")
             debugPlayback = MacPendingPlayback(torrent: Torrent(url: file, quality: "1080p"),
                                                media: Movie(title: "Bounded storage test", id: "tt0000000"),
                                                title: "Bounded storage test")
         }
-        if let requested = MacDebugHooks.section { section = requested }
+        if let requested = MacDebugHooks.section { navigator.select(requested) }
+        if let query = MacDebugHooks.searchQuery {
+            navigator.focusSearch()
+            navigator.search.text = query
+        }
         if let media = MacDebugHooks.media {
             try? await Task.sleep(nanoseconds: 600_000_000)
             if let movie = media as? Movie {
-                path.append(movie)
+                navigator.open(movie)
             } else if let show = media as? Show {
-                path.append(show)
+                navigator.open(show)
             }
         }
+        if let route = MacDebugHooks.route {
+            try? await Task.sleep(nanoseconds: 600_000_000)
+            navigator.open(route)
+        }
+        if let url = MacDebugHooks.url {
+            try? await Task.sleep(nanoseconds: 1_000_000_000)
+            print("[MacDebug] link \(url.absoluteString): \(navigator.open(url: url) ? "opened" : "refused")")
+        }
+        await MacDebugHooks.runTour(navigator)
         MacDebugHooks.scheduleSnapshot()
     }
     #endif
 }
+
+// MARK: - The window
+
+/// The AppKit window the root view is drawn in, as soon as it has one.
+struct MacWindowReader: NSViewRepresentable {
+    func makeNSView(context: Context) -> ReaderView { ReaderView() }
+    func updateNSView(_ view: ReaderView, context: Context) {}
+
+    final class ReaderView: NSView {
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            guard let window else { return }
+            MacWindowReader.prepare(window)
+        }
+
+        /// Never a click's target.
+        override func hitTest(_ point: NSPoint) -> NSView? { nil }
+    }
+
+    /// The window is black under everything (the pages are): not the
+    /// system's dark grey, in a first frame or round the sidebar. It is not
+    /// restorable on macOS 14 (macOS 15+: the scene's
+    /// `restorationBehavior(.disabled)`), and the safety net knows it is one
+    /// of the app's main windows (`MacWindowNet`).
+    @MainActor
+    static func prepare(_ window: NSWindow) {
+        window.backgroundColor = .black
+        if #unavailable(macOS 15.0) { window.isRestorable = false }
+        MacWindowNet.register(window)
+        #if DEBUG
+        MacFirstPaintProbe.start(window)
+        #endif
+    }
+}
+
+#if DEBUG
+/// `-PTDebugFirstPaint <directory>` (with a MacDebugHooks argument, so that
+/// the run is a verification run): the window as the window server has it
+/// — the pixels on screen — from the moment the root view is put in it, at
+/// 0, 50, 100, 200, 400 and 800 ms, into `<directory>/fp-<ms>.png`. Earlier
+/// than the snapshot hooks, which start once the window's task runs.
+@MainActor
+enum MacFirstPaintProbe {
+    private static var started = false
+
+    static func start(_ window: NSWindow) {
+        guard MacDebugHooks.isActive, !started,
+              let directory = UserDefaults.standard.string(forKey: "PTDebugFirstPaint") else { return }
+        started = true
+        let folder = URL(fileURLWithPath: directory)
+        try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        let launch = processStart ?? Date()
+        print("[FirstPaint] window #\(window.windowNumber) put in at \(String(format: "%.3f", Date().timeIntervalSince(launch))) s after the launch")
+        for ms in [0, 50, 100, 200, 400, 800] {
+            DispatchQueue.main.asyncAfter(deadline: .now() + .milliseconds(ms)) {
+                let url = folder.appendingPathComponent("fp-\(ms).png")
+                guard let image = windowServerImage(of: window), image.width > 1 else {
+                    print("[FirstPaint] \(ms) ms: no image from the window server (on screen: \(window.isVisible))")
+                    return
+                }
+                let rep = NSBitmapImageRep(cgImage: image)
+                try? rep.representation(using: .png, properties: [:])?.write(to: url)
+                print("[FirstPaint] \(ms) ms (\(String(format: "%.3f", Date().timeIntervalSince(launch))) s after the launch): \(image.width)×\(image.height) → \(url.lastPathComponent)")
+            }
+        }
+    }
+
+    /// When this process started (the kernel's record of it).
+    private static var processStart: Date? {
+        var info = kinfo_proc()
+        var size = MemoryLayout<kinfo_proc>.stride
+        var name: [Int32] = [CTL_KERN, KERN_PROC, KERN_PROC_PID, getpid()]
+        guard sysctl(&name, 4, &info, &size, nil, 0) == 0 else { return nil }
+        let start = info.kp_proc.p_un.__p_starttime
+        return Date(timeIntervalSince1970: Double(start.tv_sec) + Double(start.tv_usec) / 1_000_000)
+    }
+
+    /// CGWindowListCreateImage of the app's own window, looked up at run
+    /// time (the macOS 15+ SDKs mark it unavailable), as MacDebugHooks does.
+    private typealias WindowImageFunction = @convention(c) (CGRect, UInt32, UInt32, UInt32) -> Unmanaged<CGImage>?
+
+    static func windowServerImage(of window: NSWindow) -> CGImage? {
+        guard window.windowNumber > 0, let handle = dlopen(nil, RTLD_NOW),
+              let symbol = dlsym(handle, "CGWindowListCreateImage") else { return nil }
+        let create = unsafeBitCast(symbol, to: WindowImageFunction.self)
+        return create(.null, 1 << 3, UInt32(window.windowNumber), (1 << 0) | (1 << 3))?.takeRetainedValue()
+    }
+}
+#endif
 
 // MARK: - Stack depth
 
@@ -141,57 +353,15 @@ private struct MacStackDepthKey: EnvironmentKey {
 }
 
 extension EnvironmentValues {
-    /// How many pages are pushed over the section's grid (0 = the grid is
-    /// on top). In a NavigationSplitView's NavigationStack (seen on macOS
+    /// How many pages are pushed over the section's page (0 = it is on
+    /// top). In a NavigationSplitView's NavigationStack (seen on macOS
     /// 27), pushing a page over another does not call the covered page's
     /// onDisappear, and popping back does not call its onAppear (nor the
-    /// grid's, popped back to it): a view that must know whether it is on
-    /// top compares this with its own depth. MacRootView sets it on the
-    /// grid and on each pushed page.
+    /// section page's, popped back to it): a view that must know whether
+    /// it is on top compares this with its own depth. MacRootView sets it
+    /// on the section's page and on each pushed page.
     var macStackDepth: Int {
         get { self[MacStackDepthKey.self] }
         set { self[MacStackDepthKey.self] = newValue }
-    }
-}
-
-// MARK: - Poster grid building blocks (Mac variant of PosterCard/PosterGrid)
-
-enum MacPosterGrid {
-    static let columns = [GridItem(.adaptive(minimum: 150, maximum: 200), spacing: 18)]
-}
-
-struct MacPosterCard: View {
-    let title: String
-    let subtitle: String
-    let imageURL: String?
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Color.clear
-                .aspectRatio(2/3, contentMode: .fit)
-                .frame(maxWidth: .infinity)
-                .overlay {
-                    AsyncImage(url: imageURL.flatMap { URL(string: $0) }) { phase in
-                        switch phase {
-                        case .success(let image): image.resizable().scaledToFill()
-                        default: Image(systemName: "film").font(.largeTitle).foregroundStyle(.tertiary)
-                        }
-                    }
-                }
-                .background(Color(nsColor: .underPageBackgroundColor))
-                .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-                .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous)
-                    .stroke(Color.white.opacity(0.06), lineWidth: 1))
-                .shadow(color: .black.opacity(0.35), radius: 6, x: 0, y: 3)
-
-            VStack(alignment: .leading, spacing: 2) {
-                Text(subtitle.isEmpty ? " " : subtitle)
-                    .font(.caption2).foregroundStyle(.secondary).lineLimit(1)
-                Text(title)
-                    .font(.subheadline.weight(.semibold))
-                    .lineLimit(2, reservesSpace: true)
-                    .foregroundStyle(.primary)
-            }
-        }
     }
 }

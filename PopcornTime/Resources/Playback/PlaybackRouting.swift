@@ -181,6 +181,21 @@ enum PlaybackRouting {
     }
 }
 
+/// Whether the remux of a file that is still downloading can resume
+/// natively at a saved position (`RemuxPlayback.resumeReadiness`): by moving
+/// its conversion to the keyframe the file's index gives for that position.
+enum NativeResumeReadiness: Equatable {
+    /// Not known yet: the header, the keyframe index or the first two
+    /// segments are still to come.
+    case pending
+    /// The conversion can jump there: « Resume at … » plays natively.
+    case native
+    /// It can't (the reason, for the logs: no keyframe index, an index the
+    /// stream contradicts, a transcoded track, native jumps switched off…):
+    /// resuming at that position goes through VLC.
+    case vlcOnly(String)
+}
+
 /// Resume / watched-progress rules shared by the native players (pure, so
 /// the harness can test them).
 enum ResumePolicy {
@@ -259,12 +274,12 @@ enum ResumePolicy {
 
     /// Whether VLC may continue at the handed-over position without its own
     /// « Reprendre / Depuis le début » question: the user chose « Reprendre »
-    /// in the native player (quick resume through VLC), or native playback
-    /// had started (the user was watching). Otherwise nobody decided — e.g.
-    /// a DTS-only MKV rejected before the native resume question — and VLC
-    /// asks.
-    static func handOffResumeDecided(userChoseQuickResume: Bool, playbackStarted: Bool) -> Bool {
-        userChoseQuickResume || playbackStarted
+    /// in the native player (or where to start, before it: a lighter
+    /// release), or native playback had started (the user was watching).
+    /// Otherwise nobody decided — e.g. a DTS-only MKV rejected before the
+    /// native resume question — and VLC asks.
+    static func handOffResumeDecided(userChoseResume: Bool, playbackStarted: Bool) -> Bool {
+        userChoseResume || playbackStarted
     }
 
     /// Why a remux player hands over to VLC when the user's position lies
@@ -412,6 +427,18 @@ enum StarvationPolicy {
     /// it (AVKit's transport bar stays usable under the buffering overlay).
     static let userSeekThresholdSeconds: Double = 1
 
+    /// The time a held seek to `target` came from (`seekOrigin`, else the
+    /// player's time when it does not read `target` yet): where AVPlayer
+    /// puts its time back when it gives up on that seek. nil when neither
+    /// is usable or both are where the target is (nothing to tell apart).
+    static func seekResetOrigin(target: Double, seekOrigin: Double?, playerTime: Double?) -> Double? {
+        for candidate in [seekOrigin, playerTime] {
+            guard let origin = candidate, origin.isFinite, origin >= 0 else { continue }
+            if abs(origin - target) > userSeekThresholdSeconds { return origin }
+        }
+        return nil
+    }
+
     /// The user's new target when the player's time went from `lastObserved`
     /// (the previous poll) to `observed` by more than
     /// `userSeekThresholdSeconds`; nil when it didn't move (or a time is
@@ -419,6 +446,20 @@ enum StarvationPolicy {
     static func userSeekTarget(observed: Double, lastObserved: Double?) -> Double? {
         guard let last = lastObserved, last.isFinite, observed.isFinite, observed >= 0 else { return nil }
         return abs(observed - last) > userSeekThresholdSeconds ? observed : nil
+    }
+
+    /// The same, for a player that may be PLAYING (`playing`: its rate ≠ 0 — a jump wait that keeps
+    /// the old item's rate, whose held request the server answered: it plays): a forward move of at
+    /// most `elapsed` × `PlayedPositionTracker.maxRate` + `userSeekThresholdSeconds` since the last
+    /// look is playback, not a seek (measured, run R2: playback read as « user seek to 900.4 s »,
+    /// the target moved off the user's 898.4 s).
+    static func userSeekTarget(observed: Double, lastObserved: Double?, playing: Bool, elapsed: TimeInterval) -> Double? {
+        guard let target = userSeekTarget(observed: observed, lastObserved: lastObserved) else { return nil }
+        if playing, let last = lastObserved, observed > last, elapsed.isFinite,
+           observed - last <= max(0, elapsed) * PlayedPositionTracker.maxRate + userSeekThresholdSeconds {
+            return nil
+        }
+        return target
     }
 
     /// Playback got clearly past the previous resume point (nil = none yet).
@@ -1138,6 +1179,54 @@ struct LiveBornItemWatch {
         guard let pending = pendingItem, let current = current, current == pending else { return false }
         guard remuxFinished, isEligible else { return false }
         pendingItem = nil
+        return true
+    }
+}
+
+/// Remux path: the OpenSubtitles list that came after AVPlayer read the
+/// master playlist. Pure: the tests cover it.
+///
+/// The play flows search the subtitles alongside the stream
+/// (`SubtitleSearch`), and the remux lists them as renditions of its master
+/// playlist, which AVPlayer reads once, when its item is created. The start
+/// waits for the list at most `SubtitleSearch.startHold`; a list that comes
+/// later (a slow OpenSubtitles with a stream that was ready first: a
+/// finished download, a torrent already on disk, a very fast swarm) is in
+/// the masters served from then on — not in the one the playing item read:
+/// the whole film would have no OpenSubtitles entry in its subtitle menu.
+/// So the owners rebuild that item once in place
+/// (`PlaybackStarvationRecovery.rebuildNow`, position, play / pause state
+/// and the user's choices kept: under 0.3 s without picture), with the
+/// preferred language's subtitles picked as on a first start when the user
+/// chose none.
+struct LateSubtitlesWatch {
+    /// Why: the rebuild's log line.
+    static let reason = "Liste OpenSubtitles arrivée après la lecture de la liste maîtresse : élément reconstruit avec ses sous-titres"
+
+    /// A list to bring to the player: an item to rebuild.
+    private(set) var isPending = false
+
+    init() {}
+
+    /// The search's answer was given to the remux. `masterServed`: a player
+    /// had read a master playlist by then — one without this list.
+    mutating func listArrived(isEmpty: Bool, masterServed: Bool) {
+        if !isEmpty && masterServed { isPending = true }
+    }
+
+    /// A new current item (the first one, a recovery's replacement): its
+    /// master playlist has every list known so far.
+    mutating func attached() {
+        isPending = false
+    }
+
+    /// One sample (~1 Hz). True — once — when an item is to be rebuilt and
+    /// the owner can do it now (`isEligible`: as for `LiveBornItemWatch`, and
+    /// no question nor start seek pending). Not eligible yet → asked again at
+    /// the next sample.
+    mutating func shouldRebuild(isEligible: Bool) -> Bool {
+        guard isPending, isEligible else { return false }
+        isPending = false
         return true
     }
 }

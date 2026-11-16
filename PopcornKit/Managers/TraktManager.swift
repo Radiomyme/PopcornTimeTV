@@ -26,6 +26,15 @@ open class TraktManager: NetworkManager {
         anonymousAccessRefused = true
     }
     
+    /// The TVDB number Trakt's episode payloads are keyed by. Since 5.0.0 an
+    /// episode id is "<show IMDb id>-s<season>e<number>" (no TVDB number
+    /// behind it): nil then, and the caller sends nothing to Trakt — a device
+    /// that still holds a Trakt token in its keychain used to crash on
+    /// `Int(id)!` at every progress save or watched toggle.
+    static func tvdbID(ofEpisode id: String) -> Int? {
+        return Int(id)
+    }
+
     /// OAuth state parameter added for extra security against cross site forgery.
     fileprivate var state: String!
     
@@ -57,7 +66,8 @@ open class TraktManager: NetworkManager {
             if type == .movies {
                 parameters = ["movie": ["ids": ["imdb": id]], "progress": progress * 100.0]
             } else {
-                parameters = ["episode": ["ids": ["tvdb": Int(id)!]], "progress": progress * 100.0]
+                guard let tvdb = TraktManager.tvdbID(ofEpisode: id) else { return }
+                parameters = ["episode": ["ids": ["tvdb": tvdb]], "progress": progress * 100.0]
             }
             self.manager.request(Trakt.base + Trakt.scrobble + "/\(status.rawValue)", method: .post, parameters: parameters, encoding: JSONEncoding.default, headers: HTTPHeaders(Trakt.Headers.Authorization(credential.accessToken))).validate().responseData { response in
                 if let error = response.error { completion?(error as NSError) }
@@ -220,7 +230,7 @@ open class TraktManager: NetworkManager {
                         let playback = item["id"].int
                         else { continue }
                     let ids = item[t]["ids"]
-                    if (type == .movies && id == ids["imdb"].string) || (type == .episodes && Int(id) == ids["tvdb"].int) {
+                    if (type == .movies && id == ids["imdb"].string) || (type == .episodes && TraktManager.tvdbID(ofEpisode: id).map({ $0 == ids["tvdb"].int }) == true) {
                         playbackId = playback
                         break
                     }
@@ -257,7 +267,8 @@ open class TraktManager: NetworkManager {
             if type == .movies {
                 parameters = ["movies": [["ids": ["imdb": id]]]]
             } else if type == .episodes {
-                parameters = ["episodes": [["ids": ["tvdb": Int(id)!]]]]
+                guard let tvdb = TraktManager.tvdbID(ofEpisode: id) else { return }
+                parameters = ["episodes": [["ids": ["tvdb": tvdb]]]]
             } else {
                 parameters = [:]
             }
@@ -289,7 +300,8 @@ open class TraktManager: NetworkManager {
             if type == .movies {
                 parameters = ["movies": [["ids": ["imdb": id]]]]
             } else if type == .episodes {
-                parameters = ["episodes": [["ids": ["tvdb": Int(id)!]]]]
+                guard let tvdb = TraktManager.tvdbID(ofEpisode: id) else { return }
+                parameters = ["episodes": [["ids": ["tvdb": tvdb]]]]
             } else {
                 parameters = [:]
             }
@@ -417,7 +429,8 @@ open class TraktManager: NetworkManager {
             }
             let parameters: [String: Any]
             if type == .episodes {
-                parameters = ["episodes": [["ids": ["tvdb": Int(id)!]]]]
+                guard let tvdb = TraktManager.tvdbID(ofEpisode: id) else { return }
+                parameters = ["episodes": [["ids": ["tvdb": tvdb]]]]
             } else {
                 parameters = [type.rawValue: [["ids": ["imdb": id]]]]
             }
@@ -447,7 +460,8 @@ open class TraktManager: NetworkManager {
             }
             let parameters: [String: Any]
             if type == .episodes {
-                parameters = ["episodes": [["ids": ["tvdb": Int(id)!]]]]
+                guard let tvdb = TraktManager.tvdbID(ofEpisode: id) else { return }
+                parameters = ["episodes": [["ids": ["tvdb": tvdb]]]]
             } else {
                 parameters = [type.rawValue: [["ids": ["imdb": id]]]]
             }

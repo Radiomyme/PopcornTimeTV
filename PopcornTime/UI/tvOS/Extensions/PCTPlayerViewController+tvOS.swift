@@ -128,6 +128,15 @@ extension PCTPlayerViewController: UIViewControllerTransitioningDelegate {
             return
         }
         
+        // A resume on its way: the click only shows the transport bar. It
+        // neither pauses VLC nor opens the scrubber, whose second click
+        // would send VLC to the bar's position — 0:00 before the resume
+        // point plays.
+        guard !isWaitingForResume else {
+            progressBar.isHidden ? toggleControlsVisible() : ()
+            return
+        }
+
         guard !progressBar.isScrubbing else {
             endScrubbing()
             if mediaplayer.isSeekable {

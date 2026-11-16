@@ -11,6 +11,11 @@ private struct Static {
 typealias jsonArray = [[String : Any]]
 
 /// Class for managing a users watchlist.
+///
+/// Since 5.3.0 a façade over `Library.shared`: `isAdded` is a set lookup (it
+/// used to rebuild every model of the list with ObjectMapper), a title is
+/// stored once, and a change posts `.libraryDidChange`. The UserDefaults keys
+/// and the stored JSON are the ones of 4.x / 5.x.
 open class WatchlistManager<N: Media> {
     
     private let currentType: Trakt.MediaType
@@ -58,11 +63,22 @@ open class WatchlistManager<N: Media> {
      */
     open func add(_ media: N) {
         TraktManager.shared.add(media.id, toWatchlistOfType: currentType)
-        var array = UserDefaults.standard.object(forKey: "\(currentType.rawValue)Watchlist") as? jsonArray ?? jsonArray()
-        array.append(Mapper<N>().toJSON(media))
-        UserDefaults.standard.set(array, forKey: "\(currentType.rawValue)Watchlist")
+        Library.shared.addToWatchlist(Mapper<N>().toJSON(media), id: media.id, list: currentType)
+        // A watchlisted show is followed: its guide is what new episodes are
+        // worked out from.
+        if let show = media as? Show { Library.shared.noteGuide(of: show, always: true) }
     }
     
+    /**
+     The title's record has arrived on its page: if the title is in the watchlist, its stored entry gets what it lacked — the page can be added to the list before its record is in (a link's id, a Continue Watching card), and the Watchlist would show a card without a title or a year.
+
+     - Parameter media: The title, completed by its record.
+     */
+    open func complete(_ media: N) {
+        guard isAdded(media) else { return }
+        Library.shared.completeWatchlistEntry(Mapper<N>().toJSON(media), id: media.id, list: currentType)
+    }
+
     /**
      Removes media from users watchlist and syncs with Trakt if available.
      
@@ -70,11 +86,7 @@ open class WatchlistManager<N: Media> {
      */
     open func remove(_ media: N) {
         TraktManager.shared.remove(media.id, fromWatchlistOfType: currentType)
-        if var array = UserDefaults.standard.object(forKey: "\(currentType.rawValue)Watchlist") as? jsonArray,
-            let index = Mapper<N>().mapArray(JSONArray: array).firstIndex(where: { $0.id == media.id }) {
-            array.remove(at: index)
-            UserDefaults.standard.set(array, forKey: "\(currentType.rawValue)Watchlist")
-        }
+        Library.shared.removeFromWatchlist(id: media.id, list: currentType)
     }
     
     /**
@@ -85,10 +97,7 @@ open class WatchlistManager<N: Media> {
      - Returns: Boolean indicating if media is in the users watchlist.
      */
     open func isAdded(_ media: N) -> Bool {
-        if let array = UserDefaults.standard.object(forKey: "\(currentType.rawValue)Watchlist") as? jsonArray {
-            return Mapper<N>().mapArray(JSONArray: array).contains(where: {$0.id == media.id})
-        }
-        return false
+        return Library.shared.isInWatchlist(media.id, currentType)
     }
     
     /**
@@ -99,14 +108,24 @@ open class WatchlistManager<N: Media> {
      - Returns: Locally stored watchlist (may be out of date if user has authenticated with trakt).
      */
     @discardableResult open func getWatchlist(_ completion: (([N]) -> Void)? = nil) -> [N] {
-        let array = UserDefaults.standard.object(forKey: "\(currentType.rawValue)Watchlist") as? jsonArray ?? jsonArray()
-        
         TraktManager.shared.getWatchlist(forMediaOfType: N.self) { [unowned self] (medias, error) in
             guard error == nil else {return}
-            UserDefaults.standard.set(Mapper<N>().toJSONArray(medias), forKey: "\(self.currentType.rawValue)Watchlist")
+            Library.shared.replaceWatchlist(Mapper<N>().toJSONArray(medias), list: self.currentType)
             completion?(medias)
         }
         
-        return Mapper<N>().mapArray(JSONArray: array)
+        return storedWatchlist()
+    }
+
+    /**
+     The locally stored watchlist only, without asking Trakt: what to read again on `.libraryDidChange` (asking Trakt there would replace the list, which posts the notification again).
+     */
+    open func storedWatchlist() -> [N] {
+        // Decoded once per change of the list; one entry per title (5.2
+        // could store the same title twice).
+        return Library.shared.state.watchlistModels(currentType) { array in
+            var seen = Set<String>()
+            return Mapper<N>().mapArray(JSONArray: array).filter { seen.insert($0.id).inserted }
+        }
     }
 }

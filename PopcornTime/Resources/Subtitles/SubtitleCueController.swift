@@ -85,6 +85,9 @@ final class SubtitleCueController: ObservableObject {
     /// Parsed cues per subtitle link (switching back is instant).
     private var cueCache: [String: [PreparedCue]] = [:]
     private var observation: PlayerTimeObservation?
+    /// The player whose time the cues follow (`attach(to:)`). Its periodic
+    /// observer (`observation`) exists only while there are cues to show.
+    private weak var attachedPlayer: AVPlayer?
     private var lastPlayerTime: Double?
     /// Bumped on every selection so a slow download can't overwrite a newer choice.
     private var selectionGeneration = 0
@@ -182,10 +185,34 @@ final class SubtitleCueController: ObservableObject {
         }
     }
 
-    /// Start tracking `player`'s time (≈10 Hz periodic observer), and bind
-    /// its current item's own subtitles (see the file header) — so attach
-    /// once the player has its item.
+    /// Follow `player`'s time while a subtitle is shown (`updateTimeObserver`),
+    /// and bind its current item's own subtitles (see the file header) — so
+    /// attach once the player has its item.
     func attach(to player: AVPlayer) {
+        if attachedPlayer === player { return }
+        removeTimeObserver()
+        attachedPlayer = player
+        updateTimeObserver()
+        bindNativeSubtitles(of: player.currentItem)
+    }
+
+    /// Remove the time observer and unbind the item (idempotent).
+    func detach() {
+        attachedPlayer = nil
+        removeTimeObserver()
+        unbindNativeSubtitles()
+    }
+
+    /// The ≈10 Hz periodic observer of the attached player, only while the
+    /// selected subtitle has cues: it used to run from `attach` on for the
+    /// whole film, ten wake-ups of the main queue a second even with no
+    /// overlay subtitle selected (the usual case: none wanted, or the file's
+    /// own track shown by AVPlayer).
+    private func updateTimeObserver() {
+        guard let player = attachedPlayer, !cues.isEmpty else {
+            removeTimeObserver()
+            return
+        }
         if let observation, observation.player === player { return }
         removeTimeObserver()
         let token = player.addPeriodicTimeObserver(forInterval: CMTime(value: 1, timescale: 10), queue: .main) { [weak self] time in
@@ -195,14 +222,7 @@ final class SubtitleCueController: ObservableObject {
             }
         }
         observation = PlayerTimeObservation(player: player, token: token)
-        bindNativeSubtitles(of: player.currentItem)
         playerTimeDidChange(player.currentTime())
-    }
-
-    /// Remove the time observer and unbind the item (idempotent).
-    func detach() {
-        removeTimeObserver()
-        unbindNativeSubtitles()
     }
 
     /// Select a subtitle (download + parse), or nil to turn subtitles off:
@@ -665,6 +685,7 @@ final class SubtitleCueController: ObservableObject {
     private func setCues(_ newCues: [PreparedCue]) {
         cues = newCues
         maxCueDuration = newCues.map { $0.end - $0.start }.max() ?? 0
+        updateTimeObserver()
         refreshText()
     }
 
@@ -752,17 +773,11 @@ enum ExternalSubtitleLoader {
     }
 
     /// OpenSubtitles search for a movie (imdb id) or an episode (show imdb id
-    /// + season/episode) — same queries as the tvOS flow. Completion on main.
+    /// + season/episode), through the shared `SubtitleSearch`: the play flow
+    /// started it with the stream, so a player usually finds the answer
+    /// there, or joins the request in flight. Completion on main.
     static func search(for media: Media, completion: @escaping ([Subtitle]) -> Void) {
-        if let episode = media as? Episode {
-            SubtitlesManager.shared.search(episode, imdbId: episode.show?.id) { subtitles, _ in
-                completion(subtitles)
-            }
-        } else {
-            SubtitlesManager.shared.search(imdbId: media.id) { subtitles, _ in
-                completion(subtitles)
-            }
-        }
+        SubtitleSearch.shared.search(for: media, completion: completion)
     }
 
     /// The subtitle to auto-select for `code`: exact ISO 639-1 match first,

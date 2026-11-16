@@ -90,6 +90,9 @@ final class PlaybackStreamContext {
                                             torrent: playing, sources: list)
         context.decidedStart = decidedStart ?? takeRequestedStart(for: sourceURL)
         objc_setAssociatedObject(streamer, &associationKey, context, .OBJC_ASSOCIATION_RETAIN_NONATOMIC)
+        // The release every save of this title remembers (Continue Watching
+        // "rl": « Resume » and the next episode replay it).
+        PlaybackReleaseRegistry.note(playing, for: media.id)
         print("[Deficit] stream context: \(media.title) — \(playing.quality ?? "?"), \(list.count) release(s) known"
               + (playing.estimatedBitrate.map { String(format: ", ≈ %.0f Mb/s", StreamBandwidth.megabitsPerSecond($0)) } ?? "")
               + (context.decidedStart.map { String(format: ", decided start %.0f %%", $0 * 100) } ?? ""))
@@ -109,6 +112,14 @@ final class PlaybackStreamContext {
     /// (tvOS: `chooseQuality`'s completion gives only the torrent, and the
     /// callers play the episode whose own list is EZTV's).
     static func noteSources(_ torrents: [Torrent], forMediaID id: String) {
+        notedSources = (id, torrents)
+    }
+
+    /// The same list, completed by a source that answered after the picker
+    /// came up (`EpisodeSourceResolver`'s late answer): replaces the list
+    /// noted for that title only — never another title's, noted since.
+    static func noteLateSources(_ torrents: [Torrent], forMediaID id: String) {
+        guard notedSources?.id == id else { return }
         notedSources = (id, torrents)
     }
 
@@ -147,6 +158,15 @@ final class PlaybackStreamContext {
     }
 
     private static var requestedStart: (url: String, fraction: Float)?
+
+    /// Drops a requested start no stream took (a finished download played
+    /// from disk, Back before the stream started) unless it is for `url`:
+    /// a later stream of that release must not start there unasked.
+    static func dropRequestedStart(unlessFor url: String?) {
+        guard let requested = requestedStart, requested.url != url else { return }
+        print("[Resume] requested start \(Int(requested.fraction * 100)) % dropped (no stream took it)")
+        requestedStart = nil
+    }
 
     private static func takeRequestedStart(for url: String) -> Float? {
         guard let requested = requestedStart, requested.url == url else { return nil }

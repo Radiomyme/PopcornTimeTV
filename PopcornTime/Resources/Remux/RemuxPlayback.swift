@@ -83,6 +83,13 @@ import PopcornKit
 ///    request comes first), while an abandoned one stops pulling it at the
 ///    next report (after 30 s without reports): the remux copy ahead of the
 ///    player stays at about L.
+///  - On a torrent whose file has a usable keyframe index, the remux's one
+///    pass can be MOVED instead of only running in file order (NATIVE JUMPS,
+///    below): to the saved position of a film that is still downloading, to
+///    a far seek target, back into what such a move skipped. A segment a
+///    move skipped is a HOLE — listed, not on disk, written when playback
+///    goes there: its request is held like one for a segment still to come,
+///    and the disk budget neither counts nor evicts it.
 ///  - A disk budget bounds the remux copy (`allowedKeptBytes`): the free
 ///    space + the deletable segments the remux keeps − a 2 GiB reserve −
 ///    what the torrent still has to write − one lookahead at the output
@@ -210,14 +217,23 @@ final class RemuxPlayback {
 
     /// Set to true BEFORE `start()` when the caller is still fetching
     /// OpenSubtitles results, false (or assign `subtitles`) when done:
-    /// `onReady` is then held up to ~5 s so the subtitles make it into the
-    /// master playlist (AVPlayer fetches it only once), then — while the
-    /// preferred-language file is being fetched (`subtitles`) — up to
-    /// `readyFetchHoldSeconds` more. Default false.
+    /// `onReady` is then held so the subtitles make it into the master
+    /// playlist (AVPlayer fetches it only once) — until the caller assigns
+    /// `subtitles` (the players do at `SubtitleSearch.startHold` after the
+    /// search began at the latest, with an empty list; a list assigned
+    /// later is in the master of the next item built — the players build
+    /// one for it: `LateSubtitlesWatch`), 5 ticks at most —,
+    /// then — while the preferred-language file is being fetched
+    /// (`subtitles`) — up to `readyFetchHoldSeconds` more. Default false.
     var externalSubtitlesPending: Bool {
         get { stateLock.withLock { lockedSubtitlesPending } }
         set { stateLock.withLock { lockedSubtitlesPending = newValue } }
     }
+
+    /// A master playlist was served: a player has read it (AVPlayer does
+    /// once per item), with the `subtitles` known at that moment — a list
+    /// assigned afterwards is not in that item's menu (`LateSubtitlesWatch`).
+    var hasServedMaster: Bool { stateLock.withLock { lockedLoggedMaster } }
 
     /// The remux session (created on the pump queue at the first tick).
     var session: MKVToHLSRemuxSession? { stateLock.withLock { lockedSession } }
@@ -251,7 +267,12 @@ final class RemuxPlayback {
                 lockedSubtitles = newValue
                 lockedSubtitlesPending = false
             }
-            workQueue.async { [weak self] in self?.prefetchPreferredExternalSubtitle() }
+            workQueue.async { [weak self] in
+                self?.prefetchPreferredExternalSubtitle()
+                // The hold on `onReady` is over: at once, not at the next
+                // tick (up to a second later).
+                self?.fireReadyIfDue(countsHoldTick: false)
+            }
         }
     }
 
@@ -292,6 +313,17 @@ final class RemuxPlayback {
         get { stateLock.withLock { lockedOnUnavailable } }
         set { stateLock.withLock { lockedOnUnavailable = newValue } }
     }
+    /// Called on the main queue when AVPlayer asks for a HOLE behind the position last reported — a video
+    /// segment a jump skipped, held until it is written — while playback has run and no start lock is
+    /// set (`HoleRequestRule.isSeekBehind`): the player is seeking there although the position reported
+    /// does not say so (on the Apple TV, `currentTime()` keeps the time from before a held seek). Nothing
+    /// is decided here — a jump is still decided only on the positions reported: the owner reports that
+    /// position (`updatePlaybackPositions`) when it is news to it. Arguments: the segment's span on the
+    /// player timeline. Coalesced: at most once per 2 s for the same segment.
+    var onHoleRequested: ((_ start: Double, _ end: Double) -> Void)? {
+        get { stateLock.withLock { lockedOnHoleRequested } }
+        set { stateLock.withLock { lockedOnHoleRequested = newValue } }
+    }
     /// False when the segment covering `playerSeconds` (the player timeline: `playerTimeline`) was pruned
     /// (deleted for good, `prunedIndexes`).
     func isAvailable(playerSeconds: Double) -> Bool {
@@ -321,9 +353,20 @@ final class RemuxPlayback {
     /// lookahead, and the budget protects the anchor's region and segment 0's.
     func updatePlaybackPositions(played: Double?, wanted: Double?) {
         let played = played.flatMap { $0.isFinite && $0 >= 0 ? $0 : nil }
-        let wanted = wanted.flatMap { $0.isFinite && $0 >= 0 ? $0 : nil }
+        var wanted = wanted.flatMap { $0.isFinite && $0 >= 0 ? $0 : nil }
         let now = Self.uptime
+        let targetDuration = session?.targetDuration ?? 0
         stateLock.withLock {
+            // The start lock (`commitResume`): an item loaded at 0 reports 0 until its
+            // resume seek is issued. Until playback has run, or the player reports a
+            // position near the resume point, the position wanted is the resume point.
+            if let pin = lockedStartPin {
+                if played != nil || (wanted.map { $0 >= pin - 2 * targetDuration } ?? false) {
+                    lockedStartPin = nil
+                } else {
+                    wanted = pin
+                }
+            }
             lockedPlayedSeconds = played
             lockedWantedSeconds = wanted
             lockedPositionsReportedAt = played != nil || wanted != nil ? now : nil
@@ -332,11 +375,19 @@ final class RemuxPlayback {
         enforceDiskBudget(.report)
         // Requests for pruned segments held until a report newer than them: decided now.
         resolveHeldRequestsSoon()
+        noteReportForJumps(played: played, wanted: wanted)
     }
 
-    /// True once the remux has finished: every segment of the presentation was written (some may have
-    /// been pruned since). Thread-safe.
-    var isFinished: Bool { stateLock.withLock { lockedFinished } }
+    /// True once the remux has finished: the end of the presentation is written and the conversion is
+    /// at rest (some segments may have been pruned since; after a jump, some may still be holes —
+    /// `holeIndexes` — and the conversion runs again, this false meanwhile, when playback goes back
+    /// into one). Thread-safe.
+    var isFinished: Bool {
+        let (finished, session) = stateLock.withLock { (lockedFinished, lockedSession) }
+        guard finished else { return false }
+        guard let session = session, session.hasJumped else { return true }
+        return session.isTailWritten && session.nextSegmentIndex == session.progress.segmentsWritten
+    }
 
     /// Indexes of the segments deleted for good (never 0), in every rendition. Thread-safe copy.
     var prunedIndexes: IndexSet { stateLock.withLock { lockedPruned } }
@@ -358,6 +409,320 @@ final class RemuxPlayback {
     /// pruned indexes need not be contiguous (`prunedIndexes`). Thread-safe.
     var prunedThrough: Int { stateLock.withLock { lockedPruned.last ?? -1 } }
 
+    // NATIVE JUMPS --------------------------------------------------------------
+    // The conversion has one pass. On a torrent whose file has a usable keyframe
+    // index it can be moved to any segment (`MKVToHLSRemuxSession.jump`): to the
+    // saved position of a film that is still downloading, to a far seek target,
+    // back into what such a move skipped. What it skipped is a HOLE: listed with
+    // its planned duration, not on disk, and still writable — a request for it is
+    // held, never answered 404, and the disk budget neither counts nor evicts it.
+    // A PRUNED segment keeps its meaning: gone for good. A hole becomes pruned
+    // only when it can't be written any more: the session lost its ability to
+    // jump, or — bounded storage — the jump was committed (playback ran at its
+    // destination, the torrent data behind it is released). Where the pass goes
+    // is decided at each pump step by `RemuxRunPlanner.step`: on the position the
+    // player REPORTS (stable for a quarter of a second, one jump a second at
+    // most) or on an explicit decision (`commitResume`, `requestJump`), never on
+    // an HTTP request alone. The torrent is told where the pass reads
+    // (`RemuxSteering`). Without a jump none of this does anything.
+
+    /// The hidden switch (no UI): the user default `PTNativeJumpsDisabled` set
+    /// to YES turns native jumps off — the conversion then only ever runs in
+    /// file order, and resuming a film that is still downloading goes through
+    /// VLC, as before 5.3.0. Absent: native jumps are on.
+    static var nativeJumpsEnabled: Bool { !UserDefaults.standard.bool(forKey: nativeJumpsDisabledKey) }
+    static let nativeJumpsDisabledKey = "PTNativeJumpsDisabled"
+    /// Why a resume is VLC's when the switch is on (the `[Resume]` log).
+    static let nativeJumpsOffReason = "native jumps are off (\(nativeJumpsDisabledKey))"
+
+    /// Whether this remux may move its pass. Set before `start()` (main
+    /// queue); default: `nativeJumpsEnabled`.
+    var allowsNativeJumps: Bool = RemuxPlayback.nativeJumpsEnabled
+
+    /// Whether a prepared resume (`prepareResume`) can be played natively.
+    /// `.pending` until it is known: `.native` once the keyframe index is
+    /// read, the plan made and the first two segments written (the torrent
+    /// is then turned to the resume point); `.vlcOnly` as soon as something
+    /// rules a jump out, and when the index is still not read
+    /// `resumeReadinessTimeout` after the first tick. (An index that is read
+    /// while segment 1 is slow to come — a slow head — stays `.pending`
+    /// until it is written, however long: `session.jumpCapability` is then
+    /// already `.available`.) `.pending` too when no resume was prepared.
+    /// Thread-safe.
+    var resumeReadiness: NativeResumeReadiness { stateLock.withLock { lockedResumeReadiness } }
+
+    /// Called on the main queue each time `resumeReadiness` changes.
+    var onResumeReadinessChanged: ((NativeResumeReadiness) -> Void)? {
+        get { stateLock.withLock { lockedOnResumeReadiness } }
+        set { stateLock.withLock { lockedOnResumeReadiness = newValue } }
+    }
+
+    /// How long (s) after its first tick a prepared resume may stay `.pending`
+    /// without the keyframe index being read (it is not on disk, the header
+    /// does not come): it is then `.vlcOnly`.
+    static let resumeReadinessTimeout: TimeInterval = 8
+
+    /// The title has a saved position (0…1 of its length) and its file is
+    /// still downloading: prepare to resume there natively. As soon as the
+    /// first two segments are written and the session can jump, the torrent is
+    /// turned to that position's data — in both storage modes, nothing being
+    /// released for it — while the user is asked; the conversion goes on from
+    /// the head with what is on disk, and nothing is written at the position
+    /// before `commitResume()`. Main queue, before `start()`.
+    func prepareResume(atFraction fraction: Float) {
+        guard fraction.isFinite, fraction > 0, fraction < 1 else { return }
+        stateLock.withLock {
+            guard lockedResumePhase == .none else { return }
+            lockedResumePhase = .prepared
+            lockedResumeFraction = fraction
+        }
+    }
+
+    /// Where a prepared resume plays from, on the player's timeline (s): the
+    /// saved fraction of the playlists' length. nil until the resume is
+    /// `.native`. Thread-safe.
+    var resumeTargetSeconds: Double? { stateLock.withLock { lockedResumeSeconds } }
+
+    /// « Resume at … »: the pass jumps to the prepared position at once (the
+    /// next tick, started now). From now on the position wanted is the resume
+    /// point, whatever an item still loading at 0 reports (the start lock:
+    /// `updatePlaybackPositions`). Called before the readiness is known, it is
+    /// taken when the resume turns out `.native`; ignored when it is
+    /// `.vlcOnly`. Main queue.
+    func commitResume() {
+        let now = Self.uptime
+        // Bounded storage: nothing below the pass's reader is released for this
+        // jump until playback has run at its destination (`ProvisionalJump`) —
+        // from now, not from the tick that makes it.
+        let floor = session.flatMap { releaseFloor(for: $0) }
+        let ignored: String? = stateLock.withLock {
+            switch lockedResumePhase {
+            case .steering:
+                lockedResumePhase = .committed
+                lockedReleaseFloor = floor
+                if let seconds = lockedResumeSeconds { pinStartLocked(at: seconds, now: now) }
+                return nil
+            case .prepared:
+                lockedCommitRequested = true
+                return nil
+            case .none: return "no resume was prepared"
+            case .vlcOnly: return "this file resumes through VLC"
+            case .cancelled: return "the resume was cancelled"
+            case .committed, .jumped: return "already resuming"
+            }
+        }
+        if let reason = ignored {
+            logResume("no jump: \(reason)")
+            return
+        }
+        tickNow()
+    }
+
+    /// « Start from the beginning »: the prepared resume is dropped, the start
+    /// lock lifted, and the torrent turned back to where the pass reads (the
+    /// head). Main queue.
+    func cancelResume() {
+        let wasSteering: Bool = stateLock.withLock {
+            guard lockedResumePhase != .none, lockedResumePhase != .jumped else { return false }
+            let steering = lockedSteeringOffset != nil
+            if lockedStartPin != nil, lockedWantedSeconds == lockedStartPin, lockedPlayedSeconds == nil {
+                // What the lock put there: no player has reported anything.
+                lockedWantedSeconds = nil
+                lockedPositionsReportedAt = nil
+            }
+            lockedResumePhase = .cancelled
+            lockedSteeringOffset = nil
+            lockedStartPin = nil
+            lockedExplicitJump = nil
+            lockedCommitRequested = false
+            lockedReleaseFloor = nil
+            return steering
+        }
+        guard wasSteering else { return }
+        workQueue.async { [weak self] in
+            guard let self = self, !self.isStopped, let session = self.lockedSessionValue else { return }
+            let reader = session.consumedInputOffset
+            self.torrent?.setReadPosition(reader)
+            self.logResume("resume cancelled — readPosition back to \(reader)")
+        }
+    }
+
+    /// The user chose another position while the resume's start seek was in
+    /// flight (AVKit's navigation, which supersedes it): the start lock is
+    /// lifted — the positions reported from now on are the player's, not the
+    /// resume point — and a resume jump not taken yet is dropped (the
+    /// reported position decides). Main queue.
+    func releaseStartPin() {
+        let released: Bool = stateLock.withLock {
+            guard lockedStartPin != nil else { return false }
+            lockedStartPin = nil
+            if lockedExplicitJump?.reason == .resume { lockedExplicitJump = nil }
+            return true
+        }
+        if released { logResume("start lock lifted: the user chose another position during the start seek") }
+    }
+
+    /// Asks the pass to go where the player needs data now, `seconds` on its
+    /// timeline — a far target the conversion is not reaching in file order
+    /// (`FarTargetWatch`), a resume decided without a question (`.resume`,
+    /// which also sets the start lock). True: taken at the next tick, started
+    /// now — the pass jumps to the first segment still to write for that
+    /// position, or simply pumps when that is where it already is, or
+    /// everything there exists. False: no jump can serve that position — jumps
+    /// are off or impossible on this file, or its segment was pruned — and the
+    /// caller does what it did before (VLC there). Main queue.
+    @discardableResult
+    func requestJump(toPlayerSeconds seconds: Double, reason: RemuxRunPlanner.Reason) -> Bool {
+        guard seconds.isFinite, seconds >= 0, let session = session, canJump(session) else { return false }
+        if session.playerTimelineDurations() != nil {
+            let durations = Self.playerTimeline(session)
+            let target = session.targetDuration
+            let segment = Self.jumpableSegment(Self.segmentIndex(coveringPlayerSeconds: seconds, durations: durations,
+                                                                  targetDuration: target), session)
+            guard !isPruned(segment) else { return false }
+            let pruned = prunedIndexes
+            let limit = Self.lookaheadLimit(anchor: segment, durations: durations, targetDuration: target)
+            let highWater = session.progress.segmentsWritten
+            // A hole no jump can go to (none below the high-water mark should
+            // be): refused. What lies at or past the mark and is no segment of
+            // the plan — the film's last unit — is reached by pumping.
+            if let need = RemuxRunPlanner.firstWritable(in: segment..<limit, highWater: highWater,
+                                                        holes: session.missingSegments().subtracting(pruned), pruned: pruned),
+               need < highWater, need != session.nextSegmentIndex, session.jumpTarget(forSegment: need) == nil {
+                return false
+            }
+        }
+        let now = Self.uptime
+        let floor = reason == .resume ? releaseFloor(for: session) : nil
+        stateLock.withLock {
+            lockedExplicitJump = ExplicitJump(playerSeconds: seconds, reason: reason == .resume ? .resume : .requested)
+            if reason == .resume {
+                pinStartLocked(at: seconds, now: now)
+                lockedReleaseFloor = floor
+            }
+        }
+        tickNow()
+        return true
+    }
+
+    /// Media to play from `seconds` (the player's timeline) is on disk: every
+    /// segment from that position's through `cushion` seconds further exists —
+    /// neither a hole nor pruned — or, once the film's end is written, every
+    /// one from there to the end. What `StarvationPolicy.remuxDataReady` says
+    /// from the frontier alone, which a hole below the frontier fools. An
+    /// EVENT session (no duration) needs its own, longer cushion. Thread-safe.
+    func hasMedia(fromPlayerSeconds seconds: Double, cushion: Double = StarvationPolicy.remuxCushionSeconds) -> Bool {
+        guard seconds.isFinite, let session = session else { return false }
+        let durations = Self.playerTimeline(session)
+        let target = session.targetDuration
+        let written = session.progress.segmentsWritten
+        let absent = absentIndexes(session)
+        let span = session.totalDurationSeconds > 0 ? cushion : max(cushion, StarvationPolicy.eventPlaylistCushionSeconds)
+        let end = max(0, seconds) + max(0, span)
+        var index = Self.segmentIndex(coveringPlayerSeconds: max(0, seconds), durations: durations, targetDuration: target)
+        var start = Self.segmentStart(index: index, durations: durations, targetDuration: target)
+        // The position's own segment is always judged, even with no cushion at
+        // its exact start (where `start == end`).
+        repeat {
+            // Past the last segment written: only the film's end has nothing after it.
+            if index >= written { return session.isTailWritten }
+            if index > 0, absent.contains(index) { return false }
+            start += index < durations.count ? max(0, durations[index]) : max(0.5, target)
+            index += 1
+        } while start < end
+        return true
+    }
+
+    /// Media to START playing at `seconds` — a position the conversion jumped
+    /// to (a native resume, a far seek, a rewind into what a jump skipped) —
+    /// is on disk: the segment of that position and the one after it — two
+    /// segments, as for a start at 0:00 (`fireReadyIfDue`) — or, at the
+    /// film's end, what is left of it. A player makes (or re-makes) its item
+    /// there only then: AVPlayer gives up on a segment request held for
+    /// about one target duration, and on tvOS never asks for that video
+    /// segment again (`ResumePolicy.resumeAttach`, `jumpNeedsNewItem`).
+    /// Thread-safe.
+    func hasMediaToStart(fromPlayerSeconds seconds: Double) -> Bool {
+        guard seconds.isFinite, let session = session else { return false }
+        let position = max(0, seconds)
+        let durations = Self.playerTimeline(session)
+        let target = session.targetDuration
+        let index = Self.segmentIndex(coveringPlayerSeconds: position, durations: durations, targetDuration: target)
+        let start = Self.segmentStart(index: index, durations: durations, targetDuration: target)
+        let length = index < durations.count ? max(0, durations[index]) : max(0.5, target)
+        // Through the first instant of the next segment.
+        return hasMedia(fromPlayerSeconds: position, cushion: max(0, start + length - position) + 0.001)
+    }
+
+    /// What the player is told about a jump somebody waits on.
+    enum JumpState: Equatable {
+        /// The pass was moved to serve `playerSeconds`; its media is not
+        /// playing yet (the torrent turns there, the first segments are
+        /// written, AVPlayer loads them).
+        case waiting(playerSeconds: Double)
+        /// The wait is over: playback runs at `playerSeconds` — the jump's
+        /// destination, or media that exists where the player went instead.
+        case landed(playerSeconds: Double)
+        /// The jump could not be followed through (`onJumpFailed` has the
+        /// position).
+        case failed(String)
+    }
+
+    /// A jump somebody waits on is under way (from `.waiting` to `.landed` or
+    /// `.failed`): the player shows « Resuming at … » instead of a bare
+    /// spinner, and does not take the wait for a stall. Thread-safe.
+    var isJumpWaiting: Bool { stateLock.withLock { lockedJumpWait != nil } }
+
+    /// Called on the main queue at each change of that state.
+    var onJumpStateChanged: ((JumpState) -> Void)? {
+        get { stateLock.withLock { lockedOnJumpState } }
+        set { stateLock.withLock { lockedOnJumpState = newValue } }
+    }
+
+    /// Called on the main queue when a jump can't be followed through: the
+    /// index does not say true there, or nothing comes although the data is on
+    /// disk. `playerSeconds`: the position the jump was for — the caller plays
+    /// it another way (VLC there). The remux has stopped producing: `onHalted`
+    /// follows (before `onReady`, `onFailure` alone is called).
+    var onJumpFailed: ((_ reason: String, _ playerSeconds: Double) -> Void)? {
+        get { stateLock.withLock { lockedOnJumpFailed } }
+        set { stateLock.withLock { lockedOnJumpFailed = newValue } }
+    }
+
+    /// The holes: segments below the high-water mark that a jump skipped and
+    /// that may still be written (never 0 nor 1). A request for one is held
+    /// until a pass writes it. Thread-safe copy.
+    var holeIndexes: IndexSet { session.map { currentHoles($0) } ?? IndexSet() }
+
+    /// The earliest position a native rewind from `playerSeconds` reaches
+    /// (`earliestNativeRewindSeconds`) is the edge of something that was NEVER
+    /// written — the span a jump skipped (a hole, or one given up) — rather
+    /// than of segments the disk budget deleted: bounded storage then says
+    /// « not downloaded » instead of « no longer on disk ». Thread-safe.
+    func rewindFloorIsNeverWritten(fromPlayerSeconds playerSeconds: Double) -> Bool {
+        guard playerSeconds.isFinite, let session = session else { return false }
+        let durations = Self.playerTimeline(session)
+        let segment = Self.segmentIndex(coveringPlayerSeconds: max(0, playerSeconds), durations: durations,
+                                        targetDuration: session.targetDuration)
+        let missing = session.missingSegments()
+        let (pruned, neverWritten) = stateLock.withLock { (lockedPruned, lockedNeverWritten) }
+        guard let first = BoundedStorage.earliestContiguousKeptSegment(playheadSegment: segment,
+                                                                       written: session.progress.segmentsWritten,
+                                                                       pruned: pruned.union(missing)),
+              first > 0 else { return false }
+        return neverWritten.contains(first - 1) || missing.contains(first - 1)
+    }
+
+    /// Stands in for the streamer (tests: a fake torrent over a holed file).
+    /// Set before the first tick; counts as a streamer having been handed in.
+    var torrentOverride: RemuxTorrentView? {
+        didSet { if torrentOverride != nil { stateLock.withLock { lockedHadStreamer = true } } }
+    }
+
+    /// The torrent, as the remux sees it; nil for a local file (or once the
+    /// streamer is gone).
+    private var torrent: RemuxTorrentView? { torrentOverride ?? streamer.map { RemuxTorrentView.live($0) } }
+
     // BOUNDED STORAGE ---------------------------------------------------------
     // The torrent runs in PopcornTorrent's bounded mode (`PTStorageModeBounded`:
     // the film doesn't fit, only a window of it is on disk). Then, and only
@@ -374,7 +739,7 @@ final class RemuxPlayback {
     /// leaves it). Thread-safe.
     var isStorageBounded: Bool {
         if stateLock.withLock({ lockedBounded }) { return true }
-        guard streamer?.storageMode == .bounded else { return false }
+        guard torrent?.isBounded() == true else { return false }
         stateLock.withLock { lockedBounded = true }
         return true
     }
@@ -383,7 +748,9 @@ final class RemuxPlayback {
     /// in one consistent snapshot. nil before the session exists. Thread-safe.
     struct BoundedSnapshot {
         /// `MKVToHLSRemuxSession.consumedInputOffset`: the demuxer never reads
-        /// below it again.
+        /// below it again — or, while a jump is provisional (`ProvisionalJump`),
+        /// the lower offset the pass would read from again if the jump were
+        /// undone: nothing more is released until it is committed.
         var readerOffset: Int64
         /// Source offset of each written segment (its first cluster).
         var segmentSourceOffsets: [Int64]
@@ -396,7 +763,13 @@ final class RemuxPlayback {
         /// player timeline's 0.
         var timelineStartSeconds: Double
         var written: Int
+        /// Every index below `written` that is not on disk: pruned, or a hole
+        /// a jump skipped.
         var pruned: IndexSet
+        /// The part of `pruned` that was never written: holes a jump skipped,
+        /// current or given up (`lockedNeverWritten`) — never downloaded,
+        /// unlike segments the disk budget deleted.
+        var neverWritten: IndexSet
         var played: Double?
         var wanted: Double?
         /// Deletable segments on disk (written, not pruned, index ≥ 1).
@@ -413,13 +786,17 @@ final class RemuxPlayback {
         let bytes = session.segmentBytes()
         let offsets = session.segmentSourceOffsets()
         let progress = session.progress
-        let (played, wanted, pruned, allowed, rate, stopped) = stateLock.withLock {
-            (lockedPlayedSeconds, lockedWantedSeconds, lockedPruned, lockedAllowedKeptBytes, lockedBudgetRate, lockedStopped)
+        let holes = session.missingSegments()
+        let reader = session.consumedInputOffset
+        let (played, wanted, pruned, neverWritten, allowed, rate, stopped, floor) = stateLock.withLock {
+            (lockedPlayedSeconds, lockedWantedSeconds, lockedPruned.union(holes), lockedNeverWritten.union(holes),
+             lockedAllowedKeptBytes, lockedBudgetRate,
+             lockedStopped, [lockedProvisional?.floorOffset, lockedReleaseFloor].compactMap { $0 }.min())
         }
         let count = min(mediaDurations.count, bytes.count)
         var kept: Int64 = 0
         if count > 1 { for index in 1..<count where !pruned.contains(index) { kept += bytes[index] } }
-        return BoundedSnapshot(readerOffset: session.consumedInputOffset,
+        return BoundedSnapshot(readerOffset: floor.map { min($0, reader) } ?? reader,
                                segmentSourceOffsets: offsets,
                                playerDurations: Self.playerTimeline(session),
                                mediaDurations: mediaDurations,
@@ -427,10 +804,12 @@ final class RemuxPlayback {
                                timelineStartSeconds: Double(session.timelineStart90k) / 90_000,
                                written: progress.segmentsWritten,
                                pruned: pruned,
+                               neverWritten: neverWritten,
                                played: played,
                                wanted: wanted,
                                deletableKeptBytes: kept,
-                               outputBytesPerSecond: rate ?? Self.outputBytesPerSecond(segmentBytes: bytes, durations: mediaDurations),
+                               outputBytesPerSecond: rate ?? Self.outputBytesPerSecond(segmentBytes: bytes, durations: mediaDurations,
+                                                                                       excluding: holes),
                                allowedKeptBytes: allowed,
                                finished: progress.finished,
                                isStopped: stopped)
@@ -440,7 +819,8 @@ final class RemuxPlayback {
     /// `playerSeconds` reaches without a hole: the start of the first segment
     /// of the run of kept segments (written, not pruned) that holds
     /// `playerSeconds`. nil when that position's own segment is not
-    /// available (not written yet, or pruned). Any mode; thread-safe.
+    /// available (not written yet, a hole a jump skipped, or pruned). Any
+    /// mode; thread-safe.
     func earliestNativeRewindSeconds(fromPlayerSeconds playerSeconds: Double) -> Double? {
         guard playerSeconds.isFinite, let session = session else { return nil }
         let durations = Self.playerTimeline(session)
@@ -449,7 +829,7 @@ final class RemuxPlayback {
                                         targetDuration: target)
         guard let first = BoundedStorage.earliestContiguousKeptSegment(playheadSegment: segment,
                                                                        written: session.progress.segmentsWritten,
-                                                                       pruned: prunedIndexes) else { return nil }
+                                                                       pruned: absentIndexes(session)) else { return nil }
         return Self.segmentStart(index: first, durations: durations, targetDuration: target)
     }
 
@@ -514,6 +894,9 @@ final class RemuxPlayback {
     private var lockedOnUnavailable: ((Double) -> Void)?
     /// Uptime of the last `onUnavailableSegmentRequested` (coalescing).
     private var lockedLastUnavailable: TimeInterval?
+    private var lockedOnHoleRequested: ((Double, Double) -> Void)?
+    /// The last `onHoleRequested`: its segment and uptime (coalescing).
+    private var lockedLastHoleRequest: (index: Int, at: TimeInterval)?
     /// Disk budget of the latest evaluation (`allowedKeptBytes`; 0 until one
     /// succeeded), the output rate it measured (nil: none yet), when it ran
     /// (uptime; nil: never, with a known output rate) and the session's
@@ -526,6 +909,93 @@ final class RemuxPlayback {
     private var lockedLoggedAllowance: Int64?
     /// `isStorageBounded`, latched.
     private var lockedBounded = false
+
+    // Native jumps (guarded by `stateLock` too).
+
+    /// A prepared resume, from `prepareResume` to the jump.
+    private enum ResumePhase {
+        case none
+        /// Prepared; whether it can be native is not known yet.
+        case prepared
+        /// Native: the torrent is turned to the resume point (the question is up).
+        case steering
+        /// « Resume at … »: the jump is due at the next tick.
+        case committed
+        /// The pass was sent there (`lockedJumpWait` has the rest).
+        case jumped
+        /// « Start from the beginning ».
+        case cancelled
+        /// This file resumes through VLC.
+        case vlcOnly
+    }
+    private var lockedResumePhase: ResumePhase = .none
+    private var lockedResumeFraction: Float = 0
+    private var lockedResumeReadiness: NativeResumeReadiness = .pending
+    /// `resumeTargetSeconds`.
+    private var lockedResumeSeconds: Double?
+    /// `commitResume()` came before the readiness was known.
+    private var lockedCommitRequested = false
+    /// Where the torrent is turned to while a prepared resume waits for its
+    /// answer or its jump (`RemuxSteering`); nil otherwise.
+    private var lockedSteeringOffset: Int64?
+    /// The start lock: the resume point (player timeline, s) the stored
+    /// `wanted` is held at until the player reports it or playback has run
+    /// (`updatePlaybackPositions`).
+    private var lockedStartPin: Double?
+    /// An explicit decision the next tick takes (`commitResume`, `requestJump`).
+    private struct ExplicitJump {
+        var playerSeconds: Double
+        var reason: RemuxRunPlanner.Reason
+        /// Timer ticks at which the session refused the jump.
+        var refusals = 0
+    }
+    private var lockedExplicitJump: ExplicitJump?
+    /// A jump somebody waits on (`isJumpWaiting`).
+    private struct JumpWait {
+        var segment: Int
+        var playerSeconds: Double
+        var reason: RemuxRunPlanner.Reason
+        /// Uptime of the jump, and where the pass started reading.
+        var startedAt: TimeInterval
+        var readOffset: Int64
+        /// The last position PLAYED when the jump was made. A player keeps
+        /// reporting it until playback runs again: it is no landing
+        /// (`noteReportForJumps`).
+        var playedAtJump: Double?
+        var firstSegmentWritten = false
+        /// A Cluster was seen where the pass started reading.
+        var probed = false
+        /// Timer ticks in a row that produced nothing although the data the
+        /// pass reads next is on disk.
+        var stalledTicks = 0
+    }
+    private var lockedJumpWait: JumpWait?
+    /// Bounded storage: a jump is PROVISIONAL until playback has run at its
+    /// destination. Meanwhile nothing more is released (`boundedSnapshot`
+    /// reports `floorOffset` as the reader), what it skipped stays writable,
+    /// and going back before the old frontier undoes it (`resolveProvisionalJump`).
+    private struct ProvisionalJump {
+        /// The lowest offset a pass sent back to `oldFrontier` reads from.
+        var floorOffset: Int64
+        /// The pass's reader when it left.
+        var readerBefore: Int64
+        /// The segment the pass was about to write.
+        var oldFrontier: Int
+        /// The segment the latest jump went to.
+        var target: Int
+    }
+    private var lockedProvisional: ProvisionalJump?
+    /// Bounded storage: the same floor from `commitResume()` to the tick that
+    /// makes the jump (which may come a moment later).
+    private var lockedReleaseFloor: Int64?
+    /// Pruned indexes that were never written: holes given up
+    /// (`rewindFloorIsNeverWritten`).
+    private var lockedNeverWritten = IndexSet()
+    /// A tick is scheduled ahead of the timer's (`scheduleTick`).
+    private var lockedSoonTickScheduled = false
+    private var lockedOnResumeReadiness: ((NativeResumeReadiness) -> Void)?
+    private var lockedOnJumpState: ((JumpState) -> Void)?
+    private var lockedOnJumpFailed: ((String, Double) -> Void)?
     /// What the eviction never deletes behind each position (s):
     /// `minimumKeepBehindSeconds`, lowered in bounded mode when the split
     /// gives a shorter HLS rewind (`StorageBudget.protectBehindSeconds`).
@@ -564,6 +1034,22 @@ final class RemuxPlayback {
     /// (`prefetchPreferredExternalSubtitle`).
     private var prefetchedExternalKeys = Set<String>()
     private var idleTicks = 0
+    /// Native jumps: the gate of the jumps the player's position asks for;
+    /// uptime of the first tick (the `[Resume]` log's clock and the readiness
+    /// timeout) and of the moment the torrent was turned to a prepared resume;
+    /// what was logged once.
+    private var jumpGate = RemuxRunPlanner.JumpGate()
+    /// The same gate for the undoing of a provisional jump (bounded storage).
+    private var revertGate = RemuxRunPlanner.JumpGate()
+    private var firstTickAt: TimeInterval?
+    private var steeringSince: TimeInterval?
+    private var steeringSegment: Int?
+    private var loggedProbe: MatroskaDemuxer.ClusterProbe?
+    private var loggedCapability = false
+    private var loggedNotNative: String?
+    private var loggedPumpThrough = false
+    private var loggedRefusedJump: Int?
+    private var loggedInputCompleteForRun = false
 
     /// How far (s) the remux may run past its anchor (see `lookaheadAnchor`).
     /// AVPlayer always finds that much ready beyond what it asked for (the
@@ -623,6 +1109,10 @@ final class RemuxPlayback {
     /// (DEBUG end-to-end runs keep the HLS copy on the torrent's volume).
     /// Set before creating the object.
     static var outputParentOverride: URL?
+
+    /// The output directory is left on disk by `stop()` (DEBUG end-to-end
+    /// runs compare the segments two builds wrote). Default: deleted.
+    static var keepsOutputAfterStop = false
 
     deinit {
         stop()
@@ -700,8 +1190,10 @@ final class RemuxPlayback {
         // `fileLock`: a file being handed to GCDWebServer is opened first.
         let directory = outputDir
         let fileLock = self.fileLock
+        let keepsOutput = Self.keepsOutputAfterStop
         workQueue.async { [weak self] in
             if let self = self { self.stateLock.withLock { self.lockedSession = nil } }
+            guard !keepsOutput else { return }
             fileLock.withLock { _ = try? FileManager.default.removeItem(at: directory) }
         }
     }
@@ -830,10 +1322,13 @@ final class RemuxPlayback {
         case gone
     }
 
-    private static var uptime: TimeInterval { ProcessInfo.processInfo.systemUptime }
+    private static var uptime: TimeInterval { uptimeProvider?() ?? ProcessInfo.processInfo.systemUptime }
+    /// Test hook: the clock of every rule above (nil = the system uptime).
+    static var uptimeProvider: (() -> TimeInterval)?
 
     /// GCDWebServer handler thread: answers at once when possible, else holds.
-    private func handleMediaRequest(name: String, byteRange: NSRange?, completion: @escaping GCDWebServerCompletionBlock) {
+    /// (Internal: the tests ask without a server.)
+    func handleMediaRequest(name: String, byteRange: NSRange?, completion: @escaping GCDWebServerCompletionBlock) {
         let index = Self.segmentIndex(name)
         let now = Self.uptime
         // A request for a segment that exists or may still be produced
@@ -845,6 +1340,7 @@ final class RemuxPlayback {
         let resolution = self.resolution(for: request, now: now)
         if case .hold = resolution {
             hold(request)
+            if let index = index, name.hasPrefix("vseg") { noteHoleRequest(index: index) }
         } else {
             answer(request, resolution)
         }
@@ -1006,6 +1502,40 @@ final class RemuxPlayback {
         }
     }
 
+    /// A held request for video segment `index` (any thread): when it is a hole behind the position
+    /// last reported (`HoleRequestRule.isSeekBehind`), tell the player (`onHoleRequested`, main queue,
+    /// coalesced).
+    private func noteHoleRequest(index: Int) {
+        guard let session = session, index > 0, index < session.progress.segmentsWritten,
+              session.missingSegments().contains(index), !isPruned(index) else { return }
+        let durations = Self.playerTimeline(session)
+        let target = session.targetDuration
+        let (played, wanted, pinned) = stateLock.withLock { (lockedPlayedSeconds, lockedWantedSeconds, lockedStartPin != nil) }
+        let reported = HoleRequestRule.referencePosition(played: played, wanted: wanted).map {
+            RemuxRunPlanner.lowSegment(playerSeconds: $0, durations: durations, targetDuration: target)
+        }
+        guard HoleRequestRule.isSeekBehind(index: index, reportedSegment: reported, hasPlayed: played != nil,
+                                           isStartLocked: pinned) else { return }
+        let now = Self.uptime
+        let fire: Bool = stateLock.withLock {
+            guard !lockedStopped, lockedOnHoleRequested != nil else { return false }
+            if let last = lockedLastHoleRequest, last.index == index, now - last.at < Self.unavailableCoalesceInterval {
+                return false
+            }
+            lockedLastHoleRequest = (index, now)
+            return true
+        }
+        guard fire else { return }
+        let start = Self.segmentStart(index: index, durations: durations, targetDuration: target)
+        let end = Self.segmentStart(index: index + 1, durations: durations, targetDuration: target)
+        print("[Remux] hole segment \(index) requested (\(String(format: "%.1f", start))–\(String(format: "%.1f", end)) s), "
+              + "behind the position reported (segment \(reported ?? -1)) — a seek there")
+        DispatchQueue.main.async { [weak self] in
+            guard let self = self, !self.isStopped else { return }
+            self.onHoleRequested?(start, end)
+        }
+    }
+
     // MARK: - Requests for pruned segments
 
     /// What a request for a pruned segment gets (`prunedRequestDecision`).
@@ -1084,9 +1614,12 @@ final class RemuxPlayback {
         guard let session = session else { return .hold }
         let durations = Self.playerTimeline(session)
         let written = session.progress.segmentsWritten
+        // Kept segments are the evidence of where AVPlayer plays: neither the
+        // pruned ones nor the holes a jump skipped.
+        let holes = session.missingSegments()
         let (played, wanted, reportedAt, requests, pruned, protectBehind) = stateLock.withLock {
-            (lockedPlayedSeconds, lockedWantedSeconds, lockedPositionsReportedAt, lockedRecentRequests, lockedPruned,
-             lockedProtectBehind)
+            (lockedPlayedSeconds, lockedWantedSeconds, lockedPositionsReportedAt, lockedRecentRequests,
+             lockedPruned.union(holes), lockedProtectBehind)
         }
         return Self.prunedRequestDecision(index: index, durations: durations, written: written,
                                           targetDuration: session.targetDuration,
@@ -1674,8 +2207,21 @@ final class RemuxPlayback {
     /// make the demuxer take those holes for data (corrupt frames, early
     /// finish that truncates the movie). A streamer that was handed in and
     /// has since been released does not count as complete either.
+    ///
+    /// After a jump, in both storage modes, the rule is the pass's own:
+    /// everything from where it reads to the end of the file is on disk. In
+    /// full mode `totalProgress` would make the end of a resumed film wait
+    /// for the whole head the resume skipped. It is asked again at every tick
+    /// (`tick`), and a jump takes it back (`MKVToHLSRemuxSession.jump`): zeros
+    /// are « not downloaded yet » again as soon as the pass reads elsewhere.
     private var isInputComplete: Bool {
-        guard let streamer = streamer else { return !stateLock.withLock { lockedHadStreamer } }
+        guard let torrent = torrent else { return !stateLock.withLock { lockedHadStreamer } }
+        if let session = lockedSessionValue, session.hasJumped {
+            if torrent.isFileComplete() { return true }
+            let size = torrent.fileSize()
+            let reader = session.consumedInputOffset
+            return size > 0 && reader > 0 && torrent.firstMissingOffset(reader) >= size
+        }
         // Bounded mode: every byte the demuxer will still read is on disk —
         // from its position (`consumedInputOffset`, strictly forward: it never
         // reads below it again) to the end of the file. Pieces below were
@@ -1687,13 +2233,13 @@ final class RemuxPlayback {
         // after every tick). `totalProgress` there is the share downloaded
         // once, which says nothing about what is still on disk.
         if isStorageBounded {
-            if streamer.isFileComplete { return true }
+            if torrent.isFileComplete() { return true }
             guard let session = lockedSessionValue, session.isHeaderParsed else { return false }
-            let size = streamer.fileSize.longLongValue
+            let size = torrent.fileSize()
             let reader = session.consumedInputOffset
-            return size > 0 && reader > 0 && streamer.firstMissingOffset(from: reader) >= size
+            return size > 0 && reader > 0 && torrent.firstMissingOffset(reader) >= size
         }
-        return streamer.torrentStatus.totalProgress >= 1.0
+        return torrent.totalProgress() >= 1.0
     }
 
     /// Segments in one lookahead window (`lookaheadSeconds` on the target
@@ -1777,21 +2323,34 @@ final class RemuxPlayback {
                                     now: now, durations: durations, targetDuration: targetDuration)
     }
 
-    private func tick() {
+    /// One pump tick (pump queue). `timer`: the pump timer's own tick, once a
+    /// second; false for a tick started ahead of it (an explicit jump, a
+    /// position reported in a hole: `scheduleTick`), which does not count
+    /// toward the rules written in ticks (the idle ticks before `finish()`,
+    /// the waits of `prepare`, the subtitles hold of `onReady`).
+    private func tick(timer: Bool = true) {
         guard !isStopped, !failed, failureReason == nil else { return }
+        if firstTickAt == nil { firstTickAt = Self.uptime }
+        expireResumePreparation()
         if lockedSessionValue == nil {
             do {
                 let created = try MKVToHLSRemuxSession(inputFile: inputFile, outputDirectory: outputDir, options: makeOptions())
                 stateLock.withLock { lockedSession = created }
             } catch {
-                waitingTicks += 1
+                if timer { waitingTicks += 1 }
                 if waitingTicks > 90 { fail("Remux : fichier vidéo introuvable") }
                 return
             }
         }
         guard let session = lockedSessionValue else { return }
-        let inputComplete = isInputComplete
-        if inputComplete { session.markInputComplete() }
+        var inputComplete = isInputComplete
+        if inputComplete {
+            session.markInputComplete()
+        } else if session.hasJumped {
+            // The pass may have been moved since this was last true.
+            session.setInputComplete(false)
+        }
+        noteInputComplete(session, inputComplete)
 
         if !prepared {
             switch session.prepare() {
@@ -1803,8 +2362,10 @@ final class RemuxPlayback {
                 fail(reason)
                 return
             case .needMoreData:
-                waitingTicks += 1
-                if inputComplete { stalledCompleteTicks += 1 }
+                if timer {
+                    waitingTicks += 1
+                    if inputComplete { stalledCompleteTicks += 1 }
+                }
                 if !session.isHeaderParsed && waitingTicks > 90 {
                     fail("Remux : en-têtes MKV illisibles")
                 } else if waitingTicks > 240 || stalledCompleteTicks > 3 {
@@ -1812,6 +2373,20 @@ final class RemuxPlayback {
                 }
                 return
             }
+        }
+
+        // Native jumps: what the session can do, the prepared resume, a jump
+        // that failed, a provisional one to commit or undo. Nothing of it does
+        // anything in a session that neither jumped nor has a resume prepared.
+        retireHolesIfJumpsAreOver(session)
+        logJumpCapability(session)
+        applyResumePreparation(session)
+        if haltIfJumpFailed(session) { return }
+        resolveProvisionalJump(session)
+        if stateLock.withLock({ lockedExplicitJump != nil }), session.playerTimelineDurations() == nil, canJump(session) {
+            // An explicit jump before any playlist was served: its target is a
+            // segment of the planned list, which is the list from now on.
+            session.freezePlaylistFromPlan()
         }
 
         // Pump. Normal budget: 6 segments per tick (a mostly-downloaded file
@@ -1831,18 +2406,50 @@ final class RemuxPlayback {
         // raises the sticky budget anchor (`stickyBudgetAnchor`).
         // The target is read afresh at every step: the session may settle it
         // when it cuts segment 0.
+        // What each step does is `RemuxRunPlanner.step`'s answer: hold at the
+        // lookahead limit, pump at the cursor, or move the pass (`performJump`)
+        // — in a session that can't jump and never did, the first two, exactly
+        // as before the session could jump.
         let tickStart = Date()
         var anchor = currentLookaheadAnchor(session)
         enforceDiskBudget(.pump, forceEvaluation: session.isWaitingToWrite, anchor: anchor)
         var produced = 0
         var heldAtLimit = false
+        // The last `pump` stopped at its input budget, with more input to
+        // read (`MKVToHLSRemuxSession.stoppedAtInputBudget`): not the end of
+        // what is there — the loop goes on within the tick's 0.8 s, and such
+        // a tick is not idle.
+        var moreInput = false
+        var jumps = 0
         while true {
-            let before = session.progress.segmentsWritten
-            let limit = Self.lookaheadLimit(anchor: anchor, durations: Self.playerTimeline(session),
-                                            targetDuration: session.targetDuration)
-            if before >= limit { heldAtLimit = true; raiseStickyAnchor(to: anchor); break }
-            let count = session.pump(maxNewSegments: min(2, limit - before))
+            let before = session.nextSegmentIndex
+            let durations = Self.playerTimeline(session)
+            let limit = Self.lookaheadLimit(anchor: anchor, durations: durations, targetDuration: session.targetDuration)
+            var step = plannedStep(session, next: before, durations: durations, anchor: anchor, limitAnchor: limit,
+                                   allowsJump: jumps < Self.maxJumpsPerTick)
+            if case .jump(let segment, let reason) = step.step {
+                if makeJump(session, toSegment: segment, reason: reason, plan: step, timer: timer) {
+                    jumps += 1
+                    // The rule of the pass that left: the new one's is asked at the next tick.
+                    inputComplete = false
+                    anchor = currentLookaheadAnchor(session)
+                    continue
+                }
+                // Not now (the gate, a refusal): what the pump does without a
+                // jump — on in file order, or wait.
+                step = plannedStep(session, next: before, durations: durations, anchor: anchor, limitAnchor: limit,
+                                   allowsJump: false)
+            } else {
+                jumpGate.reset()
+            }
+            guard case .pump(let most) = step.step else {
+                heldAtLimit = true
+                raiseStickyAnchor(to: anchor)
+                break
+            }
+            let count = session.pump(maxNewSegments: most)
             produced += count
+            moreInput = session.stoppedAtInputBudget
             if count > 0 {
                 raiseStickyAnchor(to: anchor)
                 resolveHeldRequestsSoon()
@@ -1851,34 +2458,57 @@ final class RemuxPlayback {
                 enforceDiskBudget(.pump, forceEvaluation: true, anchor: anchor)
                 break
             }
-            if count == 0 { break }
+            if count == 0 && !moreInput { break }
             anchor = currentLookaheadAnchor(session)
             enforceDiskBudget(.pump, anchor: anchor)
-            let written = session.progress.segmentsWritten
+            let written = session.nextSegmentIndex
             if produced >= 6 && written >= anchor + 3 { break }
             if Date().timeIntervalSince(tickStart) > 0.8 { break }
         }
+        // The first two segments may just have been written: the torrent is
+        // turned to a prepared resume in this tick's report.
+        logJumpCapability(session)
+        applyResumePreparation(session)
         reportReadPosition(session)
         if let reason = session.writeFailure {
+            retireHolesIfJumpsAreOver(session)
             haltAfterWriteFailure(reason)
             return
         }
+        if haltIfJumpFailed(session) { return }
+        if trackJumpWait(session, produced: produced, moreInput: moreInput, timer: timer) { return }
 
         var progress = session.progress
         if !progress.finished {
             // Ticks held at the lookahead limit or retrying a failed write
             // say nothing about the input being exhausted: not idle (else a
-            // complete file would be finished long before its end).
-            if heldAtLimit || session.isWaitingToWrite {
+            // complete file would be finished long before its end). Nor does a
+            // tick that moved the pass, or one that was not the timer's.
+            if heldAtLimit || session.isWaitingToWrite || moreInput || jumps > 0 {
                 idleTicks = 0
-            } else {
+            } else if timer {
                 idleTicks = produced == 0 ? idleTicks + 1 : 0
+            } else if produced > 0 {
+                idleTicks = 0
             }
-            if inputComplete && idleTicks >= 3 {
+            // The film's end is written by the pass that reaches the end of the
+            // input AT the high-water mark: one filling a hole below it stops at
+            // the first segment that exists (`finish()` there would end the
+            // session without its end).
+            if inputComplete && idleTicks >= 3 && session.nextSegmentIndex == progress.segmentsWritten {
                 session.finish()
+                // A jump whose keyframe the input never had (an index that lies
+                // about the last one): failed, not a film that ends there.
+                if haltIfJumpFailed(session) { return }
                 progress = session.progress
                 stateLock.withLock { lockedFinished = true }
-                stateLock.withLock { pumpTimer?.cancel(); pumpTimer = nil }
+                if session.hasJumped { logResume("tail written (\(progress.segmentsWritten) segments)") }
+                retireHolesIfJumpsAreOver(session)
+                // With holes left, the pump goes on: a pass fills one when
+                // playback goes back into it.
+                if currentHoles(session).isEmpty || !canJump(session) {
+                    stateLock.withLock { pumpTimer?.cancel(); pumpTimer = nil }
+                }
                 if let reason = session.writeFailure {
                     haltAfterWriteFailure(reason)
                     return
@@ -1891,10 +2521,18 @@ final class RemuxPlayback {
                     return
                 }
             }
+        } else if timer, session.hasJumped, currentHoles(session).isEmpty,
+                  session.nextSegmentIndex == progress.segmentsWritten {
+            // The end is written and the last hole filled (or given up): done.
+            stateLock.withLock { pumpTimer?.cancel(); pumpTimer = nil }
         }
 
-        fireReadyIfDue(countsHoldTick: true)
+        fireReadyIfDue(countsHoldTick: timer)
     }
+
+    /// Jumps one tick makes at most (a move, then the move over what exists
+    /// it leads to; the rest waits for the next tick).
+    static let maxJumpsPerTick = 4
 
     /// How long (s) `onReady` may wait for the preferred-language
     /// OpenSubtitles file beyond the `externalSubtitlesPending` hold — only
@@ -1941,6 +2579,13 @@ final class RemuxPlayback {
         readyFired = true
         let url = URL(string: "http://127.0.0.1:\(server.port)/master.m3u8")!
         print("[Remux] playback ready: \(progress.segmentsWritten)/\(expectedSegments) segments — \(url)")
+        // The `[Start]` trace: from the stream being ready to the remux
+        // being playable (header, first segments, the subtitles hold).
+        streamer?.startTrace?.reach(.remuxPrepare, detail: "\(progress.segmentsWritten) segment(s)")
+        // `[Measure]`: how much of the file the remux read for them (its
+        // header, index and first segments: the head a resume needs).
+        streamer?.noteStartMeasure(.remuxReady, detail: "remux read \(session.consumedInputOffset) B of the file for "
+                                   + "\(progress.segmentsWritten) segment(s)")
         for line in renditionSummary { print("[Remux]   \(line)") }
         let callback = onReady
         DispatchQueue.main.async { [weak self] in
@@ -1979,7 +2624,10 @@ final class RemuxPlayback {
     private var lockedSessionValue: MKVToHLSRemuxSession? { stateLock.withLock { lockedSession } }
 
     /// A segment's files couldn't be written `maxWriteAttempts` times in a
-    /// row (disk full…). Before `onReady`: `onFailure` (VLC reads the torrent
+    /// row (disk full…), or the video can't be cut into segments any more
+    /// (`MKVToHLSRemuxSession.stopIfVideoCannotBeCut`: no keyframe for too
+    /// long), or a jump could not be followed through (`failJump`).
+    /// Before `onReady`: `onFailure` (VLC reads the torrent
     /// file itself and needs no extra disk). After it: the pump stops for
     /// good, `failureReason` is set and `onHalted(reason)` is called once on
     /// main (never after `stop()`), so the player hands over to VLC at the
@@ -2001,7 +2649,7 @@ final class RemuxPlayback {
         stateLock.withLock { pumpTimer?.cancel(); pumpTimer = nil }
         guard first else { return }
         let written = lockedSessionValue?.progress.segmentsWritten ?? 0
-        print("[Remux] write failure after playback started — remux halted at \(written) segments: \(reason)")
+        print("[Remux] remux halted after playback started, at \(written) segments: \(reason)")
         resolveHeldRequestsSoon()
         // After the onReady dispatch (same main queue, FIFO).
         DispatchQueue.main.async { [weak self] in
@@ -2021,6 +2669,901 @@ final class RemuxPlayback {
         // even if the owner lets go of this object meanwhile.
         let callback = onFailure
         DispatchQueue.main.async { callback?(message) }
+    }
+
+    // MARK: - Native jumps (pump queue unless noted)
+
+    private func logResume(_ message: String) {
+        print("[Resume] " + message)
+    }
+
+    private static func tenths(_ seconds: Double) -> String { String(format: "%.1f", seconds) }
+
+    /// Seconds since the first tick: the clock of the `[Resume]` lines.
+    private var sinceFirstTick: String { Self.tenths(Self.uptime - (firstTickAt ?? Self.uptime)) }
+
+    /// A torrent fills the input file (a streamer, or the tests' stand-in).
+    private var hasTorrent: Bool { torrentOverride != nil || streamer != nil }
+
+    /// Test hook: false, nothing starts a tick but the caller (`runTick`) —
+    /// neither an explicit jump nor a position reported in a hole.
+    var startsTicksOnDemand = true
+
+    /// Test hook: one tick, now, on the pump queue — the tests drive the pump
+    /// themselves, without `start()` (no server, no timer).
+    func runTick(timer: Bool = true) {
+        workQueue.sync { tick(timer: timer) }
+    }
+
+    /// Test hook: where the segments are written.
+    var outputDirectory: URL { outputDir }
+
+    /// The pass may be moved now: jumps are allowed (`allowsNativeJumps`), a
+    /// torrent fills the file — a local file is all there: the pump reaches
+    /// any position in file order —, the session can jump, nothing stopped.
+    /// Any thread.
+    private func canJump(_ session: MKVToHLSRemuxSession) -> Bool {
+        guard allowsNativeJumps, hasTorrent, session.jumpCapability == .available, session.jumpFailure == nil else {
+            return false
+        }
+        return stateLock.withLock { lockedHadStreamer && !lockedStopped && lockedFailureReason == nil }
+    }
+
+    /// The holes: what a jump skipped and a pass may still write. Any thread.
+    private func currentHoles(_ session: MKVToHLSRemuxSession) -> IndexSet {
+        let missing = session.missingSegments()
+        return missing.isEmpty ? missing : missing.subtracting(stateLock.withLock { lockedPruned })
+    }
+
+    /// Every index below the high-water mark that is not on disk: pruned, or
+    /// a hole. What the rules written for « pruned » take where they mean
+    /// « not there ». Any thread.
+    private func absentIndexes(_ session: MKVToHLSRemuxSession) -> IndexSet {
+        let missing = session.missingSegments()
+        let pruned = stateLock.withLock { lockedPruned }
+        return missing.isEmpty ? pruned : pruned.union(missing)
+    }
+
+    /// The start lock and the jump it goes with. `stateLock` held.
+    private func pinStartLocked(at seconds: Double, now: TimeInterval) {
+        lockedStartPin = seconds
+        lockedWantedSeconds = seconds
+        lockedPositionsReportedAt = now
+        lockedExplicitJump = ExplicitJump(playerSeconds: seconds, reason: .resume)
+    }
+
+    /// Bounded storage: the lowest offset a pass sent back to the cursor
+    /// would read from — the Cluster of the segment before it (such a pass
+    /// reads the lead-in), never above the reader. nil in full mode. Any thread.
+    private func releaseFloor(for session: MKVToHLSRemuxSession) -> Int64? {
+        guard isStorageBounded else { return nil }
+        let reader = session.consumedInputOffset
+        let offsets = session.segmentSourceOffsets()
+        let cursor = session.nextSegmentIndex
+        guard cursor >= 1, cursor - 1 < offsets.count else { return reader }
+        return min(reader, offsets[cursor - 1])
+    }
+
+    /// A tick now, ahead of the timer's (any thread).
+    private func tickNow() {
+        guard startsTicksOnDemand else { return }
+        workQueue.async { [weak self] in self?.tick(timer: false) }
+    }
+
+    /// A tick in `delay` seconds, ahead of the timer's; one at a time (any thread).
+    private func scheduleTick(after delay: TimeInterval) {
+        guard startsTicksOnDemand else { return }
+        let schedule: Bool = stateLock.withLock {
+            guard !lockedSoonTickScheduled, !lockedStopped else { return false }
+            lockedSoonTickScheduled = true
+            return true
+        }
+        guard schedule else { return }
+        workQueue.asyncAfter(deadline: .now() + max(0, delay)) { [weak self] in
+            guard let self = self else { return }
+            self.stateLock.withLock { self.lockedSoonTickScheduled = false }
+            self.tick(timer: false)
+        }
+    }
+
+    /// How long (s) after a report of a position in a hole, or ahead of the
+    /// pass, the pump looks at it (the timer's tick may be a second away).
+    static let reportedHoleTickDelay: TimeInterval = 0.3
+
+    private func setResumeReadiness(_ readiness: NativeResumeReadiness) {
+        let (changed, handler): (Bool, ((NativeResumeReadiness) -> Void)?) = stateLock.withLock {
+            guard lockedResumeReadiness != readiness else { return (false, nil) }
+            lockedResumeReadiness = readiness
+            return (true, lockedOnResumeReadiness)
+        }
+        guard changed, let handler = handler else { return }
+        DispatchQueue.main.async { [weak self] in
+            guard let self = self, !self.isStopped else { return }
+            handler(readiness)
+        }
+    }
+
+    private func notifyJumpState(_ state: JumpState) {
+        guard let handler = stateLock.withLock({ lockedOnJumpState }) else { return }
+        DispatchQueue.main.async { [weak self] in
+            guard let self = self, !self.isStopped else { return }
+            handler(state)
+        }
+    }
+
+    /// One `[Resume] not native` line per reason.
+    private func logNotNative(_ reason: String) {
+        guard loggedNotNative != reason else { return }
+        loggedNotNative = reason
+        logResume("not native: \(reason) — VLC path")
+    }
+
+    /// What the session can do, once it is known, for a torrent that may jump.
+    private func logJumpCapability(_ session: MKVToHLSRemuxSession) {
+        guard !loggedCapability, allowsNativeJumps, hasTorrent else { return }
+        switch session.jumpCapability {
+        case .pending:
+            return
+        case .available:
+            logResume("capability: native (\(session.indexedKeyframeCount) cue points, plan \(session.expectedSegmentCount) segments)")
+        case .unavailable(let reason):
+            logNotNative(reason)
+        }
+        loggedCapability = true
+    }
+
+    /// The pass's input is complete (after a jump: `isInputComplete`), once
+    /// per pass.
+    private func noteInputComplete(_ session: MKVToHLSRemuxSession, _ complete: Bool) {
+        guard session.hasJumped else { return }
+        guard complete else {
+            loggedInputCompleteForRun = false
+            return
+        }
+        guard !loggedInputCompleteForRun else { return }
+        loggedInputCompleteForRun = true
+        logResume("input complete for the run (reader \(session.consumedInputOffset), size \(torrent?.fileSize() ?? 0))")
+    }
+
+    // MARK: Prepared resume
+
+    /// A prepared resume that can't be known native in time is `.vlcOnly`
+    /// (every tick, before anything that may return early).
+    private func expireResumePreparation() {
+        guard stateLock.withLock({ lockedResumePhase == .prepared }), let start = firstTickAt else { return }
+        if !allowsNativeJumps {
+            resumeIsVLCOnly(Self.nativeJumpsOffReason)
+        } else if !hasTorrent {
+            resumeIsVLCOnly("no torrent fills this file")
+        } else if Self.uptime - start >= Self.resumeReadinessTimeout {
+            let after = "after \(Int(Self.resumeReadinessTimeout)) s"
+            guard let session = lockedSessionValue, session.isHeaderParsed else {
+                resumeIsVLCOnly("the header is not read \(after)")
+                return
+            }
+            switch session.jumpCapability {
+            case .pending: resumeIsVLCOnly("index not on disk (the keyframe index is not read \(after))")
+            case .unavailable(let reason): resumeIsVLCOnly(reason)
+            case .available:
+                // The index is read and the plan made: only segment 1 is still
+                // to come (a slow head). Native as soon as it is written.
+                break
+            }
+        }
+    }
+
+    /// This file resumes through VLC: nothing is (or stays) steered.
+    private func resumeIsVLCOnly(_ reason: String) {
+        let wasSteering: Bool = stateLock.withLock {
+            let steering = lockedSteeringOffset != nil
+            lockedResumePhase = .vlcOnly
+            lockedSteeringOffset = nil
+            lockedCommitRequested = false
+            return steering
+        }
+        logNotNative(reason)
+        if wasSteering, let session = lockedSessionValue {
+            // Back to where the pass reads: the head.
+            torrent?.setReadPosition(session.consumedInputOffset)
+        }
+        setResumeReadiness(.vlcOnly(reason))
+    }
+
+    /// The prepared resume, tick after tick: native as soon as the session can
+    /// jump and segments 0 and 1 are written (the list is then frozen from the
+    /// plan, the resume point's segment known, the torrent turned to its data);
+    /// the probe of its Cluster while the question is up; `.vlcOnly` when the
+    /// session can't jump after all.
+    private func applyResumePreparation(_ session: MKVToHLSRemuxSession) {
+        let (phase, fraction, commitRequested) = stateLock.withLock {
+            (lockedResumePhase, lockedResumeFraction, lockedCommitRequested)
+        }
+        switch phase {
+        case .prepared:
+            guard allowsNativeJumps, hasTorrent else { return }
+            switch session.jumpCapability {
+            case .pending: return
+            case .unavailable(let reason): resumeIsVLCOnly(reason); return
+            case .available: break
+            }
+            // Segments 0 and 1 first: a rebuilt player item reads them again,
+            // and bounded storage downloads nothing behind the read position.
+            guard session.progress.segmentsWritten >= MKVToHLSRemuxSession.leadingGridSlots,
+                  session.nextSegmentIndex >= MKVToHLSRemuxSession.leadingGridSlots else { return }
+            guard session.freezePlaylistFromPlan() else {
+                resumeIsVLCOnly("the playlists were frozen on estimates")
+                return
+            }
+            let length = session.playlistDurationSeconds
+            guard length > 0 else {
+                resumeIsVLCOnly("no duration")
+                return
+            }
+            let seconds = Double(fraction) * length
+            // The torrent is turned to the segment the resume point is in — the
+            // one the player's seek will load: no boundary tolerance for a
+            // position that is chosen, not reported — unless the head pass has
+            // written it already.
+            let segment = Self.segmentIndex(coveringPlayerSeconds: seconds, durations: Self.playerTimeline(session),
+                                            targetDuration: session.targetDuration)
+            let target = session.jumpTarget(forSegment: segment)
+                .flatMap { $0.segment >= session.progress.segmentsWritten ? $0 : nil }
+            let now = Self.uptime
+            let mode = isStorageBounded ? "bounded" : "full"
+            let floor = commitRequested ? releaseFloor(for: session) : nil
+            stateLock.withLock {
+                lockedResumeSeconds = seconds
+                lockedSteeringOffset = target?.readOffset
+                if commitRequested {
+                    lockedResumePhase = .committed
+                    lockedCommitRequested = false
+                    lockedReleaseFloor = floor
+                    pinStartLocked(at: seconds, now: now)
+                } else {
+                    lockedResumePhase = .steering
+                }
+            }
+            steeringSince = now
+            steeringSegment = target?.segment
+            loggedProbe = nil
+            if let target = target {
+                logResume("prepared: \(Self.tenths(seconds)) s → segment \(target.segment) "
+                          + "(player \(Self.tenths(target.playerStartSeconds)) s), keyframe offset \(target.keyframeOffset), "
+                          + "read offset \(target.readOffset), lead-in \(target.readOffset != target.keyframeOffset ? 1 : 0), mode \(mode)")
+                logResume("steering: readPosition=\(target.readOffset) (question up, +\(sinceFirstTick) s)")
+                streamer?.noteStartMeasure(.resumeSteering, detail: "read offset \(target.readOffset), segment \(target.segment)")
+            } else {
+                logResume("prepared: \(Self.tenths(seconds)) s — its segment is already written, nothing to steer, mode \(mode)")
+            }
+            setResumeReadiness(.native)
+        case .steering:
+            guard canJump(session) else {
+                if case .unavailable(let reason) = session.jumpCapability {
+                    resumeIsVLCOnly(reason)
+                } else {
+                    resumeIsVLCOnly(session.jumpFailure ?? "the conversion can't jump any more")
+                }
+                return
+            }
+            probeResumeTarget(session)
+        case .committed:
+            guard !canJump(session) else { return }
+            // Accepted, and the session can't jump any more: VLC there.
+            let seconds = stateLock.withLock { lockedResumeSeconds } ?? 0
+            var reason = session.jumpFailure ?? "the conversion can't jump any more"
+            if case .unavailable(let why) = session.jumpCapability { reason = why }
+            failJump(session, reason: reason, playerSeconds: seconds)
+        case .none, .jumped, .cancelled, .vlcOnly:
+            return
+        }
+    }
+
+    /// While the question is up: what lies where the resume's jump would read,
+    /// as soon as those bytes are there. Something else than a Cluster: the
+    /// index is wrong about this file — VLC, before the user answers.
+    private func probeResumeTarget(_ session: MKVToHLSRemuxSession) {
+        guard loggedProbe != .cluster, stateLock.withLock({ lockedSteeringOffset }) != nil,
+              let segment = steeringSegment, let target = session.jumpTarget(forSegment: segment) else { return }
+        let probe = probeJumpTarget(session, target)
+        guard probe != loggedProbe else { return }
+        loggedProbe = probe
+        let after = Self.tenths(Self.uptime - (steeringSince ?? Self.uptime))
+        switch probe {
+        case .cluster:
+            logResume("probe: Cluster at \(target.keyframeOffset) valid, \(after) s after steering")
+        case .notYet:
+            logResume("probe: Cluster at \(target.keyframeOffset) not yet, \(after) s after steering")
+        case .notACluster:
+            logResume("probe: Cluster at \(target.keyframeOffset) not a Cluster, \(after) s after steering")
+            resumeIsVLCOnly("the keyframe index does not point at a Cluster at the resume point")
+        }
+    }
+
+    /// Bytes on disk at an offset the index gives that are enough to judge what
+    /// lies there (a Cluster's header and its first child's).
+    static let probeBytes: Int64 = 4096
+
+    /// What lies where a jump to `target` reads (`MKVToHLSRemuxSession.probeJump`),
+    /// told that those bytes are on disk when the torrent says so: an index that
+    /// points into zeros is then « not a Cluster », not « not yet » for ever.
+    private func probeJumpTarget(_ session: MKVToHLSRemuxSession,
+                                 _ target: MKVToHLSRemuxSession.JumpTarget) -> MatroskaDemuxer.ClusterProbe {
+        var onDisk = false
+        if let torrent = torrent {
+            let size = torrent.fileSize()
+            func there(_ offset: Int64) -> Bool {
+                size > 0 && torrent.firstMissingOffset(offset) >= min(size, offset + Self.probeBytes)
+            }
+            onDisk = there(target.keyframeOffset) && there(target.readOffset)
+        }
+        return session.probeJump(toSegment: target.segment, knownDownloaded: onDisk)
+    }
+
+    // MARK: The pass's next step
+
+    private struct PlannedStep {
+        var step: RemuxRunPlanner.Step
+        /// The player's reported position (`wanted ?? played`).
+        var position: Double?
+        /// The explicit decision the step answers, when it is `.jump(_, .requested)`.
+        var explicit: ExplicitJump?
+        /// Why the needed segment is far (a `.farSeek` jump).
+        var farReason: String?
+        /// The segment of the player's position is on disk, and the media
+        /// that follows it runs on for at least `onMediaMargin`: a hole the
+        /// planner sends the pass to lies ahead of a player that plays on —
+        /// nobody waits on that jump (`playsOnMediaAhead`).
+        var positionOnMedia = false
+    }
+
+    /// The player at `position` (its segment `low`) plays on media that
+    /// exists for at least `targetDuration` before the first segment of its
+    /// run still to write. A player a second or so from the end of its run
+    /// reaches the hole before the pass can have written it: its jump must
+    /// be waited on (« Resuming at … », the jump-wait tracking), or on tvOS
+    /// the item that reaches the hole drops its video variant with nobody
+    /// watching (`ResumePolicy.jumpNeedsNewItem`). Pure.
+    static func playsOnMediaAhead(position: Double?, low: Int?, highWater: Int, missing: IndexSet, pruned: IndexSet,
+                                  durations: [Double], targetDuration: Double) -> Bool {
+        guard let position = position, let low = low else { return false }
+        func exists(_ index: Int) -> Bool {
+            index < highWater && !missing.contains(index) && (index == 0 || !pruned.contains(index))
+        }
+        guard exists(low) else { return false }
+        var end = low + 1
+        while exists(end) { end += 1 }
+        let runEnd = segmentStart(index: end, durations: durations, targetDuration: targetDuration)
+        return runEnd - position >= max(1, targetDuration)
+    }
+
+    /// `RemuxRunPlanner.step` on the current state. `allowsJump` false: what
+    /// the pump does without moving the pass.
+    private func plannedStep(_ session: MKVToHLSRemuxSession, next: Int, durations: [Double], anchor: Int, limitAnchor: Int,
+                             allowsJump: Bool) -> PlannedStep {
+        let target = session.targetDuration
+        let highWater = session.progress.segmentsWritten
+        let missing = session.missingSegments()
+        let jumping = allowsJump && canJump(session)
+        let (played, wanted, pruned, pending, requests) = stateLock.withLock {
+            (lockedPlayedSeconds, lockedWantedSeconds, lockedPruned, lockedExplicitJump, lockedRecentRequests)
+        }
+        let holes = missing.isEmpty ? missing : missing.subtracting(pruned)
+        let position = wanted ?? played
+        let low = position.map { seconds -> Int in
+            // A position a hair before a segment's start is that segment's (a
+            // player reports the start it settled on a hair early) — unless
+            // AVPlayer is asking for the segment before it: the position is
+            // then a seek target inside that one.
+            let tolerant = RemuxRunPlanner.lowSegment(playerSeconds: seconds, durations: durations, targetDuration: target)
+            let exact = Self.segmentIndex(coveringPlayerSeconds: seconds, durations: durations, targetDuration: target)
+            if exact < tolerant, let at = requests[exact], Self.uptime - at <= Self.requestAnchorLifetime {
+                return Self.jumpableSegment(exact, session)
+            }
+            return Self.jumpableSegment(tolerant, session)
+        }
+        let limitLow = low.map { Self.lookaheadLimit(anchor: $0, durations: durations, targetDuration: target) }
+        // An explicit decision goes to the first segment still to write for
+        // its position; none (all of it exists) or the cursor: nothing to jump to.
+        var explicit: ExplicitJump?
+        var explicitTarget: Int?
+        // (Once segments 0 and 1 are written: no jump before — the pump is on them.)
+        if jumping, let pending = pending, next >= MKVToHLSRemuxSession.leadingGridSlots,
+           highWater >= MKVToHLSRemuxSession.leadingGridSlots {
+            // The segment the player will load for that position (a chosen
+            // position: no boundary tolerance).
+            let segment = Self.jumpableSegment(Self.segmentIndex(coveringPlayerSeconds: pending.playerSeconds,
+                                                                  durations: durations, targetDuration: target), session)
+            let limit = Self.lookaheadLimit(anchor: segment, durations: durations, targetDuration: target)
+            let first = RemuxRunPlanner.firstWritable(in: segment..<limit, highWater: highWater, holes: holes, pruned: pruned)
+            if let first = first, first != next, session.jumpTarget(forSegment: first) != nil {
+                explicit = pending
+                explicitTarget = first
+            } else {
+                explicitJumpIsTaken(jumped: false)
+                // (The last case: past the last segment of the plan — the film's
+                // final unit, which only the pass at the frontier writes.)
+                logResume("no jump: " + (first == nil ? "everything from \(Self.tenths(pending.playerSeconds)) s on exists"
+                                         : first == next ? "the pass is already at segment \(next)"
+                                         : "segment \(first ?? -1) is not one the conversion can jump to — pumping toward it"))
+            }
+        }
+        var farReason: String?
+        let step = RemuxRunPlanner.step(next: next, highWater: highWater, holes: holes, pruned: pruned, low: low,
+                                        limitLow: limitLow, anchor: anchor, limitAnchor: limitAnchor, canJump: jumping,
+                                        explicitTarget: explicitTarget) { segment in
+            guard let torrent = self.torrent, let jump = session.jumpTarget(forSegment: segment) else { return false }
+            let cursorSeconds = Self.segmentStart(index: next, durations: durations, targetDuration: target)
+            let reader = session.consumedInputOffset
+            let local = torrent.firstMissingOffset(reader) >= jump.readOffset
+            let far = RemuxRunPlanner.isFarForward(cursorSeconds: cursorSeconds, targetSeconds: jump.playerStartSeconds,
+                                                   sourceLocalUpToTarget: local)
+            if far {
+                farReason = local ? "> \(Int(Self.lookaheadSeconds)) s ahead"
+                                  : "bytes missing between reader \(reader) and target \(jump.readOffset)"
+            }
+            return far
+        }
+        if jumping, case .pump = step,
+           let need = RemuxRunPlanner.need(highWater: highWater, holes: holes, pruned: pruned, low: low, limitLow: limitLow,
+                                           anchor: anchor, limitAnchor: limitAnchor), need.fromLow, need.segment > next {
+            // The player is ahead of the pass, near, and the way there is on
+            // disk (said once, until the pass has caught up).
+            if !loggedPumpThrough {
+                loggedPumpThrough = true
+                logResume(session.jumpTarget(forSegment: need.segment) == nil
+                          ? "no jump: segment \(need.segment) is past the plan's last jump point — pumping toward it"
+                          : "no jump: target \(need.segment - next) segment(s) ahead, data on disk — pumping through")
+            }
+        } else if jumping {
+            loggedPumpThrough = false
+        }
+        let positionOnMedia = Self.playsOnMediaAhead(position: position, low: low, highWater: highWater, missing: missing,
+                                                     pruned: pruned, durations: durations, targetDuration: target)
+        return PlannedStep(step: step, position: position, explicit: explicit, farReason: farReason,
+                           positionOnMedia: positionOnMedia)
+    }
+
+    /// The explicit decision is dealt with: the pass was sent there (`jumped`),
+    /// or there was nothing to jump to.
+    private func explicitJumpIsTaken(jumped: Bool) {
+        stateLock.withLock {
+            lockedExplicitJump = nil
+            lockedSteeringOffset = nil
+            if !jumped { lockedReleaseFloor = nil }
+            if lockedResumePhase == .committed { lockedResumePhase = .jumped }
+        }
+    }
+
+    /// Makes the jump the planner asked for, if it may be made now: one the
+    /// player's position asks for passes the gate first (`JumpGate`). False:
+    /// not now — the caller pumps on, or waits, as without a jump.
+    private func makeJump(_ session: MKVToHLSRemuxSession, toSegment segment: Int, reason planned: RemuxRunPlanner.Reason,
+                          plan: PlannedStep, timer: Bool) -> Bool {
+        let now = Self.uptime
+        var reason = planned
+        var playerSeconds = plan.position
+        switch planned {
+        case .requested:
+            reason = plan.explicit?.reason ?? .requested
+            playerSeconds = plan.explicit?.playerSeconds
+            _ = jumpGate.admit(segment: segment, now: now, explicit: true)
+            logResume("jump decided (\(reason.rawValue)): segment \(segment) — "
+                      + (reason == .resume ? "the resume the user accepted" : "asked by the player"))
+            streamer?.noteStartMeasure(.jumpDecided, detail: "\(reason.rawValue), segment \(segment)", segment: segment)
+        case .farSeek, .rewind:
+            guard jumpGate.admit(segment: segment, now: now, explicit: false) else {
+                if let delay = jumpGate.delayUntilAdmission(now: now) { scheduleTick(after: delay + 0.02) }
+                return false
+            }
+            logResume("jump decided (\(reason.rawValue)): segment \(segment) — "
+                      + (plan.positionOnMedia ? "a hole ahead of the player, who plays on media that exists"
+                         : planned == .rewind ? "the player is in a hole behind the pass" : (plan.farReason ?? "far")))
+            streamer?.noteStartMeasure(.jumpDecided, detail: "\(reason.rawValue), segment \(segment)", segment: segment)
+        case .skipExisting, .resume, .revert:
+            // Over what exists: nobody waits on it and nothing is re-downloaded.
+            break
+        }
+        // The planner's own jumps to a hole within the lookahead of a player
+        // that plays on media: the player waits on nothing (no « Resuming
+        // at … » over a picture that plays).
+        let playerWaits = !((planned == .farSeek || planned == .rewind) && plan.positionOnMedia)
+        guard performJump(session, toSegment: segment, reason: reason, playerSeconds: playerSeconds,
+                          playerWaits: playerWaits) else {
+            if planned == .requested, timer {
+                stateLock.withLock { lockedExplicitJump?.refusals += 1 }
+            }
+            return false
+        }
+        if planned == .requested { explicitJumpIsTaken(jumped: true) }
+        return true
+    }
+
+    /// Moves the pass (`MKVToHLSRemuxSession.jump`) and everything that goes
+    /// with it: the torrent is turned to where it now reads, at once; bounded
+    /// storage keeps what it left until playback has run at the destination
+    /// (`ProvisionalJump`); the player hears that it waits (`JumpState`),
+    /// unless `playerWaits` is false (it plays on media that exists).
+    /// False, and nothing changed, when the session refuses.
+    @discardableResult
+    private func performJump(_ session: MKVToHLSRemuxSession, toSegment segment: Int, reason: RemuxRunPlanner.Reason,
+                             playerSeconds: Double?, playerWaits: Bool = true) -> Bool {
+        let readerBefore = session.consumedInputOffset
+        let cursorBefore = session.nextSegmentIndex
+        let highWaterBefore = session.progress.segmentsWritten
+        let bounded = isStorageBounded
+        let floor = bounded ? releaseFloor(for: session) : nil
+        // Somebody waits on it, unless it is the move over what exists or the
+        // way back of an undone jump — which read the lead-in whatever the
+        // tracks (a text cue that began before is then kept too).
+        let waits = reason != .skipExisting && reason != .revert
+        guard let target = session.jump(toSegment: segment, leadIn: waits ? .automatic : .always) else {
+            if loggedRefusedJump != segment {
+                loggedRefusedJump = segment
+                logResume("no jump: the conversion can't go to segment \(segment) now (\(reason.rawValue)) — "
+                          + "cursor \(cursorBefore), high-water mark \(highWaterBefore), capability \(session.jumpCapability)")
+            }
+            return false
+        }
+        loggedRefusedJump = nil
+        loggedInputCompleteForRun = false
+        loggedPumpThrough = false
+        let now = Self.uptime
+        var provisionalFloor: Int64?
+        stateLock.withLock {
+            if bounded, waits {
+                if lockedProvisional == nil {
+                    let lowest = [floor, lockedReleaseFloor].compactMap { $0 }.min() ?? readerBefore
+                    lockedProvisional = ProvisionalJump(floorOffset: lowest, readerBefore: readerBefore,
+                                                        oldFrontier: cursorBefore, target: segment)
+                    provisionalFloor = lowest
+                } else {
+                    lockedProvisional?.target = segment
+                }
+            }
+            lockedReleaseFloor = nil
+            if waits, playerWaits {
+                lockedJumpWait = JumpWait(segment: segment, playerSeconds: playerSeconds ?? target.playerStartSeconds,
+                                          reason: reason, startedAt: now, readOffset: target.readOffset,
+                                          playedAtJump: lockedPlayedSeconds)
+            }
+        }
+        // Now, not at the end of the tick: the torrent takes seconds to turn.
+        torrent?.setReadPosition(target.readOffset)
+        let mode = bounded ? "bounded mode, provisional" : "full mode"
+        switch reason {
+        case .skipExisting:
+            logResume(segment >= highWaterBefore ? "hop to the frontier: segment \(segment)"
+                                                 : "hop over what exists: segment \(segment) (the next hole)")
+        case .revert:
+            break   // `resolveProvisionalJump` says it.
+        case .resume, .farSeek, .rewind, .requested:
+            if segment > highWaterBefore {
+                logResume("jump: segments \(highWaterBefore)…\(segment - 1) skipped as holes, segment \(segment) "
+                          + "from read offset \(target.readOffset) (reader was \(readerBefore)) — \(mode)")
+            } else if segment < cursorBefore {
+                logResume("backward jump: segment \(segment) (\(Self.tenths(target.playerStartSeconds)) s), "
+                          + "read offset \(target.readOffset) — hole, \(mode)")
+            } else {
+                logResume("jump: segment \(segment) from read offset \(target.readOffset) (reader was \(readerBefore)) "
+                          + "— a hole ahead of the pass, \(mode)")
+            }
+        }
+        if let floor = provisionalFloor { logResume("bounded: jump provisional (floor \(floor))") }
+        if waits, playerWaits { notifyJumpState(.waiting(playerSeconds: playerSeconds ?? target.playerStartSeconds)) }
+        return true
+    }
+
+    // MARK: Holes that can't be written any more
+
+    /// The session lost its ability to jump (its plan abandoned, a write or a
+    /// jump failed): what its jumps skipped will never be written. The holes
+    /// become pruned, and the rules for pruned segments take over (404 once
+    /// playback needs one, VLC there).
+    private func retireHolesIfJumpsAreOver(_ session: MKVToHLSRemuxSession) {
+        guard session.hasJumped else { return }
+        if session.jumpCapability == .available, session.jumpFailure == nil, session.writeFailure == nil { return }
+        var reason = session.jumpFailure ?? session.writeFailure ?? "the conversion can't jump any more"
+        if case .unavailable(let why) = session.jumpCapability { reason = why }
+        retireHoles(session, reason: reason)
+    }
+
+    private func retireHoles(_ session: MKVToHLSRemuxSession, reason: String) {
+        let holes = currentHoles(session)
+        stateLock.withLock {
+            lockedProvisional = nil
+            lockedReleaseFloor = nil
+            lockedPruned.formUnion(holes)
+            lockedNeverWritten.formUnion(holes)
+        }
+        guard !holes.isEmpty else { return }
+        logResume("jumps are over (\(reason)): segment(s) \(Self.rangesDescription(holes)) will never be written — pruned")
+        resolveHeldRequestsSoon()
+    }
+
+    /// A jump somebody waits on can't be followed through: the player plays
+    /// that position another way (`onJumpFailed`), and the remux stops
+    /// producing (`onHalted`; before `onReady`: `onFailure`).
+    private func failJump(_ session: MKVToHLSRemuxSession, reason: String, playerSeconds: Double) {
+        let (stateHandler, failedHandler): (((JumpState) -> Void)?, ((String, Double) -> Void)?) = stateLock.withLock {
+            lockedJumpWait = nil
+            lockedExplicitJump = nil
+            lockedSteeringOffset = nil
+            lockedStartPin = nil
+            if lockedResumePhase == .committed || lockedResumePhase == .jumped { lockedResumePhase = .vlcOnly }
+            return (lockedOnJumpState, lockedOnJumpFailed)
+        }
+        logResume("jump failed: \(reason) → VLC at \(Self.tenths(playerSeconds)) s")
+        retireHoles(session, reason: reason)
+        if readyFired {
+            DispatchQueue.main.async { [weak self] in
+                guard let self = self, !self.isStopped else { return }
+                stateHandler?(.failed(reason))
+                failedHandler?(reason, playerSeconds)
+            }
+        }
+        haltAfterWriteFailure(reason)
+    }
+
+    /// The session gave up a jump (`MKVToHLSRemuxSession.jumpFailure`: the
+    /// index does not say true there): it produces nothing more.
+    private func haltIfJumpFailed(_ session: MKVToHLSRemuxSession) -> Bool {
+        guard let reason = session.jumpFailure else { return false }
+        let seconds = stateLock.withLock { lockedJumpWait?.playerSeconds ?? lockedWantedSeconds ?? lockedPlayedSeconds } ?? 0
+        failJump(session, reason: reason, playerSeconds: seconds)
+        return true
+    }
+
+    /// Input bytes on disk past the pass's reader beyond which a tick that
+    /// produced nothing was not waiting for the download (the largest Cluster
+    /// read in one piece), and how many such timer ticks in a row fail a jump.
+    /// (The first is a test hook: a small film has no 64 MiB.)
+    static var jumpStallBytes: Int64 = 64 << 20
+    static let jumpStallTicks = 3
+
+    /// After the pump: the jump somebody waits on wrote its first segment; or
+    /// it produces nothing although its data is on disk, or the session kept
+    /// refusing an explicit one — failed (true: the remux halted).
+    private func trackJumpWait(_ session: MKVToHLSRemuxSession, produced: Int, moreInput: Bool, timer: Bool) -> Bool {
+        if let explicit = stateLock.withLock({ lockedExplicitJump }), explicit.refusals >= Self.jumpStallTicks {
+            failJump(session, reason: "the conversion could not be moved there", playerSeconds: explicit.playerSeconds)
+            return true
+        }
+        guard var wait = stateLock.withLock({ lockedJumpWait }), !wait.firstSegmentWritten else { return false }
+        let startedAt = wait.startedAt
+        if wait.segment < session.progress.segmentsWritten, !session.missingSegments().contains(wait.segment) {
+            wait.firstSegmentWritten = true
+            logResume("first segment \(wait.segment) written \(Self.tenths(Self.uptime - startedAt)) s after the jump "
+                      + "(reader +\(max(0, session.consumedInputOffset - wait.readOffset)))")
+            streamer?.noteStartMeasure(.jumpWritten, detail: "segment \(wait.segment), read from \(wait.readOffset) to "
+                                       + "\(session.consumedInputOffset)", segment: wait.segment)
+        } else if produced == 0, !wait.probed, session.jumpCapability == .available,
+                  let target = session.jumpTarget(forSegment: wait.segment) {
+            // Nothing written yet: what lies where the index sent the pass, as
+            // soon as those bytes are there.
+            switch probeJumpTarget(session, target) {
+            case .notYet:
+                return false
+            case .cluster:
+                wait.probed = true
+            case .notACluster:
+                failJump(session, reason: "the keyframe index does not point at a Cluster at \(target.readOffset)",
+                         playerSeconds: wait.playerSeconds)
+                return true
+            }
+        } else if timer {
+            var stalled = false
+            // The plan's last real segment is never cut by the pump: `finish()`
+            // writes it, three idle timer ticks after the input is complete —
+            // the very ticks this would count. It is not a stall; `finish()`
+            // fails the jump itself if its keyframe never came.
+            let isLastRealSegment = session.jumpTarget(forSegment: wait.segment) != nil
+                && session.jumpTarget(forSegment: wait.segment + 1) == nil
+            if produced == 0, !moreInput, !session.isWaitingToWrite, !isLastRealSegment, let torrent = torrent {
+                let reader = session.consumedInputOffset
+                let size = torrent.fileSize()
+                stalled = size > 0 && torrent.firstMissingOffset(reader) >= min(size, reader + Self.jumpStallBytes)
+            }
+            wait.stalledTicks = stalled ? wait.stalledTicks + 1 : 0
+        } else {
+            return false
+        }
+        let stalledTicks = wait.stalledTicks
+        stateLock.withLock {
+            // Unless the wait ended, or another jump took its place, meanwhile.
+            if lockedJumpWait?.startedAt == startedAt { lockedJumpWait = wait }
+        }
+        guard stalledTicks >= Self.jumpStallTicks else { return false }
+        failJump(session, reason: "nothing is produced at the jump's destination although its data is on disk",
+                 playerSeconds: wait.playerSeconds)
+        return true
+    }
+
+    /// A report of the player's positions (any thread): the wait of a jump
+    /// ends when playback has run at its destination — in the run of segments
+    /// written from it, at a position played SINCE the jump — or when the
+    /// player went to media that exists outside that run instead; and a
+    /// position in a hole, or ahead of the pass, gets a tick ahead of the
+    /// timer's.
+    /// The players report the last position played until playback runs again:
+    /// after a jump back, the one from before the seek. Once the holes between
+    /// the destination and it are filled, it lies in the run (a short rewind
+    /// into what a jump skipped): it, or a sample a hair after it from playback
+    /// that ran while the jump was decided, is no landing. A position played
+    /// since lies below it, or (a later seek forward) beyond it by more than a
+    /// segment.
+    private func noteReportForJumps(played: Double?, wanted: Double?) {
+        guard let session = session else { return }
+        let (wait, pinned) = stateLock.withLock { (lockedJumpWait, lockedStartPin != nil) }
+        let jumping = canJump(session)
+        guard wait != nil || (jumping && wanted != nil) else { return }
+        let durations = Self.playerTimeline(session)
+        let target = session.targetDuration
+        let highWater = session.progress.segmentsWritten
+        let missing = session.missingSegments()
+        let pruned = stateLock.withLock { lockedPruned }
+        func segment(_ seconds: Double) -> Int {
+            RemuxRunPlanner.lowSegment(playerSeconds: seconds, durations: durations, targetDuration: target)
+        }
+        func exists(_ index: Int) -> Bool {
+            index < highWater && !missing.contains(index) && (index == 0 || !pruned.contains(index))
+        }
+        /// `index` is in the run of segments on disk that starts at the jump's
+        /// destination `first` (false below it).
+        func isInRun(from first: Int, _ index: Int) -> Bool {
+            index >= first && !(first...index).contains { !exists($0) }
+        }
+        if let wait = wait {
+            /// `played` was not the position played before the jump (see above).
+            func playedSinceTheJump(_ played: Double) -> Bool {
+                guard let before = wait.playedAtJump, segment(before) >= wait.segment else { return true }
+                return played < before || played > before + max(target, 1)
+            }
+            var landedAt: Double?
+            var givenUp = false
+            if let played = played, isInRun(from: wait.segment, segment(played)), playedSinceTheJump(played) {
+                landedAt = played
+            } else if !pinned, let wanted = wanted, exists(segment(wanted)), !isInRun(from: wait.segment, segment(wanted)) {
+                landedAt = wanted
+                givenUp = true
+            }
+            if let position = landedAt {
+                let ended: Bool = stateLock.withLock {
+                    guard lockedJumpWait?.startedAt == wait.startedAt else { return false }
+                    lockedJumpWait = nil
+                    return true
+                }
+                if ended {
+                    let after = "\(Self.tenths(Self.uptime - wait.startedAt)) s after it"
+                    logResume(givenUp ? "jump to segment \(wait.segment) is not waited on any more: the player went to "
+                                        + "\(Self.tenths(position)) s, where media exists, \(after)"
+                                      : "jump to segment \(wait.segment) landed: playback ran at \(Self.tenths(position)) s, \(after)")
+                    notifyJumpState(.landed(playerSeconds: position))
+                }
+            }
+        }
+        if jumping, let wanted = wanted {
+            let low = segment(wanted)
+            if !exists(low), !pruned.contains(low), low != session.nextSegmentIndex {
+                scheduleTick(after: Self.reportedHoleTickDelay)
+            }
+        }
+    }
+
+    // MARK: Provisional jump (bounded storage)
+
+    /// Bounded storage: what becomes of the provisional jump
+    /// (`RemuxRunPlanner.provisionalOutcome`).
+    ///  - Committed once playback has run where the pass now writes: the holes
+    ///    below the pass are given up (pruned: the torrent data behind the
+    ///    reader is released from now on), and a rewind before the destination
+    ///    is blocked like any rewind past the kept media.
+    ///  - Reverted when the player goes back before the old frontier first:
+    ///    the pass returns there — to the first hole whose data is still on
+    ///    disk or ahead of what was read —, what it wrote at the destination is
+    ///    deleted and listed as holes again, and the film goes on in file order.
+    private func resolveProvisionalJump(_ session: MKVToHLSRemuxSession) {
+        guard let provisional = stateLock.withLock({ lockedProvisional }) else { return }
+        let durations = Self.playerTimeline(session)
+        let target = session.targetDuration
+        func start(_ index: Int) -> Double { Self.segmentStart(index: index, durations: durations, targetDuration: target) }
+        let cursor = session.nextSegmentIndex
+        let (played, wanted) = stateLock.withLock { (lockedPlayedSeconds, lockedWantedSeconds) }
+        let outcome = RemuxRunPlanner.provisionalOutcome(played: played, wanted: wanted,
+                                                         targetStartSeconds: start(provisional.target),
+                                                         runEndSeconds: start(max(cursor, provisional.target)),
+                                                         oldFrontierSeconds: start(provisional.oldFrontier))
+        if outcome != .revert { revertGate.reset() }
+        switch outcome {
+        case .keep:
+            return
+        case .commit:
+            let below = session.missingSegments().intersection(IndexSet(integersIn: 0..<cursor))
+            let givenUp: IndexSet = stateLock.withLock {
+                let holes = below.subtracting(lockedPruned)
+                lockedPruned.formUnion(holes)
+                lockedNeverWritten.formUnion(holes)
+                lockedProvisional = nil
+                return holes
+            }
+            logResume("bounded: jump committed (played \(Self.tenths(played ?? 0)) s)"
+                      + (givenUp.isEmpty ? "" : " — segment(s) \(Self.rangesDescription(givenUp)) given up"))
+            resolveHeldRequestsSoon()
+        case .revert:
+            guard let position = wanted else { return }
+            let low = RemuxRunPlanner.lowSegment(playerSeconds: position, durations: durations, targetDuration: target)
+            guard revertGate.admit(segment: low, now: Self.uptime, explicit: false) else {
+                if let delay = revertGate.delayUntilAdmission(now: Self.uptime) { scheduleTick(after: delay + 0.02) }
+                return
+            }
+            revertProvisionalJump(session, provisional, wanted: position)
+        }
+    }
+
+    private func revertProvisionalJump(_ session: MKVToHLSRemuxSession, _ provisional: ProvisionalJump, wanted: Double) {
+        let highWater = session.progress.segmentsWritten
+        let offsets = session.segmentSourceOffsets()
+        let pruned = stateLock.withLock { lockedPruned }
+        let holes = session.missingSegments().subtracting(pruned)
+        // Where the pass goes back to: the old frontier, unless what it would
+        // read there was released before the jump (a tight budget keeps little
+        // behind the reader) — then the first hole that can still be read.
+        // What lies before it is lost.
+        var lost = IndexSet()
+        var back: Int?
+        var candidate = holes.integerGreaterThanOrEqualTo(provisional.oldFrontier)
+        while let hole = candidate, back == nil, lost.count < 8 {
+            let readFrom = hole >= 1 && hole - 1 < offsets.count ? offsets[hole - 1] : provisional.readerBefore
+            if readFrom >= provisional.readerBefore
+                || (torrent?.firstMissingOffset(readFrom) ?? readFrom) >= provisional.readerBefore {
+                back = hole
+            } else {
+                lost.insert(hole)
+                candidate = holes.integerGreaterThan(hole)
+            }
+        }
+        guard let destination = back,
+              performJump(session, toSegment: destination, reason: .revert, playerSeconds: nil) else { return }
+        // What the pass wrote past the old frontier: deleted, holes again.
+        var island = IndexSet(integersIn: min(destination, highWater)..<highWater)
+        island.subtract(session.missingSegments())
+        island.subtract(pruned)
+        // Under the eviction passes' lock: none takes one of these for a
+        // segment to prune while it becomes a hole.
+        let taken = pruneLock.withLock { session.markMissing(island) }
+        deleteSegmentFiles(session, taken)
+        let hadWait: Bool = stateLock.withLock {
+            lockedPruned.formUnion(lost)
+            lockedNeverWritten.formUnion(lost)
+            lockedProvisional = nil
+            defer { lockedJumpWait = nil }
+            return lockedJumpWait != nil
+        }
+        logResume("bounded: jump reverted (wanted \(Self.tenths(wanted)) s) — the pass is back at segment \(destination)"
+                  + (taken.isEmpty ? "" : ", segment(s) \(Self.rangesDescription(taken)) deleted")
+                  + (lost.isEmpty ? "" : ", segment(s) \(Self.rangesDescription(lost)) lost (their data was released)"))
+        if hadWait { notifyJumpState(.landed(playerSeconds: wanted)) }
+        resolveHeldRequestsSoon()
+    }
+
+    /// (prefix, extension) of the media files of one segment index, every rendition.
+    private func segmentFileNames(_ session: MKVToHLSRemuxSession) -> [(String, String)] {
+        [session.video?.segmentPrefix ?? "vseg"].map { ($0, "m4s") }
+            + session.audioRenditions.map { ($0.segmentPrefix, "m4s") }
+            + session.subtitleRenditions.map { ($0.segmentPrefix, "vtt") }
+    }
+
+    /// Deletes the files of these segments (each index under `fileLock`: a
+    /// file being served is opened first).
+    private func deleteSegmentFiles(_ session: MKVToHLSRemuxSession, _ indexes: IndexSet) {
+        let names = segmentFileNames(session)
+        let fm = FileManager.default
+        for index in indexes {
+            fileLock.withLock {
+                for (prefix, ext) in names {
+                    try? fm.removeItem(at: outputDir.appendingPathComponent("\(prefix)\(index).\(ext)"))
+                }
+            }
+        }
     }
 
     // MARK: - Segment pruning
@@ -2075,6 +3618,16 @@ final class RemuxPlayback {
     /// Index of the segment whose span [start, end) holds `playerSeconds`
     /// (0-based) on the player timeline `durations` (`playerTimeline`) —
     /// past its end: estimated on the target grid.
+    /// `index` — a segment of the player's timeline a jump may be decided for
+    /// — brought back to the plan's last real segment when it lies past it: a
+    /// position at or past the end of the list, or in the film's last frame
+    /// unit (which only the pass that finishes writes), is served by a jump to
+    /// the last segment a jump can go to, not by the whole download in order.
+    static func jumpableSegment(_ index: Int, _ session: MKVToHLSRemuxSession) -> Int {
+        guard let last = session.lastJumpableSegment else { return index }
+        return min(index, last)
+    }
+
     static func segmentIndex(coveringPlayerSeconds playerSeconds: Double, durations: [Double], targetDuration: Double) -> Int {
         var elapsed = 0.0
         for (index, duration) in durations.enumerated() {
@@ -2158,6 +3711,10 @@ final class RemuxPlayback {
         case .afterEvaluation: break
         }
         // Segment spans and positions on the player timeline; bytes as written.
+        // The holes a jump skipped are not on disk: neither counted nor
+        // evicted (read before the bytes: a hole a pass fills meanwhile stays
+        // out of this pass's victims).
+        let holes = session.missingSegments()
         let durations = Self.playerTimeline(session)
         let bytes = session.segmentBytes()
         let target = session.targetDuration
@@ -2183,9 +3740,17 @@ final class RemuxPlayback {
             // written again (the remux reads forward, and the torrent data
             // there is released): behind it goes first. Full mode: unchanged.
             let boundedPlayhead = isStorageBounded ? [played, wanted].compactMap { $0 }.min() : nil
-            let victims = Self.evictionVictims(durations: durations, segmentBytes: bytes, pruned: pruned,
+            var victims = Self.evictionVictims(durations: durations, segmentBytes: bytes,
+                                               pruned: holes.isEmpty ? pruned : pruned.union(holes),
                                                positions: positions, allowedKeptBytes: allowed,
                                                protectBehind: protectBehind, behindFirstOf: boundedPlayhead)
+            if !victims.isEmpty, session.hasJumped {
+                // A segment an undone jump took back since the bytes were read
+                // (`revertProvisionalJump`, under this lock too) is a hole now,
+                // not something to prune.
+                let missing = session.missingSegments()
+                victims.removeAll { missing.contains($0) }
+            }
             guard !victims.isEmpty else { return ([], allowed, positions, pruned) }
             let evicted = IndexSet(victims)
             stateLock.withLock { lockedPruned.formUnion(evicted) }
@@ -2395,13 +3960,25 @@ final class RemuxPlayback {
     /// written so far — the larger of the whole output's average and the
     /// average of the `kept` segments (the span the budget keeps on disk), so
     /// a budget over high-bitrate scenes isn't sized with a lower overall
-    /// average. nil until a second of media is written.
-    static func outputBytesPerSecond(segmentBytes: [Int64], durations: [Double], kept: Range<Int>? = nil) -> Double? {
+    /// average. nil until a second of media is written. `holes`: indexes a
+    /// jump skipped — listed with their planned duration and 0 byte, they are
+    /// left out of both averages (they would divide the rate).
+    static func outputBytesPerSecond(segmentBytes: [Int64], durations: [Double], kept: Range<Int>? = nil,
+                                     excluding holes: IndexSet = IndexSet()) -> Double? {
         let count = min(segmentBytes.count, durations.count)
         guard count > 0 else { return nil }
         func average(_ range: Range<Int>) -> Double? {
-            let seconds = durations[range].reduce(0, +)
-            let bytes = segmentBytes[range].reduce(0, +)
+            var seconds = 0.0
+            var bytes: Int64 = 0
+            if holes.isEmpty {
+                seconds = durations[range].reduce(0, +)
+                bytes = segmentBytes[range].reduce(0, +)
+            } else {
+                for index in range where !holes.contains(index) {
+                    seconds += durations[index]
+                    bytes += segmentBytes[index]
+                }
+            }
             guard seconds >= 1, bytes > 0 else { return nil }
             return Double(bytes) / seconds
         }
@@ -2444,8 +4021,8 @@ final class RemuxPlayback {
     /// while a streamer is attached (a preallocated torrent file has its full
     /// size from the start, its missing pieces take no space yet), else 0.
     private var remainingTorrentBytes: Int64 {
-        guard let streamer = streamer else { return 0 }
-        let progress = Double(streamer.torrentStatus.totalProgress)
+        guard let torrent = torrent else { return 0 }
+        let progress = Double(torrent.totalProgress())
         let size = ((try? FileManager.default.attributesOfItem(atPath: inputFile.path))?[.size] as? NSNumber)?.int64Value ?? 0
         guard size > 0, progress.isFinite else { return 0 }
         return Int64(Double(size) * min(1, max(0, 1 - progress)))
@@ -2492,16 +4069,19 @@ final class RemuxPlayback {
     private func evaluateDiskBudget() {
         guard let session = session else { return }
         let writtenBytes = session.bytesWritten
+        let holes = session.missingSegments()
         let durations = session.segmentDurations()
         let bytes = session.segmentBytes()
         let pruned = stateLock.withLock { lockedPruned }
         // Every segment on disk the budget could delete: all written ones but
-        // segment 0 and the pruned ones.
+        // segment 0, the pruned ones and the holes a jump skipped.
         let count = min(durations.count, bytes.count)
         var kept = IndexSet(integersIn: min(1, count)..<count)
         kept.subtract(pruned)
+        kept.subtract(holes)
         let span = kept.first.flatMap { first in kept.last.map { first..<($0 + 1) } }
-        guard let rate = Self.outputBytesPerSecond(segmentBytes: bytes, durations: durations, kept: span) else { return }
+        guard let rate = Self.outputBytesPerSecond(segmentBytes: bytes, durations: durations, kept: span,
+                                                   excluding: holes) else { return }
         let keptBytes = kept.reduce(Int64(0)) { $0 + bytes[$1] }
         if isStorageBounded, let boundedSession = boundedSession {
             evaluateBoundedDiskBudget(boundedSession, writtenBytes: writtenBytes, keptBytes: keptBytes, rate: rate)
@@ -2559,17 +4139,49 @@ final class RemuxPlayback {
         }
     }
 
-    /// Bounded mode: tells the torrent where the remux reads next (pump
-    /// queue, after each tick): the window follows the reader. Never in full
-    /// mode (PopcornTorrent's own window, unchanged).
+    /// Tells the torrent where to download next (pump queue, after each
+    /// tick; `RemuxSteering.readPosition`): in bounded mode where the remux
+    /// reads — the window follows the reader; in both modes the resume point
+    /// while a prepared resume waits, then the pass's reader once a jump was
+    /// made. Never in full mode for a film played in file order
+    /// (PopcornTorrent's own window, unchanged).
     private func reportReadPosition(_ session: MKVToHLSRemuxSession) {
-        guard isStorageBounded, let streamer = streamer else { return }
-        let offset = session.consumedInputOffset
-        if offset > 0 { streamer.readPosition = offset }
+        guard let torrent = torrent else { return }
+        let (stopped, prepared) = stateLock.withLock { (lockedStopped, lockedSteeringOffset) }
+        guard let offset = RemuxSteering.readPosition(isStopped: stopped, preparedOffset: prepared,
+                                                      isBounded: isStorageBounded, hasJumped: session.hasJumped,
+                                                      readerOffset: session.consumedInputOffset) else { return }
+        torrent.setReadPosition(offset)
     }
 
     var statsSummary: String {
         guard let session = session else { return "préparation…" }
         return session.statsSummary
+    }
+}
+
+/// What the remux asks of the torrent that fills its input file — the
+/// streamer's own calls, as closures so that a test can stand in for it.
+struct RemuxTorrentView {
+    /// `PTTorrentStreamer.readPosition`: where to download next.
+    var setReadPosition: (Int64) -> Void
+    /// `firstMissingOffset(from:)`: the first offset at or after the
+    /// argument that is not on disk (the file size when all is).
+    var firstMissingOffset: (Int64) -> Int64
+    var fileSize: () -> Int64
+    /// The stream runs in bounded storage.
+    var isBounded: () -> Bool
+    /// `torrentStatus.totalProgress`.
+    var totalProgress: () -> Float
+    /// Every byte of the file is on disk now.
+    var isFileComplete: () -> Bool
+
+    static func live(_ streamer: PTTorrentStreamer) -> RemuxTorrentView {
+        RemuxTorrentView(setReadPosition: { streamer.readPosition = $0 },
+                         firstMissingOffset: { streamer.firstMissingOffset(from: $0) },
+                         fileSize: { streamer.fileSize.longLongValue },
+                         isBounded: { streamer.storageMode == .bounded },
+                         totalProgress: { streamer.torrentStatus.totalProgress },
+                         isFileComplete: { streamer.isFileComplete })
     }
 }

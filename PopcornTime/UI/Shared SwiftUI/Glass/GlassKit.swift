@@ -134,6 +134,21 @@ private struct GlassActionStyleModifier: ViewModifier {
     @Environment(\.glassFallback) private var fallback
 
     func body(content: Content) -> some View {
+        #if os(tvOS)
+        // The Apple TV's main button (the Home's Play, the page's Play, Try
+        // Again): neutral glass like its neighbours at rest, solid white
+        // with black type once focused, as everywhere on Apple TV. The
+        // system's prominent glass was red at rest and turned light grey
+        // with the focus — the focused button looked dimmer than the
+        // unfocused one. Red stays a small accent (progress, "new" pills).
+        if prominent {
+            content.buttonStyle(GlassPrimaryButtonStyle())
+        } else if #available(tvOS 26.0, *), !fallback {
+            content.buttonStyle(.glass)
+        } else {
+            content.buttonStyle(.bordered)
+        }
+        #else
         if #available(tvOS 26.0, macOS 26.0, *), !fallback {
             if prominent {
                 content.buttonStyle(.glassProminent).tint(GlassPalette.accent)
@@ -147,6 +162,7 @@ private struct GlassActionStyleModifier: ViewModifier {
                 content.buttonStyle(.bordered)
             }
         }
+        #endif
     }
 }
 
@@ -248,11 +264,101 @@ extension EnvironmentValues {
 }
 
 #if os(tvOS)
-/// Poster / episode cards: the system .card style (lift, parallax, glassy
-/// platter on tvOS 26+), available on every supported tvOS.
+/// Poster / episode cards (the Home's rows, See All, the page's episodes and
+/// related titles): `GlassPosterButtonStyle`.
 extension View {
     func glassCardStyle() -> some View {
-        buttonStyle(.card)
+        buttonStyle(GlassPosterButtonStyle())
+    }
+}
+
+/// A card's artwork that stands out once focused. The system `.card` style
+/// laid a translucent glass platter over the picture on tvOS 26: the
+/// focused poster was dimmed, without a clear shadow, and no more visible
+/// than a white poster beside it. Here the picture is never veiled; the
+/// focus lifts it (1.10), casts a dark shadow and rings it in white, with a
+/// thin dark edge that keeps the ring visible on a white poster. Without
+/// motion under Reduce Motion.
+struct GlassPosterButtonStyle: ButtonStyle {
+    static let cornerRadius: CGFloat = 14
+    static let focusScale: CGFloat = 1.10
+
+    func makeBody(configuration: Configuration) -> some View {
+        PosterBody(configuration: configuration)
+    }
+
+    private struct PosterBody: View {
+        let configuration: ButtonStyleConfiguration
+        @Environment(\.isFocused) private var isFocused
+        @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+        var body: some View {
+            let shape = RoundedRectangle(cornerRadius: GlassPosterButtonStyle.cornerRadius, style: .continuous)
+            configuration.label
+                .clipShape(shape)
+                .overlay {
+                    ZStack {
+                        shape.strokeBorder(Color.black.opacity(0.6), lineWidth: 2)
+                        shape.inset(by: 2).strokeBorder(Color.white, lineWidth: 4)
+                    }
+                    .opacity(isFocused ? 1 : 0)
+                }
+                .scaleEffect(configuration.isPressed ? 1.04 : (isFocused ? GlassPosterButtonStyle.focusScale : 1))
+                .shadow(color: .black.opacity(isFocused ? 0.6 : 0), radius: 30, y: 16)
+                .animation(reduceMotion ? nil : .easeOut(duration: 0.2), value: isFocused)
+                .animation(reduceMotion ? nil : .easeOut(duration: 0.1), value: configuration.isPressed)
+        }
+    }
+}
+
+/// The Apple TV's main button (`glassActionStyle(prominent: true)`): the
+/// size of a system glass button; at rest the same neutral glass as its
+/// neighbours, white type; focused, solid white with black type, a lift and
+/// a shadow. The glass never changes with the focus (a glass that changes
+/// on focus logs "glassEffect() tried to update multiple times per frame"):
+/// the white fill fades in over it.
+struct GlassPrimaryButtonStyle: ButtonStyle {
+    static let focusScale: CGFloat = 1.06
+
+    func makeBody(configuration: Configuration) -> some View {
+        PrimaryBody(configuration: configuration)
+    }
+
+    private struct PrimaryBody: View {
+        let configuration: ButtonStyleConfiguration
+        @Environment(\.isFocused) private var isFocused
+        @Environment(\.glassFallback) private var fallback
+        @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+        var body: some View {
+            // The system glass button's own margins (measured on tvOS 26.5:
+            // the same label is 249 × 74 pt in both).
+            configuration.label
+                .padding(.horizontal, 26)
+                .padding(.vertical, 15)
+                .foregroundStyle(isFocused ? Color.black : Color.white)
+                .background {
+                    ZStack {
+                        surface
+                        Capsule().fill(Color.white).opacity(isFocused ? 1 : 0)
+                    }
+                }
+                .contentShape(Capsule())
+                .scaleEffect(configuration.isPressed ? 1.02 : (isFocused ? GlassPrimaryButtonStyle.focusScale : 1))
+                .shadow(color: .black.opacity(isFocused ? 0.45 : 0), radius: 20, y: 12)
+                .animation(reduceMotion ? nil : .easeOut(duration: 0.2), value: isFocused)
+                .animation(reduceMotion ? nil : .easeOut(duration: 0.1), value: configuration.isPressed)
+        }
+
+        @ViewBuilder
+        private var surface: some View {
+            if #available(tvOS 26.0, *), !fallback {
+                Color.clear.glassEffect(.regular, in: Capsule())
+            } else {
+                Capsule().fill(.ultraThinMaterial)
+                Capsule().strokeBorder(Color.white.opacity(0.14), lineWidth: 1)
+            }
+        }
     }
 }
 #endif
@@ -405,10 +511,14 @@ struct GlassPosterCard: View {
     /// Corner radius and placeholder title size (Apple TV values by default).
     var cornerRadius: CGFloat = 26
     var placeholderFont: Font = GlassFont.bodyEmphasis
+    /// Longest side the poster is decoded at, in pixels (nil: twice the
+    /// width, the Apple TV's value). A caller on a 3× screen passes the
+    /// card's height in its pixels.
+    var maxPixelSize: CGFloat? = nil
 
     var body: some View {
         let shape = RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-        GlassRemoteImage(url: url, maxPixelSize: width * 2) {
+        GlassRemoteImage(url: url, maxPixelSize: maxPixelSize ?? width * 2) {
             ZStack {
                 Color.white.opacity(0.08)
                 Text(verbatim: title)

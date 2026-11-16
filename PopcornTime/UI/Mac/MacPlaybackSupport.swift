@@ -12,10 +12,15 @@ struct MacPendingPlayback: Identifiable {
     /// lighter release (a download slower than the video). Empty:
     /// `media.torrents`.
     var sources: [Torrent] = []
-    /// 0…1 position to start at — a switch to a lighter release resumes
-    /// where the other one was; 0: from the beginning (the Mac does not
-    /// resume otherwise).
+    /// 0…1 position the user already chose to start at — a switch to a
+    /// lighter release continues where the other one was; 0: the player
+    /// starts at the title's saved position, if any (`ResumePolicy.start`).
     var startFraction: Float = 0
+    /// A release remembered for the title (« Resume », a Home card:
+    /// `MacUpNextResume`): seconds without a peer before the loading screen
+    /// offers another source (decision D5, `UpNextResume.patience`) — and the
+    /// release is forgotten then, or when it fails. nil: the usual 45 s.
+    var patience: TimeInterval?
 
     /// `sources`, else the media's own list (DEBUG: plus
     /// `-PTDebugLighterTorrent`), each with the media's runtime when it has
@@ -70,6 +75,11 @@ struct MacQualityPickerSheet: View {
 /// The "Auto Select Quality" setting (MacSettingsView, key
 /// "autoSelectQuality"), applied the same way as the iOS page.
 enum MacAutoQuality {
+    /// The setting picks a release itself (anything but "Always Ask").
+    static var picksAlone: Bool {
+        !(UserDefaults.standard.string(forKey: "autoSelectQuality") ?? "Balanced").isEmpty
+    }
+
     /// The torrent to play without asking, or nil when the setting is
     /// "Always Ask" ("") and the picker must be shown.
     static func pick(from torrents: [Torrent], defaults: UserDefaults = .standard) -> Torrent? {
@@ -89,17 +99,29 @@ enum MacAutoQuality {
     }
 }
 
-/// Saves how far the Mac players got when they close. The Mac does not
-/// resume: this exists so that ≥ 80 % marks the movie / episode watched
-/// (WatchedlistManager.setCurrentProgress) and the show page's "up next"
-/// advances. Same rules as the iOS players (VideoPlayerWrapper
+/// Saves how far the Mac players got: when they close, and every 30 s of
+/// native playback (`isCheckpointDue`). The next play resumes there
+/// (`ResumePolicy.start`), ≥ 80 % marks the movie / episode watched
+/// (WatchedlistManager.setCurrentProgress), the show page's "up next"
+/// advances and the title has its Continue Watching entry (`PlaybackRecorder`).
+/// Same rules as the iOS players (VideoPlayerWrapper
 /// `saveProgressIfNeeded`, VLCWatchProgress): the session protects its
 /// `resumePoint` — read when the player opens, nothing for a finished
 /// title — and a smaller fraction replaces it only when the session played
 /// past it (`highWater`, the furthest position reached;
 /// `ResumePolicy.progressToSave`).
 enum MacPlaybackProgress {
-    /// The native player at close: `fraction` where it stopped.
+    /// One player at a time on the Mac, ticking on the main thread.
+    private static var checkpoint = PlaybackCheckpoint()
+
+    /// From a player's 1 Hz tick: true every 30 s (`PlaybackCheckpoint`) —
+    /// time to save the position, so a crash or a forced quit loses half a
+    /// minute of an uninterrupted session, not all of it.
+    static func isCheckpointDue() -> Bool {
+        checkpoint.isDue()
+    }
+
+    /// The native player at close (or at a checkpoint): `fraction` where it is.
     static func save(_ fraction: Float, for media: Media, resumePoint: Float, highWater: Float) {
         guard fraction.isFinite, fraction > 0 else { return }
         let current = min(fraction, 1)
@@ -128,11 +150,7 @@ enum MacPlaybackProgress {
     /// the VLC fallback's own check, MacVLCController.stop).
     static func store(_ value: Float, for media: Media) {
         guard value.isFinite, value > 0 else { return }
-        let fraction = min(value, 1)
-        if let movie = media as? Movie {
-            WatchedlistManager<Movie>.movie.setCurrentProgress(fraction, for: movie.id, with: .finished)
-        } else if let episode = media as? Episode {
-            WatchedlistManager<Episode>.episode.setCurrentProgress(fraction, for: episode.id, with: .finished)
-        }
+        // With the titles: the Continue Watching entry.
+        PlaybackRecorder.save(min(value, 1), of: media, status: .finished)
     }
 }

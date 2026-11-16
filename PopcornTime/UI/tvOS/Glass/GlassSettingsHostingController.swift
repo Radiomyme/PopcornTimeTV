@@ -18,6 +18,8 @@ final class GlassSettingsHostingController: UIHostingController<GlassSettingsVie
             setSubtitleLanguage: { GlassSettingsStore.store(languageCode: $0, forKey: PlaybackLanguagePreferences.subtitleLanguageDefaultsKey) },
             setThemeSongs: { GlassSettingsStore.themeSongs = $0 },
             readThemeSongs: { GlassSettingsStore.themeSongs },
+            setAutoPlayNext: { UpNextPreferences.autoPlayNext = $0 },
+            readAutoPlayNext: { UpNextPreferences.autoPlayNext },
             measureCache: { GlassSettingsStore.cacheSize() },
             clearCache: { AppDelegate.aggressivelyFreeDiskSpace() },
             hasActiveDownloads: { !PTTorrentDownloadManager.shared().activeDownloads.isEmpty },
@@ -26,7 +28,11 @@ final class GlassSettingsHostingController: UIHostingController<GlassSettingsVie
             showWhatsNew: {
                 guard let root = AppDelegate.shared.window?.rootViewController else { return }
                 WhatsNewPresenter.present(from: root)
-            })
+            },
+            readHome: { GlassSettingsStore.home },
+            setHomeLanguages: { GlassSettingsStore.store(homeLanguages: $0) },
+            setHiddenHomeShelves: { GlassSettingsStore.store(hiddenHomeShelves: $0) },
+            setGroupedEpisodeLookup: { GlassSettingsStore.store(groupedEpisodeLookup: $0) })
 
         let audio = PlaybackLanguagePreferences.preferredAudioLanguageCode
         let subtitles = PlaybackLanguagePreferences.preferredSubtitleLanguageCode
@@ -37,7 +43,23 @@ final class GlassSettingsHostingController: UIHostingController<GlassSettingsVie
                                    version: Bundle.main.displayVersion,
                                    languages: GlassSettingsStore.languages(including: [audio, subtitles]),
                                    actions: actions)
+        #if DEBUG
+        // `-PTDebugSettingsRow <row>` (homeLanguages, homeShelves, homeLookup):
+        // the row that takes the focus; `-PTDebugSettingsPicker <picker>`
+        // (homeLanguages, homeShelves…): the sheet open at first display.
+        let row: GlassSettingsRowID
+        switch UserDefaults.standard.string(forKey: "PTDebugSettingsRow") {
+        case "homeLanguages": row = .homeLanguages
+        case "homeShelves": row = .homeShelves
+        case "homeLookup": row = .homeLookup
+        case "autoPlayNext": row = .autoPlayNext
+        default: row = .quality
+        }
+        let picker = UserDefaults.standard.string(forKey: "PTDebugSettingsPicker").flatMap(GlassSettingsPicker.init(rawValue:))
+        super.init(rootView: GlassSettingsView(model: model, initialPicker: picker, defaultFocusRow: row))
+        #else
         super.init(rootView: GlassSettingsView(model: model))
+        #endif
     }
 
     @available(*, unavailable, message: "Created in code by TVTabBarController")
@@ -128,6 +150,68 @@ enum GlassSettingsStore {
     static var themeSongs: Bool {
         get { defaults.float(forKey: "themeSongVolume") > 0 }
         set { defaults.set(newValue ? themeSongOnVolume : 0, forKey: "themeSongVolume") }
+    }
+
+    // MARK: Home ("popcornkit.home.contentLanguages", "popcornkit.home.hiddenShelves", "libraryBulkEpisodeLookup")
+
+    /// Languages a title is often shot in, offered as content languages
+    /// next to the ones already chosen and the device's.
+    private static let homeLanguageCodes = [
+        "en", "fr", "es", "de", "it", "pt", "nl", "sv", "da", "no", "fi", "pl", "cs", "hu", "ro", "el", "tr", "ru", "uk",
+        "ar", "he", "fa", "hi", "ta", "te", "ml", "bn", "ja", "ko", "zh", "th", "vi", "id",
+    ]
+
+    /// The Home tab's settings as the hub reads them (`HomeSettings`), with
+    /// the choices the page offers.
+    @MainActor
+    static var home: GlassSettingsHome {
+        let settings = HomeSettings(defaults: defaults)
+        let languages = settings.contentLanguages
+        var codes = homeLanguageCodes
+        for code in languages + HomeSettings.defaultLanguages(device: Locale.preferredLanguages) where !codes.contains(code) {
+            codes.append(code)
+        }
+        let locale = Locale.current
+        let languageChoices = codes.map { code in
+            GlassSettingsChoice(id: code, title: (locale.localizedString(forLanguageCode: code) ?? code).capitalized(with: locale))
+        }.sorted { $0.title.localizedCaseInsensitiveCompare($1.title) == .orderedAscending }
+
+        // The fixed shelves in the Home's order (the hero is the page
+        // itself), then the genre shelves on screen or hidden earlier.
+        let hidden = settings.hiddenShelves
+        let text = HomeText.standard
+        var shelves = HomeShelfID.order.filter { $0 != HomeShelfID.hero }
+        let genres = HomeState.shared.shelves.map(\.id).filter { HomeShelfID.genre(of: $0) != nil }
+            + hidden.filter { HomeShelfID.genre(of: $0) != nil }.sorted()
+        for id in genres where !shelves.contains(id) { shelves.append(id) }
+        return GlassSettingsHome(languages: languages,
+                                 hiddenShelves: hidden,
+                                 groupedEpisodeLookup: Library.shared.isBulkEpisodeLookupEnabled,
+                                 languageChoices: languageChoices,
+                                 shelfChoices: shelves.map { GlassSettingsChoice(id: $0, title: text.title(ofShelf: $0)) })
+    }
+
+    /// Empty: every language. The hub reads its settings when it builds the
+    /// page: the shelves on screen follow at once, without a request.
+    @MainActor
+    static func store(homeLanguages codes: [String]) {
+        HomeSettings(defaults: defaults).contentLanguages = codes
+        HomeState.shared.refreshLocal()
+    }
+
+    @MainActor
+    static func store(hiddenHomeShelves ids: Set<String>) {
+        HomeSettings(defaults: defaults).hiddenShelves = ids
+        HomeState.shared.refreshLocal()
+    }
+
+    /// One switch for the hub and the library (`Library.bulkEpisodeLookupKey`):
+    /// on, the followed shows' ids go to Cinemeta in one request; off, the
+    /// library asks TVMaze show by show.
+    @MainActor
+    static func store(groupedEpisodeLookup enabled: Bool) {
+        Library.shared.isBulkEpisodeLookupEnabled = enabled
+        HomeState.shared.refreshLocal()
     }
 
     // MARK: Cache

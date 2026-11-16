@@ -53,11 +53,20 @@ extension PCTPlayerViewController {
         }
         
         add(center.changePlaybackRateCommand) { player, event in
+            // Not while a resume is on its way: a clock running faster than
+            // real time never counts as « playing at the target »
+            // (`VLCResumeWatch`), so the state would stay up over the film.
+            guard !player.isWaitingForResume else { return .commandFailed }
             player.mediaplayer.rate = (event as! MPChangePlaybackRateCommandEvent).playbackRate
             return .success
         }
         
         add(center.skipForwardCommand) { player, event in
+            // Held while a resume is on its way, as `fastForward()` and
+            // `seekLimited` are (Control Center's remote, Siri): VLC is
+            // already seeking there, and a second seek may freeze the
+            // first one's clock (`VLCResumeWatch`).
+            guard !player.isWaitingForResume else { return .success }
             player.playheadWatch.noteOwnSeek()
             player.mediaplayer.jumpForward((event as! MPSkipIntervalCommandEvent).interval) // VLCKit 4: seconds as Double
             player.noteUserMovedPlayhead()

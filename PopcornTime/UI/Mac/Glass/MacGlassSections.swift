@@ -30,7 +30,7 @@ struct MacGlassEpisodesSection: View {
                               itemWidth: Self.stillWidth,
                               spacing: 20,
                               chevronCenter: Self.stillHeight / 2,
-                              anchorID: model.upNextEpisodeID,
+                              anchorID: model.entryEpisodeID,
                               scrollToken: model.selectedSeason ?? -1) { episode in
                     tile(episode)
                 }
@@ -51,7 +51,7 @@ struct MacGlassEpisodesSection: View {
     /// The hovered episode, else the up-next one, else the season's first.
     private func panelEpisode(in episodes: [GlassEpisode]) -> GlassEpisode? {
         if let id = highlightedEpisodeID, let hit = episodes.first(where: { $0.id == id }) { return hit }
-        if let id = model.upNextEpisodeID, let hit = episodes.first(where: { $0.id == id }) { return hit }
+        if let id = model.entryEpisodeID, let hit = episodes.first(where: { $0.id == id }) { return hit }
         return episodes.first
     }
 

@@ -37,7 +37,7 @@ struct GlassEpisodesSection: View {
 
     private func panelEpisode(in episodes: [GlassEpisode]) -> GlassEpisode? {
         if let id = highlightedEpisodeID, let hit = episodes.first(where: { $0.id == id }) { return hit }
-        if let id = model.upNextEpisodeID, let hit = episodes.first(where: { $0.id == id }) { return hit }
+        if let id = model.entryEpisodeID, let hit = episodes.first(where: { $0.id == id }) { return hit }
         return episodes.first
     }
 
@@ -86,7 +86,8 @@ struct GlassEpisodesSection: View {
                 } else {
                     Text("Episodes").font(GlassFont.sectionTitle)
                 }
-                count
+                // No "0 Episodes" over the placeholders of a guide still loading.
+                if episodeCount > 0 || !model.isLoadingEpisodes { count }
             }
             .foregroundStyle(GlassPalette.primaryText)
             .padding(.horizontal, GlassMetrics.sideInset)
@@ -129,18 +130,23 @@ struct GlassEpisodesSection: View {
             .onChange(of: model.selectedSeason) { _, _ in
                 scrollToStart(of: model.episodesOfSelectedSeason, proxy: proxy)
             }
+            // A link to the page already shown names another episode.
+            .onChange(of: model.linkedEpisodeID) { _, _ in
+                scrollToStart(of: model.episodesOfSelectedSeason, proxy: proxy)
+            }
         }
     }
 
     private func entryEpisodeID(in episodes: [GlassEpisode]) -> String? {
         if let id = highlightedEpisodeID, episodes.contains(where: { $0.id == id }) { return id }
-        if let id = model.upNextEpisodeID, episodes.contains(where: { $0.id == id }) { return id }
+        if let id = model.entryEpisodeID, episodes.contains(where: { $0.id == id }) { return id }
         return episodes.first?.id
     }
 
-    /// The up-next episode when it is in this season, else the first one.
+    /// The episode a link names, else the up-next one, when it is in this
+    /// season, else the first one.
     private func scrollToStart(of episodes: [GlassEpisode], proxy: ScrollViewProxy) {
-        let target = episodes.first(where: { $0.id == model.upNextEpisodeID }) ?? episodes.first
+        let target = episodes.first(where: { $0.id == model.entryEpisodeID }) ?? episodes.first
         guard let target else { return }
         proxy.scrollTo(target.id, anchor: .leading)
     }

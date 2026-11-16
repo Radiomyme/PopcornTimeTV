@@ -122,6 +122,9 @@
 "Downloading" = "جاري التحميل";
 
 /* (No Commment) */
+"Downloads" = "التنزيلات";
+
+/* (No Commment) */
 "Downloads Empty" = "التنزيلات فارغة";
 
 /* (No Commment) */
@@ -522,6 +525,7 @@
 
 /* (No Commment) */
 "Western" = "كاوبوي";
+"Food" = "طبخ";
 
 /* (No Commment) */
 "White" = "أبيض";
@@ -562,6 +566,12 @@
 "No audio tracks available." = "لا توجد مسارات صوتية متاحة.";
 "Settings" = "الإعدادات";
 "Sort" = "فرز";
+/* 5.3, Apple TV grids: the header's controls say what they are set to (%@ = the sort, the genre); a next page that failed; a list with no title; VoiceOver's rating of a poster (%@ = 8.4). */
+"Sort: %@" = "فرز: %@";
+"Genre: %@" = "النوع: %@";
+"Couldn't load more titles." = "تعذّر تحميل المزيد من العناوين.";
+"Try another genre or another sort." = "جرّب نوعًا آخر أو ترتيبًا آخر.";
+"%@ out of 10" = "%@ من 10";
 "Time remaining" = "الوقت المتبقي";
 "Always Ask" = "السؤال دائماً";
 "Playback" = "التشغيل";
@@ -591,6 +601,9 @@
 "Remove from Watchlist" = "إزالة من المفضلة";
 "Mark as Watched" = "تعيين كمُشاهَد";
 "Mark as Unwatched" = "تعيين كغير مُشاهَد";
+"Play %@" = "تشغيل %@";
+"Mark %@ as Watched" = "تعيين %@ كمُشاهَد";
+"Mark %@ as Unwatched" = "تعيين %@ كغير مُشاهَد";
 "Download" = "تحميل";
 "Downloaded" = "تم التحميل";
 "Pause" = "إيقاف مؤقت";
@@ -656,6 +669,17 @@
 "Subtitles" = "الترجمة";
 "Audio" = "الصوت";
 
+/* The players' subtitle menus (iPhone / iPad, Mac, Apple TV): the line shown while no list is known, and the delay of a subtitle — one step earlier or later, then back to none (%@ = the delay, "+0.5 s"). They also use "Off", "Subtitles", "Subtitle Delay" and "Searching for subtitles…". */
+"No subtitles found" = "لم يُعثر على ترجمات";
+"Show Earlier (%@)" = "إظهار أبكر (%@)";
+"Show Later (%@)" = "إظهار لاحقًا (%@)";
+"Reset (%@)" = "إعادة الضبط (%@)";
+
+/* Apple TV: the next episode proposed near the end of an episode — its two buttons and the countdown (%d = seconds left). */
+"UpNext.PlayNow" = "تشغيل الآن";
+"UpNext.BackToVideo" = "العودة إلى الفيديو";
+"UpNext.Countdown" = "تشغيل تلقائي خلال %d ث";
+
 /* Bounded storage: a film larger than the free space streams with only part of it on disk. Loading screen (%d = minutes a rewind can reach), the message over the video when a rewind goes further back than what is still stored, the alert when playback can't continue, and the stream errors (%@ = space to free, e.g. "1.2 GB" / the system's error text). */
 "BoundedStorage.Loading.Minutes" = "مساحة تخزين محدودة: يمكنك الرجوع إلى الخلف نحو %d د";
 "BoundedStorage.Loading.Generic" = "مساحة تخزين محدودة: سيكون الرجوع إلى الخلف محدودًا";
@@ -667,6 +691,13 @@
 "BoundedStorage.NotEnoughSpace.Generic" = "لا توجد مساحة فارغة كافية لتشغيل هذا الفيديو حتى مع مساحة التخزين المحدودة. حرّر بعض المساحة ثم أعد المحاولة.";
 "BoundedStorage.FileError.Message" = "تعذّر حفظ الفيديو في وحدة التخزين (%@).";
 "BoundedStorage.TryLowerQuality" = "هل تريد تجربة جودة أقل؟";
+
+/* VLC player (the files the native player does not play, or cannot jump in): the state over the video while it gets to the resume point (%@ = the position, 1:40:00), the offer after 30 s of waiting and its two buttons, and the message of the VLC player's own resume question. */
+"VLC.Resume.At" = "جارٍ الاستئناف عند %@…";
+"VLC.Resume.Slow" = "يستغرق الاستئناف وقتًا أطول من المتوقع.";
+"VLC.Resume.KeepWaiting" = "متابعة الانتظار";
+"VLC.Resume.FromStart" = "البدء من البداية";
+"VLC.Resume.Question.Message" = "يُشغَّل هذا الملف بمشغل VLC: يتم الاستئناف عبر VLC.";
 
 /* Quality pickers: estimated bitrate of a release and its warning when recent downloads (the connection, or its swarms) are slower (ConnectionSpeed.swift) */
 "Bandwidth.Bitrate" = "≈ %d ميغابت/ث";
@@ -695,6 +726,11 @@
 "PlayerLoading.Seeds" = "المشاركون: %d";
 "Sources.Loading" = "جارٍ البحث عن مصادر…";
 "Picker.Recommended" = "موصى به";
+/* 5.3: iPhone / iPad detail page, a source of a movie: %lld = the counts of its swarm ("178 seeds"); the list opens on three sources, then "All Sources (15)". */
+"Sources.Seeds" = "%lld مُرسِل";
+"Sources.Peers" = "%lld نظير";
+"Sources.ShowAll" = "كل المصادر (%lld)";
+"Sources.ShowFewer" = "مصادر أقل";
 "Spinner.Loading" = "جارٍ التحميل…";
 
 /* Apple TV: a release that does not fit the app's cache (%@ = its quality, 1080p…; the smaller release's). Native player: resume question while the file still downloads (%@ = the position, 1:02:07). */
@@ -703,6 +739,117 @@
 "DiskFull.RetryIn" = "إعادة المحاولة بجودة %@";
 "DiskFull.RetryLower" = "تجربة جودة أقل";
 "Remux.Resume.Title" = "هل تريد استئناف التشغيل؟";
-"Remux.Resume.Message" = "لا يزال هذا الملف قيد التنزيل: يتم الاستئناف السريع عبر مشغل VLC. من البداية، يبقى التشغيل أصليًا (HDR وDolby Atmos).";
+"Remux.Resume.Message" = "لا يزال هذا الملف قيد التنزيل. يُستأنف التشغيل من هذا الموضع بالجودة الأصلية (HDR وDolby Atmos).";
 "Remux.Resume.At" = "الاستئناف عند %@";
 "Remux.Resume.FromStart" = "البدء من البداية";
+"Remux.Resume.Message.VLC" = "لا يتيح هذا الملف الاستئناف بالجودة الأصلية: يتم الاستئناف من هذا الموضع عبر مشغل VLC. من البداية، يبقى التشغيل أصليًا (HDR وDolby Atmos).";
+"Player.Resuming.At" = "جارٍ الاستئناف عند %@…";
+
+/* Continue Watching row (tvOS): second line of a show's card once the last episode played was finished, before "S2 · E6" and the episode's title. */
+"ContinueWatching.NextEpisode" = "الحلقة التالية";
+
+/* 5.3: the Home hub's card badges (HomeBadge.localizationKey). A shelf title is its own English key (HomeShelf.defaultTitle). */
+"Home.Badge.New" = "جديد";
+"Home.Badge.NewEpisode" = "حلقة جديدة";
+"Home.Badge.NewSeason" = "موسم جديد";
+"Home.Badge.Premiere" = "العرض الأول";
+"Home.Badge.Upcoming" = "قريبًا";
+
+/* 5.3: the Home tab of Apple TV (PopcornTime/UI/tvOS/Home) and its rows in Settings. "Home": the tab. "Home.Play", "More Info": the billboard's buttons (with "Watchlist"). "See All": the last card of a shelf. "Home.Rating": VoiceOver, %@ = the IMDb rating ("7.8"). "Home.Remaining": what is left of a title being watched, %@ = a duration ("33 min"). "Home.Settings.Shelves.Count": %1$d shelves shown of %2$d. */
+"Home" = "الرئيسية";
+"Home.Play" = "تشغيل";
+"More Info" = "معلومات أكثر";
+"See All" = "عرض الكل";
+"Home.Menu.RemoveFromContinueWatching" = "إزالة من «متابعة المشاهدة»";
+"Home.Rating" = "IMDb %@";
+"Home.Remaining" = "متبقٍ %@";
+"Home.Offline" = "غير متصل · محتوى محفوظ";
+"Home.Unavailable.Title" = "تعذّر تحميل الصفحة الرئيسية";
+"Home.Unavailable.Message" = "تحقق من اتصال Apple TV ثم أعد المحاولة.";
+/* 5.3: Apple TV detail page, above a synopsis the sources give in English only, when the app is in another language. */
+"Detail.Summary.InEnglish" = "الملخص (بالإنجليزية)";
+"Content Languages" = "لغات المحتوى";
+"All Languages" = "كل اللغات";
+"Shown Shelves" = "الصفوف المعروضة";
+"Home Shelves" = "صفوف الصفحة الرئيسية";
+"Grouped Episode Lookup" = "بحث مجمّع عن الحلقات";
+"Home.Settings.All" = "الكل";
+"Home.Settings.Shelves.Count" = "%1$d من %2$d";
+"Home.Settings.Languages.Detail" = "تعرض الصفحة الرئيسية فقط العناوين المصوّرة بهذه اللغات.";
+"Home.Settings.Languages.Message" = "تعرض الصفحة الرئيسية الأفلام والمسلسلات المصوّرة باللغات المحددة.";
+"Home.Settings.Shelves.Detail" = "الصفوف غير المحددة لا تظهر في الصفحة الرئيسية.";
+"Home.Settings.Shelves.Message" = "ألغِ تحديد صف لإخفائه.";
+"Home.Settings.Lookup.Detail" = "يرسل قائمة المسلسلات التي تتابعها إلى Cinemeta في طلب واحد للعثور على حلقاتها الجديدة.";
+/* 5.3: the Home screen of iOS and macOS (PopcornTime/UI/Shared SwiftUI/Home) and its settings. "Home": the tab. Home.Card.Remaining: %@ = a duration ("42 min"); Home.Card.Rank and Home.Card.Rating are read by VoiceOver ("Number 3", "rated 8.1"); Home.Offline.Saved: %@ = a relative date ("2 hours ago"). */
+"Home.SeeAll" = "عرض الكل";
+"Home.Card.Remaining" = "المتبقي %@";
+"Home.Card.Rank" = "رقم %lld";
+"Home.Card.Rating" = "التقييم %@";
+"Home.Kind.Movie" = "فيلم";
+"Home.Kind.Show" = "مسلسل";
+"Home.Menu.Details" = "عرض التفاصيل";
+"Home.Menu.ShareLink" = "مشاركة الرابط";
+"Home.Menu.CopyLink" = "نسخ الرابط";
+"Home.Offline.Saved" = "المحتوى المحفوظ %@.";
+"Home.Empty.Title" = "لا شيء للعرض";
+"Home.Empty.Detail" = "جميع أقسام الرئيسية مخفية. أظهرها مجددًا من الإعدادات.";
+"Home.Settings.Languages" = "لغات المحتوى";
+"Home.Settings.AllLanguages" = "كل اللغات";
+"Home.Settings.AllLanguages.Value" = "الكل";
+"Home.Settings.Languages.Footer" = "تُبقي الرئيسية على الأفلام والمسلسلات التي لغتها الأصلية إحدى هذه اللغات.";
+"Home.Settings.HiddenShelves" = "الأقسام المخفية";
+"Home.Settings.Edit" = "تعديل…";
+"Home.Settings.Shelves" = "الأقسام";
+"Home.Settings.Shelves.Footer" = "القسم المعطَّل لا يظهر في الرئيسية.";
+"Home.Settings.BulkLookup" = "إرسال مسلسلاتي إلى Cinemeta";
+"Home.Settings.BulkLookup.Footer" = "للعثور على الحلقات الجديدة، تُرسَل قائمة المسلسلات التي تتابعها إلى Cinemeta في طلب واحد (معرّفات عامة، بلا حساب). عند الإيقاف، يُسأل TVMaze عن كل مسلسل على حدة.";
+
+/* 5.3: the Home hub's shelves, Search, the grids, Settings (Stream on Cellular Data), the players' skip buttons and the detail pages. */
+"%@ Movies" = "أفلام: %@";
+"%@ Shows" = "مسلسلات: %@";
+"All Genres" = "كل الأنواع";
+"Back" = "رجوع";
+"Biography" = "السيرة الذاتية";
+"Browse by Genre" = "تصفح حسب النوع";
+"Clear" = "مسح";
+"Close" = "إغلاق";
+"Continue Watching" = "متابعة المشاهدة";
+"Featured" = "مميز";
+"Find a movie or a show by its title." = "ابحث عن فيلم أو مسلسل باسمه.";
+"Go" = "انتقال";
+"Latest Episodes" = "أحدث الحلقات";
+"Metadata" = "البيانات الوصفية";
+"Movies of the Year" = "أفلام العام";
+"New Episodes of Your Shows" = "حلقات جديدة من مسلسلاتك";
+"New Movies" = "أفلام جديدة";
+"New Shows" = "مسلسلات جديدة";
+"New in 4K" = "جديد بدقة 4K";
+"Nothing to show for this selection." = "لا يوجد ما يُعرض لهذا الاختيار.";
+"Recent Searches" = "عمليات البحث الأخيرة";
+"Refresh" = "تحديث";
+"Skip Back 10 Seconds" = "رجوع 10 ثوانٍ";
+"Skip Forward 10 Seconds" = "تقدم 10 ثوانٍ";
+"Stream on Cellular Data" = "البث عبر البيانات الخلوية";
+"Top Movies of the Last 48 Hours" = "الأفضل خلال 48 ساعة: أفلام";
+"Top Rated of the Year" = "الأعلى تقييمًا هذا العام";
+"Top Shows of the Last 48 Hours" = "الأفضل خلال 48 ساعة: مسلسلات";
+"Trending Movies" = "الأفلام الرائجة";
+"Trending Shows" = "المسلسلات الرائجة";
+"When this is off, Popcorn Time asks before it starts a stream on cellular data or a personal hotspot." = "عند إيقاف هذا الخيار، يسأل Popcorn Time قبل بدء البث عبر البيانات الخلوية أو نقطة اتصال شخصية.";
+
+/* Episode chaining (5.3.0), the three platforms: the next episode's card — « Choose Version » and « Cancel », the version line (%@ = the quality label, "1080p HEVC": the same season pack, the same release group, the same resolution and dynamic range, the release remembered for « Resume »), while it is looked for, the after-play card's title, the episode line (season, episode, title), « Still watching? » after episodes played in a row with no action (%d = how many) and its two buttons — and the setting (on by default) with its footer. */
+"UpNext.ChooseVersion" = "اختيار الإصدار";
+"UpNext.Cancel" = "إلغاء";
+"UpNext.SamePack" = "%@ · نفس الحزمة";
+"UpNext.SameGroup" = "%@ · نفس المجموعة";
+"UpNext.SameQuality" = "%@ · نفس الجودة";
+"UpNext.SameRelease" = "%@ · نفس الإصدار";
+"UpNext.FindingVersion" = "جارٍ البحث عن الإصدار…";
+"UpNext.Ended" = "انتهت الحلقة";
+"UpNext.EpisodeTitle" = "م%1$d · ح%2$d — %3$@";
+"UpNext.StillWatching" = "هل ما زلت تشاهد؟";
+"UpNext.StillWatching.Message" = "تم تشغيل %d حلقات متتالية. هل تريد متابعة المشاهدة؟";
+"UpNext.StillWatching.Continue" = "متابعة المشاهدة";
+"UpNext.StillWatching.Stop" = "إيقاف";
+"Settings.AutoPlayNext" = "تشغيل الحلقة التالية تلقائيًا";
+"Settings.AutoPlayNext.Footer" = "قرب نهاية الحلقة، تُعرض الحلقة التالية مع عد تنازلي، ثم تبدأ تلقائيًا، بنفس الإصدار عند الإمكان.";

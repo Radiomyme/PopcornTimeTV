@@ -47,6 +47,23 @@ struct GlassPlayInfo: Equatable {
     var progress: Double? = nil
 }
 
+/// Where the search for the title's sources stands: the page opens before
+/// they are in, and Play and the capability chips say so.
+enum GlassSourcesState: Equatable {
+    /// Being searched; nothing to play is known yet. Play shows a spinner
+    /// (a press is kept until a source arrives).
+    case searching
+    /// Something to play is known; a source may still add to it.
+    case partial
+    /// The search is over (also: a page filled in one go).
+    case ready
+    /// The search is over: nothing to play.
+    case none
+
+    /// A source is still expected.
+    var isSearching: Bool { self == .searching || self == .partial }
+}
+
 /// A capability chip under the metadata line ("4K", "Dolby Vision", "Atmos"…).
 /// Only pass what the torrents really offer.
 struct GlassBadge: Identifiable, Equatable {
@@ -135,7 +152,10 @@ enum GlassFocusTarget: Hashable {
 
 /// The page's state. Fill it on the main thread; sections can arrive one by
 /// one (set the matching `isLoading…` flag while they load: the section then
-/// shows placeholders, and it disappears when it ends up empty).
+/// shows placeholders, and it disappears when it ends up empty). The page
+/// itself opens on what its caller had (a grid's item): the rest of the
+/// first screen fills in when the title's record arrives, then its sources
+/// (`sources`).
 @Observable
 final class GlassDetailModel {
     var kind: GlassMediaKind
@@ -158,11 +178,20 @@ final class GlassDetailModel {
     var certification: String?
     /// 0…5 stars in halves (API rating / 20). Nil hides the stars.
     var rating: Double?
+    /// The same rating out of 10 (API rating / 10: "7.5"), the Apple TV
+    /// page's "★ 7,5" — the Home's cards' way of saying it. Nil: unrated.
+    var score: Double?
     var badges: [GlassBadge]
     var summary: String
 
     /// Nil hides Play (shows with nothing to continue).
     var play: GlassPlayInfo?
+    /// Where the search for the sources stands (`GlassSourcesState`).
+    var sources: GlassSourcesState = .ready
+    /// Why the page has nothing to play, when a failure is the reason (no
+    /// connection, no source reached): shown above the actions, where Play
+    /// becomes "Try Again" (`GlassDetailActions.retry`).
+    var loadError: String?
     var hasTrailer: Bool
     var isInWatchlist: Bool
     /// Nil hides the Watched toggle (shows have no watched state).
@@ -179,6 +208,11 @@ final class GlassDetailModel {
     var episodes: [GlassEpisode]
     /// Episode the shelf scrolls to first (the next one to watch).
     var upNextEpisodeID: String?
+    /// The episode a link names (`popcorntime://show/…?season=3&episode=5`):
+    /// the shelf opens on it instead of the up-next one.
+    var linkedEpisodeID: String?
+    /// The episode the shelf opens on: a link's, else the up-next one.
+    var entryEpisodeID: String? { linkedEpisodeID ?? upNextEpisodeID }
 
     var related: [GlassRelatedItem]
     var people: [GlassPerson]
@@ -258,6 +292,8 @@ final class GlassDetailModel {
 struct GlassDetailActions {
     /// Play button: the movie, or `model.play`'s episode for a show.
     var play: () -> Void = {}
+    /// "Try Again", shown in place of Play while `model.loadError` is set.
+    var retry: () -> Void = {}
     /// An episode card was selected.
     var playEpisode: (_ episodeID: String) -> Void = { _ in }
     var playTrailer: () -> Void = {}
@@ -291,4 +327,8 @@ struct GlassDetailActions {
     /// Every focus move (nil when focus leaves the page), e.g. to restore
     /// focus after playback.
     var focusChanged: (_ target: GlassFocusTarget?) -> Void = { _ in }
+
+    /// The page's artwork (backdrop or poster) is on screen: the last step
+    /// of the page's opening, for its timing.
+    var artworkShown: () -> Void = {}
 }

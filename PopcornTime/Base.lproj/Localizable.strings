@@ -83,7 +83,6 @@
 "Remove from on deck" = "Remove from on deck";
 "Are you sure you want to remove this item?" = "Are you sure you want to remove this item?";
 
-"Subtitle Language" = "Subtitle Language";
 "Choose a default language for the player subtitles." = "Choose a default language for the player subtitles.";
 
 "Subtitle Font Size" = "Subtitle Font Size";
@@ -143,6 +142,7 @@
 "Are you sure you want to delete the download?" = "Are you sure you want to delete the download?";
 "Stop" = "Stop";
 "Download Failed" = "Download Failed";
+"Downloads" = "Downloads";
 "Downloads Empty" = "Downloads Empty";
 "Movies and episodes you download will show up here." = "Movies and episodes you download will show up here.";
 "Paused" = "Paused";
@@ -208,7 +208,6 @@
 "%@ version %@ of Popcorn Time is now available." = "%1$@ version %2$@ of Popcorn Time is now available.";
 "Skip This Version" = "Skip This Version";
 "Update" = "Update";
-"OK" = "OK";
 "Sideloading Instructions" = "Sideloading Instructions";
 "Unfortunately, in-app updates are not available for un-jailbroken devices. Please follow the sideloading instructions available in the PopcornTimeTV repo's wiki." = "Unfortunately, in-app updates are not available for un-jailbroken devices. Please follow the sideloading instructions available in the PopcornTimeTV repo's wiki.";
 
@@ -253,6 +252,79 @@
 "Thriller" = "Thriller";
 "War" = "War";
 "Western" = "Western";
+"Food" = "Food";
+
+/* 5.3: the Home hub (PopcornKit/Managers/Home). Shelf titles (HomeShelf.defaultTitle; "%@ Movies" / "%@ Shows" are a genre shelf's, %@ = the genre) and card badges (HomeBadge.localizationKey). */
+"Featured" = "Featured";
+"Continue Watching" = "Continue Watching";
+"New Episodes of Your Shows" = "New Episodes of Your Shows";
+"Trending Movies" = "Trending Movies";
+"New Movies" = "New Movies";
+"New in 4K" = "New in 4K";
+"Latest Episodes" = "Latest Episodes";
+"Trending Shows" = "Trending Shows";
+"New Shows" = "New Shows";
+"Movies of the Year" = "Movies of the Year";
+"Top Rated of the Year" = "Top Rated of the Year";
+"Top Shows of the Last 48 Hours" = "Top Shows of the Last 48 Hours";
+"Top Movies of the Last 48 Hours" = "Top Movies of the Last 48 Hours";
+"%@ Movies" = "%@ Movies";
+"%@ Shows" = "%@ Shows";
+"Biography" = "Biography";
+"Home.Badge.New" = "New";
+"Home.Badge.NewEpisode" = "New Episode";
+"Home.Badge.NewSeason" = "New Season";
+"Home.Badge.Premiere" = "Series Premiere";
+"Home.Badge.Upcoming" = "Upcoming";
+
+/* 5.3: the Home tab of Apple TV (PopcornTime/UI/tvOS/Home) and its rows in Settings. "Home": the tab. "Home.Play", "More Info": the billboard's buttons (with "Watchlist"). "See All": the last card of a shelf. "Home.Rating": VoiceOver, %@ = the IMDb rating ("7.8"). "Home.Remaining": what is left of a title being watched, %@ = a duration ("33 min"). "Home.Settings.Shelves.Count": %1$d shelves shown of %2$d. */
+"Home" = "Home";
+"Home.Play" = "Play";
+"More Info" = "More Info";
+"See All" = "See All";
+"Home.Menu.RemoveFromContinueWatching" = "Remove from Continue Watching";
+"Home.Rating" = "IMDb %@";
+"Home.Remaining" = "%@ left";
+"Home.Offline" = "Offline · showing saved content";
+"Home.Unavailable.Title" = "Home Can't Load";
+"Home.Unavailable.Message" = "Check the Apple TV's connection, then try again.";
+/* 5.3: Apple TV detail page, above a synopsis the sources give in English only, when the app is in another language. */
+"Detail.Summary.InEnglish" = "Summary (in English)";
+"Content Languages" = "Content Languages";
+"All Languages" = "All Languages";
+"Shown Shelves" = "Shown Shelves";
+"Home Shelves" = "Home Shelves";
+"Grouped Episode Lookup" = "Grouped Episode Lookup";
+"Home.Settings.All" = "All";
+"Home.Settings.Shelves.Count" = "%1$d of %2$d";
+"Home.Settings.Languages.Detail" = "Home only suggests titles shot in these languages.";
+"Home.Settings.Languages.Message" = "Home suggests the movies and shows shot in the languages checked here.";
+"Home.Settings.Shelves.Detail" = "Unchecked shelves are not shown on Home.";
+"Home.Settings.Shelves.Message" = "Uncheck a shelf to hide it.";
+"Home.Settings.Lookup.Detail" = "Sends the list of the shows you follow to Cinemeta in one request, to find their new episodes.";
+/* 5.3: the Home screen of iOS and macOS (PopcornTime/UI/Shared SwiftUI/Home) and its settings. "Home": the tab. Home.Card.Remaining: %@ = a duration ("42 min"); Home.Card.Rank and Home.Card.Rating are read by VoiceOver ("Number 3", "rated 8.1"); Home.Offline.Saved: %@ = a relative date ("2 hours ago"). */
+"Home.SeeAll" = "See All";
+"Home.Card.Remaining" = "%@ left";
+"Home.Card.Rank" = "Number %lld";
+"Home.Card.Rating" = "rated %@";
+"Home.Kind.Movie" = "Movie";
+"Home.Kind.Show" = "Series";
+"Home.Menu.Details" = "Show Details";
+"Home.Menu.ShareLink" = "Share Link";
+"Home.Menu.CopyLink" = "Copy Link";
+"Home.Offline.Saved" = "Showing what was saved %@.";
+"Home.Empty.Title" = "Nothing to Show";
+"Home.Empty.Detail" = "Every shelf of the Home is hidden. Show them again in Settings.";
+"Home.Settings.Languages" = "Content Languages";
+"Home.Settings.AllLanguages" = "All Languages";
+"Home.Settings.AllLanguages.Value" = "All";
+"Home.Settings.Languages.Footer" = "The Home keeps the movies and shows whose original language is one of these.";
+"Home.Settings.HiddenShelves" = "Hidden Shelves";
+"Home.Settings.Edit" = "Edit…";
+"Home.Settings.Shelves" = "Shelves";
+"Home.Settings.Shelves.Footer" = "A shelf that is turned off no longer shows on the Home.";
+"Home.Settings.BulkLookup" = "Send My Shows to Cinemeta";
+"Home.Settings.BulkLookup.Footer" = "To find new episodes, the list of the shows you follow is sent to Cinemeta in a single request (public ids, no account). When this is off, each show is asked from TVMaze on its own.";
 
 /* 5.1: Keys used in code that had no entry */
 "A - Z" = "A - Z";
@@ -262,6 +334,12 @@
 "No audio tracks available." = "No audio tracks available.";
 "Settings" = "Settings";
 "Sort" = "Sort";
+/* 5.3, Apple TV grids: the header's controls say what they are set to (%@ = the sort, the genre); a next page that failed; a list with no title; VoiceOver's rating of a poster (%@ = 8.4). */
+"Sort: %@" = "Sort: %@";
+"Genre: %@" = "Genre: %@";
+"Couldn't load more titles." = "Couldn't load more titles.";
+"Try another genre or another sort." = "Try another genre or another sort.";
+"%@ out of 10" = "%@ out of 10";
 "Time remaining" = "Time remaining";
 
 /* 5.1: Settings (GlassSettingsView) */
@@ -295,6 +373,9 @@
 "Remove from Watchlist" = "Remove from Watchlist";
 "Mark as Watched" = "Mark as Watched";
 "Mark as Unwatched" = "Mark as Unwatched";
+"Play %@" = "Play %@";
+"Mark %@ as Watched" = "Mark %@ as Watched";
+"Mark %@ as Unwatched" = "Mark %@ as Unwatched";
 "Download" = "Download";
 "Downloaded" = "Downloaded";
 "Pause" = "Pause";
@@ -321,6 +402,15 @@
 "Filter" = "Filter";
 "Movie or show title" = "Movie or show title";
 
+/* Mac: the Go and Playback menus (MacCommands), the grids' Refresh button, the Search page before anything is typed, the Sources rows of Settings ("Metadata": the iPhone / iPad Sources list too). */
+"Go" = "Go";
+"Back" = "Back";
+"Refresh" = "Refresh";
+"Skip Forward 10 Seconds" = "Skip Forward 10 Seconds";
+"Skip Back 10 Seconds" = "Skip Back 10 Seconds";
+"Find a movie or a show by its title." = "Find a movie or a show by its title.";
+"Metadata" = "Metadata";
+
 /* Mac: Settings window (MacSettingsView). "%@ (+ mirrors)": %@ is the shows API host. */
 "Balanced (quick start)" = "Balanced (quick start)";
 "Languages" = "Languages";
@@ -337,6 +427,16 @@
 
 /* Mac: Popcorn Time menu item opening the release notes window. */
 "What's New…" = "What's New…";
+
+/* iPhone / iPad: the grids' empty state and genre reset, Search before anything is typed, the cellular setting and its footer, the Sources list, and the close button of the players (VoiceOver). */
+"Nothing to show for this selection." = "Nothing to show for this selection.";
+"All Genres" = "All Genres";
+"Recent Searches" = "Recent Searches";
+"Clear" = "Clear";
+"Browse by Genre" = "Browse by Genre";
+"Stream on Cellular Data" = "Stream on Cellular Data";
+"When this is off, Popcorn Time asks before it starts a stream on cellular data or a personal hotspot." = "When this is off, Popcorn Time asks before it starts a stream on cellular data or a personal hotspot.";
+"Close" = "Close";
 
 /* Mac: native player status (MacPlayerView). "Buffering %.0f%% · %d seeds · %d KB/s": buffered percentage, seeds, download speed. "Failed: %@" / "Cannot play: %@": the reason. */
 "Buffering…" = "Buffering…";
@@ -355,6 +455,17 @@
 "Subtitles" = "Subtitles";
 "Audio" = "Audio";
 
+/* The players' subtitle menus (iPhone / iPad, Mac, Apple TV): the line shown while no list is known, and the delay of a subtitle — one step earlier or later, then back to none (%@ = the delay, "+0.5 s"). They also use "Off", "Subtitles", "Subtitle Delay" and "Searching for subtitles…". */
+"No subtitles found" = "No subtitles found";
+"Show Earlier (%@)" = "Show Earlier (%@)";
+"Show Later (%@)" = "Show Later (%@)";
+"Reset (%@)" = "Reset (%@)";
+
+/* Apple TV: the next episode proposed near the end of an episode — its two buttons and the countdown (%d = seconds left). */
+"UpNext.PlayNow" = "Play Now";
+"UpNext.BackToVideo" = "Back to the Video";
+"UpNext.Countdown" = "Plays automatically in %d s";
+
 /* Bounded storage: a film larger than the free space streams with only part of it on disk. Loading screen (%d = minutes a rewind can reach), the message over the video when a rewind goes further back than what is still stored, the alert when playback can't continue, and the stream errors (%@ = space to free, e.g. "1.2 GB" / the system's error text). */
 "BoundedStorage.Loading.Minutes" = "Limited storage: you can rewind about %d min";
 "BoundedStorage.Loading.Generic" = "Limited storage: rewinding will be limited";
@@ -366,6 +477,13 @@
 "BoundedStorage.NotEnoughSpace.Generic" = "Not enough free space to stream this video, even with limited storage. Free some space and try again.";
 "BoundedStorage.FileError.Message" = "The video could not be written to storage (%@).";
 "BoundedStorage.TryLowerQuality" = "Try a lower quality?";
+
+/* VLC player (the files the native player does not play, or cannot jump in): the state over the video while it gets to the resume point (%@ = the position, 1:40:00), the offer after 30 s of waiting and its two buttons, and the message of the VLC player's own resume question. */
+"VLC.Resume.At" = "Resuming at %@…";
+"VLC.Resume.Slow" = "Resuming is taking longer than expected.";
+"VLC.Resume.KeepWaiting" = "Keep waiting";
+"VLC.Resume.FromStart" = "Start from the beginning";
+"VLC.Resume.Question.Message" = "This file plays with the VLC player: resuming goes through VLC.";
 
 /* Quality pickers: estimated bitrate of a release and its warning when recent downloads (the connection, or its swarms) are slower (ConnectionSpeed.swift) */
 "Bandwidth.Bitrate" = "≈ %d Mb/s";
@@ -394,6 +512,11 @@
 "PlayerLoading.Seeds" = "Seeds: %d";
 "Sources.Loading" = "Looking for sources…";
 "Picker.Recommended" = "Recommended";
+/* 5.3: iPhone / iPad detail page, a source of a movie: %lld = the counts of its swarm ("178 seeds"); the list opens on three sources, then "All Sources (15)". */
+"Sources.Seeds" = "%lld seeds";
+"Sources.Peers" = "%lld peers";
+"Sources.ShowAll" = "All Sources (%lld)";
+"Sources.ShowFewer" = "Fewer Sources";
 "Spinner.Loading" = "Loading…";
 
 /* Apple TV: a release that does not fit the app's cache (%@ = its quality, 1080p…; the smaller release's). Native player: resume question while the file still downloads (%@ = the position, 1:02:07). */
@@ -402,6 +525,28 @@
 "DiskFull.RetryIn" = "Try again in %@";
 "DiskFull.RetryLower" = "Try a lower quality";
 "Remux.Resume.Title" = "Resume playback?";
-"Remux.Resume.Message" = "This file is still downloading: resuming quickly goes through the VLC player. From the beginning, playback stays native (HDR, Dolby Atmos).";
+"Remux.Resume.Message" = "This file is still downloading. Playback resumes there in full quality (HDR, Dolby Atmos).";
 "Remux.Resume.At" = "Resume at %@";
 "Remux.Resume.FromStart" = "Start from the beginning";
+"Remux.Resume.Message.VLC" = "This file can't resume in full quality: resuming there goes through the VLC player. From the beginning, playback stays native (HDR, Dolby Atmos).";
+"Player.Resuming.At" = "Resuming at %@…";
+
+/* Continue Watching row (tvOS): second line of a show's card once the last episode played was finished, before "S2 · E6" and the episode's title. */
+"ContinueWatching.NextEpisode" = "Next episode";
+
+/* Episode chaining (5.3.0), the three platforms: the next episode's card — « Choose Version » and « Cancel », the version line (%@ = the quality label, "1080p HEVC": the same season pack, the same release group, the same resolution and dynamic range, the release remembered for « Resume »), while it is looked for, the after-play card's title, the episode line (season, episode, title), « Still watching? » after episodes played in a row with no action (%d = how many) and its two buttons — and the setting (on by default) with its footer. */
+"UpNext.ChooseVersion" = "Choose Version";
+"UpNext.Cancel" = "Cancel";
+"UpNext.SamePack" = "%@ · same pack";
+"UpNext.SameGroup" = "%@ · same group";
+"UpNext.SameQuality" = "%@ · same quality";
+"UpNext.SameRelease" = "%@ · same release";
+"UpNext.FindingVersion" = "Finding the version…";
+"UpNext.Ended" = "Episode finished";
+"UpNext.EpisodeTitle" = "S%1$d · E%2$d — %3$@";
+"UpNext.StillWatching" = "Still watching?";
+"UpNext.StillWatching.Message" = "%d episodes played in a row. Keep watching?";
+"UpNext.StillWatching.Continue" = "Keep Watching";
+"UpNext.StillWatching.Stop" = "Stop";
+"Settings.AutoPlayNext" = "Autoplay Next Episode";
+"Settings.AutoPlayNext.Footer" = "Near the end of an episode, the next one is offered with a countdown, then starts on its own, in the same version when possible.";

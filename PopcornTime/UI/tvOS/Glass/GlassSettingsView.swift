@@ -52,6 +52,28 @@ struct GlassSettingsLanguage: Identifiable, Hashable {
     var id: String { code }
 }
 
+/// One line of a list where several can be checked (the Home's content
+/// languages, its shelves).
+struct GlassSettingsChoice: Identifiable, Hashable {
+    let id: String
+    /// In the current UI language.
+    let title: String
+}
+
+/// The Home tab's settings, as the page shows them.
+struct GlassSettingsHome: Equatable {
+    /// ISO 639-1 codes of the languages whose titles the Home shows; empty: every language.
+    var languages: [String] = []
+    /// Ids of the shelves the Home does not show.
+    var hiddenShelves: Set<String> = []
+    /// The followed shows go to Cinemeta in one request (new episodes).
+    var groupedEpisodeLookup = true
+    /// The languages offered, in display order.
+    var languageChoices: [GlassSettingsChoice] = []
+    /// The shelves that can be hidden, in the Home's order.
+    var shelfChoices: [GlassSettingsChoice] = []
+}
+
 /// What the page does, provided by its host.
 struct GlassSettingsActions {
     var setAutoQuality: (GlassSettingsAutoQuality) -> Void = { _ in }
@@ -62,6 +84,10 @@ struct GlassSettingsActions {
     /// The stored Theme Songs state, re-read by `refresh()` (a fresh install
     /// turns theme songs on after this page was created). nil: never re-read.
     var readThemeSongs: (() -> Bool)? = nil
+    /// « Autoplay Next Episode » (`UpNextPreferences.autoPlayNext`, on by
+    /// default): written, and re-read by `refresh()`. nil: never re-read.
+    var setAutoPlayNext: (Bool) -> Void = { _ in }
+    var readAutoPlayNext: (() -> Bool)? = nil
     /// Bytes the clearable cache holds now. Called off the main thread.
     var measureCache: @Sendable () -> Int64 = { 0 }
     /// Empties the cache. Called on the main thread.
@@ -71,6 +97,13 @@ struct GlassSettingsActions {
     var isTraktSignedIn: () -> Bool = { false }
     var signOutOfTrakt: () -> Void = {}
     var showWhatsNew: () -> Void = {}
+    /// The Home tab's settings as stored now (read when the page appears).
+    /// nil: the page has no Home section.
+    var readHome: (() -> GlassSettingsHome)? = nil
+    /// Empty: every language.
+    var setHomeLanguages: ([String]) -> Void = { _ in }
+    var setHiddenHomeShelves: (Set<String>) -> Void = { _ in }
+    var setGroupedEpisodeLookup: (Bool) -> Void = { _ in }
 }
 
 /// The page's state. Changes go through the methods, which call the actions.
@@ -79,9 +112,14 @@ final class GlassSettingsModel: ObservableObject {
     @Published private(set) var audioLanguage: String?
     @Published private(set) var subtitleLanguage: String?
     @Published private(set) var themeSongs: Bool
+    /// Episode chaining: the next episode starts on its own at the end of
+    /// a countdown (off: the card stays, nothing starts by itself).
+    @Published private(set) var autoPlayNext: Bool
     @Published private(set) var isTraktSignedIn: Bool
     /// nil while it is being measured.
     @Published private(set) var cacheBytes: Int64?
+    /// nil: no Home section.
+    @Published private(set) var home: GlassSettingsHome?
     /// "5.1.0 (2)".
     let version: String
     /// Offered by the language pickers, in display order.
@@ -95,10 +133,63 @@ final class GlassSettingsModel: ObservableObject {
         self.audioLanguage = audioLanguage
         self.subtitleLanguage = subtitleLanguage
         self.themeSongs = themeSongs
+        self.autoPlayNext = actions.readAutoPlayNext?() ?? true
         self.version = version
         self.languages = languages
         self.actions = actions
         self.isTraktSignedIn = actions.isTraktSignedIn()
+        self.home = actions.readHome?()
+    }
+
+    // MARK: Home
+
+    /// Checks or unchecks a content language. The last one unchecked is
+    /// "every language" again (an empty list), and so is "All Languages".
+    func toggle(homeLanguage code: String?) {
+        guard var home else { return }
+        if let code {
+            if let index = home.languages.firstIndex(of: code) {
+                home.languages.remove(at: index)
+            } else {
+                home.languages.append(code)
+            }
+        } else {
+            home.languages = []
+        }
+        self.home = home
+        actions.setHomeLanguages(home.languages)
+    }
+
+    /// Shows or hides a shelf of the Home.
+    func toggle(homeShelf id: String) {
+        guard var home else { return }
+        if home.hiddenShelves.contains(id) { home.hiddenShelves.remove(id) } else { home.hiddenShelves.insert(id) }
+        self.home = home
+        actions.setHiddenHomeShelves(home.hiddenShelves)
+    }
+
+    func toggleGroupedEpisodeLookup() {
+        guard var home else { return }
+        home.groupedEpisodeLookup.toggle()
+        self.home = home
+        actions.setGroupedEpisodeLookup(home.groupedEpisodeLookup)
+    }
+
+    /// "Toutes", "Anglais, Français", "Anglais, Français +2".
+    var homeLanguagesSummary: String {
+        guard let home, !home.languages.isEmpty else { return glassSettingsLocalized("Home.Settings.All") }
+        let names = home.languages.map { code in home.languageChoices.first { $0.id == code }?.title ?? code }
+        let shown = names.prefix(2).joined(separator: ", ")
+        return names.count > 2 ? "\(shown) +\(names.count - 2)" : shown
+    }
+
+    /// "Toutes", "11 sur 13".
+    var homeShelvesSummary: String {
+        guard let home else { return "" }
+        let hidden = home.shelfChoices.filter { home.hiddenShelves.contains($0.id) }.count
+        guard hidden > 0 else { return glassSettingsLocalized("Home.Settings.All") }
+        return String(format: glassSettingsLocalized("Home.Settings.Shelves.Count"),
+                      home.shelfChoices.count - hidden, home.shelfChoices.count)
     }
 
     func select(autoQuality: GlassSettingsAutoQuality) {
@@ -121,6 +212,11 @@ final class GlassSettingsModel: ObservableObject {
         actions.setThemeSongs(themeSongs)
     }
 
+    func toggleAutoPlayNext() {
+        autoPlayNext.toggle()
+        actions.setAutoPlayNext(autoPlayNext)
+    }
+
     func signOutOfTrakt() {
         actions.signOutOfTrakt()
         isTraktSignedIn = actions.isTraktSignedIn()
@@ -131,6 +227,8 @@ final class GlassSettingsModel: ObservableObject {
     func refresh() {
         isTraktSignedIn = actions.isTraktSignedIn()
         if let stored = actions.readThemeSongs?(), stored != themeSongs { themeSongs = stored }
+        if let stored = actions.readAutoPlayNext?(), stored != autoPlayNext { autoPlayNext = stored }
+        if let stored = actions.readHome?(), stored != home { home = stored }
         cacheBytes = nil
         let measure = actions.measureCache
         DispatchQueue.global(qos: .utility).async {
@@ -206,13 +304,14 @@ enum GlassSettingsPalette {
 
 /// The rows that open a picker.
 enum GlassSettingsPicker: String, Identifiable {
-    case quality, audio, subtitles
+    case quality, audio, subtitles, homeLanguages, homeShelves
     var id: String { rawValue }
 }
 
 /// Rows that can hold the focus (default focus, screenshots).
 enum GlassSettingsRowID: Hashable {
-    case quality, audio, subtitles, themeSongs, clearCache, trakt, version
+    case quality, autoPlayNext, audio, subtitles, themeSongs, clearCache, trakt, version
+    case homeLanguages, homeShelves, homeLookup
 }
 
 struct GlassSettingsView: View {
@@ -239,6 +338,9 @@ struct GlassSettingsView: View {
                 .padding(.horizontal, 90)
                 .padding(.bottom, 40)
         }
+        // 90 pt from the screen's edge, as the Home and the grids (the
+        // system's side safe area came on top: the title started at 170).
+        .ignoresSafeArea(.container, edges: .horizontal)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .background { GlassSettingsBackdrop().ignoresSafeArea() }
         .defaultFocus($focusedRow, defaultFocusRow)
@@ -298,6 +400,7 @@ struct GlassSettingsView: View {
                 }
                 .frame(maxWidth: .infinity)
                 VStack(alignment: .leading, spacing: 44) {
+                    if model.home != nil { homeSection }
                     storageSection
                     if model.isTraktSignedIn { accountSection }
                     aboutSection
@@ -317,6 +420,13 @@ struct GlassSettingsView: View {
                 .focused($focusedRow, equals: .quality)
                 .accessibilityIdentifier("Settings.Row.quality")
             GlassSettingsDivider()
+            GlassSettingsRow(symbol: "play.square.stack.fill", tint: .green, title: "Settings.AutoPlayNext",
+                             detail: "Settings.AutoPlayNext.Footer", detailLines: 3,
+                             value: glassSettingsLocalized(model.autoPlayNext ? "On" : "Off"),
+                             showsChevron: false) { model.toggleAutoPlayNext() }
+                .focused($focusedRow, equals: .autoPlayNext)
+                .accessibilityIdentifier("Settings.Row.autoPlayNext")
+            GlassSettingsDivider()
             GlassSettingsRow(symbol: "speaker.wave.2.fill", tint: .blue, title: "Audio Language",
                              value: model.languageName(model.audioLanguage)) { picker = .audio }
                 .focused($focusedRow, equals: .audio)
@@ -334,6 +444,30 @@ struct GlassSettingsView: View {
                              value: glassSettingsLocalized(model.themeSongs ? "On" : "Off"),
                              showsChevron: false) { model.toggleThemeSongs() }
                 .focused($focusedRow, equals: .themeSongs)
+        }
+    }
+
+    /// The Home tab: what it shows, and what it asks about the user's shows.
+    private var homeSection: some View {
+        GlassSettingsSection(title: "Home", footer: nil) {
+            GlassSettingsRow(symbol: "globe", tint: .indigo, title: "Languages",
+                             detail: "Home.Settings.Languages.Detail",
+                             value: model.homeLanguagesSummary) { picker = .homeLanguages }
+                .focused($focusedRow, equals: .homeLanguages)
+                .accessibilityIdentifier("Settings.Row.homeLanguages")
+            GlassSettingsDivider()
+            GlassSettingsRow(symbol: "rectangle.stack.fill", tint: .purple, title: "Shown Shelves",
+                             detail: "Home.Settings.Shelves.Detail",
+                             value: model.homeShelvesSummary) { picker = .homeShelves }
+                .focused($focusedRow, equals: .homeShelves)
+                .accessibilityIdentifier("Settings.Row.homeShelves")
+            GlassSettingsDivider()
+            GlassSettingsRow(symbol: "sparkles", tint: .green, title: "Grouped Episode Lookup",
+                             detail: "Home.Settings.Lookup.Detail",
+                             value: glassSettingsLocalized(model.home?.groupedEpisodeLookup == true ? "On" : "Off"),
+                             showsChevron: false) { model.toggleGroupedEpisodeLookup() }
+                .focused($focusedRow, equals: .homeLookup)
+                .accessibilityIdentifier("Settings.Row.homeLookup")
         }
     }
 
@@ -413,6 +547,26 @@ struct GlassSettingsView: View {
                     self.picker = nil
                 },
                 onCancel: { self.picker = nil })
+        case .homeLanguages:
+            // Several can be checked: a press checks or unchecks, Menu closes.
+            GlassSettingsPickerSheet(
+                title: "Content Languages",
+                message: "Home.Settings.Languages.Message",
+                options: [.init(id: "", title: glassSettingsLocalized("All Languages"), detail: nil)]
+                    + (model.home?.languageChoices ?? []).map { .init(id: $0.id, title: $0.title, detail: nil) },
+                selectedID: model.home?.languages.first ?? "",
+                checkedIDs: Set(model.home?.languages ?? []).union(model.home?.languages.isEmpty == false ? [] : [""]),
+                onSelect: { id in model.toggle(homeLanguage: id.isEmpty ? nil : id) },
+                onCancel: { self.picker = nil })
+        case .homeShelves:
+            GlassSettingsPickerSheet(
+                title: "Home Shelves",
+                message: "Home.Settings.Shelves.Message",
+                options: (model.home?.shelfChoices ?? []).map { .init(id: $0.id, title: $0.title, detail: nil) },
+                selectedID: model.home?.shelfChoices.first?.id ?? "",
+                checkedIDs: Set((model.home?.shelfChoices ?? []).map(\.id)).subtracting(model.home?.hiddenShelves ?? []),
+                onSelect: { id in model.toggle(homeShelf: id) },
+                onCancel: { self.picker = nil })
         }
     }
 
@@ -485,6 +639,11 @@ private struct GlassSettingsRow: View {
     let tint: Color
     let title: String
     var subtitle: String? = nil
+    /// One sentence that says what the setting does, under the title and
+    /// the value, on the row's full width (two lines at most; `detailLines`).
+    var detail: String? = nil
+    /// « Autoplay Next Episode »'s sentence takes three lines in French.
+    var detailLines = 2
     let value: String?
     var showsChevron = true
     let action: () -> Void
@@ -497,41 +656,62 @@ private struct GlassSettingsRow: View {
                     .foregroundStyle(.white)
                     .frame(width: 56, height: 56)
                     .background(tint.gradient, in: RoundedRectangle(cornerRadius: 15, style: .continuous))
-                // A long title (Italian "Seleziona Automaticamente la
-                // Qualità") wraps to a second line instead of pushing the
-                // value out; the value keeps its width.
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(glassSettingsLocalized(title))
-                        .font(.system(size: 31, weight: .medium))
-                        .lineLimit(2)
-                        .minimumScaleFactor(0.8)
-                        .fixedSize(horizontal: false, vertical: true)
-                    if let subtitle {
-                        Text(glassSettingsLocalized(subtitle))
+                if let detail {
+                    VStack(alignment: .leading, spacing: 5) {
+                        titleAndValue
+                        Text(glassSettingsLocalized(detail))
                             .font(.system(size: 23, weight: .medium))
                             .opacity(0.6)
-                            .lineLimit(1)
+                            .lineLimit(detailLines)
+                            .multilineTextAlignment(.leading)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .frame(maxWidth: .infinity, alignment: .leading)
                     }
-                }
-                Spacer(minLength: 16)
-                if let value {
-                    Text(value)
-                        .font(.system(size: 29))
-                        .opacity(0.65)
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.75)
-                        .layoutPriority(1)
-                }
-                if showsChevron {
-                    Image(systemName: "chevron.forward")
-                        .font(.system(size: 24, weight: .semibold))
-                        .opacity(0.4)
+                    .padding(.vertical, 14)
+                } else {
+                    titleAndValue
                 }
             }
             .padding(.horizontal, 22)
             .frame(minHeight: 90)
         }
         .buttonStyle(GlassSettingsRowStyle())
+    }
+
+    /// The title (and subtitle), the value and the chevron, on one line.
+    private var titleAndValue: some View {
+        HStack(spacing: 24) {
+            // A long title (Italian "Seleziona Automaticamente la
+            // Qualità") wraps to a second line instead of pushing the
+            // value out; the value keeps its width.
+            VStack(alignment: .leading, spacing: 2) {
+                Text(glassSettingsLocalized(title))
+                    .font(.system(size: 31, weight: .medium))
+                    .lineLimit(2)
+                    .minimumScaleFactor(0.8)
+                    .fixedSize(horizontal: false, vertical: true)
+                if let subtitle {
+                    Text(glassSettingsLocalized(subtitle))
+                        .font(.system(size: 23, weight: .medium))
+                        .opacity(0.6)
+                        .lineLimit(1)
+                }
+            }
+            Spacer(minLength: 16)
+            if let value {
+                Text(value)
+                    .font(.system(size: 29))
+                    .opacity(0.65)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.75)
+                    .layoutPriority(1)
+            }
+            if showsChevron {
+                Image(systemName: "chevron.forward")
+                    .font(.system(size: 24, weight: .semibold))
+                    .opacity(0.4)
+            }
+        }
     }
 }
 
@@ -588,7 +768,12 @@ struct GlassSettingsPickerSheet: View {
     let title: String
     let message: String?
     let options: [Option]
+    /// The current choice: it has the focus when the sheet opens.
     let selectedID: String
+    /// A list where several lines can be checked: the checked ones. A press
+    /// then checks or unchecks (the host keeps the sheet open); nil: one
+    /// choice, the checkmark is on `selectedID`.
+    var checkedIDs: Set<String>? = nil
     let onSelect: (String) -> Void
     let onCancel: () -> Void
 
@@ -654,7 +839,7 @@ struct GlassSettingsPickerSheet: View {
                 Spacer(minLength: 16)
                 Image(systemName: "checkmark")
                     .font(.system(size: 28, weight: .bold))
-                    .opacity(option.id == selectedID ? 1 : 0)
+                    .opacity((checkedIDs?.contains(option.id) ?? (option.id == selectedID)) ? 1 : 0)
             }
             .padding(.horizontal, 26)
             .padding(.vertical, option.detail == nil ? 18 : 16)
@@ -664,19 +849,14 @@ struct GlassSettingsPickerSheet: View {
     }
 }
 
-/// The page backdrop: the app icon's warm cinema gradient (plum to near black,
-/// with an orange glow at the top right), which the glass cards refract.
+/// The page backdrop: the black of the other pages (the Home, the grids),
+/// with a faint light at the top for the glass cards to refract.
 private struct GlassSettingsBackdrop: View {
     var body: some View {
         ZStack {
-            LinearGradient(colors: [Color(red: 0.30, green: 0.08, blue: 0.34),
-                                    Color(red: 0.10, green: 0.04, blue: 0.22),
-                                    Color(red: 0.08, green: 0.03, blue: 0.18)],
-                           startPoint: .top, endPoint: .bottom)
-            RadialGradient(colors: [Color(red: 1.0, green: 0.55, blue: 0.20).opacity(0.45), .clear],
-                           center: UnitPoint(x: 0.82, y: 0.12), startRadius: 0, endRadius: 900)
-            RadialGradient(colors: [GlassSettingsPalette.accent.opacity(0.22), .clear],
-                           center: UnitPoint(x: 0.1, y: 0.95), startRadius: 0, endRadius: 800)
+            Color.black
+            RadialGradient(colors: [Color.white.opacity(0.10), .clear],
+                           center: UnitPoint(x: 0.5, y: 0), startRadius: 0, endRadius: 1100)
         }
     }
 }

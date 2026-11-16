@@ -205,6 +205,7 @@ public final class PirateBayTop100 {
     private static let keptFields: Set<String> = [
         "id", "imdb_id", "type", "name", "poster", "background", "logo", "genres", "genre",
         "releaseInfo", "year", "imdbRating", "description", "runtime",
+        "released", "trailerStreams", "status",
     ]
 
     private static func trimmed(_ meta: [String: Any]) -> [String: Any] {

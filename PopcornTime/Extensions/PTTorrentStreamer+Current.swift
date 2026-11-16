@@ -83,6 +83,11 @@ extension PTTorrentStreamer {
             case .usualRule:
                 index = Int32(PlaybackRouting.fileIndexToStream(names: fileNames, sizes: sizes, preferredIndex: preferredIndex))
             }
+            // The torrent's files (a season pack: does it hold the next
+            // episode?) and the one played, for episode chaining and the
+            // release remembered with the title.
+            PlaybackReleaseRegistry.noteFiles(PackFiles(names: fileNames, sizes: sizes),
+                                              playedIndex: index >= 0 ? Int(index) : nil, forLink: link)
             if fileNames.count > 1 {
                 let picked = index >= 0 && Int(index) < fileNames.count ? "file #\(index) \(fileNames[Int(index)])" : "no file"
                 print("\(log) multi-file torrent: \(picked) of \(fileNames.count)"
