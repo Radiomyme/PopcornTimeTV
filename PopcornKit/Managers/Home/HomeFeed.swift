@@ -126,6 +126,14 @@ public final class HomeFeed: @unchecked Sendable {
     /// TV app tells the system its Top Shelf may have changed.
     public static let didRefreshNotification = Notification.Name("PopcornKit.HomeFeed.didRefresh")
 
+    /// The « Services » row and the page filtered on a service: the Apple
+    /// TV's Home only (the other apps have no such row).
+    #if os(tvOS)
+    static let servicesRow = true
+    #else
+    static let servicesRow = false
+    #endif
+
     public let store: HomeStore
     private let transport: HomeTransport
     private let settings: HomeSettings
@@ -412,7 +420,12 @@ public final class HomeFeed: @unchecked Sendable {
     private func inputs(lists: [String: HomeSourceList], local: HomeLocal, pending: Set<String> = []) -> HomeBuilder.Inputs {
         return HomeBuilder.Inputs(lists: lists, local: local, languages: settings.contentLanguages,
                                   hidden: settings.hiddenShelves,
-                                  sendsFollowedShows: settings.sendsFollowedShowsToCinemeta, pending: pending, now: now())
+                                  sendsFollowedShows: settings.sendsFollowedShowsToCinemeta,
+                                  streaming: HomeFeed.servicesRow ? settings.streamingShelves : [],
+                                  service: HomeFeed.servicesRow ? settings.homeService : nil,
+                                  region: settings.streamingRegion,
+                                  allServicesTitle: Bundle.main.localizedString(forKey: "All", value: "All", table: nil),
+                                  pending: pending, now: now())
     }
 
     private func currentInputs() -> HomeBuilder.Inputs {
@@ -444,7 +457,7 @@ public final class HomeFeed: @unchecked Sendable {
         // them: the others are not "yet to ask".
         guard !rules.light, !planned.isEmpty else { return false }
         let plan = currentInputs().plan(rules: rules)
-        return ([plan.calendar].compactMap { $0 } + plan.genres).contains { !planned.contains($0.key) && lists[$0.key] == nil }
+        return ([plan.calendar].compactMap { $0 } + plan.genres + plan.streaming).contains { !planned.contains($0.key) && lists[$0.key] == nil }
     }
 
     private func setList(_ list: HomeSourceList?, key: String) {

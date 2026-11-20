@@ -4,6 +4,7 @@ import UIKit
 import func PopcornKit.loadMovies
 import class PopcornKit.MovieManager
 import struct PopcornKit.Movie
+import enum PopcornKit.StreamingSort
 
 class MoviesViewController: MediaViewController {
     
@@ -21,6 +22,14 @@ class MoviesViewController: MediaViewController {
             updateHeaderControls()
             #endif
             didRefresh(collectionView: collectionView)
+        }
+    }
+
+    override var streamingSort: StreamingSort {
+        switch currentFilter {
+        case .date, .year: return .recent
+        case .rating: return .topRated
+        default: return .popular
         }
     }
 
@@ -85,6 +94,10 @@ class MoviesViewController: MediaViewController {
             return DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { completion(nil, GridDebugHooks.failure) }
         }
         #endif
+        // A service's catalogue (TMDB): no saved first page.
+        if let service = currentService {
+            return loadService(service, page: page) { items, error in completion(items?.compactMap(\.movie), error) }
+        }
         guard page <= 1 else {
             return PopcornKit.loadMovies(page, filterBy: filter, genre: genre, completion: completion)
         }

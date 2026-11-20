@@ -1,9 +1,60 @@
 
 
 import Foundation
-import class PopcornKit.NetworkManager
+import UIKit
+import PopcornKit
 
 class MediaViewController: MainViewController {
+
+    /// The streaming service whose catalogue the grid shows, in the user's
+    /// country (TMDB); nil: the usual catalogue. Sort and Genre still apply.
+    var currentService: StreamingService? {
+        didSet {
+            guard oldValue != currentService, let collectionView else { return }
+            collectionViewController.currentPage = 1
+            #if os(tvOS)
+            updateHeaderControls()
+            #endif
+            didRefresh(collectionView: collectionView)
+        }
+    }
+
+    /// The kind of titles of this grid.
+    var streamingKind: HomeItem.Kind { return self is MoviesViewController ? .movie : .show }
+
+    /// The service order closest to the grid's sort (Movies and Shows map theirs).
+    var streamingSort: StreamingSort { return .popular }
+
+    /// A page of `service`'s catalogue for this grid, as cards (main queue;
+    /// nil: TMDB did not answer).
+    func loadService(_ service: StreamingService, page: Int, completion: @escaping ([HomeItem]?, NSError?) -> Void) {
+        let genre = currentGenre == .all ? nil : currentGenre.rawValue
+        TMDBStreamingClient.shared.titles(service: service.id, kind: streamingKind, region: HomeSettings().streamingRegion,
+                                          page: page, sort: streamingSort, genre: genre) { items, _ in
+            DispatchQueue.main.async {
+                guard let items else {
+                    let error = NSError(domain: "TMDB", code: -1,
+                                        userInfo: [NSLocalizedDescriptionKey: "Grid.Service.Unavailable".localized])
+                    return completion(nil, error)
+                }
+                completion(items, nil)
+            }
+        }
+    }
+
+    /// The services offered (Settings › Streaming Services; none without a key).
+    var offeredServices: [StreamingService] { return HomeSettings().streamingShelves }
+
+    /// The Service control (UIKit fallback; the header's menu replaces it).
+    @objc func showServices(_ sender: Any) {
+        let controller = UIAlertController(title: "Settings.StreamingServices".localized, message: nil, preferredStyle: .actionSheet)
+        controller.addAction(UIAlertAction(title: "All".localized, style: .default) { [weak self] _ in self?.currentService = nil })
+        for service in offeredServices {
+            controller.addAction(UIAlertAction(title: service.name, style: .default) { [weak self] _ in self?.currentService = service })
+        }
+        controller.addAction(UIAlertAction(title: "Cancel".localized, style: .cancel, handler: nil))
+        present(controller, animated: true)
+    }
     
     var currentGenre = NetworkManager.Genres.all {
         didSet {
@@ -29,6 +80,21 @@ class MediaViewController: MainViewController {
     override func updateHeaderControls() {
         GridHeaderView.set(sortButton, format: "Sort: %@".localized, value: currentFilterName)
         GridHeaderView.set(genreButton, format: "Genre: %@".localized, value: currentGenre.string)
+        GridHeaderView.set(serviceButton, format: "Service: %@".localized, value: currentService?.name ?? "All".localized)
+        let services = offeredServices
+        var serviceChoices: [UIMenuElement] = [UIAction(title: "All".localized, state: currentService == nil ? .on : .off) { [weak self] _ in
+            self?.currentService = nil
+        }]
+        serviceChoices += services.map { service in
+            UIAction(title: service.name, state: service.id == currentService?.id ? .on : .off) { [weak self] _ in
+                self?.currentService = service
+            }
+        }
+        if services.isEmpty {
+            // No key: the menu says where the services come from.
+            serviceChoices.append(UIAction(title: "Grid.Service.NoKey".localized, attributes: .disabled) { _ in })
+        }
+        GridHeaderView.setMenu(serviceButton, UIMenu(options: .singleSelection, children: serviceChoices))
         // A menu anchored to its control (the system's glass, a white
         // focus, a tick on the current choice), not an alert over the page.
         GridHeaderView.setMenu(sortButton, UIMenu(options: .singleSelection, children: sortChoices))

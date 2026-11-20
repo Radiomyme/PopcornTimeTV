@@ -248,6 +248,8 @@ final class HomeHostingController: UIHostingController<HomeView> {
     /// own entry point: a resume card continues where the library says, an
     /// episode's card plays that episode).
     private func open(_ item: HomeItem, from shelf: String?, play: Bool) {
+        // A card of the « Services » row filters the page.
+        if HomeServiceCard.isServiceCard(item) { return HomeHostingController.showService(HomeServiceCard.serviceId(of: item)) }
         guard let navigationController, let media = item.media else { return }
         var autoPlay = play
         #if DEBUG
@@ -264,6 +266,15 @@ final class HomeHostingController: UIHostingController<HomeView> {
         if item.kind == .movie { GlassDetailSeed.note(badges: GlassBadgeMerge.badges(of: item), of: item.imdbId) }
         MainViewController.showDetail(of: media, on: navigationController, autoPlay: autoPlay,
                                       season: episode?.season, episode: episode?.number)
+    }
+
+    /// The page filtered on a service (nil: the usual page). The hub reads
+    /// it when it builds the page: the service's lists are asked at once.
+    static func showService(_ id: Int?) {
+        let settings = HomeSettings()
+        guard settings.homeServiceFilter != id else { return }
+        settings.homeServiceFilter = id
+        HomeState.shared.refreshLocal()
     }
 
     /// The shelf's own titles, in its order, under its name, on the Home's
@@ -283,7 +294,8 @@ final class HomeHostingController: UIHostingController<HomeView> {
         cards.isWatched = actions.isWatched
         cards.toggleWatched = actions.toggleWatched
         let text = HomeText.standard
-        let grid = HomeSeeAllGrid(shelf: shelf, title: text.title(of: shelf), text: text, actions: cards)
+        let grid = HomeSeeAllGrid(shelf: shelf, title: text.title(of: shelf), text: text, actions: cards,
+                                  more: HomeSeeAllMore(pages: shelf.seeAll?.streamingPages()))
         navigationController.pushViewController(HomeSeeAllHostingController(grid: grid), animated: true)
     }
 }

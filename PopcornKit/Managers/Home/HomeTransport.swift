@@ -25,6 +25,8 @@ public struct HomeTransport: Sendable {
     /// The real hosts, with short timeouts and a memory of the hosts that
     /// do not answer (`HomeHTTP`).
     public static let live = HomeTransport(fetch: { request, completion in
+        // TMDB's answers need their titles' IMDb ids: its own client.
+        if request.host == .tmdb { return TMDBStreamingClient.shared.fetch(path: request.path, completion: completion) }
         HomeHTTP.shared.get(request, completion: completion)
     }, reset: {
         HomeHTTP.shared.forgetFailures()
@@ -108,6 +110,8 @@ final class HomeHTTP: @unchecked Sendable {
         case .tvmaze: return ["https://api.tvmaze.com"]
         // Turned off in the app: the shelves made of it are simply absent.
         case .apibay: return PirateBayClient.isEnabled ? PirateBayClient.hosts : []
+        // Reached through `TMDBStreamingClient` (`HomeTransport.live`).
+        case .tmdb: return []
         }
     }
 

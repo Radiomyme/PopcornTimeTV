@@ -66,6 +66,9 @@ enum HomeFixtures {
             if path.hasSuffix("data_top100_207.json") { return .file("tpb_207.json") }
             if path.hasSuffix("data_top100_211.json") { return .file("tpb_211.json") }
             return .none
+        case .tmdb:
+            // No key in a fixture run: the streaming shelves are not asked.
+            return .none
         }
     }
 

@@ -123,15 +123,17 @@ final class HomeTransportTests: CheckedTestCase {
             host == .yts ? ["https://yts-a.test", "https://yts-b.test"] : ["https://\(host.rawValue).test"]
         }
         let every = ["cinemeta.test", "yts-a.test", "yts-b.test", "tvmaze.test", "apibay.test"]
+        // TMDB is reached through its own client (`TMDBStreamingClient`), not `HomeHTTP`.
+        let served = HomeRequest.Host.allCases.filter { $0 != .tmdb }
 
         // The router lost its WAN while the Home refreshes: no host resolves.
         HomeHostStub.set(.failure(NSURLErrorCannotFindHost), for: every)
-        for host in HomeRequest.Host.allCases { check(get(http, host) == nil, "\(host.rawValue): no answer") }
+        for host in served { check(get(http, host) == nil, "\(host.rawValue): no answer") }
         eq(HomeHostStub.takeLog(), every, "every host of every service was tried")
 
         // It is back twenty seconds later, and the Home appears again.
         HomeHostStub.set(.json, for: every)
-        for host in HomeRequest.Host.allCases { check(get(http, host) != nil, "\(host.rawValue): asked again, and answers") }
+        for host in served { check(get(http, host) != nil, "\(host.rawValue): asked again, and answers") }
         eq(HomeHostStub.takeLog(), ["cinemeta.test", "yts-a.test", "tvmaze.test", "apibay.test"], "each service by its first host: nothing is shut out for five minutes")
 
         // One mirror among several fails: the next answers, and the dead one is left alone after.

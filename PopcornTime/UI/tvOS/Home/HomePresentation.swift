@@ -271,6 +271,8 @@ extension HomeSeeAll {
         case .movies: return .movies
         case .shows: return .shows
         case .watchlist: return .watchlist
+        // A service's catalogue has no tab: its See All is the Home's grid.
+        case .streaming: return .home
         }
     }
 }

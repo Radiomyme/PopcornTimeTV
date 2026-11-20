@@ -57,6 +57,7 @@ class MainViewController: UIViewController, CollectionViewControllerDelegate {
     /// what the control is set to on it (`updateHeaderControls`).
     private(set) var sortButton: UIButton?
     private(set) var genreButton: UIButton?
+    private(set) var serviceButton: UIButton?
 
     /// The page title (the tab's name; a person's).
     var bodyTitleLabel: UILabel? { return bodyHeader?.titleLabel }
@@ -120,6 +121,8 @@ class MainViewController: UIViewController, CollectionViewControllerDelegate {
         header.titleLabel.isHidden = titleText == nil
         if responds(to: sortSel) { sortButton = header.addControl(identifier: "GridHeader.Sort", target: self, action: sortSel) }
         if responds(to: genreSel) { genreButton = header.addControl(identifier: "GridHeader.Genre", target: self, action: genreSel) }
+        let serviceSel = NSSelectorFromString("showServices:")
+        if responds(to: serviceSel) { serviceButton = header.addControl(identifier: "GridHeader.Service", target: self, action: serviceSel) }
         collectionView.addSubview(header)
         bodyHeader = header
         updateHeaderControls()
