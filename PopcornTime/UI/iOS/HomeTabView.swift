@@ -231,6 +231,8 @@ private final class ShelfMore {
     private(set) var isLoading = false
     private var page = 0
     private var isOver = false
+    /// A streaming shelf's catalogue (TMDB), page after page.
+    private var pages: TMDBStreamingClient.CataloguePages?
 
     /// The catalogue's titles that are not on the shelf.
     func entries(after shelf: [HomeItem]) -> [ShelfEntry] {
@@ -259,6 +261,17 @@ private final class ShelfMore {
             PopcornKit.loadShows(next, filterBy: seeAll.showFilter ?? .trending, genre: seeAll.genreFilter) { shows, _ in finish(shows) }
         case .watchlist:
             isOver = true
+        case .streaming:
+            if pages == nil { pages = seeAll.streamingPages() }
+            guard let pages else { isOver = true; return }
+            isLoading = true
+            pages.load { [weak self] items in
+                guard let self else { return }
+                self.isLoading = false
+                guard let items, !items.isEmpty else { self.isOver = pages.isOver || items == nil; return }
+                self.page = next
+                self.loaded += items.map(ShelfEntry.init(item:))
+            }
         }
     }
 }

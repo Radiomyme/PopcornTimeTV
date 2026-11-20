@@ -412,7 +412,9 @@ public final class HomeFeed: @unchecked Sendable {
     private func inputs(lists: [String: HomeSourceList], local: HomeLocal, pending: Set<String> = []) -> HomeBuilder.Inputs {
         return HomeBuilder.Inputs(lists: lists, local: local, languages: settings.contentLanguages,
                                   hidden: settings.hiddenShelves,
-                                  sendsFollowedShows: settings.sendsFollowedShowsToCinemeta, pending: pending, now: now())
+                                  sendsFollowedShows: settings.sendsFollowedShowsToCinemeta,
+                                  streaming: settings.streamingShelves, region: settings.streamingRegion,
+                                  pending: pending, now: now())
     }
 
     private func currentInputs() -> HomeBuilder.Inputs {
@@ -444,7 +446,7 @@ public final class HomeFeed: @unchecked Sendable {
         // them: the others are not "yet to ask".
         guard !rules.light, !planned.isEmpty else { return false }
         let plan = currentInputs().plan(rules: rules)
-        return ([plan.calendar].compactMap { $0 } + plan.genres).contains { !planned.contains($0.key) && lists[$0.key] == nil }
+        return ([plan.calendar].compactMap { $0 } + plan.genres + plan.streaming).contains { !planned.contains($0.key) && lists[$0.key] == nil }
     }
 
     private func setList(_ list: HomeSourceList?, key: String) {

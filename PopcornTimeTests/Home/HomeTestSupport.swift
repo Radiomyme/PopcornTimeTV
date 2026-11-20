@@ -173,6 +173,8 @@ final class HomeFakeNetwork: @unchecked Sendable {
             if path.hasSuffix("data_top100_207.json") { return HomeFixture.data("tpb_207.json") }
             if path.hasSuffix("data_top100_211.json") { return HomeFixture.data("tpb_211.json") }
             return nil
+        case .tmdb:
+            return nil
         }
     }
 }

@@ -283,7 +283,8 @@ final class HomeHostingController: UIHostingController<HomeView> {
         cards.isWatched = actions.isWatched
         cards.toggleWatched = actions.toggleWatched
         let text = HomeText.standard
-        let grid = HomeSeeAllGrid(shelf: shelf, title: text.title(of: shelf), text: text, actions: cards)
+        let grid = HomeSeeAllGrid(shelf: shelf, title: text.title(of: shelf), text: text, actions: cards,
+                                  more: HomeSeeAllMore(pages: shelf.seeAll?.streamingPages()))
         navigationController.pushViewController(HomeSeeAllHostingController(grid: grid), animated: true)
     }
 }

@@ -225,6 +225,7 @@ public struct HomeShelf: Codable, Hashable, Sendable, Identifiable {
     /// under the name the app's genres have ("Science Fiction" for
     /// Cinemeta's "Sci-Fi") when it is one of them — those are translated.
     public var titleArgument: String? {
+        if HomeShelfID.streamingService(of: id) != nil { return seeAll?.service?.name }
         guard let genre = HomeShelfID.genre(of: id)?.genre else { return nil }
         return HomeBuilder.appGenre(genre)?.rawValue ?? genre
     }
@@ -237,6 +238,9 @@ public struct HomeSeeAll: Codable, Hashable, Sendable {
         case movies
         case shows
         case watchlist
+        /// A streaming service's catalogue in a country
+        /// (`TMDBStreamingClient.CataloguePages`).
+        case streaming
     }
 
     public var catalogue: Catalogue
@@ -244,11 +248,23 @@ public struct HomeSeeAll: Codable, Hashable, Sendable {
     public var filter: String?
     /// Raw value of `NetworkManager.Genres`.
     public var genre: String?
+    /// `.streaming`: the service, and the country of its catalogue.
+    public var service: StreamingService?
+    public var region: String?
 
-    public init(catalogue: Catalogue, filter: String? = nil, genre: String? = nil) {
+    public init(catalogue: Catalogue, filter: String? = nil, genre: String? = nil,
+                service: StreamingService? = nil, region: String? = nil) {
         self.catalogue = catalogue
         self.filter = filter
         self.genre = genre
+        self.service = service
+        self.region = region
+    }
+
+    /// The pages of a `.streaming` See All, nil for the other catalogues.
+    public func streamingPages() -> TMDBStreamingClient.CataloguePages? {
+        guard catalogue == .streaming, let service, let region else { return nil }
+        return TMDBStreamingClient.CataloguePages(service: service.id, region: region)
     }
 
     public var movieFilter: MovieManager.Filters? {
@@ -334,6 +350,8 @@ public enum HomeShelfID {
         case topMovies: return "Top 100 Movies"
         case watchlist: return "Watchlist"
         default:
+            // "On Netflix": the service's name is `HomeShelf.titleArgument`.
+            if streamingService(of: id) != nil { return "On %@" }
             guard let genre = genre(of: id) else { return id }
             return genre.kind == .movie ? "%@ Movies" : "%@ Shows"
         }

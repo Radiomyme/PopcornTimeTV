@@ -556,3 +556,24 @@
 "Settings.UpNextCard" = "Carte Épisode suivant";
 "Settings.UpNextCard.Value" = "%d s avant la fin";
 "Settings.UpNextCard.Message" = "Combien de temps avant la fin d'un épisode sa carte propose le suivant. Avec « Enchaîner les épisodes », le suivant démarre à la fin ; sinon seulement quand vous choisissez Lire maintenant.";
+
+/* Streaming services (PopcornKit/Managers/Home/HomeStreaming.swift, the tvOS Settings' streaming section). "On %@": a service's shelf, %@ = the service ("On Netflix"). */
+"Save" = "Enregistrer";
+"On %@" = "Sur %@";
+"Settings.Streaming" = "Services de streaming";
+"Settings.Streaming.Footer" = "Ce que chaque service propose dans votre pays vient de JustWatch, via TMDB. Popcorn Time n’est ni approuvé ni certifié par TMDB.";
+"Settings.TMDBKey" = "Clé TMDB";
+"Settings.TMDBKey.Detail" = "Votre propre clé gratuite, sur themoviedb.org › Paramètres › API. Les rangées « Sur Netflix » en ont besoin.";
+"Settings.TMDBKey.Set" = "Définie";
+"Settings.TMDBKey.Missing" = "Aucune";
+"Settings.TMDBKey.Placeholder" = "Clé d’API ou jeton d’accès en lecture";
+"Settings.TMDBKey.Message" = "Créez un compte gratuit sur themoviedb.org, puis copiez la clé d’API (ou le jeton d’accès en lecture) depuis Paramètres › API. Laissez vide pour garder la clé actuelle.";
+"Settings.TMDBKey.Remove" = "Supprimer la clé";
+"Settings.TMDBKey.Accepted" = "TMDB a accepté la clé. Les rangées des services apparaissent sur l’Accueil.";
+"Settings.TMDBKey.Refused" = "TMDB a refusé cette clé. Vérifiez qu’elle a été copiée en entier.";
+"Settings.TMDBKey.Unchecked" = "TMDB est injoignable : la clé est enregistrée et sera essayée au prochain rafraîchissement.";
+"Settings.StreamingRegion" = "Pays";
+"Settings.StreamingRegion.Message" = "Le catalogue d’un service change d’un pays à l’autre : les rangées montrent celui de ce pays.";
+"Settings.StreamingServices" = "Services";
+"Settings.StreamingServices.Message" = "Chaque service coché a sa rangée sur l’Accueil, dans cet ordre. Les plus regardés dans votre pays sont en tête.";
+"Settings.StreamingServices.NoKey" = "Ajoutez d’abord votre clé TMDB : les services de votre pays s’affichent dès que TMDB répond.";

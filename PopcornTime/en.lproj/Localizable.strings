@@ -556,3 +556,24 @@
 "Settings.UpNextCard" = "Next Episode Card";
 "Settings.UpNextCard.Value" = "%d s before the end";
 "Settings.UpNextCard.Message" = "How long before the end of an episode its card offers the next one. With Autoplay Next Episode on, the next one starts at the end; otherwise only when you choose Play Now.";
+
+/* Streaming services (PopcornKit/Managers/Home/HomeStreaming.swift, the tvOS Settings' streaming section). "On %@": a service's shelf, %@ = the service ("On Netflix"). */
+"Save" = "Save";
+"On %@" = "On %@";
+"Settings.Streaming" = "Streaming Services";
+"Settings.Streaming.Footer" = "What each service offers in your country comes from JustWatch, through TMDB. Popcorn Time is not endorsed or certified by TMDB.";
+"Settings.TMDBKey" = "TMDB Key";
+"Settings.TMDBKey.Detail" = "Your own free key, from themoviedb.org › Settings › API. The « On Netflix » shelves need it.";
+"Settings.TMDBKey.Set" = "Set";
+"Settings.TMDBKey.Missing" = "Not Set";
+"Settings.TMDBKey.Placeholder" = "API key or read access token";
+"Settings.TMDBKey.Message" = "Create a free account on themoviedb.org, then copy the API key (or the read access token) from Settings › API. Leave it empty to keep the current key.";
+"Settings.TMDBKey.Remove" = "Remove Key";
+"Settings.TMDBKey.Accepted" = "TMDB accepted the key. The streaming shelves appear on Home.";
+"Settings.TMDBKey.Refused" = "TMDB refused this key. Check that it was copied in full.";
+"Settings.TMDBKey.Unchecked" = "TMDB could not be reached: the key is saved and will be tried at the next refresh.";
+"Settings.StreamingRegion" = "Country";
+"Settings.StreamingRegion.Message" = "What a service offers changes from one country to another: the shelves show the catalogues of this one.";
+"Settings.StreamingServices" = "Services";
+"Settings.StreamingServices.Message" = "Each checked service has its own shelf on Home, in this order. The most watched in your country come first.";
+"Settings.StreamingServices.NoKey" = "Add your TMDB key first: the services of your country are listed once TMDB answers.";

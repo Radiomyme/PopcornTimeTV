@@ -23,6 +23,15 @@ import Foundation
 ///   `followedShowIds`.
 /// - `popcornkit.home.hiddenShelves` — [String], ids of the shelves the user
 ///   hid (`HomeShelfID`). Absent: none.
+/// - `popcornkit.tmdb.apiKey` — String, the user's own TMDB key (a v3 API
+///   key or a v4 read access token). The app ships none: TMDB revoked the
+///   one it had. Absent: no "On Netflix" shelves.
+/// - `popcornkit.home.streamingRegion` — String, ISO 3166-1 code ("FR"):
+///   the country whose catalogues the streaming shelves show. Absent: the
+///   device's region.
+/// - `popcornkit.home.streamingServices` — Data, the JSON of the services
+///   chosen (`[StreamingService]`), in the page's order. Absent:
+///   `StreamingService.defaults`. An empty list: no streaming shelf.
 public struct HomeSettings {
 
     public enum Key {
@@ -30,17 +39,25 @@ public struct HomeSettings {
         /// The library's key (`Library.isBulkEpisodeLookupEnabled`).
         public static let sendsFollowedShows = Library.bulkEpisodeLookupKey
         public static let hiddenShelves = "popcornkit.home.hiddenShelves"
+        public static let tmdbAPIKey = "popcornkit.tmdb.apiKey"
+        public static let streamingRegion = "popcornkit.home.streamingRegion"
+        public static let streamingServices = "popcornkit.home.streamingServices"
     }
 
     private let defaults: UserDefaults
     private let deviceLanguages: () -> [String]
+    private let deviceRegion: () -> String?
 
     /// - Parameter deviceLanguages: the device's languages, preferred first
     ///   ("fr-FR", "en-US"): `Locale.preferredLanguages` in production.
+    /// - Parameter deviceRegion: the device's region ("FR"):
+    ///   `Locale.current`'s in production.
     public init(defaults: UserDefaults = .standard,
-                deviceLanguages: @escaping () -> [String] = { Locale.preferredLanguages }) {
+                deviceLanguages: @escaping () -> [String] = { Locale.preferredLanguages },
+                deviceRegion: @escaping () -> String? = { Locale.current.region?.identifier }) {
         self.defaults = defaults
         self.deviceLanguages = deviceLanguages
+        self.deviceRegion = deviceRegion
     }
 
     /// English, French and the device's first language.
@@ -87,5 +104,61 @@ public struct HomeSettings {
         var shelves = hiddenShelves
         if hidden { shelves.insert(id) } else { shelves.remove(id) }
         hiddenShelves = shelves
+    }
+
+    // MARK: Streaming services
+
+    /// The user's TMDB key, nil when none was given.
+    public var tmdbAPIKey: String? {
+        get {
+            guard let key = defaults.string(forKey: Key.tmdbAPIKey)?.trimmingCharacters(in: .whitespacesAndNewlines),
+                  !key.isEmpty else { return nil }
+            return key
+        }
+        nonmutating set {
+            let key = newValue?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            if key.isEmpty { defaults.removeObject(forKey: Key.tmdbAPIKey) } else { defaults.set(key, forKey: Key.tmdbAPIKey) }
+        }
+    }
+
+    /// The country of the streaming catalogues: the one chosen, else the
+    /// device's region, else the United States.
+    public var streamingRegion: String {
+        get {
+            for candidate in [defaults.string(forKey: Key.streamingRegion), deviceRegion()] {
+                if let code = candidate.flatMap(HomeSettings.regionCode) { return code }
+            }
+            return "US"
+        }
+        nonmutating set {
+            if let code = HomeSettings.regionCode(newValue) { defaults.set(code, forKey: Key.streamingRegion) }
+        }
+    }
+
+    /// "fr" → "FR"; nil for anything that is not two letters ("150", "").
+    static func regionCode(_ text: String) -> String? {
+        let code = text.trimmingCharacters(in: .whitespaces).uppercased()
+        guard code.count == 2, code.allSatisfy({ $0.isASCII && $0.isLetter }) else { return nil }
+        return code
+    }
+
+    /// The services that have a shelf, in the page's order.
+    public var streamingServices: [StreamingService] {
+        get {
+            guard let data = defaults.data(forKey: Key.streamingServices),
+                  let services = try? JSONDecoder().decode([StreamingService].self, from: data) else {
+                return StreamingService.defaults
+            }
+            var seen = Set<Int>()
+            return services.filter { seen.insert($0.id).inserted }
+        }
+        nonmutating set {
+            if let data = try? JSONEncoder().encode(newValue) { defaults.set(data, forKey: Key.streamingServices) }
+        }
+    }
+
+    /// The streaming shelves the page asks for: none without a TMDB key.
+    public var streamingShelves: [StreamingService] {
+        return tmdbAPIKey == nil ? [] : streamingServices
     }
 }

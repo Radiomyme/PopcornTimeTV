@@ -20,6 +20,7 @@ enum HomeParse {
         case .yts: return ytsMovies(data)
         case .tvmaze: return tvmazeSchedule(data)
         case .apibay(let kind): return apibayTop(data, kind: kind)
+        case .tmdbDiscover(let kind): return tmdbDiscover(data, kind: kind)
         }
     }
 

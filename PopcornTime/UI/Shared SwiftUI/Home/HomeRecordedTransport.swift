@@ -101,6 +101,8 @@ struct HomeRecordedTransport {
             let prefix = "data_top100_"
             guard name.hasPrefix(prefix), name.hasSuffix(".json"), isPlainName(name) else { return nil }
             return "tpb_" + name.dropFirst(prefix.count)
+        case .tmdb:
+            return nil
         }
     }
 
@@ -121,7 +123,7 @@ struct HomeRecordedTransport {
         case .tvmaze:
             // A day without a recorded schedule: a day without episodes.
             return recorded ?? Data("[]".utf8)
-        case .apibay:
+        case .apibay, .tmdb:
             return recorded
         }
     }

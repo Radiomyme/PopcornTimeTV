@@ -13,6 +13,9 @@ struct HomeSeeAllGrid: View {
     let actions: HomeCardActions
     /// The user's library changed: the menus read it again.
     var libraryVersion: Int = 0
+    /// What comes after the shelf's own titles: a streaming service's
+    /// whole catalogue (an empty one for the other shelves).
+    @ObservedObject var more = HomeSeeAllMore()
 
     @FocusState private var focused: String?
 
@@ -39,9 +42,16 @@ struct HomeSeeAllGrid: View {
                     .padding(.top, 150)
                     .padding(.bottom, 34)
                 LazyVGrid(columns: columns, alignment: .leading, spacing: 40) {
-                    ForEach(shelf.items) { item in
+                    ForEach(items) { item in
                         cell(item)
+                            // Two rows before the end: the next page.
+                            .onAppear { if item.id == loadMark { more.loadNext() } }
                     }
+                }
+                if more.isLoading {
+                    ProgressView()
+                        .frame(maxWidth: .infinity)
+                        .padding(.top, 40)
                 }
             }
             .padding(.horizontal, TVHomeLayout.side)
@@ -53,6 +63,18 @@ struct HomeSeeAllGrid: View {
         .ignoresSafeArea()
         .environment(\.colorScheme, .dark)
         .accessibilityIdentifier("SeeAll.\(shelf.id)")
+        .onAppear { more.start(after: shelf.items) }
+    }
+
+    /// The shelf's titles, then the catalogue's others.
+    private var items: [HomeItem] {
+        shelf.items + more.items
+    }
+
+    /// The cell whose appearance asks the next page: twelve before the end.
+    private var loadMark: String? {
+        let all = items
+        return all.isEmpty ? nil : all[max(all.count - 12, 0)].id
     }
 
     @ViewBuilder
@@ -108,6 +130,40 @@ struct HomeSeeAllGrid: View {
             SwiftUI.Button { actions.toggleWatched(item) } label: {
                 Label(watched ? "Mark as Unwatched" : "Mark as Watched", systemImage: watched ? "eye.slash" : "eye")
             }
+        }
+    }
+}
+
+/// The titles a See All lists after its shelf's: a streaming service's
+/// catalogue (TMDB), a page at a time. Without pages, nothing.
+final class HomeSeeAllMore: ObservableObject {
+    @Published private(set) var items: [HomeItem] = []
+    @Published private(set) var isLoading = false
+    private let pages: TMDBStreamingClient.CataloguePages?
+    private var started = false
+
+    init(pages: TMDBStreamingClient.CataloguePages? = nil) {
+        self.pages = pages
+    }
+
+    /// The first page, the shelf's own titles left out.
+    func start(after shelf: [HomeItem]) {
+        guard !started, let pages else { return }
+        started = true
+        pages.skip(shelf.map(\.imdbId))
+        loadNext()
+    }
+
+    func loadNext() {
+        guard started, let pages, !isLoading, !pages.isOver else { return }
+        isLoading = true
+        pages.load { [weak self] page in
+            guard let self else { return }
+            self.isLoading = false
+            guard let page else { return }
+            self.items += page
+            // A page whose titles were all on the shelf: the one after.
+            if page.isEmpty, !pages.isOver { self.loadNext() }
         }
     }
 }

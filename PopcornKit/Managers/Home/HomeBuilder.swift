@@ -89,6 +89,10 @@ enum HomeBuilder {
         var hidden: Set<String> = []
         /// False: the followed shows are not sent to Cinemeta (no calendar).
         var sendsFollowedShows = true
+        /// The services that have a shelf (none without a TMDB key), and
+        /// the country of their catalogues.
+        var streaming: [StreamingService] = []
+        var region = "US"
         /// Keys of the sources a running refresh has yet to hear from
         /// (the ones that were down at their last attempt left out). A
         /// shelf whose own source is awaited is not made of its stand-in
@@ -101,7 +105,7 @@ enum HomeBuilder {
             return HomePlan(now: now,
                             followedShowIds: sendsFollowedShows ? local.followedShowIds : [],
                             genres: HomeBuilder.genreChoices(local, limit: rules.genreShelves),
-                            light: rules.light)
+                            light: rules.light, streaming: streaming, region: region)
         }
     }
 
@@ -127,7 +131,12 @@ enum HomeBuilder {
         drafts.append(context.yourShows())
         drafts += [
             trendingMovies, context.newMovies(), context.uhd(), context.airedEpisodes(), trendingShows,
-            context.newShows(), context.moviesOfTheYear(), context.topRatedOfTheYear(),
+            context.newShows(),
+        ].compactMap { $0 }
+        // The user's services, after the page's own picks.
+        drafts += context.streaming()
+        drafts += [
+            context.moviesOfTheYear(), context.topRatedOfTheYear(),
             context.ranking(HomeShelfID.topShows, .topShows, kind: .show),
             context.ranking(HomeShelfID.topMovies, .topMovies, kind: .movie),
         ].compactMap { $0 }
@@ -768,6 +777,27 @@ private struct Context {
         }
     }
 
+    // MARK: Streaming
+
+    /// A shelf per service the user chose, in their order: its movies and
+    /// shows in the user's country, most popular first, one of each in
+    /// turn. A service whose lists are not in yet has no shelf.
+    func streaming() -> [HomeBuilder.Draft] {
+        return inputs.streaming.compactMap { service in
+            let lists = HomeItem.Kind.allCases.compactMap { list(.streaming(service: service.id, kind: $0, region: inputs.region)) }
+            guard !lists.isEmpty else { return nil }
+            let entries = TMDBStreamingClient.alternating(lists.map(\.entries))
+            return HomeBuilder.Draft(HomeShelfID.streaming(service.id), entries, lists: lists)
+        }
+    }
+
+    /// A streaming shelf's See All: the service's whole catalogue.
+    func streamingSeeAll(of id: String) -> HomeSeeAll? {
+        guard let serviceId = HomeShelfID.streamingService(of: id),
+              let service = inputs.streaming.first(where: { $0.id == serviceId }) else { return nil }
+        return HomeSeeAll(catalogue: .streaming, service: service, region: inputs.region)
+    }
+
     // MARK: Rankings
 
     /// An apibay ranking as cards: each IMDb id with the card another list
@@ -951,7 +981,10 @@ private struct Context {
         var shelves: [HomeShelf] = []
         for draft in drafts where !inputs.hidden.contains(draft.id) {
             let style = HomeBuilder.style(of: draft.id)
+            // A service's shelf is its catalogue: a title on Netflix is
+            // there even when a shelf above showed it.
             let exempt = HomeShelfID.local.contains(draft.id) || (style == .ranked && rules.rankedShelvesAreComplete)
+                || HomeShelfID.streamingService(of: draft.id) != nil
             let limit = style == .hero ? rules.heroLimit : style == .ranked ? rules.rankedLimit : rules.shelfLimit
             // A genre shelf: the titles not shown above first; the ones shown
             // above (within the "two shelves" rule) only complete a shelf
@@ -989,7 +1022,7 @@ private struct Context {
             shelves.append(HomeShelf(id: draft.id, style: style, items: items,
                                      updatedAt: draft.lists.map(\.savedAt).min(),
                                      isStale: states.contains { $0 != .fresh },
-                                     seeAll: HomeBuilder.seeAll(of: draft.id)))
+                                     seeAll: HomeBuilder.seeAll(of: draft.id) ?? streamingSeeAll(of: draft.id)))
         }
         return shelves
     }
