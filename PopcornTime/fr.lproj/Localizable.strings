@@ -559,7 +559,6 @@
 
 /* Streaming services (PopcornKit/Managers/Home/HomeStreaming.swift, the tvOS Settings' streaming section). "On %@": a service's shelf, %@ = the service ("On Netflix"). */
 "Save" = "Enregistrer";
-"On %@" = "Sur %@";
 "Settings.Streaming" = "Services de streaming";
 "Settings.Streaming.Footer" = "Ce que chaque service propose dans votre pays vient de JustWatch, via TMDB. Popcorn Time n’est ni approuvé ni certifié par TMDB.";
 "Settings.TMDBKey" = "Clé TMDB";
@@ -567,7 +566,7 @@
 "Settings.TMDBKey.Set" = "Définie";
 "Settings.TMDBKey.Missing" = "Aucune";
 "Settings.TMDBKey.Placeholder" = "Clé d’API ou jeton d’accès en lecture";
-"Settings.TMDBKey.Message" = "Créez un compte gratuit sur themoviedb.org, puis copiez la clé d’API (ou le jeton d’accès en lecture) depuis Paramètres › API. Laissez vide pour garder la clé actuelle.";
+"Settings.TMDBKey.Message" = "Créez un compte gratuit sur themoviedb.org, puis copiez la clé d’API depuis Paramètres › API. Sélectionnez le champ ci-dessous : votre iPhone propose de taper ou de coller la clé (notification « Clavier Apple TV », ou la Télécommande du Centre de contrôle).";
 "Settings.TMDBKey.Remove" = "Supprimer la clé";
 "Settings.TMDBKey.Accepted" = "TMDB a accepté la clé. Les rangées des services apparaissent sur l’Accueil.";
 "Settings.TMDBKey.Refused" = "TMDB a refusé cette clé. Vérifiez qu’elle a été copiée en entier.";
@@ -575,5 +574,16 @@
 "Settings.StreamingRegion" = "Pays";
 "Settings.StreamingRegion.Message" = "Le catalogue d’un service change d’un pays à l’autre : les rangées montrent celui de ce pays.";
 "Settings.StreamingServices" = "Services";
-"Settings.StreamingServices.Message" = "Chaque service coché a sa rangée sur l’Accueil, dans cet ordre. Les plus regardés dans votre pays sont en tête.";
+"Settings.StreamingServices.Message" = "Chaque service coché a sa carte dans la rangée « Services » de l’Accueil, et figure dans le filtre « Service » des onglets Films et Séries. Les plus regardés dans votre pays sont en tête.";
 "Settings.StreamingServices.NoKey" = "Ajoutez d’abord votre clé TMDB : les services de votre pays s’affichent dès que TMDB répond.";
+"Services" = "Services";
+"Home.Services.Shown" = "Affiché sur l’Accueil";
+"Popular Movies on %@" = "Films populaires sur %@";
+"Popular Shows on %@" = "Séries populaires sur %@";
+"New Movies on %@" = "Nouveaux films sur %@";
+"New Shows on %@" = "Nouvelles séries sur %@";
+"Top Rated Movies on %@" = "Films les mieux notés sur %@";
+"Top Rated Shows on %@" = "Séries les mieux notées sur %@";
+"Service: %@" = "Service : %@";
+"Grid.Service.Unavailable" = "TMDB n’a pas répondu. Vérifiez votre connexion et votre clé TMDB dans les Réglages.";
+"Grid.Service.NoKey" = "Ajoutez votre clé TMDB dans les Réglages";

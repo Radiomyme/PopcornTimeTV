@@ -31,7 +31,10 @@ import Foundation
 ///   device's region.
 /// - `popcornkit.home.streamingServices` — Data, the JSON of the services
 ///   chosen (`[StreamingService]`), in the page's order. Absent:
-///   `StreamingService.defaults`. An empty list: no streaming shelf.
+///   `StreamingService.defaults`. An empty list: no « Services » row.
+/// - `popcornkit.home.serviceFilter` — Int, the TMDB id of the service the
+///   Apple TV's Home is filtered on (its « Services » row). Absent: the
+///   usual page.
 public struct HomeSettings {
 
     public enum Key {
@@ -42,6 +45,7 @@ public struct HomeSettings {
         public static let tmdbAPIKey = "popcornkit.tmdb.apiKey"
         public static let streamingRegion = "popcornkit.home.streamingRegion"
         public static let streamingServices = "popcornkit.home.streamingServices"
+        public static let serviceFilter = "popcornkit.home.serviceFilter"
     }
 
     private let defaults: UserDefaults
@@ -157,8 +161,24 @@ public struct HomeSettings {
         }
     }
 
-    /// The streaming shelves the page asks for: none without a TMDB key.
+    /// The services the « Services » row and the grids' filter offer:
+    /// none without a TMDB key.
     public var streamingShelves: [StreamingService] {
         return tmdbAPIKey == nil ? [] : streamingServices
+    }
+
+    /// The TMDB id of the service the Home is filtered on, nil for none.
+    public var homeServiceFilter: Int? {
+        get { (defaults.object(forKey: Key.serviceFilter) as? NSNumber)?.intValue }
+        nonmutating set {
+            if let newValue { defaults.set(newValue, forKey: Key.serviceFilter) } else { defaults.removeObject(forKey: Key.serviceFilter) }
+        }
+    }
+
+    /// The service the Home shows, when it is still one of the services
+    /// offered (a key removed, a service unchecked: the usual page).
+    public var homeService: StreamingService? {
+        guard let id = homeServiceFilter else { return nil }
+        return streamingShelves.first { $0.id == id }
     }
 }

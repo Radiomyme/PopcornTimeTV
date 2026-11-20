@@ -191,6 +191,10 @@ enum GlassSettingsStore {
         let hidden = settings.hiddenShelves
         let text = HomeText.standard
         var shelves = HomeShelfID.order.filter { $0 != HomeShelfID.hero }
+        // The « Services » row, under Continue Watching, once there is a key.
+        if settings.tmdbAPIKey != nil {
+            shelves.insert(HomeShelfID.services, at: min(1, shelves.count))
+        }
         let genres = HomeState.shared.shelves.map(\.id).filter { HomeShelfID.genre(of: $0) != nil }
             + hidden.filter { HomeShelfID.genre(of: $0) != nil }.sorted()
         for id in genres where !shelves.contains(id) { shelves.append(id) }
@@ -222,6 +226,8 @@ enum GlassSettingsStore {
                 if verdict != false {
                     settings.tmdbAPIKey = key
                     HomeState.shared.refreshLocal()
+                    // The services' logos, for the Home's « Services » row.
+                    streamingServices(region: settings.streamingRegion) { _ in }
                 }
                 completion(verdict)
             }
@@ -234,18 +240,36 @@ enum GlassSettingsStore {
         HomeState.shared.refreshLocal()
     }
 
+    /// The services TMDB listed last (their logos), by id.
+    @MainActor private static var knownServices: [Int: StreamingService] = [:]
+
     @MainActor
     static func store(streamingServices choices: [GlassSettingsChoice]) {
-        HomeSettings(defaults: defaults).streamingServices = choices.compactMap { choice in
-            Int(choice.id).map { StreamingService(id: $0, name: choice.title) }
+        let settings = HomeSettings(defaults: defaults)
+        let stored = Dictionary(settings.streamingServices.map { ($0.id, $0) }) { first, _ in first }
+        settings.streamingServices = choices.compactMap { choice in
+            guard let id = Int(choice.id) else { return nil }
+            return knownServices[id] ?? stored[id] ?? StreamingService(id: id, name: choice.title)
         }
         HomeState.shared.refreshLocal()
     }
 
+    /// Also gives the chosen services TMDB's logos (the defaults have none).
+    @MainActor
     static func streamingServices(region: String, completion: @escaping ([GlassSettingsChoice]?) -> Void) {
         TMDBStreamingClient.shared.services(region: region) { services in
-            let choices = services?.map { GlassSettingsChoice(id: String($0.id), title: $0.name) }
-            DispatchQueue.main.async { completion(choices) }
+            DispatchQueue.main.async {
+                guard let services else { return completion(nil) }
+                for service in services { knownServices[service.id] = service }
+                let settings = HomeSettings(defaults: defaults)
+                let chosen = settings.streamingServices
+                let withLogos = chosen.map { knownServices[$0.id] ?? $0 }
+                if withLogos != chosen {
+                    settings.streamingServices = withLogos
+                    HomeState.shared.refreshLocal()
+                }
+                completion(services.map { GlassSettingsChoice(id: String($0.id), title: $0.name) })
+            }
         }
     }
 

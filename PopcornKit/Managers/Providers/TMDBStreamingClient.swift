@@ -43,13 +43,27 @@ public final class TMDBStreamingClient: @unchecked Sendable {
 
     // MARK: Paths
 
-    /// A page of a service's catalogue in a country, most popular first:
+    /// A page of a service's catalogue in a country, in `sort`'s order:
     /// subscription titles only ("flatrate": not the rentals and purchases
     /// TMDB lists under the same service), with a few votes at least (TMDB
-    /// lists thousands of unrated fillers).
-    static func discoverPath(service: Int, kind: HomeItem.Kind, region: String, page: Int, language: String?) -> String {
-        var path = "/discover/\(kind == .movie ? "movie" : "tv")?watch_region=\(region)&with_watch_providers=\(service)"
-            + "&with_watch_monetization_types=flatrate&sort_by=popularity.desc&include_adult=false&vote_count.gte=10&page=\(page)"
+    /// lists thousands of unrated fillers). `today` ("2026-11-20") bounds
+    /// the recent ones (TMDB lists announced titles too).
+    static func discoverPath(service: Int, kind: HomeItem.Kind, region: String, page: Int, sort: StreamingSort = .popular,
+                             genre: Int? = nil, today: String? = nil, language: String?) -> String {
+        let movie = kind == .movie
+        var path = "/discover/\(movie ? "movie" : "tv")?watch_region=\(region)&with_watch_providers=\(service)"
+            + "&with_watch_monetization_types=flatrate&include_adult=false"
+        switch sort {
+        case .popular:
+            path += "&sort_by=popularity.desc&vote_count.gte=10"
+        case .recent:
+            let date = movie ? "primary_release_date" : "first_air_date"
+            path += "&sort_by=\(date).desc&\(date).lte=\(today ?? CatalogDates.dayString(Date()))&vote_count.gte=10"
+        case .topRated:
+            path += "&sort_by=vote_average.desc&vote_count.gte=\(movie ? 300 : 150)"
+        }
+        if let genre { path += "&with_genres=\(genre)" }
+        path += "&page=\(page)"
         if let language = language ?? TMDBStreamingClient.language() { path += "&language=\(language)" }
         return path
     }
@@ -83,9 +97,14 @@ public final class TMDBStreamingClient: @unchecked Sendable {
 
     /// A service's titles of one kind, page by page (`page` from 1), as
     /// cards. `hasMore`: TMDB has a next page. nil: no answer.
-    public func titles(service: Int, kind: HomeItem.Kind, region: String, page: Int,
+    /// `genre`: a genre as the app names it ("Science Fiction"); one TMDB
+    /// has no id for (for that kind) is ignored.
+    public func titles(service: Int, kind: HomeItem.Kind, region: String, page: Int, sort: StreamingSort = .popular,
+                       genre: String? = nil,
                        completion: @escaping @Sendable (_ items: [HomeItem]?, _ hasMore: Bool) -> Void) {
-        let path = TMDBStreamingClient.discoverPath(service: service, kind: kind, region: region, page: page, language: nil)
+        let path = TMDBStreamingClient.discoverPath(service: service, kind: kind, region: region, page: page, sort: sort,
+                                                    genre: genre.flatMap { TMDBStreamingClient.genreId($0, kind: kind) },
+                                                    language: nil)
         get(path) { data in
             guard let data, let root = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
                   let results = root["results"] as? [[String: Any]] else { return completion(nil, false) }
@@ -97,25 +116,31 @@ public final class TMDBStreamingClient: @unchecked Sendable {
         }
     }
 
-    /// The whole catalogue of a service in a country, the movies and the
-    /// shows mixed (most popular first, one of each in turn), page after
-    /// page: a See All grid's "more". Not thread-safe: one caller at a time.
+    /// The whole catalogue of a service in a country, in an order, page
+    /// after page: a See All grid's "more". Movies and shows mixed (one of
+    /// each in turn) when both kinds are asked. Not thread-safe: one caller
+    /// at a time.
     public final class CataloguePages: @unchecked Sendable {
         public let service: Int
         public let region: String
+        public let kinds: [HomeItem.Kind]
+        public let sort: StreamingSort
         private let client: TMDBStreamingClient
         private var next: [HomeItem.Kind: Int] = [.movie: 1, .show: 1]
         private var over: Set<HomeItem.Kind> = []
         private var seen = Set<String>()
         public private(set) var isLoading = false
 
-        public init(service: Int, region: String, client: TMDBStreamingClient = .shared) {
+        public init(service: Int, region: String, kinds: [HomeItem.Kind] = HomeItem.Kind.allCases, sort: StreamingSort = .popular,
+                    client: TMDBStreamingClient = .shared) {
             self.service = service
             self.region = region
+            self.kinds = kinds.isEmpty ? HomeItem.Kind.allCases : kinds
+            self.sort = sort
             self.client = client
         }
 
-        public var isOver: Bool { over.count == 2 }
+        public var isOver: Bool { kinds.allSatisfy(over.contains) }
 
         /// Titles already shown elsewhere (the shelf): not given again.
         public func skip(_ ids: [String]) {
@@ -132,9 +157,9 @@ public final class TMDBStreamingClient: @unchecked Sendable {
             let group = DispatchGroup()
             let lock = NSLock()
             var answers: [HomeItem.Kind: (items: [HomeItem]?, more: Bool)] = [:]
-            for kind in HomeItem.Kind.allCases where !over.contains(kind) {
+            for kind in kinds where !over.contains(kind) {
                 group.enter()
-                client.titles(service: service, kind: kind, region: region, page: next[kind] ?? 1) { items, more in
+                client.titles(service: service, kind: kind, region: region, page: next[kind] ?? 1, sort: sort) { items, more in
                     lock.lock()
                     answers[kind] = (items, more)
                     lock.unlock()
@@ -145,7 +170,7 @@ public final class TMDBStreamingClient: @unchecked Sendable {
                 self.isLoading = false
                 var lists: [[HomeItem]] = []
                 var failed = true
-                for kind in HomeItem.Kind.allCases {
+                for kind in self.kinds {
                     guard let answer = answers[kind] else { continue }
                     guard let items = answer.items else { continue }
                     failed = false
@@ -295,6 +320,22 @@ public final class TMDBStreamingClient: @unchecked Sendable {
     }
 
     // MARK: Genres
+
+    /// TMDB's id of a genre as the app or Cinemeta names it, for a kind:
+    /// nil when TMDB has none ("All", "Thriller" for shows).
+    static func genreId(_ name: String, kind: HomeItem.Kind) -> Int? {
+        guard let genre = HomeBuilder.cinemetaGenre(name) else { return nil }
+        let movies: [String: Int] = [
+            "Action": 28, "Adventure": 12, "Animation": 16, "Comedy": 35, "Crime": 80, "Documentary": 99, "Drama": 18,
+            "Family": 10751, "Fantasy": 14, "History": 36, "Horror": 27, "Mystery": 9648, "Romance": 10749, "Sci-Fi": 878,
+            "Thriller": 53, "War": 10752, "Western": 37,
+        ]
+        let shows: [String: Int] = [
+            "Action": 10759, "Adventure": 10759, "Animation": 16, "Comedy": 35, "Crime": 80, "Documentary": 99, "Drama": 18,
+            "Family": 10751, "Fantasy": 10765, "Mystery": 9648, "Sci-Fi": 10765, "War": 10768, "Western": 37,
+        ]
+        return (kind == .movie ? movies : shows)[genre]
+    }
 
     /// TMDB's genre ids (movies and TV) under Cinemeta's names, the ones
     /// the Home's filters and facts read.

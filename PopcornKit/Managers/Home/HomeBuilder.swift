@@ -89,10 +89,14 @@ enum HomeBuilder {
         var hidden: Set<String> = []
         /// False: the followed shows are not sent to Cinemeta (no calendar).
         var sendsFollowedShows = true
-        /// The services that have a shelf (none without a TMDB key), and
-        /// the country of their catalogues.
+        /// The services of the « Services » row (none without a TMDB key:
+        /// no row), the one the page is filtered on, and the country of
+        /// their catalogues.
         var streaming: [StreamingService] = []
+        var service: StreamingService?
         var region = "US"
+        /// « All »'s title on the « Services » row (the app's language).
+        var allServicesTitle = "All"
         /// Keys of the sources a running refresh has yet to hear from
         /// (the ones that were down at their last attempt left out). A
         /// shelf whose own source is awaited is not made of its stand-in
@@ -105,7 +109,7 @@ enum HomeBuilder {
             return HomePlan(now: now,
                             followedShowIds: sendsFollowedShows ? local.followedShowIds : [],
                             genres: HomeBuilder.genreChoices(local, limit: rules.genreShelves),
-                            light: rules.light, streaming: streaming, region: region)
+                            light: rules.light, service: service, region: region)
         }
     }
 
@@ -116,6 +120,17 @@ enum HomeBuilder {
     static func shelves(_ inputs: Inputs, rules: Rules = Rules(), facts: HomeTitleFacts = .shared) -> [HomeShelf] {
         let context = Context(inputs: inputs, rules: rules)
         var drafts: [Draft] = []
+
+        // Filtered on a service: its row, then its shelves only.
+        if let service = inputs.service {
+            let streaming = context.streaming(service)
+            if !inputs.hidden.contains(HomeShelfID.hero), let hero = context.streamingHero(streaming) { drafts.append(hero) }
+            drafts.append(context.servicesRow())
+            drafts += streaming
+            let shelves = HomeBuilder.sameFormats(context.finished(drafts))
+            facts.record(shelves.flatMap(\.items).filter { !HomeServiceCard.isServiceCard($0) })
+            return shelves
+        }
 
         var trendingMovies = context.trendingMovies()
         var trendingShows = context.trendingShows()
@@ -128,15 +143,11 @@ enum HomeBuilder {
             drafts.append(hero)
         }
         drafts.append(Draft(HomeShelfID.continueWatching, inputs.local.continueWatching.map { HomeEntry(item: $0) }))
+        drafts.append(context.servicesRow())
         drafts.append(context.yourShows())
         drafts += [
             trendingMovies, context.newMovies(), context.uhd(), context.airedEpisodes(), trendingShows,
-            context.newShows(),
-        ].compactMap { $0 }
-        // The user's services, after the page's own picks.
-        drafts += context.streaming()
-        drafts += [
-            context.moviesOfTheYear(), context.topRatedOfTheYear(),
+            context.newShows(), context.moviesOfTheYear(), context.topRatedOfTheYear(),
             context.ranking(HomeShelfID.topShows, .topShows, kind: .show),
             context.ranking(HomeShelfID.topMovies, .topMovies, kind: .movie),
         ].compactMap { $0 }
@@ -146,7 +157,7 @@ enum HomeBuilder {
         let shelves = HomeBuilder.sameFormats(context.finished(drafts))
         // The grids, Search and the title pages of every platform tell
         // these titles as the Home does (the Apple TV's grids included).
-        facts.record(shelves.flatMap(\.items))
+        facts.record(shelves.flatMap(\.items).filter { !HomeServiceCard.isServiceCard($0) })
         return shelves
     }
 
@@ -186,7 +197,7 @@ enum HomeBuilder {
     static func style(of id: String) -> HomeShelf.Style {
         switch id {
         case HomeShelfID.hero: return .hero
-        case HomeShelfID.continueWatching, HomeShelfID.yourShows, HomeShelfID.airedEpisodes: return .landscape
+        case HomeShelfID.continueWatching, HomeShelfID.yourShows, HomeShelfID.airedEpisodes, HomeShelfID.services: return .landscape
         case HomeShelfID.topShows, HomeShelfID.topMovies: return .ranked
         default: return .posters
         }
@@ -779,23 +790,41 @@ private struct Context {
 
     // MARK: Streaming
 
-    /// A shelf per service the user chose, in their order: its movies and
-    /// shows in the user's country, most popular first, one of each in
-    /// turn. A service whose lists are not in yet has no shelf.
-    func streaming() -> [HomeBuilder.Draft] {
-        return inputs.streaming.compactMap { service in
-            let lists = HomeItem.Kind.allCases.compactMap { list(.streaming(service: service.id, kind: $0, region: inputs.region)) }
-            guard !lists.isEmpty else { return nil }
-            let entries = TMDBStreamingClient.alternating(lists.map(\.entries))
-            return HomeBuilder.Draft(HomeShelfID.streaming(service.id), entries, lists: lists)
+    /// The « Services » row: « All » while the page is filtered, then a
+    /// card per service, the one shown marked. Empty without services (no
+    /// TMDB key): no row.
+    func servicesRow() -> HomeBuilder.Draft {
+        guard !inputs.streaming.isEmpty else { return HomeBuilder.Draft(HomeShelfID.services, []) }
+        let all = inputs.service == nil ? [] : [HomeServiceCard.all(title: inputs.allServicesTitle)]
+        let cards = all + inputs.streaming.map { HomeServiceCard.item($0, selected: $0.id == inputs.service?.id) }
+        return HomeBuilder.Draft(HomeShelfID.services, cards.map { HomeEntry(item: $0) })
+    }
+
+    /// A filtered page's shelves: the service's movies and shows, popular,
+    /// recent, top rated. A list not in yet has no shelf.
+    func streaming(_ service: StreamingService) -> [HomeBuilder.Draft] {
+        let today = CatalogDates.dayString(now)
+        return HomeShelfID.streamingShelves.compactMap { shelf in
+            guard let list = list(.streaming(service: service.id, kind: shelf.kind, sort: shelf.sort, region: inputs.region,
+                                             today: today)) else { return nil }
+            return HomeBuilder.Draft(HomeShelfID.streaming(service.id, shelf.kind, shelf.sort), list.entries, lists: [list])
         }
     }
 
-    /// A streaming shelf's See All: the service's whole catalogue.
+    /// A filtered page's hero: its popular movies and shows, one of each in
+    /// turn, the ones with a backdrop.
+    func streamingHero(_ shelves: [HomeBuilder.Draft]) -> HomeBuilder.Draft? {
+        let popular = shelves.filter { HomeShelfID.streaming(of: $0.id)?.sort == .popular }
+        let entries = TMDBStreamingClient.alternating(popular.map(\.entries)).filter { $0.item.backdropURL != nil }
+        guard !entries.isEmpty else { return nil }
+        return HomeBuilder.Draft(HomeShelfID.hero, entries, lists: popular.flatMap(\.lists))
+    }
+
+    /// A streaming shelf's See All: the service's whole catalogue of that
+    /// kind, in that order.
     func streamingSeeAll(of id: String) -> HomeSeeAll? {
-        guard let serviceId = HomeShelfID.streamingService(of: id),
-              let service = inputs.streaming.first(where: { $0.id == serviceId }) else { return nil }
-        return HomeSeeAll(catalogue: .streaming, service: service, region: inputs.region)
+        guard let shelf = HomeShelfID.streaming(of: id), let service = inputs.service, service.id == shelf.service else { return nil }
+        return HomeSeeAll(catalogue: .streaming, filter: shelf.sort.rawValue, service: service, region: inputs.region, kind: shelf.kind)
     }
 
     // MARK: Rankings
@@ -982,9 +1011,10 @@ private struct Context {
         for draft in drafts where !inputs.hidden.contains(draft.id) {
             let style = HomeBuilder.style(of: draft.id)
             // A service's shelf is its catalogue: a title on Netflix is
-            // there even when a shelf above showed it.
+            // there even when a shelf above showed it. The « Services » row
+            // holds no title.
             let exempt = HomeShelfID.local.contains(draft.id) || (style == .ranked && rules.rankedShelvesAreComplete)
-                || HomeShelfID.streamingService(of: draft.id) != nil
+                || HomeShelfID.streamingService(of: draft.id) != nil || draft.id == HomeShelfID.services
             let limit = style == .hero ? rules.heroLimit : style == .ranked ? rules.rankedLimit : rules.shelfLimit
             // A genre shelf: the titles not shown above first; the ones shown
             // above (within the "two shelves" rule) only complete a shelf

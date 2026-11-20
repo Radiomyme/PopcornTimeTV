@@ -434,7 +434,7 @@ enum GlassSettingsPalette {
 
 /// The rows that open a picker.
 enum GlassSettingsPicker: String, Identifiable {
-    case quality, upNextCard, audio, subtitles, homeLanguages, homeShelves, streamingRegion, streamingServices
+    case quality, upNextCard, audio, subtitles, homeLanguages, homeShelves, streamingRegion, streamingServices, tmdbKey
     var id: String { rawValue }
 }
 
@@ -459,8 +459,6 @@ struct GlassSettingsView: View {
     @State private var clearResult: Int64?
     @State private var showClearResult = false
     @State private var confirmSignOut = false
-    @State private var editingTMDBKey = false
-    @State private var tmdbKeyDraft = ""
     /// TMDB's verdict on the key just entered, for the alert that tells it.
     @State private var tmdbKeyVerdict: Bool??
     @State private var showTMDBKeyVerdict = false
@@ -515,21 +513,6 @@ struct GlassSettingsView: View {
             SwiftUI.Button(glassSettingsLocalized("Cancel"), role: .cancel) {}
         } message: {
             Text(glassSettingsLocalized("Are you sure you want to Sign Out?"))
-        }
-        .alert(glassSettingsLocalized("Settings.TMDBKey"), isPresented: $editingTMDBKey) {
-            TextField(glassSettingsLocalized("Settings.TMDBKey.Placeholder"), text: $tmdbKeyDraft)
-                .autocorrectionDisabled()
-                .textInputAutocapitalization(.never)
-            // Empty: the key stays as it is (« Remove Key » removes it).
-            SwiftUI.Button(glassSettingsLocalized("Save")) {
-                if !tmdbKeyDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { saveTMDBKey(tmdbKeyDraft) }
-            }
-            if model.home?.hasTMDBKey == true {
-                SwiftUI.Button(glassSettingsLocalized("Settings.TMDBKey.Remove"), role: .destructive) { saveTMDBKey(nil) }
-            }
-            SwiftUI.Button(glassSettingsLocalized("Cancel"), role: .cancel) {}
-        } message: {
-            Text(glassSettingsLocalized("Settings.TMDBKey.Message"))
         }
         .alert(glassSettingsLocalized("Settings.TMDBKey"), isPresented: $showTMDBKeyVerdict) {
             SwiftUI.Button(glassSettingsLocalized("OK"), role: .cancel) {}
@@ -652,10 +635,7 @@ struct GlassSettingsView: View {
         GlassSettingsSection(title: "Settings.Streaming", footer: "Settings.Streaming.Footer") {
             GlassSettingsRow(symbol: "key.fill", tint: .yellow, title: "Settings.TMDBKey",
                              detail: "Settings.TMDBKey.Detail",
-                             value: model.isCheckingTMDBKey ? "…" : model.tmdbKeySummary) {
-                tmdbKeyDraft = ""
-                editingTMDBKey = true
-            }
+                             value: model.isCheckingTMDBKey ? "…" : model.tmdbKeySummary) { picker = .tmdbKey }
             .focused($focusedRow, equals: .tmdbKey)
             .accessibilityIdentifier("Settings.Row.tmdbKey")
             GlassSettingsDivider()
@@ -785,6 +765,21 @@ struct GlassSettingsView: View {
                 selectedID: model.home?.shelfChoices.first?.id ?? "",
                 checkedIDs: Set((model.home?.shelfChoices ?? []).map(\.id)).subtracting(model.home?.hiddenShelves ?? []),
                 onSelect: { id in model.toggle(homeShelf: id) },
+                onCancel: { self.picker = nil })
+        case .tmdbKey:
+            GlassSettingsTextSheet(
+                title: "Settings.TMDBKey",
+                message: "Settings.TMDBKey.Message",
+                placeholder: "Settings.TMDBKey.Placeholder",
+                removeTitle: model.home?.hasTMDBKey == true ? "Settings.TMDBKey.Remove" : nil,
+                onSave: { key in
+                    self.picker = nil
+                    saveTMDBKey(key)
+                },
+                onRemove: {
+                    self.picker = nil
+                    saveTMDBKey(nil)
+                },
                 onCancel: { self.picker = nil })
         case .streamingRegion:
             GlassSettingsPickerSheet(
@@ -1088,6 +1083,73 @@ struct GlassSettingsPickerSheet: View {
         }
         .buttonStyle(GlassSettingsRowStyle(cornerRadius: 22))
         .focused($focusedID, equals: option.id)
+    }
+}
+
+/// Glass sheet with one text field (the TMDB key). Selecting the field
+/// opens tvOS's full-screen keyboard — the one the iPhone offers to type
+/// into (« Apple TV Keyboard » notification, or the Remote in Control
+/// Center), so a long key can be pasted from the phone. Menu closes it.
+struct GlassSettingsTextSheet: View {
+    let title: String
+    let message: String?
+    let placeholder: String
+    /// nil: no « Remove » button.
+    let removeTitle: String?
+    let onSave: (String) -> Void
+    let onRemove: () -> Void
+    let onCancel: () -> Void
+
+    @State private var text = ""
+    @FocusState private var focused: Field?
+    @Environment(\.glassSettingsFallback) private var fallback
+
+    private enum Field: Hashable { case text, save, remove, cancel }
+
+    private var trimmed: String { text.trimmingCharacters(in: .whitespacesAndNewlines) }
+
+    var body: some View {
+        ZStack {
+            Color.black.opacity(0.4)
+                .ignoresSafeArea()
+            VStack(alignment: .leading, spacing: 26) {
+                Text(glassSettingsLocalized(title))
+                    .font(.system(size: 46, weight: .bold))
+                    .foregroundStyle(.white)
+                if let message {
+                    Text(glassSettingsLocalized(message))
+                        .font(.system(size: 24))
+                        .foregroundStyle(GlassSettingsPalette.secondaryText)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                TextField(glassSettingsLocalized(placeholder), text: $text)
+                    .autocorrectionDisabled()
+                    .textInputAutocapitalization(.never)
+                    .keyboardType(.asciiCapable)
+                    .focused($focused, equals: .text)
+                    .onSubmit { if !trimmed.isEmpty { focused = .save } }
+                    .accessibilityIdentifier("Settings.TMDBKey.Field")
+                HStack(spacing: 24) {
+                    SwiftUI.Button(glassSettingsLocalized("Save")) { onSave(trimmed) }
+                        .disabled(trimmed.isEmpty)
+                        .focused($focused, equals: .save)
+                    if let removeTitle {
+                        SwiftUI.Button(glassSettingsLocalized(removeTitle), role: .destructive, action: onRemove)
+                            .focused($focused, equals: .remove)
+                    }
+                    SwiftUI.Button(glassSettingsLocalized("Cancel"), role: .cancel, action: onCancel)
+                        .focused($focused, equals: .cancel)
+                }
+            }
+            .padding(58)
+            .frame(width: 1100)
+            .fixedSize(horizontal: false, vertical: true)
+            .modifier(GlassSettingsCard(cornerRadius: 50, fallback: fallback))
+        }
+        .defaultFocus($focused, .text)
+        .onExitCommand(perform: onCancel)
+        .presentationBackground(.clear)
+        .accessibilityIdentifier("Settings.TextSheet")
     }
 }
 

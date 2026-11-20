@@ -126,6 +126,14 @@ public final class HomeFeed: @unchecked Sendable {
     /// TV app tells the system its Top Shelf may have changed.
     public static let didRefreshNotification = Notification.Name("PopcornKit.HomeFeed.didRefresh")
 
+    /// The « Services » row and the page filtered on a service: the Apple
+    /// TV's Home only (the other apps have no such row).
+    #if os(tvOS)
+    static let servicesRow = true
+    #else
+    static let servicesRow = false
+    #endif
+
     public let store: HomeStore
     private let transport: HomeTransport
     private let settings: HomeSettings
@@ -413,7 +421,10 @@ public final class HomeFeed: @unchecked Sendable {
         return HomeBuilder.Inputs(lists: lists, local: local, languages: settings.contentLanguages,
                                   hidden: settings.hiddenShelves,
                                   sendsFollowedShows: settings.sendsFollowedShowsToCinemeta,
-                                  streaming: settings.streamingShelves, region: settings.streamingRegion,
+                                  streaming: HomeFeed.servicesRow ? settings.streamingShelves : [],
+                                  service: HomeFeed.servicesRow ? settings.homeService : nil,
+                                  region: settings.streamingRegion,
+                                  allServicesTitle: Bundle.main.localizedString(forKey: "All", value: "All", table: nil),
                                   pending: pending, now: now())
     }
 

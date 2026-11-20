@@ -51,17 +51,29 @@ final class HomeStreamingTests: CheckedTestCase {
     // MARK: Sources and parser
 
     func testSourceKeysAndPaths() {
-        let source = HomeSource.streaming(service: 8, kind: .show, region: "FR", language: "fr-FR")
-        eq(source.key, "tmdb-FR-8-show", "the key names the country, the service and the kind")
+        let source = HomeSource.streaming(service: 8, kind: .show, sort: .popular, region: "FR", today: "2026-11-14", language: "fr-FR")
+        eq(source.key, "tmdb-FR-8-show-popular", "the key names the country, the service, the kind and the order")
         eq(source.request.host, .tmdb, "TMDB's host")
         check(source.request.path.hasPrefix("/discover/tv?watch_region=FR&with_watch_providers=8"), "a discover page of TV shows")
         check(source.request.path.contains("with_watch_monetization_types=flatrate"), "subscription titles only")
+        check(source.request.path.contains("sort_by=popularity.desc"), "most popular first")
         check(source.request.path.hasSuffix("&language=fr-FR"), "in the device's language")
         let parsed = HomeSource.streaming(ofKey: source.key)
-        check(parsed?.region == "FR" && parsed?.service == 8 && parsed?.kind == .show, "the key read back")
+        check(parsed?.region == "FR" && parsed?.service == 8 && parsed?.kind == .show && parsed?.sort == .popular, "the key read back")
         check(HomeSource.streaming(ofKey: "tpb-207") == nil, "another list's key")
         eq(HomeSource.host(ofKey: source.key), .tmdb, "the store files it under TMDB")
         eq(HomeCachePolicy.lifetime(forKey: source.key, now: now), .streaming, "kept 12 hours fresh")
+
+        let recent = TMDBStreamingClient.discoverPath(service: 8, kind: .movie, region: "FR", page: 2, sort: .recent, genre: 878,
+                                                      today: "2026-11-14", language: nil)
+        check(recent.contains("sort_by=primary_release_date.desc&primary_release_date.lte=2026-11-14"), "recent: released by today")
+        check(recent.contains("&with_genres=878&page=2"), "a genre, a page")
+        check(TMDBStreamingClient.discoverPath(service: 8, kind: .show, region: "FR", page: 1, sort: .topRated, language: nil)
+                .contains("sort_by=vote_average.desc&vote_count.gte=150"), "top rated: among titles with many votes")
+        eq(TMDBStreamingClient.genreId("Science Fiction", kind: .movie), 878, "the app's genre, TMDB's id")
+        eq(TMDBStreamingClient.genreId("Science Fiction", kind: .show), 10765, "the shows' own id")
+        check(TMDBStreamingClient.genreId("Thriller", kind: .show) == nil && TMDBStreamingClient.genreId("All", kind: .movie) == nil,
+              "no id: no genre filter")
         eq(TMDBStreamingClient.language(preferred: ["fr-FR", "en"]), "fr-FR", "TMDB's language")
         eq(TMDBStreamingClient.language(preferred: ["fr"]), "fr", "a language without a region")
     }
@@ -90,42 +102,67 @@ final class HomeStreamingTests: CheckedTestCase {
     private let disney = StreamingService(id: 337, name: "Disney+")
 
     func testPlan() {
-        let plan = HomePlan(now: now, followedShowIds: [], genres: [], streaming: [netflix, disney], region: "FR")
-        eq(plan.streaming.map(\.key), ["tmdb-FR-8-movie", "tmdb-FR-8-show", "tmdb-FR-337-movie", "tmdb-FR-337-show"],
-           "two lists per service")
-        check(plan.phase3.contains { $0.key == "tmdb-FR-8-movie" }, "asked last")
-        check(plan.isCurrent("tmdb-FR-8-show") && !plan.isCurrent("tmdb-US-8-show") && !plan.isCurrent("tmdb-FR-119-show"),
+        let usual = HomePlan(now: now, followedShowIds: [], genres: [], region: "FR")
+        check(!usual.sources.contains { $0.request.host == .tmdb }, "the usual page asks TMDB nothing")
+        let plan = HomePlan(now: now, followedShowIds: [], genres: [], service: netflix, region: "FR")
+        eq(plan.streaming.map(\.key), ["tmdb-FR-8-movie-popular", "tmdb-FR-8-show-popular", "tmdb-FR-8-movie-recent",
+                                       "tmdb-FR-8-show-recent", "tmdb-FR-8-movie-topRated", "tmdb-FR-8-show-topRated"],
+           "a filtered page: six lists of its service")
+        check(plan.phase1.prefix(6).allSatisfy { $0.request.host == .tmdb }, "asked first: they are the page")
+        check(plan.isCurrent("tmdb-FR-8-show-recent") && !plan.isCurrent("tmdb-US-8-show-recent") && !plan.isCurrent("tmdb-FR-119-show-recent"),
               "another country's or service's list is a leftover")
-        let light = HomePlan(now: now, followedShowIds: [], genres: [], light: true, streaming: [netflix], region: "FR")
+        let light = HomePlan(now: now, followedShowIds: [], genres: [], light: true, service: netflix, region: "FR")
         check(!light.sources.contains { $0.request.host == .tmdb }, "the Top Shelf's light refresh never asks TMDB")
     }
 
-    func testShelves() {
-        var lists = HomeFixture.allLists()
-        for list in [Self.list("tmdb-FR-8-movie", kind: .movie, ids: ["tt1000001", "tt1000002", "tt1000003"]),
-                     Self.list("tmdb-FR-8-show", kind: .show, ids: ["tt2000001", "tt2000002"]),
-                     Self.list("tmdb-FR-337-show", kind: .show, ids: ["tt3000001"])] {
-            lists[list.key] = list
-        }
-        var inputs = HomeFixture.inputs(lists, local: HomeLocal(), languages: ["en", "fr"], hidden: [], now: now)
-        inputs.streaming = [netflix, disney, StreamingService(id: 119, name: "Prime Video")]
+    func testServicesRowOnTheUsualPage() {
+        var inputs = HomeFixture.inputs(HomeFixture.allLists(), now: now)
+        eq(HomeBuilder.shelves(inputs, facts: HomeTitleFacts()).map(\.id).contains(HomeShelfID.services), false, "no services: no row")
+        inputs.streaming = [netflix, disney]
         inputs.region = "FR"
         let shelves = HomeBuilder.shelves(inputs, facts: HomeTitleFacts())
+        let row = shelves.first { $0.id == HomeShelfID.services }
+        eq(shelves.map(\.id).prefix(2), [HomeShelfID.hero, HomeShelfID.services], "under the hero (no resume card here)")
+        eq(row?.items.map(\.id), ["service-8", "service-337"], "a card per service, no « All »")
+        check(row?.items.allSatisfy { !HomeServiceCard.isSelected($0) } == true, "none checked")
+        eq(HomeServiceCard.serviceId(of: row!.items[1]), 337, "what a card picks")
+        check(row?.seeAll == nil, "nothing more behind it")
+        check(!shelves.contains { HomeShelfID.streaming(of: $0.id) != nil }, "no service shelf on the usual page")
+    }
 
-        let ids = shelves.map(\.id)
-        eq(Array(ids.drop { $0 != HomeShelfID.newShows }.dropFirst().prefix(3)),
-           [HomeShelfID.streaming(8), HomeShelfID.streaming(337), HomeShelfID.moviesOfTheYear],
-           "after New Shows, in the user's order; Prime Video, without lists yet, has no shelf")
-        let onNetflix = shelves.first { $0.id == HomeShelfID.streaming(8) }
-        eq(onNetflix?.items.map(\.imdbId), ["tt1000001", "tt2000001", "tt1000002", "tt2000002", "tt1000003"],
-           "a movie, a show, in turn")
-        eq(onNetflix?.seeAll, HomeSeeAll(catalogue: .streaming, service: netflix, region: "FR"), "See All: the whole catalogue")
-        eq(onNetflix?.titleArgument, "Netflix", "« On %@ »'s argument")
-        eq(onNetflix?.defaultTitle, "On %@", "the title's format")
-        check(onNetflix?.seeAll?.streamingPages()?.service == 8, "the pages of the service")
+    func testFilteredPage() {
+        var lists = HomeFixture.allLists()
+        for list in [Self.list("tmdb-FR-8-movie-popular", kind: .movie, ids: ["tt1000001", "tt1000002", "tt1000003"]),
+                     Self.list("tmdb-FR-8-show-popular", kind: .show, ids: ["tt2000001", "tt2000002"]),
+                     Self.list("tmdb-FR-8-show-topRated", kind: .show, ids: ["tt3000001"])] {
+            lists[list.key] = list
+        }
+        var inputs = HomeFixture.inputs(lists, now: now)
+        inputs.streaming = [netflix, disney]
+        inputs.service = netflix
+        inputs.region = "FR"
+        inputs.allServicesTitle = "Tous"
+        let shelves = HomeBuilder.shelves(inputs, facts: HomeTitleFacts())
 
-        inputs.hidden = [HomeShelfID.streaming(8)]
-        check(!HomeBuilder.shelves(inputs, facts: HomeTitleFacts()).contains { $0.id == HomeShelfID.streaming(8) }, "a hidden shelf")
+        eq(shelves.map(\.id), [HomeShelfID.hero, HomeShelfID.services, HomeShelfID.streaming(8, .movie, .popular),
+                                HomeShelfID.streaming(8, .show, .popular), HomeShelfID.streaming(8, .show, .topRated)],
+           "the service's shelves only, a list not in yet has none")
+        eq(shelves[0].items.map(\.imdbId), ["tt1000001", "tt2000001", "tt1000002", "tt2000002", "tt1000003"],
+           "the hero: its popular movies and shows in turn")
+        let row = shelves[1]
+        eq(row.items.map(\.id), [HomeServiceCard.allId, "service-8", "service-337"], "« All » first")
+        eq(row.items.first?.title, "Tous", "in the app's language")
+        check(HomeServiceCard.isSelected(row.items[1]) && !HomeServiceCard.isSelected(row.items[2]), "Netflix checked")
+        check(HomeServiceCard.serviceId(of: row.items[0]) == nil && HomeServiceCard.isAll(row.items[0]), "« All »: no service")
+
+        let movies = shelves[2]
+        eq(movies.items.map(\.imdbId), ["tt1000001", "tt1000002", "tt1000003"], "every title, even shown in the hero")
+        eq(movies.defaultTitle, "Popular Movies on %@", "the title's format")
+        eq(movies.titleArgument, "Netflix", "its argument")
+        eq(movies.seeAll, HomeSeeAll(catalogue: .streaming, filter: "popular", service: netflix, region: "FR", kind: .movie),
+           "See All: the service's movies, in that order")
+        let pages = movies.seeAll?.streamingPages()
+        check(pages?.service == 8 && pages?.kinds == [.movie] && pages?.sort == .popular, "its pages")
     }
 
     func testAlternating() {
@@ -142,7 +179,7 @@ final class HomeStreamingTests: CheckedTestCase {
         ]
         let services = TMDBStreamingClient.services(results, region: "FR")
         eq(services.map(\.id), [8, 381, 337], "most watched in the country first, each once")
-        eq(services.last?.logoURL?.absoluteString, "https://image.tmdb.org/t/p/w154/d.jpg", "the logo")
+        eq(services.last?.logoURL?.absoluteString, "https://image.tmdb.org/t/p/w300/d.jpg", "the logo")
     }
 
     // MARK: Helpers

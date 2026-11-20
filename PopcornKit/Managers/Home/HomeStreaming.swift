@@ -1,16 +1,21 @@
 import Foundation
 
-/// The streaming shelves ("On Netflix", "On Disney+"): what each service
+/// Browsing by streaming service ("Netflix", "Disney+"): what each service
 /// offers in the user's country, from TMDB's `discover` with its watch
 /// providers (JustWatch's data, which TMDB asks apps to credit).
 ///
-/// One shelf per service the user chose (`HomeSettings.streamingServices`),
-/// made of two lists — the service's most popular movies and shows in that
-/// country, page 1 of each — and a See All that pages through the whole
-/// catalogue (`TMDBStreamingClient.CataloguePages`). TMDB knows its titles
-/// by TMDB ids: the client gives every answer its titles' IMDb ids before
-/// the parser reads it (the hub and the app know titles by IMDb id), and a
-/// title without one is left out.
+/// - The Apple TV's Home has a « Services » row (`HomeShelfID.services`):
+///   one card per service the user chose (`HomeSettings.streamingServices`).
+///   Picking one filters the page (`HomeSettings.homeServiceFilter`): it then
+///   shows that service's shelves only — popular, recent and top rated
+///   movies and shows — under a hero of its popular titles; « All » brings
+///   the usual page back.
+/// - The Movies and Shows grids have a « Service » filter that pages through
+///   a service's catalogue (`TMDBStreamingClient.titles`).
+///
+/// TMDB knows its titles by TMDB ids: the client gives every answer its
+/// titles' IMDb ids before the parser reads it (the hub and the app know
+/// titles by IMDb id), and a title without one is left out.
 
 // MARK: - Service
 
@@ -29,11 +34,12 @@ public struct StreamingService: Codable, Hashable, Sendable, Identifiable {
     }
 
     public var logoURL: URL? {
-        return logoPath.flatMap { URL(string: "https://image.tmdb.org/t/p/w154" + $0) }
+        return logoPath.flatMap { URL(string: "https://image.tmdb.org/t/p/w300" + $0) }
     }
 
     /// The services of someone who chose none: the four that are in most
-    /// countries.
+    /// countries. No logo: a card without one shows the name (choosing the
+    /// services in Settings stores TMDB's logos).
     public static let defaults: [StreamingService] = [
         StreamingService(id: 8, name: "Netflix"),
         StreamingService(id: 119, name: "Prime Video"),
@@ -42,20 +48,96 @@ public struct StreamingService: Codable, Hashable, Sendable, Identifiable {
     ]
 }
 
+/// The order of a service's titles.
+public enum StreamingSort: String, Codable, CaseIterable, Sendable {
+    /// Most popular first (TMDB's popularity: what is watched now).
+    case popular
+    /// Latest released first, up to today.
+    case recent
+    /// Best rated first, among titles with many votes.
+    case topRated
+}
+
 // MARK: - Shelves
 
 extension HomeShelfID {
+    /// The Apple TV's row of service cards, the page's filter.
+    public static let services = "services"
+
     static let streamingPrefix = "streaming-"
 
-    /// The id of a service's shelf: "streaming-8".
-    public static func streaming(_ service: Int) -> String {
-        return "\(streamingPrefix)\(service)"
+    /// A filtered page's shelf: "streaming-8-movie-popular".
+    public static func streaming(_ service: Int, _ kind: HomeItem.Kind, _ sort: StreamingSort) -> String {
+        return "\(streamingPrefix)\(service)-\(kind.rawValue)-\(sort.rawValue)"
+    }
+
+    /// The service, kind and order of a streaming shelf; nil for the other shelves.
+    public static func streaming(of id: String) -> (service: Int, kind: HomeItem.Kind, sort: StreamingSort)? {
+        guard id.hasPrefix(streamingPrefix) else { return nil }
+        let parts = id.dropFirst(streamingPrefix.count).split(separator: "-")
+        guard parts.count == 3, let service = Int(parts[0]), let kind = HomeItem.Kind(rawValue: String(parts[1])),
+              let sort = StreamingSort(rawValue: String(parts[2])) else { return nil }
+        return (service, kind, sort)
     }
 
     /// The TMDB provider id of a streaming shelf, nil for the other shelves.
     public static func streamingService(of id: String) -> Int? {
-        guard id.hasPrefix(streamingPrefix) else { return nil }
-        return Int(id.dropFirst(streamingPrefix.count))
+        return streaming(of: id)?.service
+    }
+
+    /// The English title of a streaming shelf, a format whose argument is
+    /// the service ("Popular Movies on %@").
+    static func streamingTitle(_ kind: HomeItem.Kind, _ sort: StreamingSort) -> String {
+        switch (sort, kind) {
+        case (.popular, .movie): return "Popular Movies on %@"
+        case (.popular, .show): return "Popular Shows on %@"
+        case (.recent, .movie): return "New Movies on %@"
+        case (.recent, .show): return "New Shows on %@"
+        case (.topRated, .movie): return "Top Rated Movies on %@"
+        case (.topRated, .show): return "Top Rated Shows on %@"
+        }
+    }
+
+    /// The shelves of a filtered page, in order.
+    static let streamingShelves: [(kind: HomeItem.Kind, sort: StreamingSort)] = [
+        (.movie, .popular), (.show, .popular), (.movie, .recent), (.show, .recent), (.movie, .topRated), (.show, .topRated),
+    ]
+}
+
+/// The cards of the « Services » row: one per service, and « All » first
+/// while the page is filtered. They are not titles: `serviceId` tells what
+/// a card picks.
+public enum HomeServiceCard {
+    static let prefix = "service-"
+    /// The id of the « All » card.
+    public static let allId = "service-all"
+
+    static func item(_ service: StreamingService, selected: Bool) -> HomeItem {
+        return HomeItem(id: "\(prefix)\(service.id)", imdbId: "\(prefix)\(service.id)", kind: .movie, title: service.name,
+                        posterURL: service.logoURL, rank: selected ? 1 : nil)
+    }
+
+    static func all(title: String) -> HomeItem {
+        return HomeItem(id: allId, imdbId: allId, kind: .movie, title: title)
+    }
+
+    /// What a card of the row picks: a service's id, nil for « All ».
+    /// Not a service card: `.none` (`isServiceCard` false).
+    public static func serviceId(of item: HomeItem) -> Int? {
+        return item.id.hasPrefix(prefix) ? Int(item.id.dropFirst(prefix.count)) : nil
+    }
+
+    public static func isServiceCard(_ item: HomeItem) -> Bool {
+        return item.id.hasPrefix(prefix)
+    }
+
+    public static func isAll(_ item: HomeItem) -> Bool {
+        return item.id == allId
+    }
+
+    /// The card of the service the page shows.
+    public static func isSelected(_ item: HomeItem) -> Bool {
+        return item.rank == 1
     }
 }
 
@@ -64,24 +146,25 @@ extension HomeShelfID {
 extension HomeSource {
     static let tmdbPrefix = "tmdb-"
 
-    /// One page of a service's catalogue in a country, most popular first:
-    /// "tmdb-FR-8-movie". The language of the titles and summaries follows
-    /// the device's; the key does not (a change of language is seen at the
-    /// next refresh).
-    static func streaming(service: Int, kind: HomeItem.Kind, region: String, language: String? = nil) -> HomeSource {
-        return HomeSource(key: "\(tmdbPrefix)\(region)-\(service)-\(kind.rawValue)",
-                          request: HomeRequest(host: .tmdb, path: TMDBStreamingClient.discoverPath(service: service, kind: kind,
-                                                                                               region: region, page: 1,
-                                                                                               language: language)),
+    /// The first page of a service's titles of one kind in a country, in an
+    /// order: "tmdb-FR-8-movie-popular". The language of the titles and
+    /// summaries follows the device's, and « recent » stops at `today`; the
+    /// key holds neither (they are seen at the next refresh).
+    static func streaming(service: Int, kind: HomeItem.Kind, sort: StreamingSort, region: String, today: String,
+                          language: String? = nil) -> HomeSource {
+        return HomeSource(key: "\(tmdbPrefix)\(region)-\(service)-\(kind.rawValue)-\(sort.rawValue)",
+                          request: HomeRequest(host: .tmdb, path: TMDBStreamingClient.discoverPath(
+                            service: service, kind: kind, region: region, page: 1, sort: sort, today: today, language: language)),
                           parser: .tmdbDiscover(kind), minimum: 10, allowsEmpty: true)
     }
 
-    /// The region, service and kind of a streaming list's key.
-    static func streaming(ofKey key: String) -> (region: String, service: Int, kind: HomeItem.Kind)? {
+    /// The region, service, kind and order of a streaming list's key.
+    static func streaming(ofKey key: String) -> (region: String, service: Int, kind: HomeItem.Kind, sort: StreamingSort)? {
         guard key.hasPrefix(tmdbPrefix) else { return nil }
         let parts = key.dropFirst(tmdbPrefix.count).split(separator: "-")
-        guard parts.count == 3, let service = Int(parts[1]), let kind = HomeItem.Kind(rawValue: String(parts[2])) else { return nil }
-        return (String(parts[0]), service, kind)
+        guard parts.count == 4, let service = Int(parts[1]), let kind = HomeItem.Kind(rawValue: String(parts[2])),
+              let sort = StreamingSort(rawValue: String(parts[3])) else { return nil }
+        return (String(parts[0]), service, kind, sort)
     }
 }
 

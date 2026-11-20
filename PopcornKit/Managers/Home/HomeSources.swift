@@ -401,26 +401,31 @@ struct HomePlan: Sendable {
     /// the page reads does not change: a list a full refresh left in the
     /// same folder is still shown.
     let light: Bool
-    /// The streaming shelves' lists: each service's movies and shows in
-    /// the user's country (none without a TMDB key).
+    /// The lists of a page filtered on a service (`HomeSettings.homeService`):
+    /// its movies and shows in the user's country, in three orders. None
+    /// on the usual page.
     let streaming: [HomeSource]
 
     init(now: Date, followedShowIds: [String], genres: [(kind: HomeItem.Kind, genre: String)], days: Int = HomeBuilder.Rules.airedDays,
-         light: Bool = false, streaming: [StreamingService] = [], region: String = "US") {
+         light: Bool = false, service: StreamingService? = nil, region: String = "US") {
         year = CatalogDates.year(of: now)
         self.days = (0..<max(days, 1)).map { CatalogDates.dayString(now.addingTimeInterval(-Double($0) * 86_400)) }
         calendar = HomeSource.calendar(ids: followedShowIds)
         self.genres = genres.map { HomeSource.genre($0.kind, $0.genre) }
         self.light = light
-        self.streaming = streaming.flatMap { service in
-            HomeItem.Kind.allCases.map { HomeSource.streaming(service: service.id, kind: $0, region: region) }
-        }
+        let today = CatalogDates.dayString(now)
+        self.streaming = service.map { service in
+            HomeShelfID.streamingShelves.map {
+                HomeSource.streaming(service: service.id, kind: $0.kind, sort: $0.sort, region: region, today: today)
+            }
+        } ?? []
     }
 
     /// The first paint: hero, trending movies and shows, new movies, 4K, and
-    /// the latest episodes read off the trending shows.
+    /// the latest episodes read off the trending shows. On a page filtered
+    /// on a service, that service's lists first: they are the page.
     var phase1: [HomeSource] {
-        return [.movieTop, .seriesTop, .ytsNew(year), .yts4K] + (light ? [.topUHD] : [])
+        return (light ? [] : streaming) + [.movieTop, .seriesTop, .ytsNew(year), .yts4K] + (light ? [.topUHD] : [])
     }
 
     /// Right after: the shelves of the year, the new shows, the user's
@@ -438,11 +443,10 @@ struct HomePlan: Sendable {
         return days.flatMap { [HomeSource.tvmaze(web: true, day: $0), HomeSource.tvmaze(web: false, day: $0)] }
     }
 
-    /// Last: the two rankings, the 4K ranking, the genre shelves, the
-    /// streaming shelves.
+    /// Last: the two rankings, the 4K ranking, the genre shelves.
     var phase3: [HomeSource] {
         guard !light else { return [] }
-        return [.topShows, .topMovies, .topUHD] + genres + streaming
+        return [.topShows, .topMovies, .topUHD] + genres
     }
 
     /// Every source of the three phases.
