@@ -556,12 +556,12 @@ private struct Context {
             // first, then the other additions, latest first.
             var seeders: [String: Int] = [:]
             for entry in ranking.map({ ranked($0, kind: .movie) }) ?? [] { seeders[entry.item.imdbId] = entry.seeders ?? 0 }
-            let ranked = kept.enumerated().filter { seeders[$0.element.item.imdbId] != nil }.sorted {
+            let seeded = kept.enumerated().filter { seeders[$0.element.item.imdbId] != nil }.sorted {
                 let a = seeders[$0.element.item.imdbId] ?? 0, b = seeders[$1.element.item.imdbId] ?? 0
                 return a != b ? a > b : $0.offset < $1.offset
             }.map(\.element)
             let others = kept.filter { seeders[$0.item.imdbId] == nil }
-            let entries = (ranked + others).map { badged(badged($0, .uhd, when: true), .new, when: within($0.item.date, rules.newMovieAge)) }
+            let entries = (seeded + others).map { badged(badged($0, .uhd, when: true), .new, when: within($0.item.date, rules.newMovieAge)) }
             return HomeBuilder.Draft(HomeShelfID.uhd, entries, lists: [added] + [ranking].compactMap { $0 })
         }
         // YTS is down: apibay's UHD ranking, with the cards the other lists know.
