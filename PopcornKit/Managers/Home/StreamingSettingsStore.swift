@@ -238,8 +238,8 @@ public final class StreamingSettingsStore {
             servicesRegion = region
             servicesLoad = .loading
         }
-        client.services(region: region) { services in
-            DispatchQueue.main.async { [weak self] in
+        client.services(region: region) { [weak self] services in
+            DispatchQueue.main.async {
                 guard let self else { return }
                 let current = region == self.region && self.servicesRegion == region
                 guard let services else {
@@ -271,9 +271,9 @@ public final class StreamingSettingsStore {
         }
         regionsLoad = .loading
         let locale = self.locale
-        client.regions { codes in
+        client.regions { [weak self] codes in
             let choices = StreamingSettingsStore.regionChoices(codes, locale: locale)
-            DispatchQueue.main.async { [weak self] in
+            DispatchQueue.main.async {
                 if let self {
                     self.regionChoices = choices
                     self.regionsLoad = .loaded

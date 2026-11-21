@@ -217,3 +217,8 @@ public struct HomeSettings {
         return streamingShelves.first { $0.id == id }
     }
 }
+
+/// The hub reads its settings on its own queue and Settings writes them on
+/// the main queue, through `UserDefaults`, which is safe from any thread;
+/// the device's languages and region are read, never written.
+extension HomeSettings: @unchecked Sendable {}
