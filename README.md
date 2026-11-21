@@ -21,6 +21,35 @@ what loading is doing, plays the right episode from season packs, downloads at t
 and makes the Apple TV remote's Back reliable. **5.3.0** opens on a Home screen, opens pages at
 once, resumes a film that is still downloading in the native player, chains a show's episodes in the same release and adds the Apple TV Top Shelf.
 
+## After 5.3.0 (not released yet)
+
+On `master`, not in a release: the version stays 5.3.0 and What's New in the app is unchanged.
+Contributions by [RougeCiel](https://github.com/RougeCiel), reviewed and completed before the
+merge; seen on Apple TV simulators with recorded answers and a made-up key only, not on a real
+Apple TV nor against TMDB itself.
+
+**Browse by streaming service (Apple TV)**
+- **What it needs**: your own free TMDB key (themoviedb.org › Settings › API), typed or pasted
+  from the iPhone in **Settings › Streaming Services**, with the country and the services to
+  offer (Netflix, Amazon Prime Video, Disney Plus and Apple TV Plus until you choose). Without a
+  key the app looks and behaves as in 5.3.0, apart from that Settings section.
+- **The Services row** on Home, under Continue Watching: picking a service shows a page filtered
+  on it — its popular, recent and top rated movies and shows in your country, placeholders while
+  they come, « No results » when it lists nothing, an error with Try Again when TMDB does not
+  answer or refuses the key; « All », or Menu at the top of the page, brings the usual page
+  back. The choice lasts the session; hiding the row in Settings › Home shows the usual page.
+- **The Service filter** of the Movies and Shows grids, after Sort and Genre: the grid lists the
+  service's titles, with the sorts and genres its lists can follow.
+- **What it is not**: the services' own apps or streams. Popcorn Time plays these titles from
+  its own sources, as any other title. What each service offers comes from JustWatch, through
+  TMDB; this product uses the TMDB API but is not endorsed or certified by TMDB.
+
+**Navigation and build**
+- **Menu at a tab's first screen goes to Home** (Apple TV); Menu on Home leaves the app, as
+  before.
+- **The tvOS build with Xcode 26.2**: PopcornKit's module verifier is off (it rejected the
+  CocoaPods search paths) and a local name that hid a method is renamed.
+
 ## New in 5.3.0
 
 The same notes are shown once in the app after the update (`WhatsNewRelease.current` in
@@ -712,7 +741,7 @@ PopcornTorrent's rule (it does not publish it).
 
 **⌘U**: pick the **PopcornTimeTests** scheme (or PopcornTimeMac), destination *My Mac*. The
 macOS unit-test target runs in about 15 seconds, offline, in English whatever the Mac's
-language: 871 tests, 24,780 checks of the extra sources (apibay, Knaben, Cinemeta, TVMaze, the
+language: 899 tests, 24,939 checks of the extra sources (apibay, Knaben, Cinemeta, TVMaze, the
 Top 100), the catalogs (each source's sorts and genres, the mirror races, the first pages kept
 on disk), the Home feed (`PopcornTimeTests/Home`: its parsers, shelves, cache and loader on
 the answers recorded on 2026-11-14, its transport on hosts played by a `URLProtocol`, and the
@@ -781,7 +810,8 @@ card), the Home tab (`HomeUITests`, fed from recorded answers) and the poster gr
 (`GridUITests`), the next episode's card over the player and its press guard (`UpNextUITests`, on a
 DEBUG fixture), and Siri Remote presses replayed on the player over a loopback test torrent
 (`RemoteScriptUITests`, through `tools/remote-rig/fx-run.sh`; skipped unless `PT_REMOTE_SCRIPT`
-is set). 74 tests. They read the public catalog APIs, never
+is set), and the streaming services with and without a TMDB key (`StreamingServicesUITests`,
+on recorded TMDB answers and a made-up key). 82 tests. They read the public catalog APIs, never
 press Play, and set the app up with DEBUG launch arguments, so they are built with the DEBUG
 condition (the app for x86_64, the test runner for arm64). The second command names its own
 DerivedData and result bundle: without them the results go to a `PopcornTime-…` folder of
