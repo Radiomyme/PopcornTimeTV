@@ -42,6 +42,9 @@ struct HomeActions {
     var isWatched: (HomeItem) -> Bool? = { _ in nil }
     var toggleWatched: (HomeItem) -> Void = { _ in }
     var removeFromContinueWatching: (HomeItem) -> Void = { _ in }
+    /// The page filtered on a service goes back to the usual one (Menu at
+    /// its top, as « All » does).
+    var showUsualPage: () -> Void = {}
 }
 
 /// What a focus move asks of the scroll view.
@@ -214,6 +217,9 @@ final class HomePageModel {
 
     private func effectOfFocusMove(from old: HomeFocus?, to new: HomeFocus?) -> HomeFocusEffect {
         lastFocusChange = Date()
+        // The user moved on from the card a pick kept the focus on (or the
+        // focus went up to the top: Menu).
+        if let card = serviceCard, new != card, lastFocusUpdateWasUsers || new?.isHeader == true { serviceCard = nil }
         // The page is giving the focus to a card (`redirect`): there, or
         // on a stop on the way, which is not a move of the user's.
         var arrived = false
@@ -361,14 +367,23 @@ final class HomePageModel {
 
     /// The backdrop of the card the compact billboard shows.
     private func showFollowedBackdrop() {
-        if let item = compactItem { backdrop.show(HomeBackdrop.Source(item)) }
+        if let item = compactItem { backdrop.show(backdropSource(of: item)) }
     }
 
     private func setFollowed(_ item: HomeItem) {
         if followed != item {
             withAnimation(.easeInOut(duration: 0.25)) { followed = item }
         }
-        backdrop.show(HomeBackdrop.Source(item))
+        backdrop.show(backdropSource(of: item))
+    }
+
+    /// A card's backdrop. A card of the « Services » row has no artwork:
+    /// the page's own, its hero's (once a service is picked, that
+    /// service's titles), not the last title the focus left behind.
+    private func backdropSource(of item: HomeItem) -> HomeBackdrop.Source? {
+        guard HomeServiceCard.isServiceCard(item) else { return HomeBackdrop.Source(item) }
+        let title = heroItem ?? home.shelves.first { $0.id != HomeShelfID.services }?.items.first
+        return title.map(HomeBackdrop.Source.init)
     }
 
     /// The page leaves the screen (a title's page is pushed, another tab is
@@ -452,7 +467,59 @@ final class HomePageModel {
     /// Menu below the top: where the focus goes back up to.
     func takeTopFocus() -> HomeFocus? {
         returnFocus = nil
+        serviceCard = nil
         return preferredFocus
+    }
+
+    // MARK: The « Services » row
+
+    /// The card of the « Services » row the focus stays on while the page
+    /// is rebuilt for a service picked (`keepFocus(on:)`).
+    @ObservationIgnored private var serviceCard: HomeFocus?
+    @ObservationIgnored private var serviceCardSince = Date.distantPast
+
+    /// A service was picked (or « All ») from `card`'s row: once the page
+    /// is rebuilt, the focus is on `card` (the service picked, or the one
+    /// that was on) with its row under the band — not on « All », which
+    /// comes and goes at the start of the row and where the focus fell
+    /// (a second Select then undid the pick).
+    func keepFocus(on card: HomeFocus) {
+        serviceCard = card
+        serviceCardSince = Date()
+        // What the focus does next is the page's (Select moved nothing).
+        pageMovesFocus()
+    }
+
+    /// The shelves changed: the card the focus has to be on after a pick,
+    /// nil when there is none. Kept while the page refreshes (its shelves
+    /// come in one by one, the hero above them), until the user moves.
+    func focusAfterServicePick() -> HomeFocus? {
+        guard let card = serviceCard else { return nil }
+        guard isVisible, Date().timeIntervalSince(serviceCardSince) < 30 else {
+            serviceCard = nil
+            return nil
+        }
+        guard exists(card) else { return nil }
+        if !home.isRefreshing { serviceCard = nil }
+        return card
+    }
+
+    /// The service the page is filtered on: the selected card of the
+    /// « Services » row (nil: the usual page).
+    var filteredService: HomeItem? {
+        return home.shelf(HomeShelfID.services)?.items.first(where: HomeServiceCard.isSelected)
+    }
+
+    /// A page filtered on a service none of whose lists came (TMDB refused
+    /// the key, or did not answer; nothing saved): the error header.
+    var serviceFailed: Bool {
+        return home.isUnavailable && filteredService != nil
+    }
+
+    /// A page filtered on a service with none of its shelves yet: they are
+    /// being asked (placeholders), or the service listed nothing.
+    var hasOnlyServicesRow: Bool {
+        return filteredService != nil && home.shelves.allSatisfy { $0.id == HomeShelfID.services }
     }
 
     /// Menu has somewhere to go back to inside the page.
@@ -472,7 +539,12 @@ final class HomePageModel {
         } else {
             heroIndex = min(heroIndex, max(items.count - 1, 0))
         }
-        if !isInShelves { showHeroBackdrop() }
+        if !isInShelves {
+            showHeroBackdrop()
+        } else if let followed, HomeServiceCard.isServiceCard(followed) {
+            // On a service's card: the hero of the page it now shows.
+            backdrop.show(backdropSource(of: followed))
+        }
     }
 
     func showHero(_ index: Int) {

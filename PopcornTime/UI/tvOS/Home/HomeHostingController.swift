@@ -213,6 +213,7 @@ final class HomeHostingController: UIHostingController<HomeView> {
         actions.open = { [weak self] item, shelf in self?.open(item, from: shelf, play: false) }
         actions.play = { [weak self] item, shelf in self?.open(item, from: shelf, play: true) }
         actions.seeAll = { [weak self] shelf in self?.seeAll(shelf) }
+        actions.showUsualPage = { [weak self] in self?.showService(nil, fromRow: false) }
         actions.isInWatchlist = { Library.shared.isInWatchlist($0.imdbId) }
         actions.toggleWatchlist = { item in
             if let movie = item.movie {
@@ -249,7 +250,7 @@ final class HomeHostingController: UIHostingController<HomeView> {
     /// episode's card plays that episode).
     private func open(_ item: HomeItem, from shelf: String?, play: Bool) {
         // A card of the « Services » row filters the page.
-        if HomeServiceCard.isServiceCard(item) { return HomeHostingController.showService(HomeServiceCard.serviceId(of: item)) }
+        if HomeServiceCard.isServiceCard(item) { return showService(HomeServiceCard.serviceId(of: item)) }
         guard let navigationController, let media = item.media else { return }
         var autoPlay = play
         #if DEBUG
@@ -268,13 +269,26 @@ final class HomeHostingController: UIHostingController<HomeView> {
                                       season: episode?.season, episode: episode?.number)
     }
 
-    /// The page filtered on a service (nil: the usual page). The hub reads
-    /// it when it builds the page: the service's lists are asked at once.
-    static func showService(_ id: Int?) {
+    /// The page filtered on a service (nil: the usual page). The page's own
+    /// hub (`home`: the one on screen, the recorded one of a fixture run)
+    /// builds it again: a service's lists that are missing or no longer
+    /// fresh are asked at once, or as soon as a running refresh ends.
+    ///
+    /// `fromRow`: picked in the « Services » row. The focus then stays on
+    /// the card of the service picked — of the one that was on, after
+    /// « All » — once the page is rebuilt (« All » comes and goes at the
+    /// start of the row, where the focus would otherwise land, and the row
+    /// drawn again can leave the focus nowhere).
+    private func showService(_ id: Int?, fromRow: Bool = true) {
         let settings = HomeSettings()
-        guard settings.homeServiceFilter != id else { return }
+        let shown = settings.homeServiceFilter
+        guard shown != id else { return }
         settings.homeServiceFilter = id
-        HomeState.shared.refreshLocal()
+        if fromRow, let service = id ?? shown,
+           let card = home.shelf(HomeShelfID.services)?.items.first(where: { HomeServiceCard.serviceId(of: $0) == service }) {
+            model.keepFocus(on: .card(shelf: HomeShelfID.services, item: card.id))
+        }
+        home.refreshLocal()
     }
 
     /// The shelf's own titles, in its order, under its name, on the Home's

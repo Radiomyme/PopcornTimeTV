@@ -91,9 +91,12 @@ struct HomeView: View {
         .environment(\.colorScheme, .dark)
         .animation(.easeInOut(duration: 0.3), value: model.home.isOffline)
         .onPlayPauseCommand(perform: playPausePressed)
-        // Menu below the top goes back up; at the top there is no handler:
-        // the system takes it, as on the other tabs.
-        .onExitCommand(perform: model.canGoBackToTop ? { backToTop() } : nil)
+        // Menu below the top goes back up; at the top of a page filtered on
+        // a service, back to the usual page (as « All »); at the top of the
+        // usual page there is no handler: the system takes it, as on the
+        // other tabs.
+        .onExitCommand(perform: model.canGoBackToTop ? { backToTop() }
+                       : model.filteredService != nil ? { model.actions.showUsualPage() } : nil)
         .onAppear { model.pageAppeared() }
         .onChange(of: model.home.heroItems) { old, _ in model.heroItemsChanged(from: old) }
         .task(id: model.header == .skeleton) {
@@ -152,6 +155,21 @@ struct HomeView: View {
                         if model.header == .skeleton, showsSkeleton {
                             HomeShelfSkeleton(style: .posters)
                             HomeShelfSkeleton(style: .posters)
+                        } else if model.hasOnlyServicesRow, !model.home.isUnavailable {
+                            // A service just picked: its shelves are on
+                            // their way, or it listed nothing — never the
+                            // row alone without a word.
+                            if model.home.isRefreshing {
+                                HomeShelfSkeleton(style: .posters)
+                                HomeShelfSkeleton(style: .posters)
+                            } else {
+                                Text("No results")
+                                    .font(GlassFont.body)
+                                    .foregroundStyle(GlassPalette.secondaryText)
+                                    .padding(.horizontal, TVHomeLayout.side)
+                                    .padding(.top, 20)
+                                    .accessibilityIdentifier("Home.Services.Empty")
+                            }
                         }
                     }
                 }
@@ -173,11 +191,26 @@ struct HomeView: View {
             .onChange(of: model.home.shelves) { _, _ in
                 // A page without a hero: its first card's backdrop.
                 if model.header == .none { model.showHeroBackdrop() }
+                // A service picked from its row: the focus stays on its card,
+                // the row under the band (once the new row is laid out).
+                if let card = model.focusAfterServicePick() {
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
+                        if model.serviceFailed { return showServiceFailure() }
+                        if focus == card { return scroll(to: HomeShelfID.services, proxy: proxy, viewport: size.height, animated: true) }
+                        if case .redirect(let target) = model.redirect(to: card) {
+                            moveFocus(to: target, proxy: proxy, viewport: size.height)
+                        }
+                    }
+                    return
+                }
                 // The focused card is gone: the one that took its place.
                 guard let wanted = model.focusAfterShelvesChanged() else { return }
                 if case .redirect(let target) = model.redirect(to: wanted) {
                     moveFocus(to: target, proxy: proxy, viewport: size.height)
                 }
+            }
+            .onChange(of: model.home.isUnavailable) { _, unavailable in
+                if unavailable, model.serviceFailed { showServiceFailure() }
             }
             .onChange(of: model.focusRequest) { _, request in
                 guard let request else { return }
@@ -200,7 +233,7 @@ struct HomeView: View {
             HomeHeroHeader(model: model, focus: $focus, height: heroHeight)
                 .frame(width: size.width, alignment: .leading)
         case .error:
-            HomeErrorHeader(isRefreshing: model.home.isRefreshing, focus: $focus) {
+            HomeErrorHeader(isRefreshing: model.home.isRefreshing, service: model.filteredService?.title, focus: $focus) {
                 Task { await model.home.refresh(force: true) }
             }
             .frame(width: size.width, height: model.home.shelves.isEmpty ? size.height : heroHeight)
@@ -272,8 +305,11 @@ struct HomeView: View {
     ///   again (`resetFocus`), which puts the focus on a card on screen —
     ///   not always that one, but under the band's backdrop, not seen —
     ///   and the focus state goes on from there;
-    /// - with the focus nowhere (the focused card was removed) or outside
-    ///   the page, UIKit brings it into the page first.
+    /// - with the focus outside the page, UIKit brings it into the page
+    ///   first; with the focus nowhere (the focused card was removed, or
+    ///   drawn again in a row that changed: UIKit may still place it in the
+    ///   page, where nothing shows it), too — the card made the page's
+    ///   default focus first, where the focus then lands.
     /// Six steps at most, 0.3 s apart; then the page gives up and takes the
     /// focus as it is.
     private func moveFocus(to wanted: HomeFocus, proxy: ScrollViewProxy, viewport: CGFloat, attempt: Int = 0) {
@@ -295,7 +331,8 @@ struct HomeView: View {
             // The moves this step causes are stops on the way, not the
             // user's (a move of the user's ends the redirect).
             model.pageMovesFocus()
-            if !isInPage {
+            if !isInPage || (focus == nil && wanted.shelf != nil) {
+                if wanted.shelf != nil { model.prefer(wanted) }
                 model.pullFocus()
             } else if wanted.shelf != nil, focus?.isHeader ?? true {
                 // The card as the page's default focus, then (once the
@@ -323,6 +360,16 @@ struct HomeView: View {
         withAnimation(.easeInOut(duration: reduceMotion ? 0.01 : 0.4)) {
             proxy.scrollTo(shelfID, anchor: anchor)
         }
+    }
+
+    /// None of the picked service's lists came: the message at the top of
+    /// the page, with Try Again, which gets the focus — the row (« All »
+    /// included) stays under it. On the service's card, the row under the
+    /// band, the message had scrolled away: the row alone, without a word.
+    private func showServiceFailure() {
+        guard focus?.shelf != nil || !model.focusIsInPage() else { return }
+        _ = model.takeTopFocus()
+        focus = .retry
     }
 
     private func backToTop() {

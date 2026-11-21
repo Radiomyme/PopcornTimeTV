@@ -533,9 +533,13 @@ struct HomeCompactBillboard: View {
 
 // MARK: - Instead of the billboard
 
-/// The hub could not load and has nothing saved.
+/// The hub could not load and has nothing saved. On a page filtered on a
+/// service (`service`, its name): none of its lists came (TMDB refused the
+/// key, or did not answer) — the « Services » row stays under it, « All »
+/// included.
 struct HomeErrorHeader: View {
     let isRefreshing: Bool
+    var service: String? = nil
     var focus: FocusState<HomeFocus?>.Binding
     let retry: () -> Void
 
@@ -544,10 +548,10 @@ struct HomeErrorHeader: View {
             Image(systemName: "wifi.exclamationmark")
                 .font(.system(size: 84, weight: .semibold))
                 .foregroundStyle(GlassPalette.secondaryText)
-            Text("Home.Unavailable.Title")
+            Text(service.map { String(format: "Home.Unavailable.Service".localized, $0) } ?? "Home.Unavailable.Title".localized)
                 .font(.system(size: 48, weight: .bold))
                 .foregroundStyle(GlassPalette.primaryText)
-            Text("Home.Unavailable.Message")
+            Text(service == nil ? "Home.Unavailable.Message".localized : "Grid.Service.Unavailable".localized)
                 .font(GlassFont.body)
                 .foregroundStyle(GlassPalette.secondaryText)
                 .multilineTextAlignment(.center)
