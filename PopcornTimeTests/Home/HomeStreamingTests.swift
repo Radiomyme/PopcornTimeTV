@@ -80,13 +80,13 @@ final class HomeStreamingTests: CheckedTestCase {
     // MARK: Sources and parser
 
     func testSourceKeysAndPaths() {
-        let source = HomeSource.streaming(service: 8, kind: .show, sort: .popular, region: "FR", today: "2026-11-14", language: "fr-FR")
+        let source = HomeSource.streaming(service: 8, kind: .show, sort: .popular, region: "FR", today: "2026-11-14")
         eq(source.key, "tmdb-FR-8-show-popular", "the key names the country, the service, the kind and the order")
         eq(source.request.host, .tmdb, "TMDB's host")
         check(source.request.path.hasPrefix("/discover/tv?watch_region=FR&with_watch_providers=8"), "a discover page of TV shows")
         check(source.request.path.contains("with_watch_monetization_types=flatrate"), "subscription titles only")
         check(source.request.path.contains("sort_by=popularity.desc"), "most popular first")
-        check(source.request.path.hasSuffix("&language=fr-FR"), "in the device's language")
+        check(source.request.path.hasSuffix("&language=en-US"), "in English, as the app names its titles (Cinemeta's), whatever the device's language")
         let parsed = HomeSource.streaming(ofKey: source.key)
         check(parsed?.region == "FR" && parsed?.service == 8 && parsed?.kind == .show && parsed?.sort == .popular, "the key read back")
         check(HomeSource.streaming(ofKey: "tpb-207") == nil, "another list's key")
@@ -94,17 +94,26 @@ final class HomeStreamingTests: CheckedTestCase {
         eq(HomeCachePolicy.lifetime(forKey: source.key, now: now), .streaming, "kept 12 hours fresh")
 
         let recent = TMDBStreamingClient.discoverPath(service: 8, kind: .movie, region: "FR", page: 2, sort: .recent, genre: 878,
-                                                      today: "2026-11-14", language: nil)
+                                                      today: "2026-11-14")
         check(recent.contains("sort_by=primary_release_date.desc&primary_release_date.lte=2026-11-14"), "recent: released by today")
         check(recent.contains("&with_genres=878&page=2"), "a genre, a page")
-        check(TMDBStreamingClient.discoverPath(service: 8, kind: .show, region: "FR", page: 1, sort: .topRated, language: nil)
+        check(TMDBStreamingClient.discoverPath(service: 8, kind: .show, region: "FR", page: 1, sort: .topRated)
                 .contains("sort_by=vote_average.desc&vote_count.gte=150"), "top rated: among titles with many votes")
         eq(TMDBStreamingClient.genreId("Science Fiction", kind: .movie), 878, "the app's genre, TMDB's id")
         eq(TMDBStreamingClient.genreId("Science Fiction", kind: .show), 10765, "the shows' own id")
         check(TMDBStreamingClient.genreId("Thriller", kind: .show) == nil && TMDBStreamingClient.genreId("All", kind: .movie) == nil,
-              "no id: no genre filter")
-        eq(TMDBStreamingClient.language(preferred: ["fr-FR", "en"]), "fr-FR", "TMDB's language")
-        eq(TMDBStreamingClient.language(preferred: ["fr"]), "fr", "a language without a region")
+              "TMDB has no id for these")
+        eq(TMDBStreamingClient.genreId("Music", kind: .movie), 10402, "Music: TMDB's movies have it (Cinemeta has not)")
+        check(TMDBStreamingClient.genreId("Music", kind: .show) == nil, "not its shows")
+        // The genres a grid offers while a service is chosen.
+        let movies = NetworkManager.Genres.movies.filter { TMDBStreamingClient.supportsGenre($0.rawValue, kind: .movie) }
+        eq(movies.map(\.rawValue), ["All", "Action", "Adventure", "Animation", "Comedy", "Crime", "Documentary", "Drama", "Family",
+                                    "Fantasy", "History", "Horror", "Music", "Mystery", "Romance", "Science Fiction", "Thriller", "War", "Western"],
+           "the movies' genres TMDB can filter on (not Film Noir, not Sports)")
+        let shows = NetworkManager.Genres.shows.filter { TMDBStreamingClient.supportsGenre($0.rawValue, kind: .show) }
+        eq(shows.map(\.rawValue), ["All", "Action", "Adventure", "Animation", "Comedy", "Crime", "Documentary", "Drama", "Family",
+                                   "Fantasy", "Mystery", "Science Fiction", "War", "Western"],
+           "the shows' (not Horror, History, Romance, Thriller, Sports)")
     }
 
     func testDiscoverAnswer() {

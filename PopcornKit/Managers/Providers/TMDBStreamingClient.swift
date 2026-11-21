@@ -7,25 +7,66 @@ import Foundation
 ///   in the query, a v4 read access token in an `Authorization` header.
 /// - TMDB knows titles by TMDB ids; the app by IMDb ids. Every title of an
 ///   answer is given its IMDb id (`/movie|tv/{id}/external_ids`), a few
-///   requests at a time, and the pairs are kept on disk for good (an id
-///   never changes): a list asked again costs one request.
+///   requests at a time for the whole app (`parallelLookups`), and the ids
+///   found are kept on disk for good (an id never changes): a list asked
+///   again costs one request. A lookup that got no answer is tried once
+///   more; still none, the page is a failure (nil), not a page with holes.
 /// - The hub reaches it through `HomeTransport.live` (host `.tmdb`): the
 ///   body it gets is TMDB's page with an "imdb_id" in every result.
+/// - The titles are asked in English ("en-US"), as the rest of the app
+///   names them (Cinemeta's titles): one language on the shelves, and the
+///   same name for a title on the Home, in the grids and in Search.
 public final class TMDBStreamingClient: @unchecked Sendable {
 
-    public static let shared = TMDBStreamingClient()
+    /// The app's client. In a DEBUG run with `-PTDebugHomeFixtures <folder>`
+    /// it answers from the recorded files of that folder (`TMDBRecorded`)
+    /// and keeps the ids it reads in memory only: no request ever reaches
+    /// TMDB, and any key is taken (`check(key:)`).
+    public static let shared: TMDBStreamingClient = {
+        #if DEBUG
+        if let folder = UserDefaults.standard.string(forKey: "PTDebugHomeFixtures"), !folder.isEmpty {
+            return TMDBStreamingClient(recordedIn: URL(fileURLWithPath: folder))
+        }
+        #endif
+        return TMDBStreamingClient()
+    }()
 
     static let base = "https://api.themoviedb.org/3"
     /// Seconds without a byte before a request is given up.
     static let timeout: TimeInterval = 8
-    /// External-id requests in flight at once (TMDB allows about 40 a second).
+    /// External-id requests in flight at once, every list and grid together
+    /// (TMDB allows about 40 a second).
     static let parallelLookups = 6
+    /// TMDB serves a discover list up to its 500th page; it refuses the next.
+    static let lastPage = 500
+    /// The language of the titles and summaries asked.
+    static let language = "en-US"
 
     /// The key, read at every request (the user may change it any time).
     var apiKey: () -> String? = { HomeSettings().tmdbAPIKey }
 
+    /// A GET: the body of a 2xx answer, nil otherwise. Called back on any queue.
+    typealias Fetch = @Sendable (_ path: String, _ completion: @escaping @Sendable (Data?) -> Void) -> Void
+
+    /// Answers instead of TMDB (recorded files: `init(recordedIn:)`); nil:
+    /// TMDB itself, with the key. Set before the first request.
+    var recorded: Fetch?
+
+    /// Seconds before the lookups that got no answer are tried again.
+    var retryDelay: TimeInterval = 1
+
     private let session: URLSession
     private let ids: TMDBIdCache
+    private let lookups = TMDBRequestGate(limit: TMDBStreamingClient.parallelLookups)
+
+    /// A client of recorded answers (`TMDBRecorded`, a DEBUG fixture run):
+    /// never a request, ids in memory only, every key taken.
+    convenience init(recordedIn folder: URL) {
+        self.init(ids: TMDBIdCache(file: nil))
+        recorded = { path, completion in
+            DispatchQueue.global(qos: .userInitiated).async { completion(TMDBRecorded.answer(to: path, in: folder)) }
+        }
+    }
 
     init(session: URLSession? = nil, ids: TMDBIdCache = TMDBIdCache()) {
         if let session {
@@ -47,9 +88,10 @@ public final class TMDBStreamingClient: @unchecked Sendable {
     /// subscription titles only ("flatrate": not the rentals and purchases
     /// TMDB lists under the same service), with a few votes at least (TMDB
     /// lists thousands of unrated fillers). `today` ("2026-11-20") bounds
-    /// the recent ones (TMDB lists announced titles too).
+    /// the recent ones (TMDB lists announced titles too). In English unless
+    /// a `language` is given.
     static func discoverPath(service: Int, kind: HomeItem.Kind, region: String, page: Int, sort: StreamingSort = .popular,
-                             genre: Int? = nil, today: String? = nil, language: String?) -> String {
+                             genre: Int? = nil, today: String? = nil, language: String? = nil) -> String {
         let movie = kind == .movie
         var path = "/discover/\(movie ? "movie" : "tv")?watch_region=\(region)&with_watch_providers=\(service)"
             + "&with_watch_monetization_types=flatrate&include_adult=false"
@@ -64,31 +106,26 @@ public final class TMDBStreamingClient: @unchecked Sendable {
         }
         if let genre { path += "&with_genres=\(genre)" }
         path += "&page=\(page)"
-        if let language = language ?? TMDBStreamingClient.language() { path += "&language=\(language)" }
+        path += "&language=\(language ?? TMDBStreamingClient.language)"
         return path
-    }
-
-    /// The device's first language as TMDB takes it ("fr-FR", "en-US").
-    static func language(preferred: [String] = Locale.preferredLanguages) -> String? {
-        guard let first = preferred.first else { return nil }
-        let parts = first.split(separator: "-")
-        guard let code = parts.first, code.count == 2 else { return nil }
-        if let region = parts.dropFirst().first(where: { $0.count == 2 }) { return "\(code)-\(region)" }
-        return String(code)
     }
 
     // MARK: Hub
 
     /// The hub's GET (`HomeTransport.live`, host `.tmdb`): the page, with
-    /// every result's IMDb id. nil: no key, no answer, a refused key.
+    /// every result's IMDb id. nil: no key, no answer, a refused key — or a
+    /// lookup of the page without an answer (the hub keeps the list it has
+    /// and asks again at the next refresh, instead of a list with holes).
     func fetch(path: String, completion: @escaping @Sendable (Data?) -> Void) {
         let kind: HomeItem.Kind = path.hasPrefix("/discover/tv") ? .show : .movie
         get(path) { data in
-            guard let data, var root = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
+            guard let data, let root = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
                   let results = root["results"] as? [[String: Any]] else { return completion(nil) }
-            self.withImdbIds(results, kind: kind) { resolved in
-                root["results"] = resolved
-                completion(try? JSONSerialization.data(withJSONObject: root))
+            self.withImdbIds(results, kind: kind) { resolved, failed in
+                guard failed == 0 else { return completion(nil) }
+                var page = root
+                page["results"] = resolved
+                completion(try? JSONSerialization.data(withJSONObject: page))
             }
         }
     }
@@ -96,22 +133,33 @@ public final class TMDBStreamingClient: @unchecked Sendable {
     // MARK: Catalogue
 
     /// A service's titles of one kind, page by page (`page` from 1), as
-    /// cards. `hasMore`: TMDB has a next page. nil: no answer.
-    /// `genre`: a genre as the app names it ("Science Fiction"); one TMDB
-    /// has no id for (for that kind) is ignored.
+    /// cards. `hasMore`: TMDB has a next page — a page can be empty and
+    /// still have one (none of its titles has an IMDb id): the end is
+    /// `hasMore` false, not an empty page. nil: a failure (no answer, or a
+    /// lookup of its titles without one), for a Retry.
+    /// `genre`: a genre as the app names it ("Science Fiction"; nil or
+    /// "All": every genre). One TMDB has no id for, for that kind
+    /// (`supportsGenre`), answers an empty last page, without a request: a
+    /// grid never shows the whole catalogue under a genre's name. So does
+    /// a page past TMDB's last (`lastPage`).
     public func titles(service: Int, kind: HomeItem.Kind, region: String, page: Int, sort: StreamingSort = .popular,
                        genre: String? = nil,
                        completion: @escaping @Sendable (_ items: [HomeItem]?, _ hasMore: Bool) -> Void) {
-        let path = TMDBStreamingClient.discoverPath(service: service, kind: kind, region: region, page: page, sort: sort,
-                                                    genre: genre.flatMap { TMDBStreamingClient.genreId($0, kind: kind) },
-                                                    language: nil)
+        var genreId: Int?
+        if let genre, !TMDBStreamingClient.isAll(genre) {
+            guard let id = TMDBStreamingClient.genreId(genre, kind: kind) else { return completion([], false) }
+            genreId = id
+        }
+        guard page <= TMDBStreamingClient.lastPage else { return completion([], false) }
+        let path = TMDBStreamingClient.discoverPath(service: service, kind: kind, region: region, page: page, sort: sort, genre: genreId)
         get(path) { data in
             guard let data, let root = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
                   let results = root["results"] as? [[String: Any]] else { return completion(nil, false) }
             let pages = (root["total_pages"] as? NSNumber)?.intValue ?? page
-            self.withImdbIds(results, kind: kind) { resolved in
+            self.withImdbIds(results, kind: kind) { resolved, failed in
+                guard failed == 0 else { return completion(nil, false) }
                 let items = resolved.compactMap { HomeParse.tmdbEntry($0, kind: kind)?.item }
-                completion(items, page < min(pages, 500))
+                completion(items, page < min(pages, TMDBStreamingClient.lastPage))
             }
         }
     }
@@ -155,19 +203,17 @@ public final class TMDBStreamingClient: @unchecked Sendable {
             guard !isOver else { return completion([]) }
             isLoading = true
             let group = DispatchGroup()
-            let lock = NSLock()
-            var answers: [HomeItem.Kind: (items: [HomeItem]?, more: Bool)] = [:]
+            let answers = TMDBGathered<[HomeItem.Kind: (items: [HomeItem]?, more: Bool)]>([:])
             for kind in kinds where !over.contains(kind) {
                 group.enter()
                 client.titles(service: service, kind: kind, region: region, page: next[kind] ?? 1, sort: sort) { items, more in
-                    lock.lock()
-                    answers[kind] = (items, more)
-                    lock.unlock()
+                    answers.update { $0[kind] = (items, more) }
                     group.leave()
                 }
             }
             group.notify(queue: .main) {
                 self.isLoading = false
+                let answers = answers.value
                 var lists: [[HomeItem]] = []
                 var failed = true
                 for kind in self.kinds {
@@ -201,22 +247,19 @@ public final class TMDBStreamingClient: @unchecked Sendable {
     /// `display_priorities`): movies' and shows' lists merged. nil: no answer.
     public func services(region: String, completion: @escaping @Sendable ([StreamingService]?) -> Void) {
         let group = DispatchGroup()
-        let lock = NSLock()
-        var lists: [[[String: Any]]] = []
-        var answered = false
+        // nil: neither list answered.
+        let lists = TMDBGathered<[[String: Any]]?>(nil)
         for kind in ["movie", "tv"] {
             group.enter()
             get("/watch/providers/\(kind)?watch_region=\(region)") { data in
                 let results = data.flatMap { (try? JSONSerialization.jsonObject(with: $0)) as? [String: Any] }?["results"] as? [[String: Any]]
-                lock.lock()
-                if let results { lists.append(results); answered = true }
-                lock.unlock()
+                if let results { lists.update { $0 = ($0 ?? []) + results } }
                 group.leave()
             }
         }
         group.notify(queue: .global(qos: .userInitiated)) {
-            guard answered else { return completion(nil) }
-            completion(TMDBStreamingClient.services(lists.flatMap { $0 }, region: region))
+            guard let results = lists.value else { return completion(nil) }
+            completion(TMDBStreamingClient.services(results, region: region))
         }
     }
 
@@ -241,8 +284,10 @@ public final class TMDBStreamingClient: @unchecked Sendable {
         }
     }
 
-    /// Does TMDB take this key? nil: no answer (offline, TMDB down).
+    /// Does TMDB take this key? false: refused (401); nil: no answer
+    /// (offline, TMDB down). Recorded answers take any key, unasked.
     public func check(key: String, completion: @escaping @Sendable (Bool?) -> Void) {
+        if recorded != nil { return completion(true) }
         guard let request = request("/configuration", key: key) else { return completion(false) }
         session.dataTask(with: request) { _, response, error in
             let status = (response as? HTTPURLResponse)?.statusCode
@@ -255,12 +300,15 @@ public final class TMDBStreamingClient: @unchecked Sendable {
     // MARK: IMDb ids
 
     /// The results, each with its "imdb_id" (from the disk, else asked),
-    /// in their order; the ones TMDB has none for are left out.
+    /// in their order; the ones TMDB has none for are left out. `failed`:
+    /// the titles whose lookup got no answer, even tried again (left out
+    /// too — a caller that cannot have holes treats the page as a failure).
     private func withImdbIds(_ results: [[String: Any]], kind: HomeItem.Kind,
-                             completion: @escaping @Sendable ([[String: Any]]) -> Void) {
+                             completion: @escaping @Sendable (_ resolved: [[String: Any]], _ failed: Int) -> Void) {
         let tmdbIds = results.compactMap { ($0["id"] as? NSNumber)?.intValue }
-        let missing = tmdbIds.filter { ids.imdbId(kind: kind, tmdbId: $0) == nil }
-        lookUp(missing[...], kind: kind) {
+        var seen = Set<Int>()
+        let missing = tmdbIds.filter { ids.imdbId(kind: kind, tmdbId: $0) == nil && seen.insert($0).inserted }
+        lookUp(missing, kind: kind, again: true) { failed in
             let resolved: [[String: Any]] = results.compactMap { result in
                 guard let id = (result["id"] as? NSNumber)?.intValue,
                       let imdb = self.ids.imdbId(kind: kind, tmdbId: id), !imdb.isEmpty else { return nil }
@@ -269,28 +317,41 @@ public final class TMDBStreamingClient: @unchecked Sendable {
                 return result
             }
             self.ids.save()
-            completion(resolved)
+            completion(resolved, failed.count)
         }
     }
 
-    /// Asks the external ids of `pending`, `parallelLookups` at a time.
-    private func lookUp(_ pending: ArraySlice<Int>, kind: HomeItem.Kind, completion: @escaping @Sendable () -> Void) {
-        guard !pending.isEmpty else { return completion() }
-        let batch = pending.prefix(TMDBStreamingClient.parallelLookups)
+    /// Asks the external ids of `pending` through the client's one gate
+    /// (`parallelLookups` in flight for the whole app). An answer is kept,
+    /// "" when TMDB has no IMDb id; no answer is a failure: with `again`,
+    /// the failed ones are asked once more after `retryDelay`. Calls back
+    /// with the ones that failed in the end.
+    private func lookUp(_ pending: [Int], kind: HomeItem.Kind, again: Bool, completion: @escaping @Sendable (_ failed: [Int]) -> Void) {
+        guard !pending.isEmpty else { return completion([]) }
         let group = DispatchGroup()
-        for id in batch {
+        let failures = TMDBGathered<[Int]>([])
+        for id in pending {
             group.enter()
-            get("/\(kind == .movie ? "movie" : "tv")/\(id)/external_ids") { data in
-                if let data, let root = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] {
-                    let imdb = (root["imdb_id"] as? String).flatMap { HomeParse.isImdbId($0) ? $0 : nil }
-                    // "": TMDB has no IMDb id for it (not asked again).
-                    self.ids.set(imdb ?? "", kind: kind, tmdbId: id)
+            lookups.run { done in
+                self.get("/\(kind == .movie ? "movie" : "tv")/\(id)/external_ids") { data in
+                    if let data, let root = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] {
+                        let imdb = (root["imdb_id"] as? String).flatMap { HomeParse.isImdbId($0) ? $0 : nil }
+                        // "": TMDB has no IMDb id for it (not asked again in this run).
+                        self.ids.set(imdb ?? "", kind: kind, tmdbId: id)
+                    } else {
+                        failures.update { $0.append(id) }
+                    }
+                    done()
+                    group.leave()
                 }
-                group.leave()
             }
         }
         group.notify(queue: .global(qos: .userInitiated)) {
-            self.lookUp(pending.dropFirst(batch.count), kind: kind, completion: completion)
+            let failed = failures.value
+            guard again, !failed.isEmpty else { return completion(failed) }
+            DispatchQueue.global(qos: .userInitiated).asyncAfter(deadline: .now() + self.retryDelay) {
+                self.lookUp(failed, kind: kind, again: false, completion: completion)
+            }
         }
     }
 
@@ -308,6 +369,7 @@ public final class TMDBStreamingClient: @unchecked Sendable {
 
     /// The body of a 2xx answer, nil otherwise (no key, refused, offline).
     private func get(_ path: String, completion: @escaping @Sendable (Data?) -> Void) {
+        if let recorded { return recorded(path, completion) }
         guard let key = apiKey(), let request = request(path, key: key) else { return completion(nil) }
         session.dataTask(with: request) { data, response, error in
             let status = (response as? HTTPURLResponse)?.statusCode ?? -1
@@ -321,9 +383,24 @@ public final class TMDBStreamingClient: @unchecked Sendable {
 
     // MARK: Genres
 
+    /// Can a service's titles of this kind be filtered on this genre (as
+    /// the app or Cinemeta names it)? "All" can. The grids offer only these
+    /// while a service is chosen.
+    public static func supportsGenre(_ name: String, kind: HomeItem.Kind) -> Bool {
+        return isAll(name) || genreId(name, kind: kind) != nil
+    }
+
+    /// "All", the app's genre that filters nothing.
+    static func isAll(_ name: String) -> Bool {
+        return name.caseInsensitiveCompare(NetworkManager.Genres.all.rawValue) == .orderedSame
+    }
+
     /// TMDB's id of a genre as the app or Cinemeta names it, for a kind:
     /// nil when TMDB has none ("All", "Thriller" for shows).
     static func genreId(_ name: String, kind: HomeItem.Kind) -> Int? {
+        // TMDB's movies have a Music genre; Cinemeta, whose names the
+        // tables use, has none.
+        if kind == .movie, name.caseInsensitiveCompare("Music") == .orderedSame { return 10402 }
         guard let genre = HomeBuilder.cinemetaGenre(name) else { return nil }
         let movies: [String: Int] = [
             "Action": 28, "Adventure": 12, "Animation": 16, "Comedy": 35, "Crime": 80, "Documentary": 99, "Drama": 18,
@@ -347,7 +424,77 @@ public final class TMDBStreamingClient: @unchecked Sendable {
     ]
 }
 
-/// TMDB id → IMDb id, by kind, on disk ("" for a title that has none).
+/// A value several requests' callbacks add to, under a lock.
+final class TMDBGathered<Value>: @unchecked Sendable {
+    private let lock = NSLock()
+    private var stored: Value
+
+    init(_ value: Value) { stored = value }
+
+    var value: Value {
+        lock.lock()
+        defer { lock.unlock() }
+        return stored
+    }
+
+    func update(_ change: (inout Value) -> Void) {
+        lock.lock()
+        change(&stored)
+        lock.unlock()
+    }
+}
+
+/// At most `limit` requests in flight; the others wait their turn, in order.
+final class TMDBRequestGate: @unchecked Sendable {
+    typealias Work = @Sendable (_ done: @escaping @Sendable () -> Void) -> Void
+    private let lock = NSLock()
+    private let limit: Int
+    private var running = 0
+    private var waiting: [Work] = []
+
+    init(limit: Int) {
+        self.limit = max(limit, 1)
+    }
+
+    /// Runs `work` now or when a place is free; `work` calls `done` once,
+    /// when its request has answered.
+    func run(_ work: @escaping Work) {
+        lock.lock()
+        guard running < limit else {
+            waiting.append(work)
+            return lock.unlock()
+        }
+        running += 1
+        lock.unlock()
+        start(work)
+    }
+
+    private func start(_ work: @escaping Work) {
+        let once = TMDBGathered(false)
+        DispatchQueue.global(qos: .userInitiated).async {
+            work { [self] in
+                var first = false
+                once.update { first = !$0; $0 = true }
+                if first { finished() }
+            }
+        }
+    }
+
+    private func finished() {
+        lock.lock()
+        guard !waiting.isEmpty else {
+            running -= 1
+            return lock.unlock()
+        }
+        let next = waiting.removeFirst()
+        lock.unlock()
+        start(next)
+    }
+}
+
+/// TMDB id → IMDb id, by kind. The ids found are kept on disk; "" (TMDB
+/// has none, yet: a new release often gets its IMDb id days later) stays
+/// in memory, so the title is asked again at the next launch.
 final class TMDBIdCache: @unchecked Sendable {
     private let lock = NSLock()
     private var map: [String: String]
@@ -386,12 +533,77 @@ final class TMDBIdCache: @unchecked Sendable {
         lock.unlock()
     }
 
+    /// Writes the real ids, under the lock (two lists that end together
+    /// write in turn, the newer last). A write that fails is tried again at
+    /// the next save.
     func save() {
         lock.lock()
-        guard dirty, let file else { return lock.unlock() }
-        dirty = false
-        let data = try? JSONEncoder().encode(map)
-        lock.unlock()
-        try? data?.write(to: file, options: .atomic)
+        defer { lock.unlock() }
+        guard dirty, let file else { return }
+        do {
+            let data = try JSONEncoder().encode(map.filter { !$0.value.isEmpty })
+            try data.write(to: file, options: .atomic)
+            dirty = false
+        } catch {
+            dirty = true
+        }
+    }
+}
+
+/// TMDB's answers recorded in a folder, for the DEBUG fixture runs
+/// (`-PTDebugHomeFixtures <folder>`: `TMDBStreamingClient.shared` and the
+/// hubs' recorded transports read them) and the tests. The files, made by
+/// tools/tmdb-fixtures.py into PopcornTimeTests/Fixtures/Home:
+///
+///   tmdb_<movie|tv>_<popular|recent|topRated>_p<page>.json   a discover page of any service and
+///                                                            country, every result with its
+///                                                            "imdb_id" (fake TMDB ids)
+///   tmdb_providers.json                                      the services of a country
+///   tmdb_regions.json                                        the countries
+///
+/// The genre and the service of a discover request are not looked at. A
+/// page that was not recorded is an empty last page; an external id is
+/// read off the recorded pages ({"imdb_id": null} for an id none has).
+/// Nothing else is answered.
+public enum TMDBRecorded {
+
+    /// The recorded file a request reads; nil when it is answered without one.
+    public static func fileName(for path: String) -> String? {
+        if path.hasPrefix("/watch/providers/regions") { return "tmdb_regions.json" }
+        if path.hasPrefix("/watch/providers/") { return "tmdb_providers.json" }
+        guard let discover = discover(path) else { return nil }
+        return "tmdb_\(discover.kind)_\(discover.sort)_p\(discover.page).json"
+    }
+
+    /// The body a request is answered with; nil: TMDB "fails".
+    public static func answer(to path: String, in folder: URL) -> Data? {
+        if let name = fileName(for: path), let data = try? Data(contentsOf: folder.appendingPathComponent(name)) { return data }
+        if let discover = discover(path) {
+            return try? JSONSerialization.data(withJSONObject: ["page": discover.page, "total_pages": discover.page - 1,
+                                                                "total_results": 0, "results": [Any]()])
+        }
+        // "/movie/9100004/external_ids"
+        let parts = path.split(separator: "/")
+        guard parts.count == 3, parts[2] == "external_ids", parts[0] == "movie" || parts[0] == "tv", let id = Int(parts[1]) else { return nil }
+        let names = ((try? FileManager.default.contentsOfDirectory(atPath: folder.path)) ?? [])
+            .filter { $0.hasPrefix("tmdb_\(parts[0])_") && $0.hasSuffix(".json") }.sorted()
+        for name in names {
+            guard let data = try? Data(contentsOf: folder.appendingPathComponent(name)),
+                  let results = ((try? JSONSerialization.jsonObject(with: data)) as? [String: Any])?["results"] as? [[String: Any]],
+                  let hit = results.first(where: { ($0["id"] as? NSNumber)?.intValue == id }) else { continue }
+            return try? JSONSerialization.data(withJSONObject: ["id": id, "imdb_id": hit["imdb_id"] ?? NSNull()])
+        }
+        return try? JSONSerialization.data(withJSONObject: ["id": id, "imdb_id": NSNull()])
+    }
+
+    /// The kind ("movie", "tv"), order and page of a discover path.
+    private static func discover(_ path: String) -> (kind: String, sort: String, page: Int)? {
+        guard path.hasPrefix("/discover/"), let items = URLComponents(string: "https://recorded" + path)?.queryItems else { return nil }
+        func value(_ name: String) -> String { items.first { $0.name == name }?.value ?? "" }
+        let kind = path.hasPrefix("/discover/tv") ? "tv" : "movie"
+        let sortBy = value("sort_by")
+        let sort = sortBy.hasPrefix("popularity") ? StreamingSort.popular : sortBy.hasPrefix("vote_average") ? .topRated : .recent
+        guard let page = Int(value("page")), page >= 1 else { return nil }
+        return (kind, sort.rawValue, page)
     }
 }

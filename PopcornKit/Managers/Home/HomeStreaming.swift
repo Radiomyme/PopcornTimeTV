@@ -154,15 +154,21 @@ extension HomeSource {
     static let tmdbPrefix = "tmdb-"
 
     /// The first page of a service's titles of one kind in a country, in an
-    /// order: "tmdb-FR-8-movie-popular". The language of the titles and
-    /// summaries follows the device's, and « recent » stops at `today`; the
-    /// key holds neither (they are seen at the next refresh).
+    /// order: "tmdb-FR-8-movie-popular". In English, as the app names its
+    /// titles (`TMDBStreamingClient.language`); « recent » stops at
+    /// `today`, which the key does not hold (seen at the next refresh).
+    ///
+    /// One title is a complete list: a small service, or a short « top
+    /// rated » list, is fresh for its 12 hours and replaces a longer one (a
+    /// title left the service). The client answers nothing rather than a
+    /// page with holes (a lookup without an answer), so a short answer is
+    /// an honest one.
     static func streaming(service: Int, kind: HomeItem.Kind, sort: StreamingSort, region: String, today: String,
                           language: String? = nil) -> HomeSource {
         return HomeSource(key: "\(tmdbPrefix)\(region)-\(service)-\(kind.rawValue)-\(sort.rawValue)",
                           request: HomeRequest(host: .tmdb, path: TMDBStreamingClient.discoverPath(
                             service: service, kind: kind, region: region, page: 1, sort: sort, today: today, language: language)),
-                          parser: .tmdbDiscover(kind), minimum: 10, allowsEmpty: true)
+                          parser: .tmdbDiscover(kind), minimum: 1, allowsEmpty: true)
     }
 
     /// The region, service, kind and order of a streaming list's key.
