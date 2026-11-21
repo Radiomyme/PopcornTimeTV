@@ -209,6 +209,17 @@ final class HomeStreamingTests: CheckedTestCase {
         check(pages?.service == 8 && pages?.kinds == [.movie] && pages?.sort == .popular, "its pages")
     }
 
+    /// Settings › Services stores TMDB's entries for the services chosen (their logos): the
+    /// row's cards keep the names the user first saw only if the defaults are TMDB's names.
+    func testTheDefaultServicesHaveTMDBsNames() {
+        let root = (try? JSONSerialization.jsonObject(with: HomeFixture.data("tmdb_providers.json"))) as? [String: Any]
+        let listed = TMDBStreamingClient.services(root?["results"] as? [[String: Any]] ?? [], region: "FR")
+        let names = Dictionary(listed.map { ($0.id, $0.name) }) { first, _ in first }
+        for service in StreamingService.defaults {
+            eq(service.name, names[service.id], "service \(service.id): TMDB's own name")
+        }
+    }
+
     func testAlternating() {
         eq(TMDBStreamingClient.alternating([[1, 3, 5, 7], [2, 4]]), [1, 2, 3, 4, 5, 7], "one of each, then the rest")
         eq(TMDBStreamingClient.alternating([[Int]]()), [], "nothing")

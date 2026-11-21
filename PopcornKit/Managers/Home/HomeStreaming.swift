@@ -39,11 +39,13 @@ public struct StreamingService: Codable, Hashable, Sendable, Identifiable {
 
     /// The services of someone who chose none: the four that are in most
     /// countries. No logo: a card without one shows the name (choosing the
-    /// services in Settings stores TMDB's logos).
+    /// services in Settings stores TMDB's logos — and TMDB's entries, so
+    /// these are TMDB's own names: a card keeps the name the user first
+    /// saw when Settings loads the country's list).
     public static let defaults: [StreamingService] = [
         StreamingService(id: 8, name: "Netflix"),
-        StreamingService(id: 119, name: "Prime Video"),
-        StreamingService(id: 337, name: "Disney+"),
+        StreamingService(id: 119, name: "Amazon Prime Video"),
+        StreamingService(id: 337, name: "Disney Plus"),
         StreamingService(id: 350, name: "Apple TV+"),
     ]
 }
