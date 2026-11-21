@@ -37,10 +37,12 @@ yet on a real Apple TV.
   key the app looks and behaves as in 5.3.0, apart from that Settings section.
 - **The services offered** are TMDB's for your country, the most watched first: the
   subscription and free ones, not the stores (Apple TV Store, Amazon Video, Rakuten TV, YouTube,
-  Canal VOD…), whose lists would be titles they rent or sell. Amazon Prime Video is the
+  Canal VOD…), whose lists would be titles they rent or sell. A service's page lists the titles
+  watched there with a subscription, for free or with ads. Amazon Prime Video is the
   country's own (TMDB numbers it differently in the United States, the United Kingdom, Germany,
-  Austria and Japan), and choosing another country turns the services chosen into that
-  country's, leaving out the ones it does not have.
+  Austria and Japan), even before Settings has listed a new country's services, and choosing
+  another country turns the services chosen into that country's, leaving out the ones it does
+  not have.
 - **The Services row** on Home, under Continue Watching: picking a service shows a page filtered
   on it — its popular, recent and top rated movies and shows in your country, placeholders while
   they come, « No results » when it lists nothing, an error with Try Again when TMDB does not
@@ -750,7 +752,7 @@ PopcornTorrent's rule (it does not publish it).
 
 **⌘U**: pick the **PopcornTimeTests** scheme (or PopcornTimeMac), destination *My Mac*. The
 macOS unit-test target runs in about 15 seconds, offline, in English whatever the Mac's
-language: 904 tests, 25,408 checks of the extra sources (apibay, Knaben, Cinemeta, TVMaze, the
+language: 906 tests, 24,905 checks of the extra sources (apibay, Knaben, Cinemeta, TVMaze, the
 Top 100), the catalogs (each source's sorts and genres, the mirror races, the first pages kept
 on disk), the Home feed (`PopcornTimeTests/Home`: its parsers, shelves, cache and loader on
 the answers recorded on 2026-11-14, its transport on hosts played by a `URLProtocol`, and the
