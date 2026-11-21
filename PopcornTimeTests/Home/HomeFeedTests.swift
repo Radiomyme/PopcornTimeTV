@@ -1293,6 +1293,51 @@ final class HomeFeedTests: CheckedTestCase {
         check(homeWait { feed.snapshot.shelves.filter { HomeShelfID.streaming(of: $0.id) != nil }.count == 6 }, "its page")
     }
 
+    /// The Apple TV picks a service while the lookups that follow a refresh are still out:
+    /// one of them answers after the filter changed and before the pick's `refreshLocal`
+    /// reaches the hub. The page it makes is the picked one, its lists not asked yet: it is
+    /// on its way (« refreshing »), not a page that listed nothing and is done — the screen
+    /// would say « No results » and let go of the card it keeps the focus on, and the
+    /// service's shelves would then come in below the screen.
+    func testAServicePickedWhileALookupAnswersIsOnItsWay() {
+        streaming(filter: nil)
+        network.answer(tmdbPage)
+        let feed = makeFeed(options: servicesOptions)
+        var updates: [HomeSnapshot] = []
+        feed.onUpdate = { updates.append($0) }
+        let isLookup = { (request: HomeRequest) in
+            request.path.hasPrefix("/meta/movie/") || request.path.hasPrefix("/catalog/series/last-videos/")
+        }
+        // A refresh of the usual page, every request answered but the lookups it leaves.
+        network.hold = true
+        var ended = false
+        feed.refresh { ended = true }
+        check(homeWait { self.network.release { !isLookup($0) }; return ended }, "the refresh ends")
+        check(homeWait { self.network.waiting.contains(where: isLookup) }, "its lookups are out")
+        check(!feed.snapshot.isRefreshing, "the usual page is done")
+
+        // Netflix picked; a lookup answers first, and the hub rebuilds the page before the
+        // pick's `refreshLocal` comes.
+        streaming(filter: 8)
+        network.release(isLookup)
+        check(homeWait { feed.isIdle }, "the lookups' page is made")
+        homeSettle(0.1)
+        feed.refreshLocal()
+        network.hold = false
+        check(homeWait { self.network.release(); return feed.snapshot.shelves.contains { HomeShelfID.streamingService(of: $0.id) == 8 } },
+              "Netflix's shelves come")
+        idle(feed)
+        feed.onUpdate = nil
+
+        let picked = updates.filter { $0.shelves.shelf(HomeShelfID.services)?.items.contains(where: HomeServiceCard.isSelected) == true }
+        check(!picked.isEmpty, "the picked page was delivered")
+        for update in picked where !update.shelves.contains(where: { HomeShelfID.streamingService(of: $0.id) == 8 }) {
+            check(update.isRefreshing, "Netflix's page without its shelves is on its way, not done",
+                  "\(update.shelves.ids) refreshing=\(update.isRefreshing)")
+        }
+        eq(tmdbPaths.count, 6, "its six lists asked")
+    }
+
     // MARK: Observable state
 
     @MainActor

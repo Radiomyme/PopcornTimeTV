@@ -466,8 +466,17 @@ public final class HomeFeed: @unchecked Sendable {
         if ([plan.calendar].compactMap { $0 } + plan.genres).contains(where: { !planned.contains($0.key) && lists[$0.key] == nil }) {
             return true
         }
-        // A service picked: its lists kept from an earlier visit are shown
-        // at once, and asked again only when they are no longer fresh.
+        return awaitsPickedService(plan)
+    }
+
+    /// A service picked whose lists no refresh asked yet, missing or no
+    /// longer fresh: the refresh that asks them is due (lists kept from an
+    /// earlier visit and still fresh are shown at once, not asked again).
+    /// Its page is on its way meanwhile: a page made before that refresh
+    /// begins (a lookup answering right after the pick) is not a service
+    /// that listed nothing.
+    private func awaitsPickedService(_ plan: HomePlan) -> Bool {
+        guard !rules.light, !planned.isEmpty else { return false }
         let now = self.now()
         return plan.streaming.contains { source in
             guard !planned.contains(source.key) else { return false }
@@ -512,10 +521,11 @@ public final class HomeFeed: @unchecked Sendable {
         // A page filtered on a service whose lists all failed at their
         // last attempt, with none to show: unavailable too (TMDB refused
         // the key, or did not answer), though the other hosts answered.
-        let streaming = inputs.plan(rules: rules).streaming
+        let plan = inputs.plan(rules: rules)
+        let streaming = plan.streaming
         let serviceDown = !streaming.isEmpty && streaming.allSatisfy { down.contains($0.key) }
             && !shelves.contains { HomeShelfID.streamingService(of: $0.id) != nil }
-        return HomeSnapshot(shelves: shelves, isRefreshing: running != nil,
+        return HomeSnapshot(shelves: shelves, isRefreshing: running != nil || awaitsPickedService(plan),
                             lastUpdated: shelves.compactMap(\.updatedAt).max(),
                             isOffline: reachedNothing, isUnavailable: (reachedNothing && !remote) || serviceDown)
     }
