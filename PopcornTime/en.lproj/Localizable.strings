@@ -577,6 +577,21 @@
 "Settings.StreamingServices" = "Services";
 "Settings.StreamingServices.Message" = "Each checked service has its card in the « Services » row of Home, and is offered by the « Service » filter of Movies and Shows. The most watched in your country come first.";
 "Settings.StreamingServices.NoKey" = "Add your TMDB key first: the services of your country are listed once TMDB answers.";
+/* The TMDB key outside the Apple TV and its key sheet's additions. Settings.TMDBKey.QR: the line under the QR code of the Apple TV's key sheet (the code opens TMDB's API page, never the key). Settings.TMDBKey.Check*: « Check Again » on a saved key and its three verdicts. Message.Touch / Message.Mac: the key screen of the iPhone and iPad / of the Mac. The .HomeOnly variants are for the apps whose only use of the key is the Home's « Services » row (no « Service » filter in their grids). */
+"Settings.TMDBKey.QR" = "Scan with your phone to open TMDB’s API page and copy your key.";
+"Settings.TMDBKey.Check" = "Check Again";
+"Settings.TMDBKey.Check.Accepted" = "TMDB accepts the saved key.";
+"Settings.TMDBKey.Check.Refused" = "TMDB refuses the saved key: it may have been deleted or regenerated on themoviedb.org. Enter the new one.";
+"Settings.TMDBKey.Check.Unanswered" = "TMDB could not be reached. The key stays saved; try again later.";
+"Settings.TMDBKey.Checking" = "Checking…";
+"Settings.TMDBKey.GetKey" = "Get a Free Key";
+"Settings.TMDBKey.Paste" = "Paste";
+"Settings.TMDBKey.Hidden" = "Once saved, the key is not shown again: paste a new one to replace it.";
+"Settings.TMDBKey.Message.Touch" = "Create a free account on themoviedb.org, then copy the API key or the API read access token from Settings › API and paste it here. With it, Home shows a « Services » row: what Netflix, Prime Video and the others offer in your country, played by Popcorn Time from its own sources.";
+"Settings.TMDBKey.Message.Mac" = "Create a free account on themoviedb.org, then copy the API key or the API read access token from Settings › API and paste it below (⌘V). With it, Home shows a « Services » row: what Netflix, Prime Video and the others offer in your country, played by Popcorn Time from its own sources.";
+"Settings.TMDBKey.Detail.HomeOnly" = "Your own free key, from themoviedb.org › Settings › API. The « Services » row of Home needs it.";
+"Settings.TMDBKey.Accepted.HomeOnly" = "TMDB accepted the key. The « Services » row appears on Home.";
+"Settings.StreamingServices.Message.HomeOnly" = "Each checked service has its card in the « Services » row of Home. The most watched in your country come first.";
 "Services" = "Services";
 "Home.Services.Shown" = "Selected";
 "Popular Movies on %@" = "Popular Movies on %@";

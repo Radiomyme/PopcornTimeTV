@@ -577,6 +577,21 @@
 "Settings.StreamingServices" = "Services";
 "Settings.StreamingServices.Message" = "Chaque service coché a sa carte dans la rangée « Services » de l’Accueil, et figure dans le filtre « Service » des onglets Films et Séries. Les plus regardés dans votre pays sont en tête.";
 "Settings.StreamingServices.NoKey" = "Ajoutez d’abord votre clé TMDB : les services de votre pays s’affichent dès que TMDB répond.";
+/* The TMDB key outside the Apple TV and its key sheet's additions. Settings.TMDBKey.QR: the line under the QR code of the Apple TV's key sheet (the code opens TMDB's API page, never the key). Settings.TMDBKey.Check*: « Check Again » on a saved key and its three verdicts. Message.Touch / Message.Mac: the key screen of the iPhone and iPad / of the Mac. The .HomeOnly variants are for the apps whose only use of the key is the Home's « Services » row (no « Service » filter in their grids). */
+"Settings.TMDBKey.QR" = "Scannez avec votre téléphone pour ouvrir la page API de TMDB et copier votre clé.";
+"Settings.TMDBKey.Check" = "Vérifier à nouveau";
+"Settings.TMDBKey.Check.Accepted" = "TMDB accepte la clé enregistrée.";
+"Settings.TMDBKey.Check.Refused" = "TMDB refuse la clé enregistrée : elle a peut-être été supprimée ou régénérée sur themoviedb.org. Saisissez la nouvelle.";
+"Settings.TMDBKey.Check.Unanswered" = "TMDB est injoignable. La clé reste enregistrée ; réessayez plus tard.";
+"Settings.TMDBKey.Checking" = "Vérification…";
+"Settings.TMDBKey.GetKey" = "Obtenir une clé gratuite";
+"Settings.TMDBKey.Paste" = "Coller";
+"Settings.TMDBKey.Hidden" = "Une fois enregistrée, la clé n’est plus affichée : collez-en une nouvelle pour la remplacer.";
+"Settings.TMDBKey.Message.Touch" = "Créez un compte gratuit sur themoviedb.org, puis copiez la clé d’API ou le jeton d’accès en lecture depuis Paramètres › API et collez-le ici. Avec elle, l’Accueil montre une rangée « Services » : ce que Netflix, Prime Video et les autres proposent dans votre pays, lu par Popcorn Time depuis ses propres sources.";
+"Settings.TMDBKey.Message.Mac" = "Créez un compte gratuit sur themoviedb.org, puis copiez la clé d’API ou le jeton d’accès en lecture depuis Paramètres › API et collez-le ci-dessous (⌘V). Avec elle, l’Accueil montre une rangée « Services » : ce que Netflix, Prime Video et les autres proposent dans votre pays, lu par Popcorn Time depuis ses propres sources.";
+"Settings.TMDBKey.Detail.HomeOnly" = "Votre propre clé gratuite, sur themoviedb.org › Paramètres › API. La rangée « Services » de l’Accueil en a besoin.";
+"Settings.TMDBKey.Accepted.HomeOnly" = "TMDB a accepté la clé. La rangée « Services » apparaît sur l’Accueil.";
+"Settings.StreamingServices.Message.HomeOnly" = "Chaque service coché a sa carte dans la rangée « Services » de l’Accueil. Les plus regardés dans votre pays sont en tête.";
 "Services" = "Services";
 "Home.Services.Shown" = "Sélectionné";
 "Popular Movies on %@" = "Films populaires sur %@";

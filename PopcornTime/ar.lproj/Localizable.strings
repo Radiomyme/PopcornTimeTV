@@ -880,6 +880,21 @@
 "Settings.StreamingServices" = "الخدمات";
 "Settings.StreamingServices.Message" = "لكل خدمة محددة بطاقتها في صف «الخدمات» في الصفحة الرئيسية، وتظهر في فلتر «الخدمة» في الأفلام والمسلسلات. الأكثر مشاهدة في بلدك تأتي أولًا.";
 "Settings.StreamingServices.NoKey" = "أضف مفتاح TMDB أولًا: تظهر خدمات بلدك بمجرد أن يستجيب TMDB.";
+/* The TMDB key outside the Apple TV and its key sheet's additions. Settings.TMDBKey.QR: the line under the QR code of the Apple TV's key sheet (the code opens TMDB's API page, never the key). Settings.TMDBKey.Check*: « Check Again » on a saved key and its three verdicts. Message.Touch / Message.Mac: the key screen of the iPhone and iPad / of the Mac. The .HomeOnly variants are for the apps whose only use of the key is the Home's « Services » row (no « Service » filter in their grids). */
+"Settings.TMDBKey.QR" = "امسح الرمز بهاتفك لفتح صفحة API في TMDB ونسخ مفتاحك.";
+"Settings.TMDBKey.Check" = "التحقق مرة أخرى";
+"Settings.TMDBKey.Check.Accepted" = "يقبل TMDB المفتاح المحفوظ.";
+"Settings.TMDBKey.Check.Refused" = "يرفض TMDB المفتاح المحفوظ: ربما حُذف أو أُعيد إنشاؤه على themoviedb.org. أدخل المفتاح الجديد.";
+"Settings.TMDBKey.Check.Unanswered" = "تعذّر الوصول إلى TMDB. يبقى المفتاح محفوظًا؛ حاول مرة أخرى لاحقًا.";
+"Settings.TMDBKey.Checking" = "جارٍ التحقق…";
+"Settings.TMDBKey.GetKey" = "احصل على مفتاح مجاني";
+"Settings.TMDBKey.Paste" = "لصق";
+"Settings.TMDBKey.Hidden" = "بعد حفظ المفتاح لا يُعرض مجددًا: الصق مفتاحًا جديدًا لاستبداله.";
+"Settings.TMDBKey.Message.Touch" = "أنشئ حسابًا مجانيًا على themoviedb.org، ثم انسخ مفتاح API أو رمز الوصول للقراءة من الإعدادات › API والصقه هنا. بفضله تعرض الصفحة الرئيسية صف «الخدمات»: ما تقدمه Netflix وPrime Video وغيرها في بلدك، يشغّله Popcorn Time من مصادره الخاصة.";
+"Settings.TMDBKey.Message.Mac" = "أنشئ حسابًا مجانيًا على themoviedb.org، ثم انسخ مفتاح API أو رمز الوصول للقراءة من الإعدادات › API والصقه أدناه (⌘V). بفضله تعرض الصفحة الرئيسية صف «الخدمات»: ما تقدمه Netflix وPrime Video وغيرها في بلدك، يشغّله Popcorn Time من مصادره الخاصة.";
+"Settings.TMDBKey.Detail.HomeOnly" = "مفتاحك المجاني الخاص، من themoviedb.org › الإعدادات › API. يحتاجه صف «الخدمات» في الصفحة الرئيسية.";
+"Settings.TMDBKey.Accepted.HomeOnly" = "قبل TMDB المفتاح. يظهر صف «الخدمات» في الصفحة الرئيسية.";
+"Settings.StreamingServices.Message.HomeOnly" = "لكل خدمة محددة بطاقتها في صف «الخدمات» في الصفحة الرئيسية. الأكثر مشاهدة في بلدك تأتي أولًا.";
 "Services" = "الخدمات";
 "Home.Services.Shown" = "مختار";
 "Popular Movies on %@" = "أفلام شائعة على %@";
