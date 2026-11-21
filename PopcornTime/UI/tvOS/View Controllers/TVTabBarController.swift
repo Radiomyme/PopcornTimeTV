@@ -180,6 +180,53 @@ class TVTabBarController: UITabBarController {
         pushedNavigationController?.popViewController(animated: true)
     }
 
+    // MARK: - Menu (Back) at a tab's root: Home first
+
+    /// Whether Menu, which nothing below took, goes to Home instead of
+    /// leaving the app: on the first screen of a tab other than Home, with
+    /// nothing presented and nothing being pushed or popped. Home's own Menu
+    /// (and the second press, once on Home) still leaves the app, as on every
+    /// tvOS app. Playback, cards and sheets are presented: they keep theirs.
+    private var menuGoesHome: Bool {
+        guard let selected = selectedViewController, name(of: selected) != .home,
+              presentedViewController == nil, selected.presentedViewController == nil else { return false }
+        guard let navigation = selected as? UINavigationController else { return true }
+        return navigation.viewControllers.count == 1 && navigation.transitionCoordinator == nil
+            && navigation.topViewController?.presentedViewController == nil
+    }
+
+    /// Menu taken in `pressesBegan`: its end goes Home, and it never reaches
+    /// the system (which leaves the app on it).
+    private var menuIsGoingHome = false
+
+    // The presses come here up the responder chain only when no screen below
+    // took them (a pushed page pops, a grid goes back to its top, a sheet
+    // closes): all of Menu's phases stay here then.
+    override func pressesBegan(_ presses: Set<UIPress>, with event: UIPressesEvent?) {
+        guard presses.contains(where: { $0.type == .menu }), menuGoesHome else { return super.pressesBegan(presses, with: event) }
+        menuIsGoingHome = true
+    }
+
+    override func pressesEnded(_ presses: Set<UIPress>, with event: UIPressesEvent?) {
+        guard presses.contains(where: { $0.type == .menu }), menuIsGoingHome else { return super.pressesEnded(presses, with: event) }
+        menuIsGoingHome = false
+        goHome()
+    }
+
+    override func pressesCancelled(_ presses: Set<UIPress>, with event: UIPressesEvent?) {
+        guard presses.contains(where: { $0.type == .menu }), menuIsGoingHome else { return super.pressesCancelled(presses, with: event) }
+        menuIsGoingHome = false
+    }
+
+    /// Home, as it was left; the focus goes into it (left on the tab bar, it
+    /// would stay on the tab Menu came from, and the focus on a tab selects it).
+    private func goHome() {
+        guard let home = viewController(for: .home) else { return }
+        selectedViewController = home
+        let root = (home as? UINavigationController)?.topViewController ?? home
+        moveFocus(to: root)
+    }
+
     /// The Settings tab shows `GlassSettingsView`. The storyboard's navigation
     /// controller stays; its root, the old table page, is replaced before it
     /// ever loads. That root is the only tab root without a custom class,
