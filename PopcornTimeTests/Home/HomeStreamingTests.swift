@@ -48,6 +48,35 @@ final class HomeStreamingTests: CheckedTestCase {
         eq(elsewhere.streamingRegion, "US", "no region at all: the United States")
     }
 
+    /// The Home's filter lasts for the run of the app only, and a hidden « Services » row
+    /// means the usual page (its « All » card is the only way back).
+    func testServiceFilterLastsTheSessionOnly() {
+        let sandbox = HomeSandbox()
+        defer {
+            HomeSettings(defaults: sandbox.defaults).homeServiceFilter = nil
+            sandbox.discard()
+        }
+        let settings = HomeSettings(defaults: sandbox.defaults, deviceRegion: { "FR" })
+        settings.tmdbAPIKey = "abc123"
+        // What an earlier build kept across launches.
+        sandbox.defaults.set(8, forKey: HomeSettings.Key.serviceFilter)
+        check(settings.homeService == nil, "a filter an earlier build stored is not read: a launch opens on the usual page")
+        _ = HomeFeed(store: HomeStore(directory: sandbox.directory), transport: HomeFakeNetwork().transport, defaults: sandbox.defaults)
+        check(sandbox.defaults.object(forKey: HomeSettings.Key.serviceFilter) == nil, "and it is removed")
+
+        settings.homeServiceFilter = 8
+        eq(settings.homeService?.id, 8, "a service picked")
+        check(sandbox.defaults.object(forKey: HomeSettings.Key.serviceFilter) == nil, "kept in memory, not in the defaults")
+        eq(HomeSettings(defaults: sandbox.defaults).homeServiceFilter, 8, "every reader of the run sees it")
+
+        settings.setShelf(HomeShelfID.services, hidden: true)
+        check(settings.homeService == nil, "the « Services » row hidden: the usual page")
+        settings.setShelf(HomeShelfID.services, hidden: false)
+        eq(settings.homeService?.id, 8, "shown again: the service picked is back")
+        settings.homeServiceFilter = nil
+        check(settings.homeService == nil, "« All »")
+    }
+
     // MARK: Sources and parser
 
     func testSourceKeysAndPaths() {

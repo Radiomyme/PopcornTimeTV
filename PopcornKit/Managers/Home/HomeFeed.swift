@@ -254,6 +254,7 @@ public final class HomeFeed: @unchecked Sendable {
         self.store = store
         self.transport = transport
         self.settings = HomeSettings(defaults: defaults, deviceLanguages: deviceLanguages)
+        settings.forgetStoredServiceFilter()
         self.mainHooks = hooks
         self.options = options
         self.rules = rules

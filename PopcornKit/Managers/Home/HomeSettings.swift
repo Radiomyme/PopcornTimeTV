@@ -32,9 +32,10 @@ import Foundation
 /// - `popcornkit.home.streamingServices` — Data, the JSON of the services
 ///   chosen (`[StreamingService]`), in the page's order. Absent:
 ///   `StreamingService.defaults`. An empty list: no « Services » row.
-/// - `popcornkit.home.serviceFilter` — Int, the TMDB id of the service the
-///   Apple TV's Home is filtered on (its « Services » row). Absent: the
-///   usual page.
+/// - `popcornkit.home.serviceFilter` — no longer read: the first build of
+///   the streaming services kept the Home's filter there, across launches.
+///   The filter now lasts for the run of the app (`homeServiceFilter`), and
+///   the hub removes that value when it is made (`forgetStoredServiceFilter`).
 public struct HomeSettings {
 
     public enum Key {
@@ -45,6 +46,7 @@ public struct HomeSettings {
         public static let tmdbAPIKey = "popcornkit.tmdb.apiKey"
         public static let streamingRegion = "popcornkit.home.streamingRegion"
         public static let streamingServices = "popcornkit.home.streamingServices"
+        /// Obsolete: removed, never read (see the list above).
         public static let serviceFilter = "popcornkit.home.serviceFilter"
     }
 
@@ -168,17 +170,43 @@ public struct HomeSettings {
     }
 
     /// The TMDB id of the service the Home is filtered on, nil for none.
+    ///
+    /// For this run of the app only, kept in memory: a launch always opens
+    /// on the usual page, whose first job is to resume (Continue Watching).
+    /// One value for the whole process, whatever defaults a `HomeSettings`
+    /// reads: every hub of the run (the app's, a DEBUG fixture hub) shows
+    /// the same page.
     public var homeServiceFilter: Int? {
-        get { (defaults.object(forKey: Key.serviceFilter) as? NSNumber)?.intValue }
-        nonmutating set {
-            if let newValue { defaults.set(newValue, forKey: Key.serviceFilter) } else { defaults.removeObject(forKey: Key.serviceFilter) }
+        get { HomeSettings.sessionFilter.value }
+        nonmutating set { HomeSettings.sessionFilter.value = newValue }
+    }
+
+    private static let sessionFilter = SessionValue()
+
+    /// The filter of this run, under a lock: the hub reads it on its queue,
+    /// the screens write it on the main queue.
+    private final class SessionValue: @unchecked Sendable {
+        private let lock = NSLock()
+        private var stored: Int?
+        var value: Int? {
+            get { lock.lock(); defer { lock.unlock() }; return stored }
+            set { lock.lock(); stored = newValue; lock.unlock() }
         }
     }
 
+    /// Removes the filter an earlier build kept in the defaults
+    /// (`Key.serviceFilter`); nothing reads it any more.
+    public func forgetStoredServiceFilter() {
+        if defaults.object(forKey: Key.serviceFilter) != nil { defaults.removeObject(forKey: Key.serviceFilter) }
+    }
+
     /// The service the Home shows, when it is still one of the services
-    /// offered (a key removed, a service unchecked: the usual page).
+    /// offered (a key removed, a service unchecked: the usual page) and the
+    /// « Services » row is shown: hidden, the page would lose its « All »
+    /// card, the only way back to the usual page. The choice is kept: shown
+    /// again, the row brings the filtered page back.
     public var homeService: StreamingService? {
-        guard let id = homeServiceFilter else { return nil }
+        guard let id = homeServiceFilter, !hiddenShelves.contains(HomeShelfID.services) else { return nil }
         return streamingShelves.first { $0.id == id }
     }
 }
