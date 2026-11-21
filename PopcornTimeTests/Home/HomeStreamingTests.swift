@@ -227,6 +227,9 @@ final class HomeStreamingTests: CheckedTestCase {
 
     /// Settings › Services stores TMDB's entries for the services chosen (their logos): the
     /// row's cards keep the names the user first saw only if the defaults are TMDB's names.
+    /// This checks the defaults against the hand-made tmdb_providers.json
+    /// (tools/tmdb-fixtures.py), not against TMDB's live answer: the two lists are kept in
+    /// step by hand, and the names in them were read from TMDB's forum, not from the API.
     func testTheDefaultServicesHaveTMDBsNames() {
         let root = (try? JSONSerialization.jsonObject(with: HomeFixture.data("tmdb_providers.json"))) as? [String: Any]
         let listed = TMDBStreamingClient.services(root?["results"] as? [[String: Any]] ?? [], region: "FR")

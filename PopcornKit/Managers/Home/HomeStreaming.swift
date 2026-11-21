@@ -46,7 +46,7 @@ public struct StreamingService: Codable, Hashable, Sendable, Identifiable {
         StreamingService(id: 8, name: "Netflix"),
         StreamingService(id: 119, name: "Amazon Prime Video"),
         StreamingService(id: 337, name: "Disney Plus"),
-        StreamingService(id: 350, name: "Apple TV+"),
+        StreamingService(id: 350, name: "Apple TV Plus"),
     ]
 }
 

@@ -56,7 +56,7 @@ for kind, source, base in [("movie", "cm_movie_top.json", 9100000), ("tv", "cm_s
             write("tmdb_%s_%s_p%d.json" % (kind, sort, page),
                   {"page": page, "total_pages": 2, "total_results": len(ordered), "results": chunk})
 
-providers = [(8, "Netflix"), (119, "Amazon Prime Video"), (337, "Disney Plus"), (381, "Canal+"), (350, "Apple TV+"),
+providers = [(8, "Netflix"), (119, "Amazon Prime Video"), (337, "Disney Plus"), (381, "Canal+"), (350, "Apple TV Plus"),
              (531, "Paramount Plus"), (1899, "Max"), (56, "OCS")]
 write("tmdb_providers.json", {"results": [{"provider_id": i, "provider_name": n, "display_priority": p + 1,
                                            "display_priorities": {"FR": p + 1, "US": p + 1}}
