@@ -96,7 +96,8 @@ final class StreamingServicesUITests: XCTestCase {
         snap("netflix-waiting")
         XCTAssertFalse(popular.exists, "Netflix's lists came at once: nothing waited")
         XCTAssertTrue(element("Home.Card.service-all").exists, "the page is not filtered yet")
-        XCTAssertTrue(popular.waitForExistence(timeout: 30), "Netflix's shelves never came")
+        // Each answer 3 s late, after the refresh the launch started.
+        XCTAssertTrue(popular.waitForExistence(timeout: 60), "Netflix's shelves never came")
         pause(2)
         snap("netflix-arrived")
         XCTAssertTrue(waitUntil(timeout: 5) { netflix.hasFocus || self.looksFocused(netflix, beside: self.element("Home.Card.service-119")) },
@@ -448,7 +449,11 @@ final class StreamingServicesUITests: XCTestCase {
     }
 
     private func waitForFocus(on element: XCUIElement, timeout: TimeInterval = 20) -> Bool {
-        return waitUntil(timeout: timeout) { element.exists && element.hasFocus }
+        // A query, not the element: one drawn again between two reads is
+        // not a failure.
+        let focused = app.descendants(matching: .any)
+            .matching(NSPredicate(format: "identifier == %@ AND hasFocus == true", element.identifier)).firstMatch
+        return waitUntil(timeout: timeout) { focused.exists }
     }
 
     private func waitUntil(timeout: TimeInterval, _ condition: () -> Bool) -> Bool {
