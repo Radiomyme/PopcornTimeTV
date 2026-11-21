@@ -872,7 +872,7 @@
 "Settings.TMDBKey.Refused" = "TMDB ha rifiutato questa chiave. Controlla che sia stata copiata per intero.";
 "Settings.TMDBKey.Unchecked" = "Impossibile raggiungere TMDB: la chiave è salvata e verrà provata al prossimo aggiornamento.";
 "Settings.StreamingRegion" = "Paese";
-"Settings.StreamingRegion.Message" = "L'offerta di un servizio cambia da un paese all'altro: le righe mostrano il catalogo di questo.";
+"Settings.StreamingRegion.Message" = "L'offerta di un servizio cambia da un paese all'altro: le righe mostrano il catalogo di questo paese.";
 "Settings.StreamingServices" = "Servizi";
 "Settings.StreamingServices.Message" = "Ogni servizio selezionato ha la sua scheda nella riga «Servizi» della Home, e compare nel filtro «Servizio» di Film e Serie TV. I più visti nel tuo paese sono in cima.";
 "Settings.StreamingServices.NoKey" = "Aggiungi prima la tua chiave TMDB: i servizi del tuo paese compaiono appena TMDB risponde.";

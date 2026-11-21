@@ -572,7 +572,7 @@
 "Settings.TMDBKey.Refused" = "TMDB refused this key. Check that it was copied in full.";
 "Settings.TMDBKey.Unchecked" = "TMDB could not be reached: the key is saved and will be tried at the next refresh.";
 "Settings.StreamingRegion" = "Country";
-"Settings.StreamingRegion.Message" = "What a service offers changes from one country to another: the shelves show the catalogues of this one.";
+"Settings.StreamingRegion.Message" = "What a service offers changes from one country to another: the shelves show this country's catalogs.";
 "Settings.StreamingServices" = "Services";
 "Settings.StreamingServices.Message" = "Each checked service has its card in the « Services » row of Home, and is offered by the « Service » filter of Movies and Shows. The most watched in your country come first.";
 "Settings.StreamingServices.NoKey" = "Add your TMDB key first: the services of your country are listed once TMDB answers.";
@@ -586,4 +586,4 @@
 "Top Rated Shows on %@" = "Top Rated Shows on %@";
 "Service: %@" = "Service: %@";
 "Grid.Service.Unavailable" = "TMDB did not answer. Check your connection and your TMDB key in Settings.";
-"Home.Unavailable.Service" = "The %@ Catalogue Can't Load";
+"Home.Unavailable.Service" = "The %@ Catalog Can't Load";
