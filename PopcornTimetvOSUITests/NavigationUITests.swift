@@ -1,8 +1,8 @@
 import XCTest
 
 /// The Siri Remote on the tvOS app: Menu (Back) goes one level back from every
-/// screen (also while a screen still slides in), on a tab's first screen it
-/// leaves the app, and a grid comes back exactly as it was left. A grid's
+/// screen (also while a screen still slides in), on another tab's first
+/// screen it goes to Home, on Home it leaves the app, and a grid comes back exactly as it was left. A grid's
 /// title and Sort / Genre scroll with its posters, the tab bar follows the
 /// scroll, and Up goes from the first row to Sort / Genre, then the tab bar.
 ///
@@ -116,12 +116,12 @@ final class NavigationUITests: XCTestCase {
         XCTAssertEqual(focusedCell(in: grid)?.label, label, "the focus is not back on the poster")
     }
 
-    /// Menu on a tab's grid leaves the app for the Home screen (tvOS 26
-    /// does it at once; earlier tvOS first gives the focus to the tab bar).
-    func testMenuOnAGridGoesToTheHomeScreen() throws {
+    /// Menu on a tab's grid goes to Home, then leaves the app for the Home
+    /// screen.
+    func testMenuOnAGridGoesHomeThenToTheHomeScreen() throws {
         launch(["-PTDebugTab", "shows"])
         _ = try focusPoster(in: grid(named: "ShowsViewController"))
-        expectMenuLeavesTheApp("Shows grid")
+        expectMenuGoesHomeThenLeavesTheApp("Shows grid")
     }
 
     // MARK: - The grid's header
@@ -378,8 +378,8 @@ final class NavigationUITests: XCTestCase {
     // MARK: - Other tabs and screens
 
     /// Settings: Menu closes a choice sheet without changing anything, with
-    /// the focus back on its row; Menu again leaves the app.
-    func testMenuOnSettingsClosesThePickerThenLeavesTheApp() throws {
+    /// the focus back on its row; Menu again goes to Home, then leaves the app.
+    func testMenuOnSettingsClosesThePickerThenGoesHome() throws {
         launch(["-PTDebugTab", "settings", "-PTDebugFocusContent", "YES"])
         let picker = element("Settings.Picker")
         let row = element("Settings.Row.quality")
@@ -396,11 +396,11 @@ final class NavigationUITests: XCTestCase {
         pause(1)
         XCTAssertFalse(picker.exists, "Menu did not close the choices")
         XCTAssertTrue(row.hasFocus, "the focus did not go back to the row")
-        expectMenuLeavesTheApp("Settings")
+        expectMenuGoesHomeThenLeavesTheApp("Settings")
     }
 
-    /// Search: from the keyboard, Menu leaves the app.
-    func testMenuOnSearchLeavesTheApp() throws {
+    /// Search: from the keyboard, Menu goes to Home, then leaves the app.
+    func testMenuOnSearchGoesHome() throws {
         launch(["-PTDebugTab", "search"])
         pause(3)
         remote.press(.down)
@@ -410,7 +410,7 @@ final class NavigationUITests: XCTestCase {
             pause(1.5)
         }
         XCTAssertFalse(tabBarHasFocus, "the focus never left the tab bar for the keyboard")
-        expectMenuLeavesTheApp("Search")
+        expectMenuGoesHomeThenLeavesTheApp("Search")
     }
 
     /// Search with results: Up from a result goes back to the scope bar, the
@@ -495,7 +495,7 @@ final class NavigationUITests: XCTestCase {
         XCTAssertFalse(detailTitle.exists, "Menu twice from two pages did not reach the grid")
         XCTAssertEqual(focusedCell(in: grid)?.label, label, "the focus is not back on the poster")
         pause(1.5)
-        expectMenuLeavesTheApp("the grid after Menu twice")
+        expectMenuGoesHomeThenLeavesTheApp("the grid after Menu twice")
     }
 
     /// Select on a poster, then Menu three times in quick succession while
@@ -514,12 +514,12 @@ final class NavigationUITests: XCTestCase {
         XCTAssertEqual(app.state, .runningForeground, "Select then Menu three times left the app")
         XCTAssertFalse(detailTitle.exists || loadingScreen.exists, "a page or the loading screen is up after Menu")
         XCTAssertEqual(focusedCell(in: grid)?.label, label, "the focus is not back on the poster")
-        expectMenuLeavesTheApp("the grid after Select then Menu three times")
+        expectMenuGoesHomeThenLeavesTheApp("the grid after Select then Menu three times")
     }
 
     /// The focus on a tab in the tab bar, at a tab's root (Movies, Shows,
-    /// Settings, Home): Menu goes to the Home screen.
-    func testMenuInTheTabBarAtATabsRootLeavesTheApp() throws {
+    /// Settings, Home): Menu goes to Home, and from Home to the Home screen.
+    func testMenuInTheTabBarAtATabsRootGoesHome() throws {
         for tab in ["movies", "shows", "settings", "home"] {
             launch(["-PTDebugTab", tab])
             pause(4)
@@ -528,21 +528,26 @@ final class NavigationUITests: XCTestCase {
                 pause(0.8)
             }
             XCTAssertTrue(tabBarHasFocus, "tab \(tab): the tab bar never got the focus")
-            remote.press(.menu)
-            XCTAssertTrue(waitUntilLeft(), "tab \(tab): Menu in the tab bar at the tab's root did not go to the Home screen")
+            if tab == "home" {
+                remote.press(.menu)
+                XCTAssertTrue(waitUntilLeft(), "Home: Menu in the tab bar did not go to the Home screen")
+            } else {
+                expectMenuGoesHomeThenLeavesTheApp("tab \(tab), in the tab bar")
+            }
             app.terminate()
             pause(1)
         }
     }
 
-    /// Downloads (empty on a fresh simulator) and Watchlist: Menu leaves the app.
-    func testMenuOnTheDownloadsAndWatchlistTabsLeavesTheApp() throws {
+    /// Downloads (empty on a fresh simulator) and Watchlist: Menu goes to
+    /// Home, then leaves the app.
+    func testMenuOnTheDownloadsAndWatchlistTabsGoesHome() throws {
         for tab in ["downloads", "watchlist"] {
             launch(["-PTDebugTab", tab])
             pause(3)
             remote.press(.down)
             pause(1)
-            expectMenuLeavesTheApp("tab \(tab)")
+            expectMenuGoesHomeThenLeavesTheApp("tab \(tab)")
             app.terminate()
         }
     }
@@ -560,13 +565,14 @@ final class NavigationUITests: XCTestCase {
     }
 
     /// The Top 100 that cannot be reached (The Pirate Bay off, no cached
-    /// list): the error is shown and Menu still leaves the app.
-    func testMenuOnTheTop100ErrorLeavesTheApp() throws {
+    /// list): the error is shown and Menu still goes to Home, then leaves
+    /// the app.
+    func testMenuOnTheTop100ErrorGoesHome() throws {
         launch(["-PTDebugTab", "movies", "-PTDebugFilter", "top100", "-PTDebugTop100Offline", "YES"])
         pause(8)
         remote.press(.down)
         pause(1)
-        expectMenuLeavesTheApp("Top 100 error")
+        expectMenuGoesHomeThenLeavesTheApp("Top 100 error")
     }
 
     // MARK: - Links into the app
@@ -1107,14 +1113,22 @@ final class NavigationUITests: XCTestCase {
         return layout
     }
 
-    /// On a tab's first screen, Menu leaves the app (at once, or after a
-    /// first press that gives the focus to the tab bar).
-    private func expectMenuLeavesTheApp(_ screen: String) {
+    /// On the first screen of a tab other than Home, Menu goes to Home (at
+    /// once, or after a first press that gives the focus to the tab bar)
+    /// and the app stays; Menu on Home then leaves the app.
+    private func expectMenuGoesHomeThenLeavesTheApp(_ screen: String) {
         remote.press(.menu)
-        if waitUntilLeft() { return }
-        XCTAssertTrue(tabBarHasFocus, "\(screen): Menu neither left the app nor moved the focus to the tab bar")
+        pause(1.5)
+        XCTAssertEqual(app.state, .runningForeground, "\(screen): Menu left the app instead of going to Home")
+        if selectedTab != "home" {
+            XCTAssertTrue(tabBarHasFocus, "\(screen): Menu neither went to Home nor moved the focus to the tab bar")
+            remote.press(.menu)
+            pause(1.5)
+            XCTAssertEqual(app.state, .runningForeground, "\(screen): Menu on the tab bar left the app instead of going to Home")
+        }
+        XCTAssertEqual(selectedTab, "home", "\(screen): Menu did not go to Home")
         remote.press(.menu)
-        XCTAssertTrue(waitUntilLeft(), "\(screen): Menu on the tab bar must go to the Home screen")
+        XCTAssertTrue(waitUntilLeft(), "\(screen): Menu on Home must go to the Home screen")
     }
 
     /// The app left the foreground (Menu at the root: the Home screen). The
