@@ -60,6 +60,46 @@ public enum StreamingSort: String, Codable, CaseIterable, Sendable {
     case topRated
 }
 
+// MARK: - The grids' sorts with a service
+
+extension MovieManager.Filters {
+    /// The order of a service's catalogue this sort of the Movies grid
+    /// means; nil: one TMDB's lists cannot follow (Trending, Top 100: The
+    /// Pirate Bay's seeders; Recently Added: when YTS got the title). The
+    /// grid offers only the others while a service is chosen: its Sort
+    /// control never names an order the list is not in.
+    public var streamingSort: StreamingSort? {
+        switch self {
+        case .popularity: return .popular
+        case .year: return .recent
+        case .rating: return .topRated
+        case .trending, .top100, .date: return nil
+        }
+    }
+
+    /// The sorts of the Movies grid while a service is chosen, in the
+    /// grid's order: Popular, Top Rated, New.
+    public static var streamingArray: [MovieManager.Filters] { array.filter { $0.streamingSort != nil } }
+}
+
+extension ShowManager.Filters {
+    /// The order of a service's catalogue this sort of the Shows grid
+    /// means; nil: one TMDB's lists cannot follow (Trending, Top 100,
+    /// Recently Added, A - Z). See `MovieManager.Filters.streamingSort`.
+    public var streamingSort: StreamingSort? {
+        switch self {
+        case .popularity: return .popular
+        case .year: return .recent
+        case .rating: return .topRated
+        case .trending, .top100, .date, .name: return nil
+        }
+    }
+
+    /// The sorts of the Shows grid while a service is chosen, in the grid's
+    /// order: Popular, Top Rated, New.
+    public static var streamingArray: [ShowManager.Filters] { array.filter { $0.streamingSort != nil } }
+}
+
 // MARK: - Shelves
 
 extension HomeShelfID {

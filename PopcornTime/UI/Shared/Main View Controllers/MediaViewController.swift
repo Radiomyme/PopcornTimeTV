@@ -7,10 +7,15 @@ import PopcornKit
 class MediaViewController: MainViewController {
 
     /// The streaming service whose catalogue the grid shows, in the user's
-    /// country (TMDB); nil: the usual catalogue. Sort and Genre still apply.
+    /// country (TMDB); nil: the usual catalogue. Sort and Genre still apply,
+    /// limited to what the service's lists can follow (`genres`, the
+    /// subclasses' `sortChoices`): one that is not is put back first.
     var currentService: StreamingService? {
         didSet {
-            guard oldValue != currentService, let collectionView else { return }
+            guard oldValue != currentService else { return }
+            servicePageShift = 0
+            fitSortAndGenreToService()
+            guard let collectionView else { return }
             collectionViewController.currentPage = 1
             #if os(tvOS)
             updateHeaderControls()
@@ -19,24 +24,65 @@ class MediaViewController: MainViewController {
         }
     }
 
+    /// True while Sort or Genre is set for the service (`fitSortAndGenreToService`):
+    /// their own reload waits, the service's covers it.
+    var holdsReload = false
+
+    /// A genre or a sort the service's lists cannot follow goes back to
+    /// « All » or to Popular (Movies and Shows put their sort back).
+    private func fitSortAndGenreToService() {
+        holdsReload = true
+        defer { holdsReload = false }
+        if !genres.contains(currentGenre) { currentGenre = .all }
+        fitSortToService()
+    }
+
+    /// The grid's sort, back to one the service's lists follow (Movies, Shows).
+    func fitSortToService() {}
+
     /// The kind of titles of this grid.
     var streamingKind: HomeItem.Kind { return self is MoviesViewController ? .movie : .show }
 
-    /// The service order closest to the grid's sort (Movies and Shows map theirs).
+    /// The service order of the grid's sort (Movies and Shows map theirs).
     var streamingSort: StreamingSort { return .popular }
 
+    /// Pages of the service's list skipped so far because they came back
+    /// empty with more after them (every title of the page was without an
+    /// IMDb id): the grid's page n is TMDB's n + this.
+    private var servicePageShift = 0
+    /// The service's list said it has no page after the last one shown:
+    /// the grid stops asking (`show(page:items:merge:)`).
+    private(set) var serviceListIsOver = false
+    /// Empty pages in a row the grid goes past before it stops asking.
+    private static let toleratedEmptyServicePages = 3
+
     /// A page of `service`'s catalogue for this grid, as cards (main queue;
-    /// nil: TMDB did not answer).
+    /// nil: TMDB did not answer, or a title's IMDb id could not be asked).
+    /// An empty page with more after it is not the end: the next one is
+    /// asked, three at most in a row.
     func loadService(_ service: StreamingService, page: Int, completion: @escaping ([HomeItem]?, NSError?) -> Void) {
-        let genre = currentGenre == .all ? nil : currentGenre.rawValue
+        askService(service, page: page, genre: currentGenre == .all ? nil : currentGenre.rawValue, sort: streamingSort,
+                   emptyPagesSoFar: 0, completion: completion)
+    }
+
+    private func askService(_ service: StreamingService, page: Int, genre: String?, sort: StreamingSort, emptyPagesSoFar: Int,
+                            completion: @escaping ([HomeItem]?, NSError?) -> Void) {
         TMDBStreamingClient.shared.titles(service: service.id, kind: streamingKind, region: HomeSettings().streamingRegion,
-                                          page: page, sort: streamingSort, genre: genre) { items, _ in
+                                          page: page + servicePageShift, sort: sort, genre: genre) { [weak self] items, hasMore in
             DispatchQueue.main.async {
+                // Another list was asked meanwhile: its own load fills the grid.
+                guard let self, self.currentService == service else { return }
                 guard let items else {
                     let error = NSError(domain: "TMDB", code: -1,
                                         userInfo: [NSLocalizedDescriptionKey: "Grid.Service.Unavailable".localized])
                     return completion(nil, error)
                 }
+                if items.isEmpty, hasMore, emptyPagesSoFar + 1 < MediaViewController.toleratedEmptyServicePages {
+                    self.servicePageShift += 1
+                    return self.askService(service, page: page, genre: genre, sort: sort, emptyPagesSoFar: emptyPagesSoFar + 1,
+                                           completion: completion)
+                }
+                self.serviceListIsOver = !hasMore || items.isEmpty
                 completion(items, nil)
             }
         }
@@ -59,8 +105,8 @@ class MediaViewController: MainViewController {
     var currentGenre = NetworkManager.Genres.all {
         didSet {
             // Set before the grid exists (a tab never shown yet): its first
-            // load reads the genre.
-            guard let collectionView else { return }
+            // load reads the genre. Set for a service: its reload covers it.
+            guard let collectionView, !holdsReload else { return }
             collectionViewController.currentPage = 1
             #if os(tvOS)
             updateHeaderControls()
@@ -78,10 +124,15 @@ class MediaViewController: MainViewController {
     /// the page shows. (Nothing said the sort; the genre took the place of
     /// the page title.)
     override func updateHeaderControls() {
+        // Without services (no TMDB key, or none chosen) no Service control:
+        // the header is the usual one. One chosen that is no longer offered
+        // (the key removed, the service unchecked in Settings) is dropped.
+        let services = offeredServices
+        if let service = currentService, !services.contains(where: { $0.id == service.id }) { currentService = nil }
+        serviceButton?.isHidden = services.isEmpty
         GridHeaderView.set(sortButton, format: "Sort: %@".localized, value: currentFilterName)
         GridHeaderView.set(genreButton, format: "Genre: %@".localized, value: currentGenre.string)
         GridHeaderView.set(serviceButton, format: "Service: %@".localized, value: currentService?.name ?? "All".localized)
-        let services = offeredServices
         var serviceChoices: [UIMenuElement] = [UIAction(title: "All".localized, state: currentService == nil ? .on : .off) { [weak self] _ in
             self?.currentService = nil
         }]
@@ -89,10 +140,6 @@ class MediaViewController: MainViewController {
             UIAction(title: service.name, state: service.id == currentService?.id ? .on : .off) { [weak self] _ in
                 self?.currentService = service
             }
-        }
-        if services.isEmpty {
-            // No key: the menu says where the services come from.
-            serviceChoices.append(UIAction(title: "Grid.Service.NoKey".localized, attributes: .disabled) { _ in })
         }
         GridHeaderView.setMenu(serviceButton, UIMenu(options: .singleSelection, children: serviceChoices))
         // A menu anchored to its control (the system's glass, a white
@@ -109,13 +156,24 @@ class MediaViewController: MainViewController {
 
     /// The sorts the Sort control offers (Movies and Shows have their own).
     var sortChoices: [UIAction] { return [] }
+
+    /// Back on the grid (from Settings, where a key or the services may
+    /// have changed): the Service control and its menu read them again.
+    override func viewWillAppear(_ animated: Bool) {
+        super.viewWillAppear(animated)
+        if bodyHeader != nil { updateHeaderControls() }
+    }
     #endif
 
     /// The genres this grid offers: those its catalog knows (YTS for the
-    /// movies, Cinemeta for the shows). A genre the catalog ignores used to
-    /// show the whole catalog under the genre's name.
+    /// movies, Cinemeta for the shows); with a service, those TMDB can
+    /// filter its titles on. A genre the catalog ignores used to show the
+    /// whole catalog under the genre's name.
     var genres: [NetworkManager.Genres] {
-        return self is MoviesViewController ? NetworkManager.Genres.movies : NetworkManager.Genres.shows
+        let all = self is MoviesViewController ? NetworkManager.Genres.movies : NetworkManager.Genres.shows
+        guard currentService != nil else { return all }
+        let kind = streamingKind
+        return all.filter { TMDBStreamingClient.supportsGenre($0.rawValue, kind: kind) }
     }
 
     // MARK: First page: last session's list, then the network's
@@ -138,6 +196,8 @@ class MediaViewController: MainViewController {
     override func didRefresh(collectionView: UICollectionView) {
         showingSnapshot = false
         barrenPages = 0
+        servicePageShift = 0
+        serviceListIsOver = false
         dropPendingFirstPage()
         super.didRefresh(collectionView: collectionView)
     }
@@ -206,7 +266,7 @@ class MediaViewController: MainViewController {
         // the grid would keep its last titles back for a row that never
         // fills: `CollectionViewController.shownCount`).
         barrenPages = added.isEmpty ? barrenPages + 1 : 0
-        if items.isEmpty || barrenPages >= MediaViewController.toleratedBarrenPages {
+        if items.isEmpty || barrenPages >= MediaViewController.toleratedBarrenPages || (currentService != nil && serviceListIsOver) {
             // No more results: the content inset of the collection view is reset.
             collectionView?.contentInset.bottom = tabBarController?.tabBar.frame.height ?? 0
         } else {

@@ -116,6 +116,22 @@ final class HomeStreamingTests: CheckedTestCase {
            "the shows' (not Horror, History, Romance, Thriller, Sports)")
     }
 
+    /// While a service is chosen the grids' Sort offers only what its list
+    /// is really in, under the app's own names (Popular, Top Rated, New).
+    func testTheSortsAGridOffersWithAService() {
+        eq(MovieManager.Filters.streamingArray, [.popularity, .rating, .year], "Movies: Popular, Top Rated, New")
+        eq(MovieManager.Filters.streamingArray.compactMap(\.streamingSort), [.popular, .topRated, .recent], "each its own TMDB order")
+        for filter in [MovieManager.Filters.trending, .top100, .date] {
+            check(filter.streamingSort == nil, "\(filter): an order TMDB's lists cannot follow")
+        }
+        eq(ShowManager.Filters.streamingArray, [.popularity, .rating, .year], "Shows: Popular, Top Rated, New")
+        eq(ShowManager.Filters.streamingArray.compactMap(\.streamingSort), [.popular, .topRated, .recent], "each its own TMDB order")
+        for filter in [ShowManager.Filters.trending, .top100, .date, .name] {
+            check(filter.streamingSort == nil, "\(filter): not offered with a service (A - Z would be TMDB's popularity)")
+        }
+        eq(Set(StreamingSort.allCases), Set(MovieManager.Filters.streamingArray.compactMap(\.streamingSort)), "every order a service lists is offered")
+    }
+
     func testDiscoverAnswer() {
         let entries = HomeParse.tmdbDiscover(Self.discover(kind: .movie, ids: ["tt0000001", "tt0000002"]), kind: .movie)
         eq(entries?.count, 2, "every result with an IMDb id")

@@ -15,8 +15,8 @@ class ShowsViewController: MediaViewController {
     var currentFilter = ShowManager.Filters.trending {
         didSet {
             // Set before the grid exists (a tab never shown yet): its first
-            // load reads the filter.
-            guard let collectionView else { return }
+            // load reads the filter. Set for a service: its reload covers it.
+            guard let collectionView, !holdsReload else { return }
             collectionViewController.currentPage = 1
             #if os(tvOS)
             updateHeaderControls()
@@ -26,18 +26,23 @@ class ShowsViewController: MediaViewController {
     }
 
     override var streamingSort: StreamingSort {
-        switch currentFilter {
-        case .date, .year: return .recent
-        case .rating: return .topRated
-        default: return .popular
-        }
+        return currentFilter.streamingSort ?? .popular
+    }
+
+    /// The sorts offered: with a service, only the orders its lists follow.
+    private var sorts: [ShowManager.Filters] {
+        return currentService == nil ? ShowManager.Filters.array : ShowManager.Filters.streamingArray
+    }
+
+    override func fitSortToService() {
+        if !sorts.contains(currentFilter) { currentFilter = .popularity }
     }
 
     #if os(tvOS)
     override var currentFilterName: String { return currentFilter.string }
 
     override var sortChoices: [UIAction] {
-        return ShowManager.Filters.array.map { filter in
+        return sorts.map { filter in
             UIAction(title: filter.string, state: filter == currentFilter ? .on : .off) { [weak self] _ in
                 self?.currentFilter = filter
             }
