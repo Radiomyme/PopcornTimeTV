@@ -629,8 +629,10 @@ struct GlassSettingsView: View {
         }
     }
 
-    /// The Home's « On Netflix » shelves: the user's TMDB key, the country,
-    /// the services. TMDB's terms ask to credit JustWatch.
+    /// The Home's « Services » row and the grids' « Service » filter: the
+    /// user's TMDB key, the country, the services. The footer credits
+    /// JustWatch and carries TMDB's notice, as TMDB's terms ask, and says
+    /// that Popcorn Time does not play from these services.
     private var streamingSection: some View {
         GlassSettingsSection(title: "Settings.Streaming", footer: "Settings.Streaming.Footer") {
             GlassSettingsRow(symbol: "key.fill", tint: .yellow, title: "Settings.TMDBKey",
@@ -911,6 +913,10 @@ private struct GlassSettingsRow: View {
             }
             .padding(.horizontal, 22)
             .frame(minHeight: 90)
+            // Its whole height, whatever the column offers: the « Clé TMDB »
+            // row (the fourth section of the right column) got less, its
+            // two lines ran out of its platter.
+            .fixedSize(horizontal: false, vertical: true)
         }
         .buttonStyle(GlassSettingsRowStyle())
     }
