@@ -76,7 +76,8 @@ class MediaViewController: MainViewController {
                 guard let self, self.currentService == service, self.loadGeneration == generation else { return }
                 guard let items else {
                     let error = NSError(domain: "TMDB", code: -1,
-                                        userInfo: [NSLocalizedDescriptionKey: "Grid.Service.Unavailable".localized])
+                                        userInfo: [NSLocalizedDescriptionKey: (TMDBStreamingClient.shared.isKeyRefused
+                                                                               ? "Grid.Service.Refused" : "Grid.Service.Unavailable").localized])
                     return completion(nil, error)
                 }
                 if items.isEmpty, hasMore, emptyPagesSoFar + 1 < MediaViewController.toleratedEmptyServicePages {

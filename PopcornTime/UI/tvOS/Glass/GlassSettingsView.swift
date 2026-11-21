@@ -74,6 +74,8 @@ struct GlassSettingsHome: Equatable {
     var shelfChoices: [GlassSettingsChoice] = []
     /// The user gave a TMDB key: the streaming shelves can be asked.
     var hasTMDBKey = false
+    /// TMDB refused that key at its last request (401).
+    var isTMDBKeyRefused = false
     /// ISO 3166-1 code of the country of the streaming catalogues ("FR").
     var streamingRegion = "US"
     /// The services that have a shelf, in the Home's order (id: TMDB's
@@ -253,6 +255,8 @@ final class GlassSettingsModel: ObservableObject {
         let region = home.streamingRegion
         actions.loadStreamingServices(region) { [weak self] choices in
             guard let self, self.home?.streamingRegion == region, let choices else { return }
+            // The chosen services, matched to the country's meanwhile.
+            if let stored = self.actions.readHome?() { self.home = stored }
             self.streamingServiceChoices = choices
         }
     }
@@ -291,7 +295,8 @@ final class GlassSettingsModel: ObservableObject {
     }
 
     var tmdbKeySummary: String {
-        glassSettingsLocalized(home?.hasTMDBKey == true ? "Settings.TMDBKey.Set" : "Settings.TMDBKey.Missing")
+        guard home?.hasTMDBKey == true else { return glassSettingsLocalized("Settings.TMDBKey.Missing") }
+        return glassSettingsLocalized(home?.isTMDBKeyRefused == true ? "Settings.TMDBKey.Refused.Short" : "Settings.TMDBKey.Set")
     }
 
     /// "Toutes", "Anglais, Français", "Anglais, Français +2".

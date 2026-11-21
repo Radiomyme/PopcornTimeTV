@@ -208,6 +208,7 @@ enum GlassSettingsStore {
                                  languageChoices: languageChoices,
                                  shelfChoices: shelves.map { GlassSettingsChoice(id: $0, title: text.title(ofShelf: $0)) },
                                  hasTMDBKey: settings.tmdbAPIKey != nil,
+                                 isTMDBKeyRefused: TMDBStreamingClient.shared.isKeyRefused,
                                  streamingRegion: settings.streamingRegion,
                                  streamingServices: settings.streamingServices.map { GlassSettingsChoice(id: String($0.id), title: $0.name) })
     }
@@ -238,10 +239,14 @@ enum GlassSettingsStore {
         }
     }
 
+    /// The chosen services then follow the country as soon as TMDB lists
+    /// its services (`streamingServices(region:)`), picker open or not.
     @MainActor
     static func store(streamingRegion code: String) {
-        HomeSettings(defaults: defaults).streamingRegion = code
+        let settings = HomeSettings(defaults: defaults)
+        settings.streamingRegion = code
         HomeState.shared.refreshLocal()
+        streamingServices(region: settings.streamingRegion) { _ in }
     }
 
     /// The services TMDB listed last (their logos), by id.
@@ -258,7 +263,11 @@ enum GlassSettingsStore {
         HomeState.shared.refreshLocal()
     }
 
-    /// Also gives the chosen services TMDB's logos (the defaults have none).
+    /// Also matches the chosen services to the country's (TMDB's logos and
+    /// names, the country's id of a service — Amazon Prime Video is 119 in
+    /// France, 9 in the United States —, and none the country lacks:
+    /// `StreamingService.matching`). Only for the country chosen now: an
+    /// answer for a country left meanwhile changes nothing.
     @MainActor
     static func streamingServices(region: String, completion: @escaping ([GlassSettingsChoice]?) -> Void) {
         TMDBStreamingClient.shared.services(region: region) { services in
@@ -267,9 +276,9 @@ enum GlassSettingsStore {
                 for service in services { knownServices[service.id] = service }
                 let settings = HomeSettings(defaults: defaults)
                 let chosen = settings.streamingServices
-                let withLogos = chosen.map { knownServices[$0.id] ?? $0 }
-                if withLogos != chosen {
-                    settings.streamingServices = withLogos
+                let matched = StreamingService.matching(chosen, in: services)
+                if settings.streamingRegion == region, matched != chosen {
+                    settings.streamingServices = matched
                     HomeState.shared.refreshLocal()
                 }
                 completion(services.map { GlassSettingsChoice(id: String($0.id), title: $0.name) })

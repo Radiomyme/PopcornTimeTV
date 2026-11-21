@@ -12,13 +12,24 @@
 #   tmdb_<movie|tv>_<popular|recent|topRated>_p<1|2>.json   the 20 popular movies / shows of
 #                                                          cm_movie_top.json / cm_series_top.json in
 #                                                          three orders, 12 then 8 per page
-#   tmdb_providers.json                                     eight services, the most watched first
-#                                                          (TMDB's provider ids and names)
+#   tmdb_providers.json                                     the services of a country (France): the
+#                                                          most watched first, TMDB's provider ids
+#                                                          and names as TMDB gave them on 2026-11-21,
+#                                                          two stores among them (Apple TV Store,
+#                                                          Amazon Video: rentals and purchases, which
+#                                                          Settings leaves out)
+#   tmdb_providers_US.json                                  the same in the United States, where Amazon
+#                                                          Prime Video is provider 9 (119 elsewhere)
 #   tmdb_regions.json                                       nine countries
 #   tmdb_movie_popular_p3.json                              past the last page: six titles no
 #                                                          other page has
 #   tmdb_empty.json                                         an empty last page: every list of
-#                                                          TMDBRecorded.emptyService (Apple TV Plus)
+#                                                          TMDBRecorded.emptyService (Apple TV)
+#
+# The fields are TMDB's, with TMDB's types, as its real answers have them (checked against TMDB on
+# 2026-11-21): every field of a result is there, the ones the app does not read too. No real path
+# is copied: "poster_path", "backdrop_path" and the providers' "logo_path" are null (TMDB has null
+# for a title without artwork), so a fixture run shows Metahub's artwork and the services' names.
 #
 # The DEBUG launch argument -PTDebugHomeFixtures <folder> makes the app answer every TMDB request
 # from these files: the hub's lists and the client's (grids, See All, Settings).
@@ -41,12 +52,13 @@ def results(source, kind, base):
     rows = []
     for i, meta in enumerate(metas):
         date = (meta.get("released") or "")[:10]
-        row = {"id": base + i, "imdb_id": meta["id"], "vote_average": float(meta.get("imdbRating") or 0),
-               "vote_count": 500 + 10 * i, "genre_ids": [GENRES[g] for g in meta.get("genres", []) if g in GENRES],
-               "original_language": "en"}
-        if meta.get("description"): row["overview"] = meta["description"]
-        if kind == "movie": row.update(title=meta["name"], release_date=date)
-        else: row.update(name=meta["name"], first_air_date=date)
+        row = {"adult": False, "backdrop_path": None, "id": base + i, "imdb_id": meta["id"],
+               "vote_average": float(meta.get("imdbRating") or 0), "vote_count": 500 + 10 * i,
+               "genre_ids": [GENRES[g] for g in meta.get("genres", []) if g in GENRES],
+               "original_language": "en", "overview": meta.get("description") or "",
+               "popularity": round(400.0 - 15 * i, 3), "poster_path": None, "softcore": False}
+        if kind == "movie": row.update(title=meta["name"], original_title=meta["name"], release_date=date, video=False)
+        else: row.update(name=meta["name"], original_name=meta["name"], first_air_date=date, origin_country=["US"])
         rows.append(row)
     return rows
 
@@ -60,17 +72,24 @@ for kind, source, base in [("movie", "cm_movie_top.json", 9100000), ("tv", "cm_s
             write("tmdb_%s_%s_p%d.json" % (kind, sort, page),
                   {"page": page, "total_pages": 2, "total_results": len(ordered), "results": chunk})
 
-providers = [(8, "Netflix"), (119, "Amazon Prime Video"), (337, "Disney Plus"), (381, "Canal+"), (350, "Apple TV Plus"),
-             (531, "Paramount Plus"), (1899, "Max"), (56, "OCS")]
-write("tmdb_providers.json", {"results": [{"provider_id": i, "provider_name": n, "display_priority": p + 1,
-                                           "display_priorities": {"FR": p + 1, "US": p + 1}}
-                                          for p, (i, n) in enumerate(providers)]})
-write("tmdb_regions.json", {"results": [{"iso_3166_1": c} for c in ["FR", "BE", "CH", "CA", "US", "GB", "DE", "ES", "IT"]]})
+def providers_of(region, providers):
+    return {"results": [{"display_priorities": {region: p}, "display_priority": p, "logo_path": None, "provider_name": n,
+                         "provider_id": i} for p, (i, n) in enumerate(providers)]}
+
+write("tmdb_providers.json", providers_of("FR", [
+    (8, "Netflix"), (119, "Amazon Prime Video"), (350, "Apple TV"), (337, "Disney Plus"), (2, "Apple TV Store"),
+    (381, "Canal+"), (283, "Crunchyroll"), (531, "Paramount Plus"), (1899, "HBO Max"), (10, "Amazon Video")]))
+write("tmdb_providers_US.json", providers_of("US", [
+    (8, "Netflix"), (9, "Amazon Prime Video"), (350, "Apple TV"), (337, "Disney Plus"), (15, "Hulu"), (10, "Amazon Video"),
+    (2, "Apple TV Store"), (283, "Crunchyroll"), (1899, "HBO Max")]))
+COUNTRIES = [("FR", "France"), ("BE", "Belgium"), ("CH", "Switzerland"), ("CA", "Canada"), ("US", "United States of America"),
+             ("GB", "United Kingdom"), ("DE", "Germany"), ("ES", "Spain"), ("IT", "Italy")]
+write("tmdb_regions.json", {"results": [{"iso_3166_1": c, "english_name": n, "native_name": n} for c, n in COUNTRIES]})
 # A page past the last one (page 2 says total_pages 2): titles of its own (the shows of
 # cm_series_top.json, under movie ids of their own), so a grid that asks past TMDB's last page
 # shows them (StreamingServicesUITests).
-beyond = [dict(row, id=9100900 + i, title=row["name"], release_date=row["first_air_date"])
+beyond = [dict(row, id=9100900 + i, title=row["name"], original_title=row["name"], release_date=row["first_air_date"], video=False)
           for i, row in enumerate(results("cm_series_top.json", "tv", 0)[:6])]
-for row in beyond: del row["name"], row["first_air_date"]
+for row in beyond: del row["name"], row["original_name"], row["first_air_date"], row["origin_country"]
 write("tmdb_movie_popular_p3.json", {"page": 3, "total_pages": 3, "total_results": 26, "results": beyond})
 write("tmdb_empty.json", {"page": 1, "total_pages": 1, "total_results": 0, "results": []})

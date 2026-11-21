@@ -877,6 +877,7 @@
 "Settings.TMDBKey.Remove" = "Remover chave";
 "Settings.TMDBKey.Accepted" = "O TMDB aceitou a chave. A fileira “Serviços” aparece no Início, e o filtro “Serviço” em Filmes e Seriados.";
 "Settings.TMDBKey.Refused" = "O TMDB recusou esta chave. Verifique se ela foi copiada por inteiro.";
+"Settings.TMDBKey.Refused.Short" = "Recusada";
 "Settings.TMDBKey.Unchecked" = "Não foi possível acessar o TMDB: a chave foi salva e será testada na próxima atualização.";
 "Settings.StreamingRegion" = "País";
 "Settings.StreamingRegion.Message" = "O que um serviço oferece muda de um país para outro: as fileiras mostram o catálogo deste país.";
@@ -893,4 +894,5 @@
 "Top Rated Shows on %@" = "Seriados mais votados em %@";
 "Service: %@" = "Serviço: %@";
 "Grid.Service.Unavailable" = "O TMDB não respondeu. Verifique sua conexão e sua chave do TMDB nos Ajustes.";
+"Grid.Service.Refused" = "O TMDB recusou sua chave. Verifique-a em Ajustes › Serviços de streaming.";
 "Home.Unavailable.Service" = "Não foi possível carregar o catálogo de %@";

@@ -551,7 +551,8 @@ struct HomeErrorHeader: View {
             Text(service.map { String(format: "Home.Unavailable.Service".localized, $0) } ?? "Home.Unavailable.Title".localized)
                 .font(.system(size: 48, weight: .bold))
                 .foregroundStyle(GlassPalette.primaryText)
-            Text(service == nil ? "Home.Unavailable.Message".localized : "Grid.Service.Unavailable".localized)
+            Text(service == nil ? "Home.Unavailable.Message".localized
+                 : TMDBStreamingClient.shared.isKeyRefused ? "Grid.Service.Refused".localized : "Grid.Service.Unavailable".localized)
                 .font(GlassFont.body)
                 .foregroundStyle(GlassPalette.secondaryText)
                 .multilineTextAlignment(.center)

@@ -57,6 +57,8 @@ public final class TMDBStreamingClient: @unchecked Sendable {
 
     private let session: URLSession
     private let ids: TMDBIdCache
+    /// The key TMDB refused last (401), until it takes it (`isKeyRefused`).
+    private let refusedKey = TMDBGathered<String?>(nil)
     private let lookups = TMDBRequestGate(limit: TMDBStreamingClient.parallelLookups)
 
     /// A client of recorded answers (`TMDBRecorded`, a DEBUG fixture run):
@@ -85,9 +87,13 @@ public final class TMDBStreamingClient: @unchecked Sendable {
     // MARK: Paths
 
     /// A page of a service's catalogue in a country, in `sort`'s order:
-    /// subscription titles only ("flatrate": not the rentals and purchases
-    /// TMDB lists under the same service), with a few votes at least (TMDB
-    /// lists thousands of unrated fillers). `today` ("2026-11-20") bounds
+    /// subscription titles ("flatrate"), with a few votes at least (TMDB
+    /// lists thousands of unrated fillers). TMDB applies "flatrate" to the
+    /// title, not to the service asked: a title the service only rents or
+    /// sells comes too when another service streams it. Subscription
+    /// services offer nothing else (Netflix in France: the same 5384 titles
+    /// with or without it, 2026-11-21); stores would list their rentals,
+    /// which is why `services(region:)` leaves them out (`isStore`). `today` ("2026-11-20") bounds
     /// the recent ones (TMDB lists announced titles too). In English unless
     /// a `language` is given.
     static func discoverPath(service: Int, kind: HomeItem.Kind, region: String, page: Int, sort: StreamingSort = .popular,
@@ -244,22 +250,25 @@ public final class TMDBStreamingClient: @unchecked Sendable {
     // MARK: Services and countries
 
     /// The services of a country, the most watched there first (TMDB's
-    /// `display_priorities`): movies' and shows' lists merged. nil: no answer.
+    /// `display_priorities`): movies' and shows' lists merged, without the
+    /// stores (`isStore`). nil: no answer — or one of the two lists without
+    /// one: Settings matches the services chosen to this list and leaves out
+    /// the ones it does not have, so the list is whole or none.
     public func services(region: String, completion: @escaping @Sendable ([StreamingService]?) -> Void) {
         let group = DispatchGroup()
-        // nil: neither list answered.
-        let lists = TMDBGathered<[[String: Any]]?>(nil)
+        let lists = TMDBGathered<[[[String: Any]]]>([])
         for kind in ["movie", "tv"] {
             group.enter()
             get("/watch/providers/\(kind)?watch_region=\(region)") { data in
                 let results = data.flatMap { (try? JSONSerialization.jsonObject(with: $0)) as? [String: Any] }?["results"] as? [[String: Any]]
-                if let results { lists.update { $0 = ($0 ?? []) + results } }
+                if let results { lists.update { $0.append(results) } }
                 group.leave()
             }
         }
         group.notify(queue: .global(qos: .userInitiated)) {
-            guard let results = lists.value else { return completion(nil) }
-            completion(TMDBStreamingClient.services(results, region: region))
+            let answered = lists.value
+            guard answered.count == 2 else { return completion(nil) }
+            completion(TMDBStreamingClient.services(answered.flatMap { $0 }, region: region))
         }
     }
 
@@ -267,13 +276,32 @@ public final class TMDBStreamingClient: @unchecked Sendable {
         var best: [Int: (service: StreamingService, priority: Int)] = [:]
         for result in results {
             guard let id = (result["provider_id"] as? NSNumber)?.intValue,
-                  let name = (result["provider_name"] as? String)?.trimmingCharacters(in: .whitespaces), !name.isEmpty else { continue }
+                  let name = (result["provider_name"] as? String)?.trimmingCharacters(in: .whitespaces), !name.isEmpty,
+                  !isStore(id: id, name: name) else { continue }
             let priorities = result["display_priorities"] as? [String: Any]
             let priority = (priorities?[region] as? NSNumber)?.intValue ?? (result["display_priority"] as? NSNumber)?.intValue ?? 999
             if let known = best[id], known.priority <= priority { continue }
             best[id] = (StreamingService(id: id, name: name, logoPath: result["logo_path"] as? String), priority)
         }
         return best.values.sorted { $0.priority != $1.priority ? $0.priority < $1.priority : $0.service.name < $1.service.name }.map(\.service)
+    }
+
+    /// Stores TMDB lists among its watch providers: what they have is for
+    /// rent or sale, and a « subscription » discover of one lists the titles
+    /// it rents that another service streams (`discoverPath`). Checked on
+    /// TMDB in France on 2026-11-21, title by title: Apple TV Store (2),
+    /// Rakuten TV (35), Canal VOD (58), Orange VOD (61), YouTube (192),
+    /// VIVA by videofutur (2286), Premiere Max (2307), Pathé Home (2601),
+    /// JustWatch TV Store (2784); the others are the well-known stores of
+    /// other countries (Google Play Movies, Fandango At Home, Amazon Video,
+    /// Chili, Microsoft Store, Sky Store). A name with « Store » or ending
+    /// in « VOD » is one too. Free services (Arte, Pluto TV) and YouTube
+    /// Premium are not stores.
+    static let storeIds: Set<Int> = [2, 3, 7, 10, 35, 40, 58, 61, 68, 130, 192, 2286, 2307, 2601, 2784]
+
+    static func isStore(id: Int, name: String) -> Bool {
+        let words = name.lowercased().split(whereSeparator: { !$0.isLetter && !$0.isNumber })
+        return storeIds.contains(id) || words.contains("store") || words.last == "vod"
     }
 
     /// The ISO codes of the countries TMDB has watch providers for. nil: no answer.
@@ -291,10 +319,34 @@ public final class TMDBStreamingClient: @unchecked Sendable {
         guard let request = request("/configuration", key: key) else { return completion(false) }
         session.dataTask(with: request) { _, response, error in
             let status = (response as? HTTPURLResponse)?.statusCode
-            if status == 401 { return completion(false) }
-            if let status, (200..<300).contains(status), error == nil { return completion(true) }
+            if status == 401 {
+                self.note(status: 401, key: key)
+                return completion(false)
+            }
+            if let status, (200..<300).contains(status), error == nil {
+                self.note(status: status, key: key)
+                return completion(true)
+            }
             completion(nil)
         }.resume()
+    }
+
+    /// TMDB refused the user's key (401) at its last request with it, and
+    /// has not taken it since: the screens say the key was refused, not
+    /// that TMDB did not answer. False without a key, or with recorded
+    /// answers.
+    public var isKeyRefused: Bool {
+        guard recorded == nil, let key = apiKey(), let refused = refusedKey.value else { return false }
+        return key == refused
+    }
+
+    /// Remembers a refusal of `key`, forgets it once TMDB takes the key.
+    private func note(status: Int, key: String) {
+        if status == 401 {
+            refusedKey.update { $0 = key }
+        } else if (200..<300).contains(status) {
+            refusedKey.update { if $0 == key { $0 = nil } }
+        }
     }
 
     // MARK: IMDb ids
@@ -373,6 +425,7 @@ public final class TMDBStreamingClient: @unchecked Sendable {
         guard let key = apiKey(), let request = request(path, key: key) else { return completion(nil) }
         session.dataTask(with: request) { data, response, error in
             let status = (response as? HTTPURLResponse)?.statusCode ?? -1
+            if error == nil { self.note(status: status, key: key) }
             guard let data, error == nil, (200..<300).contains(status) else {
                 print("[TMDB] \(path.prefix(60)) FAILED status=\(status)")
                 return completion(nil)
@@ -559,6 +612,8 @@ final class TMDBIdCache: @unchecked Sendable {
 ///                                                            country, every result with its
 ///                                                            "imdb_id" (fake TMDB ids)
 ///   tmdb_providers.json                                      the services of a country
+///   tmdb_providers_<country>.json                            the services of that country, when
+///                                                            recorded (US: Amazon Prime Video is 9)
 ///   tmdb_regions.json                                        the countries
 ///
 /// The genre and the service of a discover request are not looked at. A
@@ -567,7 +622,7 @@ final class TMDBIdCache: @unchecked Sendable {
 /// Nothing else is answered.
 public enum TMDBRecorded {
 
-    /// The service the recorded answers list nothing for (Apple TV Plus):
+    /// The service the recorded answers list nothing for (Apple TV):
     /// a fixture run shows how the Home and the grids say a service listed
     /// nothing.
     public static let emptyService = 350
@@ -583,6 +638,12 @@ public enum TMDBRecorded {
 
     /// The body a request is answered with; nil: TMDB "fails".
     public static func answer(to path: String, in folder: URL) -> Data? {
+        if path.hasPrefix("/watch/providers/"), !path.hasPrefix("/watch/providers/regions"),
+           let region = URLComponents(string: "https://recorded" + path)?.queryItems?.first(where: { $0.name == "watch_region" })?.value,
+           region.count == 2, region.allSatisfy({ $0.isASCII && $0.isUppercase }),
+           let data = try? Data(contentsOf: folder.appendingPathComponent("tmdb_providers_\(region).json")) {
+            return data
+        }
         if let name = fileName(for: path), let data = try? Data(contentsOf: folder.appendingPathComponent(name)) { return data }
         if let discover = discover(path) {
             return try? JSONSerialization.data(withJSONObject: ["page": discover.page, "total_pages": discover.page - 1,
@@ -597,9 +658,20 @@ public enum TMDBRecorded {
             guard let data = try? Data(contentsOf: folder.appendingPathComponent(name)),
                   let results = ((try? JSONSerialization.jsonObject(with: data)) as? [String: Any])?["results"] as? [[String: Any]],
                   let hit = results.first(where: { ($0["id"] as? NSNumber)?.intValue == id }) else { continue }
-            return try? JSONSerialization.data(withJSONObject: ["id": id, "imdb_id": hit["imdb_id"] ?? NSNull()])
+            return externalIds(id, kind: String(parts[0]), imdb: hit["imdb_id"] ?? NSNull())
         }
-        return try? JSONSerialization.data(withJSONObject: ["id": id, "imdb_id": NSNull()])
+        return externalIds(id, kind: String(parts[0]), imdb: NSNull())
+    }
+
+    /// An external_ids answer in TMDB's shape: every field, null when TMDB
+    /// has no such id (as it answers for a title without an IMDb id).
+    private static func externalIds(_ id: Int, kind: String, imdb: Any) -> Data? {
+        var answer: [String: Any] = ["id": id, "imdb_id": imdb, "wikidata_id": NSNull(), "facebook_id": NSNull(),
+                                     "instagram_id": NSNull(), "twitter_id": NSNull()]
+        if kind == "tv" {
+            for name in ["freebase_mid", "freebase_id", "tvdb_id", "tvrage_id"] { answer[name] = NSNull() }
+        }
+        return try? JSONSerialization.data(withJSONObject: answer)
     }
 
     /// The kind ("movie", "tv"), order, page and service of a discover path.

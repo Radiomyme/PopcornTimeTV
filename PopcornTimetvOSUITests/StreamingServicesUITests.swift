@@ -108,12 +108,12 @@ final class StreamingServicesUITests: XCTestCase {
     }
 
     /// A service that lists nothing (the recorded answers list nothing for
-    /// TMDBRecorded.emptyService, Apple TV Plus): « No results » under the
+    /// TMDBRecorded.emptyService, Apple TV): « No results » under the
     /// row, « All » there, and no shelf of the service.
     func testAServiceThatListsNothingSaysSo() throws {
         launch(key: Self.key, ["-PTDebugHomeResume", Self.resume, "-PTDebugHomeFocus", "services:3"])
         let apple = element("Home.Card.service-350"), empty = element("Home.Services.Empty")
-        XCTAssertTrue(waitForFocus(on: apple, timeout: 40), "the focus never reached Apple TV Plus's card: \(focusedLabel)")
+        XCTAssertTrue(waitForFocus(on: apple, timeout: 40), "the focus never reached Apple TV's card: \(focusedLabel)")
         pause(1.5)
         remote.press(.select)
         XCTAssertTrue(empty.waitForExistence(timeout: 30), "a service that lists nothing: no « No results »")

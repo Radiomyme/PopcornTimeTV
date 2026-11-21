@@ -570,6 +570,7 @@
 "Settings.TMDBKey.Remove" = "Remove Key";
 "Settings.TMDBKey.Accepted" = "TMDB accepted the key. The « Services » row appears on Home, and the « Service » filter in Movies and Shows.";
 "Settings.TMDBKey.Refused" = "TMDB refused this key. Check that it was copied in full.";
+"Settings.TMDBKey.Refused.Short" = "Refused";
 "Settings.TMDBKey.Unchecked" = "TMDB could not be reached: the key is saved and will be tried at the next refresh.";
 "Settings.StreamingRegion" = "Country";
 "Settings.StreamingRegion.Message" = "What a service offers changes from one country to another: the shelves show this country's catalogs.";
@@ -586,4 +587,5 @@
 "Top Rated Shows on %@" = "Top Rated Shows on %@";
 "Service: %@" = "Service: %@";
 "Grid.Service.Unavailable" = "TMDB did not answer. Check your connection and your TMDB key in Settings.";
+"Grid.Service.Refused" = "TMDB refused your key. Check it in Settings › Streaming Services.";
 "Home.Unavailable.Service" = "The %@ Catalog Can't Load";

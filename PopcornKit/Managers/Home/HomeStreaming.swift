@@ -37,17 +37,41 @@ public struct StreamingService: Codable, Hashable, Sendable, Identifiable {
         return logoPath.flatMap { URL(string: "https://image.tmdb.org/t/p/w300" + $0) }
     }
 
-    /// The services of someone who chose none: the four that are in most
-    /// countries. No logo: a card without one shows the name (choosing the
-    /// services in Settings stores TMDB's logos — and TMDB's entries, so
-    /// these are TMDB's own names: a card keeps the name the user first
-    /// saw when Settings loads the country's list).
-    public static let defaults: [StreamingService] = [
-        StreamingService(id: 8, name: "Netflix"),
-        StreamingService(id: 119, name: "Amazon Prime Video"),
-        StreamingService(id: 337, name: "Disney Plus"),
-        StreamingService(id: 350, name: "Apple TV Plus"),
-    ]
+    /// The services of someone who chose none, in a country: the four that
+    /// are in most countries. No logo: a card without one shows the name
+    /// (choosing the services in Settings stores TMDB's logos — and TMDB's
+    /// entries, so these are TMDB's own names: a card keeps the name the
+    /// user first saw when Settings loads the country's list). Amazon Prime
+    /// Video is provider 119 in most countries, 9 in a few (`primeVideo9`).
+    public static func defaults(for region: String) -> [StreamingService] {
+        return [
+            StreamingService(id: 8, name: "Netflix"),
+            StreamingService(id: primeVideo9.contains(region.uppercased()) ? 9 : 119, name: "Amazon Prime Video"),
+            StreamingService(id: 337, name: "Disney Plus"),
+            StreamingService(id: 350, name: "Apple TV"),
+        ]
+    }
+
+    /// The countries where TMDB lists Amazon Prime Video as provider 9, and
+    /// has no 119 (TMDB's providers, 2026-11-21: 119 in 129 countries, 9 in
+    /// these five, never both).
+    static let primeVideo9: Set<String> = ["AT", "DE", "GB", "JP", "US"]
+
+    /// The services chosen, as a country's list (`available`, TMDB's
+    /// services there) has them: the same id when the country has it, else
+    /// the country's service of the same name (Amazon Prime Video: 119 in
+    /// France, 9 in the United States), else left out — the country has no
+    /// such service, and its page would be empty. In the chosen order, each
+    /// once; TMDB's entry (its name and logo today).
+    public static func matching(_ chosen: [StreamingService], in available: [StreamingService]) -> [StreamingService] {
+        func key(_ name: String) -> String {
+            return name.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: nil).trimmingCharacters(in: .whitespaces)
+        }
+        let byId = Dictionary(available.map { ($0.id, $0) }) { first, _ in first }
+        let byName = Dictionary(available.map { (key($0.name), $0) }) { first, _ in first }
+        var seen = Set<Int>()
+        return chosen.compactMap { byId[$0.id] ?? byName[key($0.name)] }.filter { seen.insert($0.id).inserted }
+    }
 }
 
 /// The order of a service's titles.

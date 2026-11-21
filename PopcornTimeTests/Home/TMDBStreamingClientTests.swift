@@ -189,6 +189,51 @@ final class TMDBStreamingClientTests: CheckedTestCase {
         eq(wait { done in client.check(key: self.key) { done($0) } }, .some(nil), "TMDB down: nil")
     }
 
+    /// A refused key is told apart from no answer on the screens (Home, grids, Settings): TMDB
+    /// answers 401 to a key it refuses (status_code 7, « Invalid API key »).
+    func testARefusedKeyIsRemembered() {
+        var current = key
+        let client = makeClient()
+        client.apiKey = { current }
+        check(!client.isKeyRefused, "nothing asked yet")
+        TMDBStub.answer { _ in .failure }
+        check(titles(client)?.items == nil && !client.isKeyRefused, "no answer: not a refusal")
+        TMDBStub.answer { _ in .status(503) }
+        check(titles(client)?.items == nil && !client.isKeyRefused, "TMDB down: not a refusal")
+        TMDBStub.answer { _ in .status(401) }
+        check(titles(client)?.items == nil, "a refused key: no page")
+        check(client.isKeyRefused, "and the key is known refused")
+        current = String(repeating: "b", count: 32)
+        check(!client.isKeyRefused, "another key: not known refused")
+        current = key
+        TMDBStub.answer { _ in self.page([]) }
+        _ = titles(client)
+        check(!client.isKeyRefused, "taken again: no longer refused")
+        TMDBStub.answer { _ in .status(401) }
+        _ = wait { done in client.check(key: self.key) { done($0) } }
+        check(client.isKeyRefused, "Settings' check of the same key refused: refused")
+        let none = makeClient()
+        none.apiKey = { nil }
+        check(!none.isKeyRefused, "no key: nothing refused")
+    }
+
+    /// Settings matches the chosen services to a country's list: half a list (one of TMDB's two
+    /// answered) would drop services the country has.
+    func testTheServicesOfACountryNeedBothLists() {
+        let client = makeClient()
+        TMDBStub.answer { request in
+            guard request.url?.path.hasSuffix("/movie") == true else { return .failure }
+            return .json(["results": [["provider_id": 8, "provider_name": "Netflix", "display_priorities": ["FR": 0]]]])
+        }
+        eq(wait { done in client.services(region: "FR") { done($0) } }, .some(nil), "the shows' list without an answer: no list")
+        TMDBStub.answer { request in
+            let tv = request.url?.path.hasSuffix("/tv") == true
+            return .json(["results": [["provider_id": tv ? 381 : 8, "provider_name": tv ? "Canal+" : "Netflix", "display_priorities": ["FR": tv ? 1 : 0]],
+                                      ["provider_id": 2, "provider_name": "Apple TV Store", "display_priorities": ["FR": 2]]]])
+        }
+        eq(wait { done in client.services(region: "FR") { done($0) } }??.map(\.id), [8, 381], "both: merged, the store left out")
+    }
+
     // MARK: IMDb ids
 
     func testIdsAreJoinedAndOnlyRealOnesKeptOnDisk() {
@@ -350,6 +395,12 @@ final class TMDBStreamingClientTests: CheckedTestCase {
         eq(titles(client, kind: .show)?.items?.count, 12, "the shows")
         eq(wait { done in client.check(key: "anything") { done($0) } }, .some(true), "any key is taken")
         eq(wait { done in client.services(region: "FR") { done($0) } }??.first?.name, "Netflix", "the services of a country")
+        check(wait { done in client.services(region: "FR") { done($0) } }??.contains { $0.id == 119 } == true, "France: Prime Video is 119")
+        let american = wait { done in client.services(region: "US") { done($0) } } ?? nil
+        check(american?.contains { $0.id == 9 } == true && american?.contains { $0.id == 119 } == false,
+              "the United States' own list: Prime Video is 9", "\(american?.map(\.id) ?? [])")
+        eq(wait { done in client.services(region: "DE") { done($0) } }??.map(\.id),
+           wait { done in client.services(region: "FR") { done($0) } }??.map(\.id), "a country not recorded: the French list")
         check((wait { done in client.regions { done($0) } }??.count ?? 0) > 3, "the countries")
         eq(TMDBStub.requests.count, 0, "nothing asked of anyone")
 
@@ -368,6 +419,10 @@ final class TMDBStreamingClientTests: CheckedTestCase {
         let unknown = TMDBRecorded.answer(to: "/movie/1/external_ids", in: recorded)
             .flatMap { (try? JSONSerialization.jsonObject(with: $0)) as? [String: Any] }
         check(unknown?["imdb_id"] is NSNull, "an id no page has: no IMDb id")
+        check(unknown?["wikidata_id"] is NSNull && unknown?["tvdb_id"] == nil, "TMDB's other fields of a movie, null")
+        let show = TMDBRecorded.answer(to: "/tv/9200000/external_ids", in: recorded)
+            .flatMap { (try? JSONSerialization.jsonObject(with: $0)) as? [String: Any] }
+        check((show?["imdb_id"] as? String).map(HomeParse.isImdbId) == true && show?["tvdb_id"] is NSNull, "a recorded show: its IMDb id, a show's fields")
         check(TMDBRecorded.answer(to: "/configuration", in: recorded) == nil, "nothing else")
     }
 }

@@ -48,6 +48,47 @@ final class HomeStreamingTests: CheckedTestCase {
         eq(elsewhere.streamingRegion, "US", "no region at all: the United States")
     }
 
+    /// TMDB lists Amazon Prime Video as provider 119 in most countries but as 9 in Austria,
+    /// Germany, the United Kingdom, Japan and the United States (TMDB, 2026-11-21: 119 is not in
+    /// the US list, and a US discover of 119 answers no title). Someone there who keeps the
+    /// default services must get the 9, or its card opens an empty page.
+    func testTheDefaultServicesFollowTheCountry() {
+        let sandbox = HomeSandbox()
+        defer { sandbox.discard() }
+        let american = HomeSettings(defaults: sandbox.defaults, deviceRegion: { "US" })
+        eq(american.streamingServices.map(\.id), [8, 9, 337, 350], "in the United States: Prime Video is 9")
+        eq(american.streamingServices.map(\.name), ["Netflix", "Amazon Prime Video", "Disney Plus", "Apple TV"], "TMDB's names")
+        american.streamingRegion = "fr"
+        eq(american.streamingServices.map(\.id), [8, 119, 337, 350], "the country chosen in Settings decides: France, 119")
+        american.streamingRegion = "GB"
+        eq(american.streamingServices.map(\.id), [8, 9, 337, 350], "the United Kingdom: 9")
+        american.streamingServices = [StreamingService(id: 119, name: "Amazon Prime Video")]
+        eq(american.streamingServices.map(\.id), [119], "services the user chose are kept as they are")
+    }
+
+    /// TMDB lists stores among its watch providers (Apple TV Store, Amazon Video, Rakuten TV…),
+    /// and its discover cannot tie « subscription » to the service asked: with
+    /// with_watch_monetization_types=flatrate, a store's list is the titles it rents or sells
+    /// that some other service streams (TMDB, 2026-11-21: of the first titles of Apple TV Store,
+    /// Rakuten TV, YouTube, Canal VOD, Orange VOD in France, none was a subscription title
+    /// there). Settings must not offer them.
+    func testStoresAreNotOfferedAsServices() {
+        let root = (try? JSONSerialization.jsonObject(with: HomeFixture.data("tmdb_providers.json"))) as? [String: Any]
+        let listed = TMDBStreamingClient.services(root?["results"] as? [[String: Any]] ?? [], region: "FR")
+        eq(listed.map(\.id), [8, 119, 350, 337, 381, 283, 531, 1899], "the recorded French list without Apple TV Store and Amazon Video")
+        let results: [[String: Any]] = [
+            ["provider_id": 8, "provider_name": "Netflix", "display_priorities": ["FR": 0]],
+            ["provider_id": 35, "provider_name": "Rakuten TV", "display_priorities": ["FR": 1]],
+            ["provider_id": 192, "provider_name": "YouTube", "display_priorities": ["FR": 2]],
+            ["provider_id": 9999, "provider_name": "Some Store", "display_priorities": ["FR": 3]],
+            ["provider_id": 9998, "provider_name": "Some VOD", "display_priorities": ["FR": 4]],
+            ["provider_id": 234, "provider_name": "Arte", "display_priorities": ["FR": 5]],
+            ["provider_id": 188, "provider_name": "YouTube Premium", "display_priorities": ["FR": 6]],
+        ]
+        eq(TMDBStreamingClient.services(results, region: "FR").map(\.id), [8, 234, 188],
+           "stores left out, by id or by a name that says so; a free service (Arte) and YouTube Premium kept")
+    }
+
     /// The Home's filter lasts for the run of the app only, and a hidden « Services » row
     /// means the usual page (its « All » card is the only way back).
     func testServiceFilterLastsTheSessionOnly() {
@@ -228,15 +269,32 @@ final class HomeStreamingTests: CheckedTestCase {
     /// Settings › Services stores TMDB's entries for the services chosen (their logos): the
     /// row's cards keep the names the user first saw only if the defaults are TMDB's names.
     /// This checks the defaults against the hand-made tmdb_providers.json
-    /// (tools/tmdb-fixtures.py), not against TMDB's live answer: the two lists are kept in
-    /// step by hand, and the names in them were read from TMDB's forum, not from the API.
+    /// (tools/tmdb-fixtures.py), whose ids and names are the ones TMDB's API gave for France on
+    /// 2026-11-21 (350 is « Apple TV » there, no longer « Apple TV Plus »).
     func testTheDefaultServicesHaveTMDBsNames() {
-        let root = (try? JSONSerialization.jsonObject(with: HomeFixture.data("tmdb_providers.json"))) as? [String: Any]
-        let listed = TMDBStreamingClient.services(root?["results"] as? [[String: Any]] ?? [], region: "FR")
-        let names = Dictionary(listed.map { ($0.id, $0.name) }) { first, _ in first }
-        for service in StreamingService.defaults {
-            eq(service.name, names[service.id], "service \(service.id): TMDB's own name")
+        for (region, file) in [("FR", "tmdb_providers.json"), ("US", "tmdb_providers_US.json")] {
+            let root = (try? JSONSerialization.jsonObject(with: HomeFixture.data(file))) as? [String: Any]
+            let listed = TMDBStreamingClient.services(root?["results"] as? [[String: Any]] ?? [], region: region)
+            let names = Dictionary(listed.map { ($0.id, $0.name) }) { first, _ in first }
+            for service in StreamingService.defaults(for: region) {
+                eq(service.name, names[service.id], "\(region), service \(service.id): in the country's list, under TMDB's own name")
+            }
         }
+    }
+
+    /// A new country: the services chosen become that country's (Settings, when TMDB lists them).
+    func testTheChosenServicesFollowANewCountry() {
+        let root = (try? JSONSerialization.jsonObject(with: HomeFixture.data("tmdb_providers_US.json"))) as? [String: Any]
+        let american = TMDBStreamingClient.services(root?["results"] as? [[String: Any]] ?? [], region: "US")
+        let french = StreamingService.defaults(for: "FR") + [StreamingService(id: 381, name: "Canal+")]
+        let matched = StreamingService.matching(french, in: american)
+        eq(matched.map(\.id), [8, 9, 337, 350], "Prime Video becomes the US's 9 by its name; Canal+, not in the US, is left out")
+        check(matched.allSatisfy { service in american.contains(service) }, "TMDB's entries for the country")
+        eq(StreamingService.matching([StreamingService(id: 350, name: "Apple TV Plus")], in: american).first?.name, "Apple TV",
+           "a service the country has keeps its id and takes TMDB's name of today")
+        eq(StreamingService.matching([StreamingService(id: 119, name: "amazon prime video"), StreamingService(id: 9, name: "Amazon Prime Video")],
+                                     in: american).map(\.id), [9], "the same service once")
+        eq(StreamingService.matching(french, in: []).count, 0, "a country with no service: none")
     }
 
     func testAlternating() {

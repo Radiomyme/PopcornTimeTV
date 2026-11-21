@@ -873,6 +873,7 @@
 "Settings.TMDBKey.Remove" = "حذف المفتاح";
 "Settings.TMDBKey.Accepted" = "قبل TMDB المفتاح. يظهر صف «الخدمات» في الصفحة الرئيسية، وفلتر «الخدمة» في الأفلام والمسلسلات.";
 "Settings.TMDBKey.Refused" = "رفض TMDB هذا المفتاح. تحقق من أنه نُسخ بالكامل.";
+"Settings.TMDBKey.Refused.Short" = "مرفوض";
 "Settings.TMDBKey.Unchecked" = "تعذّر الوصول إلى TMDB: حُفظ المفتاح وستتم تجربته في التحديث القادم.";
 "Settings.StreamingRegion" = "البلد";
 "Settings.StreamingRegion.Message" = "يختلف ما تقدمه الخدمة من بلد إلى آخر: تعرض الصفوف كتالوج هذا البلد.";
@@ -889,4 +890,5 @@
 "Top Rated Shows on %@" = "المسلسلات الأعلى تقييمًا على %@";
 "Service: %@" = "الخدمة: %@";
 "Grid.Service.Unavailable" = "لم يستجب TMDB. تحقق من اتصالك ومن مفتاح TMDB في الإعدادات.";
+"Grid.Service.Refused" = "رفض TMDB مفتاحك. تحقق منه في الإعدادات › خدمات البث.";
 "Home.Unavailable.Service" = "تعذّر تحميل كتالوج %@";

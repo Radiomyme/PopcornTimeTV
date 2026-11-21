@@ -31,7 +31,9 @@ import Foundation
 ///   device's region.
 /// - `popcornkit.home.streamingServices` — Data, the JSON of the services
 ///   chosen (`[StreamingService]`), in the page's order. Absent:
-///   `StreamingService.defaults`. An empty list: no « Services » row.
+///   `StreamingService.defaults(for:)` the country. An empty list: no
+///   « Services » row. Settings matches it to a new country's services
+///   when the country changes (`StreamingService.matching`).
 /// - `popcornkit.home.serviceFilter` — no longer read: the first build of
 ///   the streaming services kept the Home's filter there, across launches.
 ///   The filter now lasts for the run of the app (`homeServiceFilter`), and
@@ -153,7 +155,7 @@ public struct HomeSettings {
         get {
             guard let data = defaults.data(forKey: Key.streamingServices),
                   let services = try? JSONDecoder().decode([StreamingService].self, from: data) else {
-                return StreamingService.defaults
+                return StreamingService.defaults(for: streamingRegion)
             }
             var seen = Set<Int>()
             return services.filter { seen.insert($0.id).inserted }

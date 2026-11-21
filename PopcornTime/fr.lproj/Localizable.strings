@@ -570,6 +570,7 @@
 "Settings.TMDBKey.Remove" = "Supprimer la clé";
 "Settings.TMDBKey.Accepted" = "TMDB a accepté la clé. La rangée « Services » apparaît sur l’Accueil, et le filtre « Service » dans Films et Séries.";
 "Settings.TMDBKey.Refused" = "TMDB a refusé cette clé. Vérifiez qu’elle a été copiée en entier.";
+"Settings.TMDBKey.Refused.Short" = "Refusée";
 "Settings.TMDBKey.Unchecked" = "TMDB est injoignable : la clé est enregistrée et sera essayée au prochain rafraîchissement.";
 "Settings.StreamingRegion" = "Pays";
 "Settings.StreamingRegion.Message" = "Le catalogue d’un service change d’un pays à l’autre : les rangées montrent celui de ce pays.";
@@ -586,4 +587,5 @@
 "Top Rated Shows on %@" = "Séries les mieux notées sur %@";
 "Service: %@" = "Service : %@";
 "Grid.Service.Unavailable" = "TMDB n’a pas répondu. Vérifiez votre connexion et votre clé TMDB dans les Réglages.";
+"Grid.Service.Refused" = "TMDB a refusé votre clé. Vérifiez-la dans Réglages › Services de streaming.";
 "Home.Unavailable.Service" = "Le catalogue %@ ne peut pas se charger";
