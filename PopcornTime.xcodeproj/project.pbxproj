@@ -541,6 +541,7 @@
 		81680B8F443D007C956B7DCC /* ContinueWatchingUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6D209D3410F92A182F415559 /* ContinueWatchingUITests.swift */; };
 		825F60F57B61CF4503BBE3E4 /* BoundedTTLCache.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9F31CD6A4DF0AA4FFAD2ED43 /* BoundedTTLCache.swift */; };
 		8289EDABC5AF40BE1AAC9C85 /* CatalogQueries.swift in Sources */ = {isa = PBXBuildFile; fileRef = FE952C0A38B2B3134C6F5447 /* CatalogQueries.swift */; };
+		82B2F435854DCB6A8415DA37 /* StreamingServicesUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4D18F70F2FB2DCE834F362E8 /* StreamingServicesUITests.swift */; };
 		82CD177C2A67579F974D73B8 /* HomeModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = ED8707875AF56D289FEC523A /* HomeModel.swift */; };
 		83401A1F3B17A97CC82FA52E /* WhatsNewView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B87CA952C39ECA080A5345DC /* WhatsNewView.swift */; };
 		849363D3E1F9E06DAFDE2BDF /* CatalogDates.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7DE69B3679548A2B1D9D4333 /* CatalogDates.swift */; };
@@ -1166,6 +1167,7 @@
 		4D15C7E61EF1D7C700953E45 /* DownloadViewController+tvOS.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; name = "DownloadViewController+tvOS.swift"; path = "../View Controllers/DownloadViewController+tvOS.swift"; sourceTree = "<group>"; };
 		4D15C7E81EF1D81600953E45 /* MPMediaItemProperty+Extension.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = "MPMediaItemProperty+Extension.swift"; sourceTree = "<group>"; };
 		4D15C7F71EF2154100953E45 /* DownloadDetailCollectionViewCell.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; name = DownloadDetailCollectionViewCell.swift; path = "Collection View Cells/DownloadDetailCollectionViewCell.swift"; sourceTree = "<group>"; };
+		4D18F70F2FB2DCE834F362E8 /* StreamingServicesUITests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = StreamingServicesUITests.swift; path = PopcornTimetvOSUITests/StreamingServicesUITests.swift; sourceTree = SOURCE_ROOT; };
 		4D2543AD1DACFBFE00149533 /* TopShelf.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = TopShelf.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 		4D2543B21DACFBFE00149533 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		4D29965E1EE35C4100737894 /* UIDownloadProgressView.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; name = UIDownloadProgressView.swift; path = Views/UIDownloadProgressView.swift; sourceTree = "<group>"; };
@@ -2596,6 +2598,7 @@
 				0A2B046A1940B81D42081189 /* HomeUITests.swift */,
 				8607FFADBE24E23C95714CF3 /* UpNextUITests.swift */,
 				D89E46005A42C801577E9AD2 /* RemoteScriptUITests.swift */,
+				4D18F70F2FB2DCE834F362E8 /* StreamingServicesUITests.swift */,
 			);
 			name = PopcornTimetvOSUITests;
 			path = PopcornTimetvOSUITests;
@@ -3238,6 +3241,7 @@
 				B66380A9DE0680A38584DDD5 /* HomeUITests.swift in Sources */,
 				1A0B2B460B8864109190C840 /* UpNextUITests.swift in Sources */,
 				C84ADD1780C642361FB3E0D4 /* RemoteScriptUITests.swift in Sources */,
+				82B2F435854DCB6A8415DA37 /* StreamingServicesUITests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

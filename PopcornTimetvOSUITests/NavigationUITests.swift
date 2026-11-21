@@ -159,6 +159,7 @@ final class NavigationUITests: XCTestCase {
         }
         guard let first = focusedCell(in: grid), first.frame.minX < 200 else { return XCTFail("the first column never got the focus") }
         let firstRowMinY = first.frame.minY
+        XCTAssertFalse(element("GridHeader.Service").exists, "a Service control without a TMDB key")
         remote.press(.up)
         pause(1.2)
         XCTAssertTrue(sort.hasFocus || genre.hasFocus, "Up from the first row did not reach Sort / Genre: \(focusedLabel)")
@@ -934,7 +935,7 @@ final class NavigationUITests: XCTestCase {
         } else {
             XCTFail("no poster has the focus back at the top: \(back)")
         }
-        for identifier in Self.headerIdentifiers {
+        for identifier in Self.headerIdentifiers + Self.optionalHeaderIdentifiers.filter({ top.header[$0] != nil }) {
             guard let frame = back.header[identifier], let before = top.header[identifier] else {
                 XCTFail("\(identifier) is not back at the top")
                 continue
@@ -1007,6 +1008,9 @@ final class NavigationUITests: XCTestCase {
             "-AppleLanguages", "(en)",
             "-AppleLocale", "en_US",
             "-PTDebugHomeFixtures", Self.homeFixtures,
+            // No TMDB key, whatever the simulator saved: the grids' header
+            // is Sort and Genre (StreamingServicesUITests has the key's).
+            "-popcornkit.tmdb.apiKey", "",
         ] + arguments
         app.launch()
         self.app = app
@@ -1075,6 +1079,10 @@ final class NavigationUITests: XCTestCase {
 
     /// The page title and Sort / Genre of a grid (`MainViewController`).
     private static let headerIdentifiers = ["GridHeader.Title", "GridHeader.Sort", "GridHeader.Genre"]
+    /// The Service control: only with a TMDB key and services chosen
+    /// (`MediaViewController`). These tests run without a key (it is not
+    /// there); when it is, it is checked like the others.
+    private static let optionalHeaderIdentifiers = ["GridHeader.Service"]
 
     /// What is on the screen, from one snapshot of the app: the grid's
     /// header, its posters and the tab bar's tabs (only those on the screen).
@@ -1102,7 +1110,7 @@ final class NavigationUITests: XCTestCase {
             let inGrid = inGrid || node.identifier == "MediaGrid.\(gridName)"
             let inTabBar = inTabBar || node.elementType == .tabBar
             let onScreen = node.frame.intersects(layout.screen) && !node.frame.isEmpty
-            if Self.headerIdentifiers.contains(node.identifier) { layout.header[node.identifier] = node.frame }
+            if (Self.headerIdentifiers + Self.optionalHeaderIdentifiers).contains(node.identifier) { layout.header[node.identifier] = node.frame }
             if inGrid, node.elementType == .cell, onScreen {
                 layout.posters.append(node.frame)
                 if node.hasFocus { layout.focusedPoster = node.frame }

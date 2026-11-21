@@ -53,7 +53,8 @@ final class GlassSettingsHostingController: UIHostingController<GlassSettingsVie
                                    languages: GlassSettingsStore.languages(including: [audio, subtitles]),
                                    actions: actions)
         #if DEBUG
-        // `-PTDebugSettingsRow <row>` (homeLanguages, homeShelves, homeLookup):
+        // `-PTDebugSettingsRow <row>` (homeLanguages, homeShelves, homeLookup,
+        // tmdbKey, streamingRegion, streamingServices…):
         // the row that takes the focus; `-PTDebugSettingsPicker <picker>`
         // (homeLanguages, homeShelves…): the sheet open at first display.
         let row: GlassSettingsRowID
@@ -63,6 +64,9 @@ final class GlassSettingsHostingController: UIHostingController<GlassSettingsVie
         case "homeLookup": row = .homeLookup
         case "autoPlayNext": row = .autoPlayNext
         case "upNextCard": row = .upNextCard
+        case "tmdbKey": row = .tmdbKey
+        case "streamingRegion": row = .streamingRegion
+        case "streamingServices": row = .streamingServices
         default: row = .quality
         }
         let picker = UserDefaults.standard.string(forKey: "PTDebugSettingsPicker").flatMap(GlassSettingsPicker.init(rawValue:))

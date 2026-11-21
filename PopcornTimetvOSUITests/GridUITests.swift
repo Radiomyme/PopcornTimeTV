@@ -56,6 +56,7 @@ final class GridUITests: XCTestCase {
 
         let title = element("GridHeader.Title"), sort = element("GridHeader.Sort"), genre = element("GridHeader.Genre")
         XCTAssertTrue(title.exists && sort.exists && genre.exists, "the header is not complete")
+        XCTAssertFalse(element("GridHeader.Service").exists, "a Service control without a TMDB key")
         XCTAssertEqual(title.frame.midY, sort.frame.midY, accuracy: 6, "the title and Sort are not on one line")
         XCTAssertEqual(sort.frame.midY, genre.frame.midY, accuracy: 2, "Sort and Genre are not on one line")
         if isEnglish {
@@ -628,6 +629,9 @@ final class GridUITests: XCTestCase {
             "-themeSongVolume", "0",
             "-AppleLanguages", "(\(language))",
             "-AppleLocale", locale,
+            // No TMDB key, whatever the simulator saved: no Service control
+            // (StreamingServicesUITests has the key's header).
+            "-popcornkit.tmdb.apiKey", "",
         ] + arguments
         app.launch()
         self.app = app
