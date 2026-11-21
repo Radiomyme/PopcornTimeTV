@@ -567,11 +567,17 @@ final class TMDBIdCache: @unchecked Sendable {
 /// Nothing else is answered.
 public enum TMDBRecorded {
 
+    /// The service the recorded answers list nothing for (Apple TV Plus):
+    /// a fixture run shows how the Home and the grids say a service listed
+    /// nothing.
+    public static let emptyService = 350
+
     /// The recorded file a request reads; nil when it is answered without one.
     public static func fileName(for path: String) -> String? {
         if path.hasPrefix("/watch/providers/regions") { return "tmdb_regions.json" }
         if path.hasPrefix("/watch/providers/") { return "tmdb_providers.json" }
         guard let discover = discover(path) else { return nil }
+        if discover.service == emptyService { return "tmdb_empty.json" }
         return "tmdb_\(discover.kind)_\(discover.sort)_p\(discover.page).json"
     }
 
@@ -596,14 +602,14 @@ public enum TMDBRecorded {
         return try? JSONSerialization.data(withJSONObject: ["id": id, "imdb_id": NSNull()])
     }
 
-    /// The kind ("movie", "tv"), order and page of a discover path.
-    private static func discover(_ path: String) -> (kind: String, sort: String, page: Int)? {
+    /// The kind ("movie", "tv"), order, page and service of a discover path.
+    private static func discover(_ path: String) -> (kind: String, sort: String, page: Int, service: Int?)? {
         guard path.hasPrefix("/discover/"), let items = URLComponents(string: "https://recorded" + path)?.queryItems else { return nil }
         func value(_ name: String) -> String { items.first { $0.name == name }?.value ?? "" }
         let kind = path.hasPrefix("/discover/tv") ? "tv" : "movie"
         let sortBy = value("sort_by")
         let sort = sortBy.hasPrefix("popularity") ? StreamingSort.popular : sortBy.hasPrefix("vote_average") ? .topRated : .recent
         guard let page = Int(value("page")), page >= 1 else { return nil }
-        return (kind, sort.rawValue, page)
+        return (kind, sort.rawValue, page, Int(value("with_watch_providers")))
     }
 }

@@ -345,8 +345,8 @@ final class TMDBStreamingClientTests: CheckedTestCase {
         eq(first?.more, true, "with a next one")
         check(first?.items?.allSatisfy { HomeParse.isImdbId($0.imdbId) } == true, "every title known by its IMDb id")
         eq(titles(client, page: 2)?.more, false, "the second is the last")
-        let third = titles(client, page: 3)
-        check(third?.items == [] && third?.more == false, "past it: the end")
+        let third = titles(client, kind: .show, page: 3)
+        check(third?.items == [] && third?.more == false, "past it, a page not recorded: the end")
         eq(titles(client, kind: .show)?.items?.count, 12, "the shows")
         eq(wait { done in client.check(key: "anything") { done($0) } }, .some(true), "any key is taken")
         eq(wait { done in client.services(region: "FR") { done($0) } }??.first?.name, "Netflix", "the services of a country")
@@ -358,6 +358,11 @@ final class TMDBStreamingClientTests: CheckedTestCase {
         eq(TMDBRecorded.fileName(for: source.request.path), "tmdb_movie_recent_p1.json", "a list's file")
         let entries = TMDBRecorded.answer(to: source.request.path, in: recorded).flatMap { HomeParse.tmdbDiscover($0, kind: .movie) }
         eq(entries?.count, 12, "read as the hub reads it")
+        let nothing = HomeSource.streaming(service: TMDBRecorded.emptyService, kind: .show, sort: .popular, region: "FR",
+                                           today: "2026-11-14")
+        eq(TMDBRecorded.fileName(for: nothing.request.path), "tmdb_empty.json", "the service that lists nothing")
+        eq(TMDBRecorded.answer(to: nothing.request.path, in: recorded).flatMap { HomeParse.tmdbDiscover($0, kind: .show) }?.count, 0,
+           "an empty list, not a failure")
         let replayed = HomeRecordedTransport.answer(to: HomeRequest(host: .tmdb, path: source.request.path), in: recorded)
         eq(replayed, TMDBRecorded.answer(to: source.request.path, in: recorded), "the iOS and Mac recorded transport answers the same")
         let unknown = TMDBRecorded.answer(to: "/movie/1/external_ids", in: recorded)

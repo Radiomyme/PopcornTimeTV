@@ -15,6 +15,10 @@
 #   tmdb_providers.json                                     eight services, the most watched first
 #                                                          (TMDB's provider ids and names)
 #   tmdb_regions.json                                       nine countries
+#   tmdb_movie_popular_p3.json                              past the last page: six titles no
+#                                                          other page has
+#   tmdb_empty.json                                         an empty last page: every list of
+#                                                          TMDBRecorded.emptyService (Apple TV Plus)
 #
 # The DEBUG launch argument -PTDebugHomeFixtures <folder> makes the app answer every TMDB request
 # from these files: the hub's lists and the client's (grids, See All, Settings).
@@ -62,3 +66,11 @@ write("tmdb_providers.json", {"results": [{"provider_id": i, "provider_name": n,
                                            "display_priorities": {"FR": p + 1, "US": p + 1}}
                                           for p, (i, n) in enumerate(providers)]})
 write("tmdb_regions.json", {"results": [{"iso_3166_1": c} for c in ["FR", "BE", "CH", "CA", "US", "GB", "DE", "ES", "IT"]]})
+# A page past the last one (page 2 says total_pages 2): titles of its own (the shows of
+# cm_series_top.json, under movie ids of their own), so a grid that asks past TMDB's last page
+# shows them (StreamingServicesUITests).
+beyond = [dict(row, id=9100900 + i, title=row["name"], release_date=row["first_air_date"])
+          for i, row in enumerate(results("cm_series_top.json", "tv", 0)[:6])]
+for row in beyond: del row["name"], row["first_air_date"]
+write("tmdb_movie_popular_p3.json", {"page": 3, "total_pages": 3, "total_results": 26, "results": beyond})
+write("tmdb_empty.json", {"page": 1, "total_pages": 1, "total_results": 0, "results": []})
