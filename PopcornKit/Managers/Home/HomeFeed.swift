@@ -91,6 +91,10 @@ public final class HomeFeed: @unchecked Sendable {
         /// of a list that failed). The other shelves are not asked, and no
         /// title of a ranking is looked up.
         public var light = false
+        /// The « Services » row and the page filtered on a service
+        /// (`HomeSettings.homeService`): the Apple TV's Home only, by
+        /// default. The unit tests, which run on macOS, turn it on.
+        public var servicesRow = HomeFeed.defaultServicesRow
 
         public init(requestDeadline: TimeInterval = 15, phaseGrace: TimeInterval = 1.5) {
             self.requestDeadline = requestDeadline
@@ -129,9 +133,9 @@ public final class HomeFeed: @unchecked Sendable {
     /// The « Services » row and the page filtered on a service: the Apple
     /// TV's Home only (the other apps have no such row).
     #if os(tvOS)
-    static let servicesRow = true
+    public static let defaultServicesRow = true
     #else
-    static let servicesRow = false
+    public static let defaultServicesRow = false
     #endif
 
     public let store: HomeStore
@@ -422,8 +426,8 @@ public final class HomeFeed: @unchecked Sendable {
         return HomeBuilder.Inputs(lists: lists, local: local, languages: settings.contentLanguages,
                                   hidden: settings.hiddenShelves,
                                   sendsFollowedShows: settings.sendsFollowedShowsToCinemeta,
-                                  streaming: HomeFeed.servicesRow ? settings.streamingShelves : [],
-                                  service: HomeFeed.servicesRow ? settings.homeService : nil,
+                                  streaming: options.servicesRow ? settings.streamingShelves : [],
+                                  service: options.servicesRow ? settings.homeService : nil,
                                   region: settings.streamingRegion,
                                   allServicesTitle: Bundle.main.localizedString(forKey: "All", value: "All", table: nil),
                                   pending: pending, now: now())
@@ -451,14 +455,25 @@ public final class HomeFeed: @unchecked Sendable {
     }
 
     /// The user's titles changed what the page reads (another set of
-    /// followed shows, the genres of a title just added) and no refresh
-    /// asked those lists: one is due. False before the first refresh.
+    /// followed shows, the genres of a title just added), or a service was
+    /// picked, and no refresh asked those lists: one is due. False before
+    /// the first refresh.
     private func readsUnaskedLists() -> Bool {
         // A light plan reads the same lists as a full one and asks five of
         // them: the others are not "yet to ask".
         guard !rules.light, !planned.isEmpty else { return false }
         let plan = currentInputs().plan(rules: rules)
-        return ([plan.calendar].compactMap { $0 } + plan.genres + plan.streaming).contains { !planned.contains($0.key) && lists[$0.key] == nil }
+        if ([plan.calendar].compactMap { $0 } + plan.genres).contains(where: { !planned.contains($0.key) && lists[$0.key] == nil }) {
+            return true
+        }
+        // A service picked: its lists kept from an earlier visit are shown
+        // at once, and asked again only when they are no longer fresh.
+        let now = self.now()
+        return plan.streaming.contains { source in
+            guard !planned.contains(source.key) else { return false }
+            guard let list = lists[source.key] else { return true }
+            return state(list, at: now) != .fresh
+        }
     }
 
     private func setList(_ list: HomeSourceList?, key: String) {
@@ -491,11 +506,18 @@ public final class HomeFeed: @unchecked Sendable {
     }
 
     private func makeSnapshot() -> HomeSnapshot {
-        let shelves = HomeBuilder.shelves(currentInputs(), rules: rules)
-        let remote = shelves.contains { !HomeShelfID.local.contains($0.id) }
+        let inputs = currentInputs()
+        let shelves = HomeBuilder.shelves(inputs, rules: rules)
+        let remote = shelves.contains { HomeShelfID.isRemote($0.id) }
+        // A page filtered on a service whose lists all failed at their
+        // last attempt, with none to show: unavailable too (TMDB refused
+        // the key, or did not answer), though the other hosts answered.
+        let streaming = inputs.plan(rules: rules).streaming
+        let serviceDown = !streaming.isEmpty && streaming.allSatisfy { down.contains($0.key) }
+            && !shelves.contains { HomeShelfID.streamingService(of: $0.id) != nil }
         return HomeSnapshot(shelves: shelves, isRefreshing: running != nil,
                             lastUpdated: shelves.compactMap(\.updatedAt).max(),
-                            isOffline: reachedNothing, isUnavailable: reachedNothing && !remote)
+                            isOffline: reachedNothing, isUnavailable: (reachedNothing && !remote) || serviceDown)
     }
 
     /// Delivers the page as it is now, then runs `then` (main queue).

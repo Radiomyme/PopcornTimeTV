@@ -405,9 +405,18 @@ struct HomePlan: Sendable {
     /// its movies and shows in the user's country, in three orders. None
     /// on the usual page.
     let streaming: [HomeSource]
+    /// The services the « Services » row offers (their TMDB ids) and the
+    /// country of their catalogues: the lists of those services in that
+    /// country are kept on the usual page too, and through a switch of
+    /// service — the cache policy decides when they are asked again or
+    /// expire. The others (a service unchecked, another country) leave.
+    let offered: Set<Int>
+    let region: String
 
     init(now: Date, followedShowIds: [String], genres: [(kind: HomeItem.Kind, genre: String)], days: Int = HomeBuilder.Rules.airedDays,
-         light: Bool = false, service: StreamingService? = nil, region: String = "US") {
+         light: Bool = false, service: StreamingService? = nil, offered: [Int] = [], region: String = "US") {
+        self.offered = Set(offered + (service.map { [$0.id] } ?? []))
+        self.region = region
         year = CatalogDates.year(of: now)
         self.days = (0..<max(days, 1)).map { CatalogDates.dayString(now.addingTimeInterval(-Double($0) * 86_400)) }
         calendar = HomeSource.calendar(ids: followedShowIds)
@@ -460,7 +469,10 @@ struct HomePlan: Sendable {
         if key.hasPrefix(HomeSource.calendarPrefix) { return key == calendar?.key }
         if key.hasPrefix(HomeSource.tvmazePrefix) { return days.contains { key.hasSuffix($0) } }
         if key.hasPrefix(HomeSource.apibayPrefix) { return HomeSource.apibayLists.contains(key) }
-        if key.hasPrefix(HomeSource.tmdbPrefix) { return streaming.contains { $0.key == key } }
+        if key.hasPrefix(HomeSource.tmdbPrefix) {
+            guard let list = HomeSource.streaming(ofKey: key) else { return false }
+            return list.region == region && offered.contains(list.service)
+        }
         return true
     }
 }

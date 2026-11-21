@@ -109,7 +109,7 @@ enum HomeBuilder {
             return HomePlan(now: now,
                             followedShowIds: sendsFollowedShows ? local.followedShowIds : [],
                             genres: HomeBuilder.genreChoices(local, limit: rules.genreShelves),
-                            light: rules.light, service: service, region: region)
+                            light: rules.light, service: service, offered: streaming.map(\.id), region: region)
         }
     }
 

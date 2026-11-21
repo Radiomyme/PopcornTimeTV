@@ -70,7 +70,7 @@ public final class HomeState {
     public func paintFromDisk() -> Bool {
         guard !hasLoaded else { return true }
         let snapshot = feed.diskSnapshot()
-        guard snapshot.shelves.contains(where: { !HomeShelfID.local.contains($0.id) }) else { return false }
+        guard snapshot.shelves.contains(where: { HomeShelfID.isRemote($0.id) }) else { return false }
         apply(snapshot)
         return true
     }

@@ -140,6 +140,12 @@ final class HomeStreamingTests: CheckedTestCase {
         check(plan.phase1.prefix(6).allSatisfy { $0.request.host == .tmdb }, "asked first: they are the page")
         check(plan.isCurrent("tmdb-FR-8-show-recent") && !plan.isCurrent("tmdb-US-8-show-recent") && !plan.isCurrent("tmdb-FR-119-show-recent"),
               "another country's or service's list is a leftover")
+        let offered = HomePlan(now: now, followedShowIds: [], genres: [], offered: [8, 119], region: "FR")
+        check(offered.streaming.isEmpty, "the usual page asks no service's list")
+        check(offered.isCurrent("tmdb-FR-8-movie-popular") && offered.isCurrent("tmdb-FR-119-show-recent"),
+              "but keeps the lists of the services offered, in the country (« All », another service)")
+        check(!offered.isCurrent("tmdb-FR-337-show-recent") && !offered.isCurrent("tmdb-US-8-movie-popular") && !offered.isCurrent("tmdb-junk"),
+              "not a service unchecked, another country's, or a key it cannot read")
         let light = HomePlan(now: now, followedShowIds: [], genres: [], light: true, service: netflix, region: "FR")
         check(!light.sources.contains { $0.request.host == .tmdb }, "the Top Shelf's light refresh never asks TMDB")
     }

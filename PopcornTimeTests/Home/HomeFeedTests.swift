@@ -55,6 +55,8 @@ final class HomeFeedTests: CheckedTestCase {
     }
 
     override func tearDown() {
+        // The Home's service filter lasts for the run (`HomeSettings.homeServiceFilter`).
+        HomeSettings(defaults: sandbox.defaults).homeServiceFilter = nil
         sandbox.discard()
         super.tearDown()
     }
@@ -1060,6 +1062,169 @@ final class HomeFeedTests: CheckedTestCase {
         network.release()
         check(homeWait { MainActor.assumeIsolated { !state.isRefreshing } }, "the refresh ends")
         idle(feed)
+    }
+
+    // MARK: Streaming services
+
+    /// The Apple TV's « Services » row in a feed of the tests (they run on macOS, whose
+    /// Home has none).
+    private var servicesOptions: HomeFeed.Options {
+        var options = HomeFeed.Options(requestDeadline: .infinity, phaseGrace: .infinity)
+        options.servicesRow = true
+        return options
+    }
+
+    /// A TMDB key, the country, and the service the Home shows (nil: the usual page).
+    private func streaming(filter: Int?, services: [StreamingService]? = nil, region: String = "FR") {
+        let settings = HomeSettings(defaults: sandbox.defaults)
+        settings.tmdbAPIKey = "0123456789abcdef0123456789abcdef"
+        settings.streamingRegion = region
+        if let services { settings.streamingServices = services }
+        settings.homeServiceFilter = filter
+    }
+
+    /// TMDB's discover pages as `TMDBStreamingClient` hands them to the hub (an IMDb id in
+    /// every result): twelve titles of their own per service, kind and order.
+    private func tmdbPage(_ request: HomeRequest) -> Data?? {
+        guard request.host == .tmdb else { return nil }
+        let path = request.path
+        let kind: HomeItem.Kind = path.hasPrefix("/discover/tv") ? .show : .movie
+        let sort = path.contains("sort_by=popularity") ? 1 : path.contains("sort_by=vote_average") ? 3 : 2
+        let service = path.components(separatedBy: "with_watch_providers=").last.flatMap { Int($0.prefix { $0.isNumber }) } ?? 0
+        let ids = (1...12).map { String(format: "tt9%03d%d%d%02d", service % 1000, kind == .movie ? 1 : 2, sort, $0) }
+        return .some(HomeStreamingTests.discover(kind: kind, ids: ids))
+    }
+
+    private var tmdbPaths: [String] { network.requests.filter { $0.host == .tmdb }.map(\.path) }
+
+    private func storedKeys() -> Set<String> {
+        return Set(HomeStore(directory: sandbox.directory, now: { [clock] in clock!.now }).readAll().keys)
+    }
+
+    func testAPageFilteredOnAServiceAsksItsSixLists() {
+        streaming(filter: 8)
+        network.answer(tmdbPage)
+        let snapshot = load(makeFeed(options: servicesOptions))
+        eq(tmdbPaths.count, 6, "the service's six lists")
+        check(tmdbPaths.allSatisfy { $0.contains("watch_region=FR&with_watch_providers=8") }, "of Netflix, in France")
+        let netflix = HomeShelfID.streamingShelves.map { HomeShelfID.streaming(8, $0.kind, $0.sort) }
+        eq(snapshot.shelves.ids, [HomeShelfID.hero, HomeShelfID.services] + netflix, "the hero, the row, the service's shelves")
+        eq(snapshot.shelf(HomeShelfID.services)?.items.first?.id, HomeServiceCard.allId, "« All » first")
+        check(snapshot.heroItems.allSatisfy { $0.imdbId.hasPrefix("tt9008") }, "a hero of the service's titles")
+        check(!snapshot.isUnavailable && !snapshot.isOffline, "a page")
+
+        // The « Services » row hidden: the usual page, and no list of the service.
+        HomeSettings(defaults: sandbox.defaults).setShelf(HomeShelfID.services, hidden: true)
+        network.forget()
+        clock.now = HomeFixture.now.addingTimeInterval(13 * 3600)
+        let usual = load(makeFeed(options: servicesOptions))
+        eq(tmdbPaths.count, 0, "nothing asked of TMDB")
+        check(usual.shelf(HomeShelfID.trendingMovies) != nil && !usual.shelves.contains { HomeShelfID.streaming(of: $0.id) != nil },
+              "the usual page")
+
+        // The Top Shelf's light refresh never asks them, filtered or not.
+        HomeSettings(defaults: sandbox.defaults).setShelf(HomeShelfID.services, hidden: false)
+        network.forget()
+        clock.now = HomeFixture.now.addingTimeInterval(26 * 3600)
+        var light = servicesOptions
+        light.light = true
+        load(makeFeed(options: light))
+        check(network.requests.count > 0 && tmdbPaths.isEmpty, "the light refresh asks its lists, none of TMDB's")
+    }
+
+    func testOfflineWithAKeyAndNothingCachedIsUnavailable() {
+        streaming(filter: nil)
+        network.down = Set(HomeRequest.Host.allCases)
+        let usual = load(makeFeed(options: servicesOptions))
+        check(usual.isUnavailable && usual.isOffline, "the usual page: the error and its Retry (the « Services » row is not a list)")
+        streaming(filter: 8)
+        let filtered = load(makeFeed(options: servicesOptions))
+        check(filtered.isUnavailable && filtered.isOffline, "a page filtered on a service too")
+        MainActor.assumeIsolated {
+            check(!HomeState(feed: makeFeed(options: servicesOptions)).paintFromDisk(),
+                  "a launch with nothing cached paints no page made of the row alone")
+        }
+    }
+
+    func testAFilteredPageWhoseListsFailedSaysSo() {
+        streaming(filter: 8)
+        network.down = [.tmdb]
+        let failed = load(makeFeed(options: servicesOptions))
+        check(failed.isUnavailable, "no list of the service: the error and its Retry")
+        check(!failed.isOffline, "online: the other hosts answered")
+        eq(failed.shelves.ids, [HomeShelfID.services], "the row stays: « All » is there")
+        streaming(filter: nil)
+        let feed = makeFeed(options: servicesOptions)
+        check(!load(feed).isUnavailable, "the usual page is not unavailable")
+        network.down = []
+        network.answer(tmdbPage)
+        streaming(filter: 8)
+        let retried = load(feed, force: true)
+        check(!retried.isUnavailable && retried.shelves.count == 8, "Retry: the service's page")
+    }
+
+    func testServiceListsStayThroughAllAndAnotherService() {
+        let netflix = StreamingService(id: 8, name: "Netflix"), disney = StreamingService(id: 337, name: "Disney+")
+        streaming(filter: 8, services: [netflix, disney])
+        network.answer(tmdbPage)
+        let feed = makeFeed(options: servicesOptions)
+        load(feed)
+        let netflixKeys = Set(HomeShelfID.streamingShelves.map { "tmdb-FR-8-\($0.kind.rawValue)-\($0.sort.rawValue)" })
+        check(storedKeys().isSuperset(of: netflixKeys), "Netflix's lists on disk")
+
+        // « All », and a refresh of the usual page (the app comes back to the front).
+        streaming(filter: nil)
+        clock.now = HomeFixture.now.addingTimeInterval(3600)
+        load(feed)
+        check(storedKeys().isSuperset(of: netflixKeys), "kept through « All »")
+        // Disney+, then Netflix again within its 12 hours: nothing asked of TMDB for it.
+        streaming(filter: 337)
+        load(feed)
+        check(storedKeys().isSuperset(of: netflixKeys), "kept through another service")
+        network.forget()
+        streaming(filter: 8)
+        feed.refreshLocal()
+        homeSettle(0.2)
+        idle(feed)
+        eq(tmdbPaths.count, 0, "fresh: Netflix's page at once, without a request")
+        eq(feed.snapshot.shelves.ids.filter { HomeShelfID.streaming(of: $0) != nil }.count, 6, "its six shelves")
+
+        // Past their 12 hours, picked again from the usual page: asked again.
+        streaming(filter: nil)
+        clock.now = HomeFixture.now.addingTimeInterval(14 * 3600)
+        load(feed)
+        network.forget()
+        streaming(filter: 8)
+        feed.refreshLocal()
+        check(homeWait { self.tmdbPaths.count == 6 }, "a stale list picked again is asked again", "\(tmdbPaths)")
+        idle(feed)
+
+        // Disney+ unchecked, then another country: their lists leave.
+        streaming(filter: nil, services: [netflix])
+        load(feed)
+        check(!storedKeys().contains { $0.hasPrefix("tmdb-FR-337-") }, "an unchecked service's lists are cleaned")
+        check(storedKeys().isSuperset(of: netflixKeys), "not the others'")
+        streaming(filter: nil, region: "BE")
+        load(feed)
+        check(!storedKeys().contains { $0.hasPrefix("tmdb-") }, "another country: France's lists are cleaned")
+    }
+
+    func testAServicePickedDuringARefreshIsAskedWhenItEnds() {
+        streaming(filter: nil)
+        network.answer(tmdbPage)
+        let feed = makeFeed(options: servicesOptions)
+        network.hold = true
+        feed.refresh()
+        check(homeWait { !self.network.waiting.isEmpty }, "a refresh of the usual page runs")
+        streaming(filter: 8)
+        feed.refreshLocal()
+        homeSettle()
+        check(network.waiting.allSatisfy { $0.host != .tmdb }, "it goes on with its own plan")
+        network.hold = false
+        network.release()
+        check(homeWait { self.tmdbPaths.count == 6 }, "the service's lists are asked when it ends", "\(tmdbPaths)")
+        idle(feed)
+        check(homeWait { feed.snapshot.shelves.filter { HomeShelfID.streaming(of: $0.id) != nil }.count == 6 }, "its page")
     }
 
     // MARK: Observable state

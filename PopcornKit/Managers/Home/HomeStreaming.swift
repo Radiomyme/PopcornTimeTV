@@ -80,6 +80,13 @@ extension HomeShelfID {
         return (service, kind, sort)
     }
 
+    /// A shelf made of the hosts' lists: not one of the user's own
+    /// (`local`), nor the « Services » row, which is made of the settings
+    /// alone. A page without any is "unavailable" when the hosts failed.
+    public static func isRemote(_ id: String) -> Bool {
+        return !local.contains(id) && id != services
+    }
+
     /// The TMDB provider id of a streaming shelf, nil for the other shelves.
     public static func streamingService(of id: String) -> Int? {
         return streaming(of: id)?.service
