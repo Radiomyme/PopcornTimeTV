@@ -64,6 +64,7 @@
 		1405114E43C0A4C891A5E8D5 /* GlassRemoteImage.swift in Sources */ = {isa = PBXBuildFile; fileRef = 710A72E36F872A00A95B57B8 /* GlassRemoteImage.swift */; };
 		145BDF44A9991BC183FA0155 /* Library.swift in Sources */ = {isa = PBXBuildFile; fileRef = 68E1395CB976C46EBECAF7FB /* Library.swift */; };
 		14632E82375DB89B12B4AF00 /* VLCResumeOverlay.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7095098276FBDAA25508DD76 /* VLCResumeOverlay.swift */; };
+		15367CCF11C78A090AF58482 /* TMDBKeySettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1936F5B137F99D8D8E2B47DA /* TMDBKeySettings.swift */; };
 		15D1CED2D6A475595FD7BE9C /* ReleaseMatchingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 290B1ECDACAF4EF6D6DE8D2A /* ReleaseMatchingTests.swift */; };
 		185BA974F4C2CD8D41BFD9F8 /* EBML.swift in Sources */ = {isa = PBXBuildFile; fileRef = FD3ADE7ABACE8AC42374D51E /* EBML.swift */; };
 		18893819E2F0EA397427985E /* MacGlassDetailScreen.swift in Sources */ = {isa = PBXBuildFile; fileRef = ACE95A032F7EA6C545758B65 /* MacGlassDetailScreen.swift */; };
@@ -412,6 +413,7 @@
 		51D0BE99510604763933BC8A /* GridDebugHooks.swift in Sources */ = {isa = PBXBuildFile; fileRef = 813AF07BEF77D13438315729 /* GridDebugHooks.swift */; };
 		51F6552EFF7951249BC7541E /* DetailSessionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8EAB37B3640CD0C83AA92540 /* DetailSessionTests.swift */; };
 		522062687D6FBD248667FBF6 /* SubtitleConversion.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1EB39D111D2AFE3635EBEB23 /* SubtitleConversion.swift */; };
+		5262156F373DE02BC54140A1 /* TMDBKeySettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1936F5B137F99D8D8E2B47DA /* TMDBKeySettings.swift */; };
 		53963157F19427E3E9FDEA98 /* LoadingPhase.swift in Sources */ = {isa = PBXBuildFile; fileRef = AD48D854255C13ED3B2D36E7 /* LoadingPhase.swift */; };
 		53ACA1E47C4525B91D5B9859 /* GlassDetailWarmUp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3B121AAC35CB3A4B54868B80 /* GlassDetailWarmUp.swift */; };
 		53BC0CB9FC3C74BB4C92DCE9 /* AVPlayerItemFailureObserver.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0E3DA7B2D4D7CA055941C925 /* AVPlayerItemFailureObserver.swift */; };
@@ -455,6 +457,7 @@
 		5FEAA76C6D6F36E5439C4C5B /* TorrentioClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 70EBA1D4C0FFEE0000000001 /* TorrentioClient.swift */; };
 		60C371678709C57B09D84CCF /* ThemeSongManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4D0F9D051E6F296400860852 /* ThemeSongManager.swift */; };
 		616466E12BC1775A9BC79FD7 /* JumpWaitProgress.swift in Sources */ = {isa = PBXBuildFile; fileRef = 09549257B50666E4D6B25222 /* JumpWaitProgress.swift */; };
+		61A4264817393288BAA0E763 /* QRCodeImage.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5A10F6C6630CFDA0CD6CB61A /* QRCodeImage.swift */; };
 		620B39BD6EFA527D5D19F6A0 /* NextUpTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A8D4DEC18AD6159096B680B6 /* NextUpTests.swift */; };
 		624F440C83C9F8EA3F871398 /* RemuxRunPlanner.swift in Sources */ = {isa = PBXBuildFile; fileRef = 116B40B03406623E28081C47 /* RemuxRunPlanner.swift */; };
 		629BBA023C4B6D17076BB8C6 /* MatroskaDemuxer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8C2EC1C69555712A03A2CCA7 /* MatroskaDemuxer.swift */; };
@@ -627,6 +630,7 @@
 		A0CAEC25C2B18F913DF6F615 /* MacLibraryState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6D814477E5858ED061FFD359 /* MacLibraryState.swift */; };
 		A0F693B18F4168E4BCB72E01 /* CinemetaClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 78E93FE7FC06148BF5498E30 /* CinemetaClient.swift */; };
 		A14766897A75E1861E87606D /* PlaybackLanguagePreferences.swift in Sources */ = {isa = PBXBuildFile; fileRef = 545ED3913E5BBCC7F92D03A2 /* PlaybackLanguagePreferences.swift */; };
+		A1E3D9E462AA22B900FFC35C /* QRCodeImage.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5A10F6C6630CFDA0CD6CB61A /* QRCodeImage.swift */; };
 		A20B730BEB773508F44C5D55 /* MirrorChain.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3ADF95B9DDB389CAF0F85570 /* MirrorChain.swift */; };
 		A21C60F40D4947789B048AA3 /* TopShelfReloader.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3884B0654D70EEF22BEF27E3 /* TopShelfReloader.swift */; };
 		A28DFFE8767713CDA34F25D1 /* KnabenClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 465C81265998C402EC94DA6D /* KnabenClient.swift */; };
@@ -678,6 +682,7 @@
 		B6950884CCBB1C2D93F42FEF /* RemuxPlayback.swift in Sources */ = {isa = PBXBuildFile; fileRef = 43ACA0733CDCDC15FEE82849 /* RemuxPlayback.swift */; };
 		B7392CAC6873C79111FB6219 /* RemuxAVPlayerViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = C2F95F473701410C083AFC2F /* RemuxAVPlayerViewController.swift */; };
 		B7771C84B789F5E035FE5C15 /* Fixtures in Resources */ = {isa = PBXBuildFile; fileRef = E46DD2F099688E8AEBD09B06 /* Fixtures */; };
+		B810271CA4EABAB051EFEEB2 /* QRCodeImage.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5A10F6C6630CFDA0CD6CB61A /* QRCodeImage.swift */; };
 		B87411E44675CC283BFD226B /* RemuxAudioTranscoder.swift in Sources */ = {isa = PBXBuildFile; fileRef = E07267B3D72BCBF52A5C33B0 /* RemuxAudioTranscoder.swift */; };
 		B916AD968EB3D55671AAA0D7 /* PlaybackEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = F2E2860F5ED0880FDF359835 /* PlaybackEngine.swift */; };
 		B9BB0A54F1EDE51B3DE10575 /* HomeSettingsModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7E0C7CD7047E5563C60430CF /* HomeSettingsModel.swift */; };
@@ -717,6 +722,7 @@
 		C516DE0CA0ED6806CB93A4CC /* RemuxWaitProgress.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5BE5ED5B8EA9A42C62954234 /* RemuxWaitProgress.swift */; };
 		C5366CBCE3B068723B00CAEA /* RemuxWaitNudge.swift in Sources */ = {isa = PBXBuildFile; fileRef = D2828D5CB95B223B4F034EC8 /* RemuxWaitNudge.swift */; };
 		C59D1958E8BD60E7129C9426 /* HomeTransport.swift in Sources */ = {isa = PBXBuildFile; fileRef = AEE05BE17BF851732332EC8E /* HomeTransport.swift */; };
+		C5C48D7B287AAD386DF4E1E2 /* TMDBKeySettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1936F5B137F99D8D8E2B47DA /* TMDBKeySettings.swift */; };
 		C5EC2BCDE1F61CEA350AF163 /* ArtworkMemoryCache.swift in Sources */ = {isa = PBXBuildFile; fileRef = A4946DAE7DA202996C21686C /* ArtworkMemoryCache.swift */; };
 		C60E6D81C8802ACDA6371071 /* TorrentCacheCleanup.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0672CB356732DF7D08526F83 /* TorrentCacheCleanup.swift */; };
 		C6715DE87D42D71DE5FD990A /* BoundedStorageSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = 93A4CBBE36C30AE3F3835B20 /* BoundedStorageSession.swift */; };
@@ -759,6 +765,7 @@
 		D59080AD1676539D95DF0318 /* FarTargetWatchP13Tests.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD50DBBC91FE0CBE44E91861 /* FarTargetWatchP13Tests.swift */; };
 		D5F1CA3C5C4779774FB89750 /* ArtworkPipeline.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2FC816A2632F65C28E8EDB4E /* ArtworkPipeline.swift */; };
 		D64E47899A70667FFDE9EEA7 /* HomeStreaming.swift in Sources */ = {isa = PBXBuildFile; fileRef = EC00C80899EE46EAFD1E1E63 /* HomeStreaming.swift */; };
+		D77D93921C72389F87929F6F /* TMDBKeySettingsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B605EDCB33D420E2535728BB /* TMDBKeySettingsTests.swift */; };
 		D78BF0DB0D44EE76601EB54B /* FarTargetWatchP11Tests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 62432897AE1115943938CF6D /* FarTargetWatchP11Tests.swift */; };
 		D7D5231F5924ED083E736493 /* VLCResumeWatch.swift in Sources */ = {isa = PBXBuildFile; fileRef = C6D8316232536841928A0E73 /* VLCResumeWatch.swift */; };
 		D8073C2D706F746F5514C2ED /* DetailMerge.swift in Sources */ = {isa = PBXBuildFile; fileRef = 432967E06FD47203CB71C3C5 /* DetailMerge.swift */; };
@@ -1003,6 +1010,7 @@
 		18120BAA8ADD23FD1B0AC80D /* SyntheticMatroska.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = SyntheticMatroska.swift; path = PopcornTimeTests/Remux/SyntheticMatroska.swift; sourceTree = SOURCE_ROOT; };
 		183512CDB2D5F647BC5011FB /* WhatsNew.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = WhatsNew.swift; sourceTree = "<group>"; };
 		18F3482BBDE59699785600D8 /* ArtworkLoaderTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = ArtworkLoaderTests.swift; path = PopcornTimeTests/Artwork/ArtworkLoaderTests.swift; sourceTree = SOURCE_ROOT; };
+		1936F5B137F99D8D8E2B47DA /* TMDBKeySettings.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = TMDBKeySettings.swift; path = PopcornKit/Managers/Home/TMDBKeySettings.swift; sourceTree = SOURCE_ROOT; };
 		1A32370299AE9B3491C824BC /* RecentSearchesTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = RecentSearchesTests.swift; path = PopcornTimeTests/Catalog/RecentSearchesTests.swift; sourceTree = SOURCE_ROOT; };
 		1B75A3A88F053724195D45B6 /* SeasonPackTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = SeasonPackTests.swift; path = PopcornTimeTests/Providers/SeasonPackTests.swift; sourceTree = SOURCE_ROOT; };
 		1B75AFB00989AD9B4CBA5A5D /* Pods-PopcornKit iOS.release.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-PopcornKit iOS.release.xcconfig"; path = "Target Support Files/Pods-PopcornKit iOS/Pods-PopcornKit iOS.release.xcconfig"; sourceTree = "<group>"; };
@@ -1281,6 +1289,7 @@
 		587968AFBE7ADB8A08FDA9D6 /* HomeBillboard.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = HomeBillboard.swift; path = PopcornTime/UI/tvOS/Home/HomeBillboard.swift; sourceTree = SOURCE_ROOT; };
 		59807731FFF8D12E6AB6850E /* ReleaseMatching.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = ReleaseMatching.swift; path = PopcornKit/Managers/Providers/ReleaseMatching.swift; sourceTree = SOURCE_ROOT; };
 		59E94AFCAFF820469FC265C4 /* MacPosterCard.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = MacPosterCard.swift; path = PopcornTime/UI/Mac/MacPosterCard.swift; sourceTree = SOURCE_ROOT; };
+		5A10F6C6630CFDA0CD6CB61A /* QRCodeImage.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = QRCodeImage.swift; path = PopcornKit/Managers/Home/QRCodeImage.swift; sourceTree = SOURCE_ROOT; };
 		5A7A5DDBD357E1934A17991F /* RemuxSequentialGoldenTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = RemuxSequentialGoldenTests.swift; path = PopcornTimeTests/Remux/RemuxSequentialGoldenTests.swift; sourceTree = SOURCE_ROOT; };
 		5B2645DB8392CDC23BF6B91A /* Assets.xcassets */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		5BE5ED5B8EA9A42C62954234 /* RemuxWaitProgress.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = RemuxWaitProgress.swift; path = PopcornTime/Resources/Remux/RemuxWaitProgress.swift; sourceTree = SOURCE_ROOT; };
@@ -1408,6 +1417,7 @@
 		B1A8C3A6124637AD94DF7505 /* RemuxWaitNudgeTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = RemuxWaitNudgeTests.swift; path = PopcornTimeTests/Remux/RemuxWaitNudgeTests.swift; sourceTree = SOURCE_ROOT; };
 		B4144AD019D210EC5010E75E /* RootTabView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = RootTabView.swift; path = PopcornTime/UI/iOS/RootTabView.swift; sourceTree = SOURCE_ROOT; };
 		B46C65CC570E869D860C1CF2 /* ImageProxy.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = ImageProxy.swift; path = PopcornKit/Resources/ImageProxy.swift; sourceTree = SOURCE_ROOT; };
+		B605EDCB33D420E2535728BB /* TMDBKeySettingsTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = TMDBKeySettingsTests.swift; path = PopcornTimeTests/Home/TMDBKeySettingsTests.swift; sourceTree = SOURCE_ROOT; };
 		B63BEEC27BF296F81E4F16FB /* Collection+Safe.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = "Collection+Safe.swift"; path = "PopcornKit/Resources/Collection+Safe.swift"; sourceTree = SOURCE_ROOT; };
 		B747D9446AC930A21B6E6E3D /* Pods_TopShelf.framework */ = {isa = PBXFileReference; explicitFileType = wrapper.framework; includeInIndex = 0; path = Pods_TopShelf.framework; sourceTree = BUILT_PRODUCTS_DIR; };
 		B785F27A3D642BE0AEF1EC08 /* VLCResumeWatchTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = VLCResumeWatchTests.swift; path = PopcornTimeTests/Playback/VLCResumeWatchTests.swift; sourceTree = SOURCE_ROOT; };
@@ -2516,6 +2526,7 @@
 				0A583CF6B295C7A37E1D8BF0 /* HomeCursorTests.swift */,
 				633A1223A6C957C44124C6E0 /* HomeCollageTests.swift */,
 				3AEFEF5E2FD4C29075F17B67 /* TMDBStreamingClientTests.swift */,
+				B605EDCB33D420E2535728BB /* TMDBKeySettingsTests.swift */,
 			);
 			name = Home;
 			sourceTree = "<group>";
@@ -2620,6 +2631,8 @@
 				EC0020856DC26C009F27DF96 /* HomeFeed.swift */,
 				7395C7943D845BFBBC555C44 /* HomeState.swift */,
 				0E5E2ABF0130319D16A64105 /* HomeLibraryHooks.swift */,
+				1936F5B137F99D8D8E2B47DA /* TMDBKeySettings.swift */,
+				5A10F6C6630CFDA0CD6CB61A /* QRCodeImage.swift */,
 			);
 			name = Home;
 			sourceTree = "<group>";
@@ -3382,6 +3395,7 @@
 				9F8D16CD3E43E0C7A33D8093 /* RemuxWaitNudge.swift in Sources */,
 				640E16A3F479D3D0D844B6B3 /* RemuxWaitNudgeTests.swift in Sources */,
 				25FD312AC328B0A5CF480B3D /* TMDBStreamingClientTests.swift in Sources */,
+				D77D93921C72389F87929F6F /* TMDBKeySettingsTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -3690,6 +3704,8 @@
 				E36F899A26903CF33D4E572A /* UserNavigation.swift in Sources */,
 				B02D65FD15AD65ACB87EAE79 /* PlaybackStartMeasure.swift in Sources */,
 				616466E12BC1775A9BC79FD7 /* JumpWaitProgress.swift in Sources */,
+				C5C48D7B287AAD386DF4E1E2 /* TMDBKeySettings.swift in Sources */,
+				A1E3D9E462AA22B900FFC35C /* QRCodeImage.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -3810,6 +3826,8 @@
 				19C5BDA6DA452AC3DD30D9EB /* UserNavigation.swift in Sources */,
 				0A2237B0ECC9AA84A9F10701 /* PlaybackStartMeasure.swift in Sources */,
 				DA4619A54265F0649A56AAA8 /* JumpWaitProgress.swift in Sources */,
+				5262156F373DE02BC54140A1 /* TMDBKeySettings.swift in Sources */,
+				61A4264817393288BAA0E763 /* QRCodeImage.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -3917,6 +3935,8 @@
 				0739B462503668D1F8112166 /* UserNavigation.swift in Sources */,
 				86357C41D24F891A765CB8A2 /* PlaybackStartMeasure.swift in Sources */,
 				2678B8FC1CC758CD5D483BC1 /* JumpWaitProgress.swift in Sources */,
+				15367CCF11C78A090AF58482 /* TMDBKeySettings.swift in Sources */,
+				B810271CA4EABAB051EFEEB2 /* QRCodeImage.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

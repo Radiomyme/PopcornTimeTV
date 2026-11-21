@@ -342,7 +342,15 @@ public final class TMDBStreamingClient: @unchecked Sendable {
     /// that TMDB did not answer. False without a key, or with recorded
     /// answers.
     public var isKeyRefused: Bool {
-        guard recorded == nil, let key = apiKey(), let refused = refusedKey.value else { return false }
+        guard let key = apiKey() else { return false }
+        return isKeyRefused(key)
+    }
+
+    /// TMDB refused this key at its last request with it (`isKeyRefused`
+    /// for a key read elsewhere: Settings' own defaults). False with
+    /// recorded answers.
+    public func isKeyRefused(_ key: String) -> Bool {
+        guard recorded == nil, let refused = refusedKey.value else { return false }
         return key == refused
     }
 
@@ -416,7 +424,7 @@ public final class TMDBStreamingClient: @unchecked Sendable {
     // MARK: HTTP
 
     private func request(_ path: String, key: String) -> URLRequest? {
-        let isToken = key.count > 40
+        let isToken = TMDBKeySettings.kind(of: key) == .readToken
         let separator = path.contains("?") ? "&" : "?"
         let address = TMDBStreamingClient.base + path + (isToken ? "" : "\(separator)api_key=\(key)")
         guard let url = URL(string: address) else { return nil }
