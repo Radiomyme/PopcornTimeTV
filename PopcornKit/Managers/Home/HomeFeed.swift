@@ -758,11 +758,16 @@ public final class HomeFeed: @unchecked Sendable {
         // network, and neither do hosts that were already down failing
         // again while the others were left alone, their lists being fresh:
         // a host the ISP blocks fails at every refresh, and the device is
-        // not offline for that.
+        // not offline for that. TMDB is left out of that judgement: it
+        // refusing the user's key, or being down, is not the device being
+        // offline (a page filtered on a service says so itself, as
+        // unavailable), and a refresh that asked only TMDB says nothing.
+        let hosts = refresh.hosts.subtracting([.tmdb])
+        let planHosts = Set(refresh.plan.sources.map(\.request.host)).subtracting([.tmdb])
         if refresh.reached {
             reachedNothing = false
-        } else if !refresh.hosts.isEmpty,
-                  !refresh.hosts.isSubset(of: refresh.downHosts) || refresh.hosts.isSuperset(of: refresh.plan.sources.map(\.request.host)) {
+        } else if !hosts.isEmpty,
+                  !hosts.isSubset(of: refresh.downHosts) || hosts.isSuperset(of: planHosts) {
             reachedNothing = true
         }
         // What a source this refresh had no use for was worth is forgotten

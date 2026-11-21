@@ -1163,6 +1163,48 @@ final class HomeFeedTests: CheckedTestCase {
         check(!retried.isUnavailable && retried.shelves.count == 8, "Retry: the service's page")
     }
 
+    /// TMDB failing alone is not the device being offline. A service
+    /// picked while the rest of the page is fresh asks only TMDB; when it
+    /// refuses the key, the filtered page is unavailable, and the usual page
+    /// after « All » shows no offline note.
+    func testAServiceFailingWhileTheRestIsFreshIsNotOffline() {
+        streaming(filter: nil)
+        // Series-year answers long enough to count as complete, so a second
+        // refresh within the hour asks nothing.
+        let top = (try! JSONSerialization.jsonObject(with: HomeFixture.data("cm_series_top.json")) as! [String: Any])["metas"] as! [[String: Any]]
+        let metas: [[String: Any]] = (0..<40).map { i in
+            var meta = top[i % top.count]
+            meta["id"] = String(format: "tt98%05d", i)
+            meta["imdb_id"] = meta["id"]
+            return meta
+        }
+        let yearPage = try! JSONSerialization.data(withJSONObject: ["metas": metas])
+        network.answer { [self] request in
+            if request.host == .cinemeta, request.path.contains("/catalog/series/year/") { return .some(yearPage) }
+            return self.tmdbPage(request)
+        }
+        let feed = makeFeed(options: servicesOptions)
+        check(!load(feed).isOffline, "the usual page, online")
+
+        clock.now = HomeFixture.now.addingTimeInterval(600)
+        network.down = [.tmdb]
+        network.forget()
+        streaming(filter: 8)
+        feed.refreshLocal()
+        check(homeWait { self.tmdbPaths.count >= 6 }, "Netflix's lists asked", "\(tmdbPaths)")
+        idle(feed)
+        homeSettle(0.2)
+        eq(network.requests.filter { $0.host != .tmdb }.count, 0, "nothing else asked: the rest is fresh")
+        check(feed.snapshot.isUnavailable, "the filtered page: unavailable, with its Retry")
+        check(!feed.snapshot.isOffline, "not offline: only TMDB failed")
+
+        streaming(filter: nil)
+        feed.refreshLocal()
+        homeSettle(0.2)
+        idle(feed)
+        check(!feed.snapshot.isOffline && !feed.snapshot.isUnavailable, "« All »: the usual page, no offline note")
+    }
+
     func testServiceListsStayThroughAllAndAnotherService() {
         let netflix = StreamingService(id: 8, name: "Netflix"), disney = StreamingService(id: 337, name: "Disney+")
         streaming(filter: 8, services: [netflix, disney])
