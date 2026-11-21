@@ -25,18 +25,27 @@ once, resumes a film that is still downloading in the native player, chains a sh
 
 On `master`, not in a release: the version stays 5.3.0 and What's New in the app is unchanged.
 Contributions by [RougeCiel](https://github.com/RougeCiel), reviewed and completed before the
-merge; seen on Apple TV simulators with recorded answers and a made-up key only, not on a real
-Apple TV nor against TMDB itself.
+merge. Seen on Apple TV simulators with recorded answers, then against TMDB itself with a real
+key on 2026-11-21 (Settings, the Services row, the filtered pages and the grids' Service filter,
+in French and after a move to the United States); what that run found is corrected below. Not
+yet on a real Apple TV.
 
 **Browse by streaming service (Apple TV)**
 - **What it needs**: your own free TMDB key (themoviedb.org › Settings › API), typed or pasted
   from the iPhone in **Settings › Streaming Services**, with the country and the services to
-  offer (Netflix, Amazon Prime Video, Disney Plus and Apple TV Plus until you choose). Without a
+  offer (Netflix, Amazon Prime Video, Disney Plus and Apple TV until you choose). Without a
   key the app looks and behaves as in 5.3.0, apart from that Settings section.
+- **The services offered** are TMDB's for your country, the most watched first: the
+  subscription and free ones, not the stores (Apple TV Store, Amazon Video, Rakuten TV, YouTube,
+  Canal VOD…), whose lists would be titles they rent or sell. Amazon Prime Video is the
+  country's own (TMDB numbers it differently in the United States, the United Kingdom, Germany,
+  Austria and Japan), and choosing another country turns the services chosen into that
+  country's, leaving out the ones it does not have.
 - **The Services row** on Home, under Continue Watching: picking a service shows a page filtered
   on it — its popular, recent and top rated movies and shows in your country, placeholders while
   they come, « No results » when it lists nothing, an error with Try Again when TMDB does not
-  answer or refuses the key; « All », or Menu at the top of the page, brings the usual page
+  answer, or saying so when TMDB refuses the key (Settings then shows the key as refused);
+  « All », or Menu at the top of the page, brings the usual page
   back. The choice lasts the session; hiding the row in Settings › Home shows the usual page.
 - **The Service filter** of the Movies and Shows grids, after Sort and Genre: the grid lists the
   service's titles, with the sorts and genres its lists can follow.
@@ -741,7 +750,7 @@ PopcornTorrent's rule (it does not publish it).
 
 **⌘U**: pick the **PopcornTimeTests** scheme (or PopcornTimeMac), destination *My Mac*. The
 macOS unit-test target runs in about 15 seconds, offline, in English whatever the Mac's
-language: 899 tests, 24,939 checks of the extra sources (apibay, Knaben, Cinemeta, TVMaze, the
+language: 904 tests, 25,408 checks of the extra sources (apibay, Knaben, Cinemeta, TVMaze, the
 Top 100), the catalogs (each source's sorts and genres, the mirror races, the first pages kept
 on disk), the Home feed (`PopcornTimeTests/Home`: its parsers, shelves, cache and loader on
 the answers recorded on 2026-11-14, its transport on hosts played by a `URLProtocol`, and the
