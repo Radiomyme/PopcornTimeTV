@@ -95,6 +95,9 @@ final class StreamingServicesUITests: XCTestCase {
         pause(1.2)
         snap("netflix-waiting")
         XCTAssertFalse(popular.exists, "Netflix's lists came at once: nothing waited")
+        // The placeholders are hidden from accessibility: what shows instead
+        // of them, when the page is wrong, is « No results ».
+        XCTAssertFalse(element("Home.Services.Empty").exists, "« No results » while Netflix's lists are on their way")
         XCTAssertTrue(element("Home.Card.service-all").exists, "the page is not filtered yet")
         // Each answer 3 s late, after the refresh the launch started.
         XCTAssertTrue(popular.waitForExistence(timeout: 60), "Netflix's shelves never came")
@@ -102,6 +105,23 @@ final class StreamingServicesUITests: XCTestCase {
         snap("netflix-arrived")
         XCTAssertTrue(waitUntil(timeout: 5) { netflix.hasFocus || self.looksFocused(netflix, beside: self.element("Home.Card.service-119")) },
                       "the focus left Netflix's card while its shelves came: \(focusedLabel)")
+    }
+
+    /// A service that lists nothing (the recorded answers list nothing for
+    /// TMDBRecorded.emptyService, Apple TV Plus): « No results » under the
+    /// row, « All » there, and no shelf of the service.
+    func testAServiceThatListsNothingSaysSo() throws {
+        launch(key: Self.key, ["-PTDebugHomeResume", Self.resume, "-PTDebugHomeFocus", "services:3"])
+        let apple = element("Home.Card.service-350"), empty = element("Home.Services.Empty")
+        XCTAssertTrue(waitForFocus(on: apple, timeout: 40), "the focus never reached Apple TV Plus's card: \(focusedLabel)")
+        pause(1.5)
+        remote.press(.select)
+        XCTAssertTrue(empty.waitForExistence(timeout: 30), "a service that lists nothing: no « No results »")
+        pause(1.5)
+        snap("apple-empty")
+        XCTAssertTrue(element("Home.Card.service-all").exists, "no « All » to go back")
+        XCTAssertFalse(element("Home.Unavailable").exists, "an empty list is not a failure")
+        XCTAssertFalse(element("Home.Section.streaming-350-movie-popular").exists, "a shelf of a service that lists nothing")
     }
 
     /// A service none of whose lists came (TMDB refused the key, or did not
@@ -127,7 +147,7 @@ final class StreamingServicesUITests: XCTestCase {
         pause(2)
         snap("service-unavailable")
         if isEnglish {
-            XCTAssertTrue(app.staticTexts["The Netflix Catalogue Can't Load"].exists, "the error does not name the service")
+            XCTAssertTrue(app.staticTexts["The Netflix Catalog Can't Load"].exists, "the error does not name the service")
         }
         let retry = element("Home.Retry"), all = element("Home.Card.service-all")
         XCTAssertTrue(waitUntil(timeout: 5) { retry.hasFocus }, "Try Again does not have the focus: \(focusedLabel)")
@@ -257,7 +277,8 @@ final class StreamingServicesUITests: XCTestCase {
     /// Genre. Netflix picked: the control says it, the list is Netflix's
     /// popular movies, Sort is back on Popular and offers only Popular, Top
     /// Rated and New, Genre only the genres TMDB knows; Menu closes a menu
-    /// and nothing more; the list pages to its second page and ends there.
+    /// and nothing more; the list pages to its second page and ends there
+    /// (the recorded page 3, past TMDB's last page, is never shown).
     func testTheMoviesGridsServiceControlFiltersAndPages() throws {
         launch(key: Self.key, ["-PTDebugTab", "movies"])
         let grid = self.grid("MoviesViewController")
@@ -360,6 +381,19 @@ final class StreamingServicesUITests: XCTestCase {
         let secondPage = ["The Dog Stars", "Project Hail Mary", "Coraline", "Disclosure Day", "Love of Your Life"]
         XCTAssertTrue(waitUntil(timeout: 15) { grid.cells.allElementsBoundByIndex.contains { cell in secondPage.contains { cell.label.hasPrefix($0) } } },
                       "the grid never showed Netflix's second page")
+        XCTAssertFalse(element("Grid.Retry").exists, "an error footer at the end of Netflix's list")
+
+        // The end: page 2 says it is TMDB's last. A page 3 is recorded with
+        // titles of its own, so a grid that asked past the end would show them.
+        for _ in 0..<3 {
+            remote.press(.down)
+            pause(1.5)
+        }
+        pause(3)
+        snap("movies-netflix-end")
+        let pastTheEnd = ["MobLand", "Nocturne", "Black Doves", "Dexter: Resurrection", "VisionQuest", "Black Clover"]
+        let asked = grid.cells.allElementsBoundByIndex.map(\.label).filter { label in pastTheEnd.contains { label.hasPrefix($0) } }
+        XCTAssertEqual(asked, [], "the grid asked past TMDB's last page")
         XCTAssertFalse(element("Grid.Retry").exists, "an error footer at the end of Netflix's list")
     }
 
