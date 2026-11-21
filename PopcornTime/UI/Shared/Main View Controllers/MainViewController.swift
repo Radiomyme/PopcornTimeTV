@@ -210,7 +210,8 @@ class MainViewController: UIViewController, CollectionViewControllerDelegate {
     /// Menu on a grid goes up one level at a time, as the user reads the
     /// page: from the rows below, back to the top of the grid (the first
     /// row, with the header and the tab bar); from the top, to the tab bar;
-    /// from the tab bar, the system leaves the app. (tvOS 26 leaves the app
+    /// from the tab bar Menu goes to Home (`TVTabBarController`), and from
+    /// Home leaves the app. (tvOS 26 leaves the app
     /// at once from anywhere on a tab's first screen: a long way from the
     /// fifth page of a list.)
     private func installMenuToTheTop() {
@@ -224,7 +225,8 @@ class MainViewController: UIViewController, CollectionViewControllerDelegate {
     /// Only for a tab's first screen at rest with the focus in it: a page
     /// being pushed or popped keeps its own Back (`TVNavigationController`),
     /// a screen pushed on a tab (a person's titles) goes back with one press,
-    /// and from the tab bar Menu leaves the app.
+    /// and from the tab bar Menu goes to Home (`TVTabBarController`), and
+    /// from Home leaves the app.
     private var takesMenu: Bool {
         guard let navigationController, navigationController.topViewController === self,
               navigationController.viewControllers.first === self,

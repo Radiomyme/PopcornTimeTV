@@ -554,7 +554,8 @@ struct HomeErrorHeader: View {
                 .frame(maxWidth: 980)
             // Not disabled while it refreshes: a disabled button cannot keep
             // the focus, and with nothing else on the page it would fall to
-            // the tab bar (Menu then leaves the app). A press then does nothing.
+            // the tab bar (from the tab bar Menu goes to Home, and from Home
+            // leaves the app: here, at once). A press then does nothing.
             SwiftUI.Button {
                 if !isRefreshing { retry() }
             } label: {

@@ -404,7 +404,8 @@ final class HomeUITests: XCTestCase {
     // MARK: - Menu
 
     /// Menu from the shelves goes back to the top of the page, on Play;
-    /// Menu there leaves the app, as on the other tabs.
+    /// Menu there leaves the app (from the tab bar Menu goes to Home, and
+    /// from Home leaves the app).
     func testMenuFromAShelfReturnsToTheTopThenLeavesTheApp() throws {
         launch()
         try focusPlay()

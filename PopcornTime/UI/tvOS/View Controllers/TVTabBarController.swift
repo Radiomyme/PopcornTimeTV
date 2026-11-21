@@ -160,8 +160,9 @@ class TVTabBarController: UITabBarController {
     /// screen that is not one level back: the focus is there only because
     /// that screen had nothing to focus (a page still loading, an error), or
     /// because the user went up to the tabs from a person's page. Menu then
-    /// goes back in the tab, as from the screen itself; on a tab's first
-    /// screen it still leaves the app.
+    /// goes back in the tab, as from the screen itself. On a tab's first
+    /// screen, from the tab bar Menu goes to Home (`menuGoesHome`), and from
+    /// Home leaves the app.
     private func installBackFromTabBar() {
         let menu = UITapGestureRecognizer(target: self, action: #selector(backFromTabBar))
         menu.allowedPressTypes = [NSNumber(value: UIPress.PressType.menu.rawValue)]

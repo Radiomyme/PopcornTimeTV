@@ -35,7 +35,8 @@ class TVLoadingViewController: UIViewController {
 
 /// A screen pushed in a tab with nothing focusable on it (the loading
 /// screen) let the focus fall into the tab bar,
-/// and Menu pressed there leaves the app instead of going back. This
+/// and Menu pressed there would not go back (from the tab bar Menu goes to
+/// Home, and from Home leaves the app). This
 /// invisible full-screen view takes the focus instead: Menu then reaches the
 /// navigation controller, which goes back. It draws no focus effect.
 final class TVFocusAnchorView: UIView {

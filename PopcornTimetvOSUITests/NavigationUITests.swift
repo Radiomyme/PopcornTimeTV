@@ -691,14 +691,16 @@ final class NavigationUITests: XCTestCase {
     /// the app left on Settings with the focus on that tab: back in the
     /// foreground, the app shows the page on the Shows tab. (tvOS gives the
     /// focus back to the Settings tab then, and selects a tab 0.3 s after
-    /// the focus lands on it.)
+    /// the focus lands on it.) The remote's TV button leaves the app: Menu
+    /// there would go to Home first, and the app would not be left on
+    /// Settings.
     func testALinkPickedInTheBackgroundOpensItsPage() throws {
         launch(["-PTDebugTab", "settings", "-PTDebugActivationURL", "popcorntime://show/tt0903747"])
         XCTAssertTrue(element("Settings.Row.quality").waitForExistence(timeout: 10), "the Settings page never showed")
         pause(2)
         XCTAssertTrue(tabBarHasFocus, "the focus is not on the Settings tab")
-        remote.press(.menu)
-        XCTAssertTrue(waitUntilLeft(), "Menu on the Settings tab did not go to the Home screen")
+        remote.press(.home)
+        XCTAssertTrue(waitUntilLeft(), "the TV button on the Settings tab did not go to the Home screen")
         pause(2)
         app.activate()
         XCTAssertTrue(detailTitle.waitForExistence(timeout: 60), "the page never opened")
@@ -1115,7 +1117,8 @@ final class NavigationUITests: XCTestCase {
 
     /// On the first screen of a tab other than Home, Menu goes to Home (at
     /// once, or after a first press that gives the focus to the tab bar)
-    /// and the app stays; Menu on Home then leaves the app.
+    /// with the focus in Home, not in the tab bar, and the app stays; Menu
+    /// on Home then leaves the app.
     private func expectMenuGoesHomeThenLeavesTheApp(_ screen: String) {
         remote.press(.menu)
         pause(1.5)
@@ -1127,6 +1130,7 @@ final class NavigationUITests: XCTestCase {
             XCTAssertEqual(app.state, .runningForeground, "\(screen): Menu on the tab bar left the app instead of going to Home")
         }
         XCTAssertEqual(selectedTab, "home", "\(screen): Menu did not go to Home")
+        XCTAssertFalse(tabBarHasFocus, "\(screen): the focus stayed in the tab bar after going to Home: \(focusedLabel)")
         remote.press(.menu)
         XCTAssertTrue(waitUntilLeft(), "\(screen): Menu on Home must go to the Home screen")
     }

@@ -323,7 +323,8 @@ final class GridUITests: XCTestCase {
 
     /// Menu from the rows below goes back to the top of the grid, in the
     /// same column, with the header and the tab bar; from the top it goes to
-    /// the tab bar; from the tab bar it leaves the app.
+    /// the tab bar; from the tab bar it goes to Home (`TVTabBarController`),
+    /// and from Home it leaves the app.
     func testMenuGoesToTheTopThenToTheTabBar() throws {
         launch(["-PTDebugTab", "movies"])
         let grid = self.grid("MoviesViewController")
@@ -359,7 +360,13 @@ final class GridUITests: XCTestCase {
         XCTAssertEqual(app.tabBars.firstMatch.identifier, "TabBar.movies", "the tab changed")
 
         remote.press(.menu)
-        XCTAssertTrue(app.wait(for: .runningBackground, timeout: 8) || app.state != .runningForeground, "Menu in the tab bar did not leave the app")
+        pause(1.5)
+        XCTAssertEqual(app.state, .runningForeground, "Menu in the tab bar left the app instead of going to Home")
+        XCTAssertEqual(app.tabBars.firstMatch.identifier, "TabBar.home", "Menu in the tab bar did not go to Home")
+        XCTAssertFalse(tabBarHasFocus, "the focus stayed in the tab bar after going to Home: \(focusedLabel)")
+
+        remote.press(.menu)
+        XCTAssertTrue(app.wait(for: .runningBackground, timeout: 8) || app.state != .runningForeground, "Menu on Home did not leave the app")
     }
 
     /// A person's page pushed on a tab (a detail page's cast, Search's
