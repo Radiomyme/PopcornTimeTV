@@ -1205,6 +1205,30 @@ final class HomeFeedTests: CheckedTestCase {
         check(!feed.snapshot.isOffline && !feed.snapshot.isUnavailable, "« All »: the usual page, no offline note")
     }
 
+    /// A service's list that TMDB answers empty is a complete one: it
+    /// replaces the titles kept (they left the service), is fresh for its 12
+    /// hours, and the page is not unavailable for it.
+    func testAServiceListThatEmptiesOutReplacesTheOldOne() {
+        streaming(filter: 8)
+        network.answer(tmdbPage)
+        let feed = makeFeed(options: servicesOptions)
+        eq(load(feed).shelves.ids.filter { HomeShelfID.streaming(of: $0) != nil }.count, 6, "Netflix's six shelves")
+
+        clock.now = HomeFixture.now.addingTimeInterval(13 * 3600)
+        network.answer { request in
+            guard request.host == .tmdb else { return nil }
+            return .some(HomeStreamingTests.discover(kind: request.path.hasPrefix("/discover/tv") ? .show : .movie, ids: []))
+        }
+        let emptied = load(feed)
+        check(!emptied.shelves.contains { HomeShelfID.streaming(of: $0.id) != nil }, "the titles that left are gone")
+        check(!emptied.isUnavailable && !emptied.isOffline, "an empty answer is not a failure")
+
+        network.forget()
+        clock.now = HomeFixture.now.addingTimeInterval(13 * 3600 + 600)
+        load(feed)
+        eq(tmdbPaths.count, 0, "the empty lists are fresh: not asked again")
+    }
+
     func testServiceListsStayThroughAllAndAnotherService() {
         let netflix = StreamingService(id: 8, name: "Netflix"), disney = StreamingService(id: 337, name: "Disney+")
         streaming(filter: 8, services: [netflix, disney])
