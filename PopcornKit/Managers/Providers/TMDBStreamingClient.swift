@@ -87,20 +87,24 @@ public final class TMDBStreamingClient: @unchecked Sendable {
     // MARK: Paths
 
     /// A page of a service's catalogue in a country, in `sort`'s order:
-    /// subscription titles ("flatrate"), with a few votes at least (TMDB
-    /// lists thousands of unrated fillers). TMDB applies "flatrate" to the
+    /// titles watched with a subscription, free or with ads ("flatrate",
+    /// "free", "ads"; %7C is TMDB's « or »), with a few votes at least (TMDB
+    /// lists thousands of unrated fillers). TMDB applies these types to the
     /// title, not to the service asked: a title the service only rents or
     /// sells comes too when another service streams it. Subscription
     /// services offer nothing else (Netflix in France: the same 5384 titles
-    /// with or without it, 2026-11-21); stores would list their rentals,
-    /// which is why `services(region:)` leaves them out (`isStore`). `today` ("2026-11-20") bounds
+    /// with or without it, 2026-11-21); free services need "free" and "ads"
+    /// (JustWatch TV Free in France: 178 titles with "flatrate" alone, 231
+    /// with all three; Tubi TV in the US: 16889 and 20001); stores would
+    /// list their rentals, which is why `services(region:)` leaves them out
+    /// (`isStore`). `today` ("2026-11-20") bounds
     /// the recent ones (TMDB lists announced titles too). In English unless
     /// a `language` is given.
     static func discoverPath(service: Int, kind: HomeItem.Kind, region: String, page: Int, sort: StreamingSort = .popular,
                              genre: Int? = nil, today: String? = nil, language: String? = nil) -> String {
         let movie = kind == .movie
         var path = "/discover/\(movie ? "movie" : "tv")?watch_region=\(region)&with_watch_providers=\(service)"
-            + "&with_watch_monetization_types=flatrate&include_adult=false"
+            + "&with_watch_monetization_types=flatrate%7Cfree%7Cads&include_adult=false"
         switch sort {
         case .popular:
             path += "&sort_by=popularity.desc&vote_count.gte=10"
@@ -294,10 +298,12 @@ public final class TMDBStreamingClient: @unchecked Sendable {
     /// VIVA by videofutur (2286), Premiere Max (2307), Pathé Home (2601),
     /// JustWatch TV Store (2784); the others are the well-known stores of
     /// other countries (Google Play Movies, Fandango At Home, Amazon Video,
-    /// Chili, Microsoft Store, Sky Store). A name with « Store » or ending
+    /// Chili, Microsoft Store, Sky Store), and Fandango (60), the US cinema
+    /// tickets and rentals seller (TMDB's US list, 2026-11-21; its free
+    /// service, Fandango at Home Free, 332, stays). A name with « Store » or ending
     /// in « VOD » is one too. Free services (Arte, Pluto TV) and YouTube
     /// Premium are not stores.
-    static let storeIds: Set<Int> = [2, 3, 7, 10, 35, 40, 58, 61, 68, 130, 192, 2286, 2307, 2601, 2784]
+    static let storeIds: Set<Int> = [2, 3, 7, 10, 35, 40, 58, 60, 61, 68, 130, 192, 2286, 2307, 2601, 2784]
 
     static func isStore(id: Int, name: String) -> Bool {
         let words = name.lowercased().split(whereSeparator: { !$0.isLetter && !$0.isNumber })

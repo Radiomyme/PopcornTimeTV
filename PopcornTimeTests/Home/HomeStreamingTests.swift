@@ -84,9 +84,11 @@ final class HomeStreamingTests: CheckedTestCase {
             ["provider_id": 9998, "provider_name": "Some VOD", "display_priorities": ["FR": 4]],
             ["provider_id": 234, "provider_name": "Arte", "display_priorities": ["FR": 5]],
             ["provider_id": 188, "provider_name": "YouTube Premium", "display_priorities": ["FR": 6]],
+            ["provider_id": 60, "provider_name": "Fandango", "display_priorities": ["FR": 7]],
+            ["provider_id": 332, "provider_name": "Fandango at Home Free", "display_priorities": ["FR": 8]],
         ]
-        eq(TMDBStreamingClient.services(results, region: "FR").map(\.id), [8, 234, 188],
-           "stores left out, by id or by a name that says so; a free service (Arte) and YouTube Premium kept")
+        eq(TMDBStreamingClient.services(results, region: "FR").map(\.id), [8, 234, 188, 332],
+           "stores left out, by id or by a name that says so; free services (Arte, Fandango at Home Free) and YouTube Premium kept")
     }
 
     /// The Home's filter lasts for the run of the app only, and a hidden « Services » row
@@ -125,7 +127,11 @@ final class HomeStreamingTests: CheckedTestCase {
         eq(source.key, "tmdb-FR-8-show-popular", "the key names the country, the service, the kind and the order")
         eq(source.request.host, .tmdb, "TMDB's host")
         check(source.request.path.hasPrefix("/discover/tv?watch_region=FR&with_watch_providers=8"), "a discover page of TV shows")
-        check(source.request.path.contains("with_watch_monetization_types=flatrate"), "subscription titles only")
+        check(source.request.path.contains("with_watch_monetization_types=flatrate%7Cfree%7Cads&"),
+              "titles watched with a subscription, free or with ads: a free service's own titles too, no rentals asked")
+        let types = URLComponents(string: "https://api.themoviedb.org/3" + source.request.path)?.queryItems?
+            .first { $0.name == "with_watch_monetization_types" }?.value
+        eq(types, "flatrate|free|ads", "a URL the system accepts, TMDB's « or » once decoded")
         check(source.request.path.contains("sort_by=popularity.desc"), "most popular first")
         check(source.request.path.hasSuffix("&language=en-US"), "in English, as the app names its titles (Cinemeta's), whatever the device's language")
         let parsed = HomeSource.streaming(ofKey: source.key)
