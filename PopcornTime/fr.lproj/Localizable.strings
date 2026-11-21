@@ -557,18 +557,18 @@
 "Settings.UpNextCard.Value" = "%d s avant la fin";
 "Settings.UpNextCard.Message" = "Combien de temps avant la fin d'un épisode sa carte propose le suivant. Avec « Enchaîner les épisodes », le suivant démarre à la fin ; sinon seulement quand vous choisissez Lire maintenant.";
 
-/* Streaming services (PopcornKit/Managers/Home/HomeStreaming.swift, the tvOS Settings' streaming section). "On %@": a service's shelf, %@ = the service ("On Netflix"). */
+/* Streaming services (PopcornKit/Managers/Home/HomeStreaming.swift; the tvOS Settings' streaming section, the Home's « Services » row, the Movies and Shows grids' « Service » filter). "… on %@": a shelf of a page filtered on a service, %@ = the service ("Popular Movies on Netflix"); "Service: %@" like "Sort: %@"; Home.Unavailable.Service: %@ = the service, when none of its lists came. Settings.Streaming.Footer carries TMDB's required notice ("This product uses the TMDB API but is not endorsed or certified by TMDB"). */
 "Save" = "Enregistrer";
 "Settings.Streaming" = "Services de streaming";
-"Settings.Streaming.Footer" = "Ce que chaque service propose dans votre pays vient de JustWatch, via TMDB. Popcorn Time n’est ni approuvé ni certifié par TMDB.";
+"Settings.Streaming.Footer" = "Ce que chaque service propose dans votre pays vient de JustWatch, via TMDB. Ce produit utilise l’API de TMDB mais n’est ni approuvé ni certifié par TMDB. Popcorn Time lit ces titres depuis ses propres sources, pas depuis ces services.";
 "Settings.TMDBKey" = "Clé TMDB";
-"Settings.TMDBKey.Detail" = "Votre propre clé gratuite, sur themoviedb.org › Paramètres › API. Les rangées « Sur Netflix » en ont besoin.";
+"Settings.TMDBKey.Detail" = "Votre propre clé gratuite, sur themoviedb.org › Paramètres › API. La rangée « Services » de l’Accueil et le filtre « Service » en ont besoin.";
 "Settings.TMDBKey.Set" = "Définie";
 "Settings.TMDBKey.Missing" = "Aucune";
 "Settings.TMDBKey.Placeholder" = "Clé d’API ou jeton d’accès en lecture";
 "Settings.TMDBKey.Message" = "Créez un compte gratuit sur themoviedb.org, puis copiez la clé d’API depuis Paramètres › API. Sélectionnez le champ ci-dessous : votre iPhone propose de taper ou de coller la clé (notification « Clavier Apple TV », ou la Télécommande du Centre de contrôle).";
 "Settings.TMDBKey.Remove" = "Supprimer la clé";
-"Settings.TMDBKey.Accepted" = "TMDB a accepté la clé. Les rangées des services apparaissent sur l’Accueil.";
+"Settings.TMDBKey.Accepted" = "TMDB a accepté la clé. La rangée « Services » apparaît sur l’Accueil, et le filtre « Service » dans Films et Séries.";
 "Settings.TMDBKey.Refused" = "TMDB a refusé cette clé. Vérifiez qu’elle a été copiée en entier.";
 "Settings.TMDBKey.Unchecked" = "TMDB est injoignable : la clé est enregistrée et sera essayée au prochain rafraîchissement.";
 "Settings.StreamingRegion" = "Pays";
@@ -577,7 +577,7 @@
 "Settings.StreamingServices.Message" = "Chaque service coché a sa carte dans la rangée « Services » de l’Accueil, et figure dans le filtre « Service » des onglets Films et Séries. Les plus regardés dans votre pays sont en tête.";
 "Settings.StreamingServices.NoKey" = "Ajoutez d’abord votre clé TMDB : les services de votre pays s’affichent dès que TMDB répond.";
 "Services" = "Services";
-"Home.Services.Shown" = "Affiché sur l’Accueil";
+"Home.Services.Shown" = "Sélectionné";
 "Popular Movies on %@" = "Films populaires sur %@";
 "Popular Shows on %@" = "Séries populaires sur %@";
 "New Movies on %@" = "Nouveaux films sur %@";
@@ -586,4 +586,4 @@
 "Top Rated Shows on %@" = "Séries les mieux notées sur %@";
 "Service: %@" = "Service : %@";
 "Grid.Service.Unavailable" = "TMDB n’a pas répondu. Vérifiez votre connexion et votre clé TMDB dans les Réglages.";
-"Grid.Service.NoKey" = "Ajoutez votre clé TMDB dans les Réglages";
+"Home.Unavailable.Service" = "Le catalogue %@ ne peut pas se charger";
