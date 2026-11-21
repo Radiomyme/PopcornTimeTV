@@ -62,16 +62,18 @@ class MediaViewController: MainViewController {
     /// asked, three at most in a row.
     func loadService(_ service: StreamingService, page: Int, completion: @escaping ([HomeItem]?, NSError?) -> Void) {
         askService(service, page: page, genre: currentGenre == .all ? nil : currentGenre.rawValue, sort: streamingSort,
-                   emptyPagesSoFar: 0, completion: completion)
+                   emptyPagesSoFar: 0, generation: loadGeneration, completion: completion)
     }
 
     private func askService(_ service: StreamingService, page: Int, genre: String?, sort: StreamingSort, emptyPagesSoFar: Int,
-                            completion: @escaping ([HomeItem]?, NSError?) -> Void) {
+                            generation: Int, completion: @escaping ([HomeItem]?, NSError?) -> Void) {
         TMDBStreamingClient.shared.titles(service: service.id, kind: streamingKind, region: HomeSettings().streamingRegion,
                                           page: page + servicePageShift, sort: sort, genre: genre) { [weak self] items, hasMore in
             DispatchQueue.main.async {
-                // Another list was asked meanwhile: its own load fills the grid.
-                guard let self, self.currentService == service else { return }
+                // Another list was asked meanwhile (another service, genre or
+                // sort): its own load fills the grid, and this answer must not
+                // touch the page shift or the end of that list.
+                guard let self, self.currentService == service, self.loadGeneration == generation else { return }
                 guard let items else {
                     let error = NSError(domain: "TMDB", code: -1,
                                         userInfo: [NSLocalizedDescriptionKey: "Grid.Service.Unavailable".localized])
@@ -80,7 +82,7 @@ class MediaViewController: MainViewController {
                 if items.isEmpty, hasMore, emptyPagesSoFar + 1 < MediaViewController.toleratedEmptyServicePages {
                     self.servicePageShift += 1
                     return self.askService(service, page: page, genre: genre, sort: sort, emptyPagesSoFar: emptyPagesSoFar + 1,
-                                           completion: completion)
+                                           generation: generation, completion: completion)
                 }
                 self.serviceListIsOver = !hasMore || items.isEmpty
                 completion(items, nil)
