@@ -477,14 +477,17 @@ final class HomePageModel {
     /// is rebuilt for a service picked (`keepFocus(on:)`).
     @ObservationIgnored private var serviceCard: HomeFocus?
     @ObservationIgnored private var serviceCardSince = Date.distantPast
+    /// The service the pick asked the page to show (nil: the usual page).
+    @ObservationIgnored private var servicePage: Int?
 
     /// A service was picked (or « All ») from `card`'s row: once the page
     /// is rebuilt, the focus is on `card` (the service picked, or the one
     /// that was on) with its row under the band — not on « All », which
     /// comes and goes at the start of the row and where the focus fell
     /// (a second Select then undid the pick).
-    func keepFocus(on card: HomeFocus) {
+    func keepFocus(on card: HomeFocus, page: Int?) {
         serviceCard = card
+        servicePage = page
         serviceCardSince = Date()
         // What the focus does next is the page's (Select moved nothing).
         pageMovesFocus()
@@ -492,7 +495,9 @@ final class HomePageModel {
 
     /// The shelves changed: the card the focus has to be on after a pick,
     /// nil when there is none. Kept while the page refreshes (its shelves
-    /// come in one by one, the hero above them), until the user moves.
+    /// come in one by one, the hero above them), until the user moves —
+    /// and until the page shown is the one picked: an update made before
+    /// the pick and delivered right after it (a lookup's) is not its end.
     func focusAfterServicePick() -> HomeFocus? {
         guard let card = serviceCard else { return nil }
         guard isVisible, Date().timeIntervalSince(serviceCardSince) < 30 else {
@@ -500,7 +505,8 @@ final class HomePageModel {
             return nil
         }
         guard exists(card) else { return nil }
-        if !home.isRefreshing { serviceCard = nil }
+        let shown = filteredService.flatMap(HomeServiceCard.serviceId(of:))
+        if !home.isRefreshing, shown == servicePage { serviceCard = nil }
         return card
     }
 

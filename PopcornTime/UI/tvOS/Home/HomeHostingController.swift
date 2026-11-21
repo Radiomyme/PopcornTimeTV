@@ -286,7 +286,7 @@ final class HomeHostingController: UIHostingController<HomeView> {
         settings.homeServiceFilter = id
         if fromRow, let service = id ?? shown,
            let card = home.shelf(HomeShelfID.services)?.items.first(where: { HomeServiceCard.serviceId(of: $0) == service }) {
-            model.keepFocus(on: .card(shelf: HomeShelfID.services, item: card.id))
+            model.keepFocus(on: .card(shelf: HomeShelfID.services, item: card.id), page: id)
         }
         home.refreshLocal()
     }
