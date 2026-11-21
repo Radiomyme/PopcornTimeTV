@@ -72,6 +72,13 @@ struct GlassSettingsHome: Equatable {
     var languageChoices: [GlassSettingsChoice] = []
     /// The shelves that can be hidden, in the Home's order.
     var shelfChoices: [GlassSettingsChoice] = []
+    /// The user gave a TMDB key: the streaming shelves can be asked.
+    var hasTMDBKey = false
+    /// ISO 3166-1 code of the country of the streaming catalogues ("FR").
+    var streamingRegion = "US"
+    /// The services that have a shelf, in the Home's order (id: TMDB's
+    /// provider id).
+    var streamingServices: [GlassSettingsChoice] = []
 }
 
 /// What the page does, provided by its host.
@@ -110,6 +117,19 @@ struct GlassSettingsActions {
     var setHomeLanguages: ([String]) -> Void = { _ in }
     var setHiddenHomeShelves: (Set<String>) -> Void = { _ in }
     var setGroupedEpisodeLookup: (Bool) -> Void = { _ in }
+    /// Checks a TMDB key, then keeps it unless TMDB refused it (nil: the
+    /// key is removed). The completion (main queue) gets TMDB's verdict:
+    /// nil when it could not be asked (the key is kept).
+    var setTMDBKey: (String?, @escaping (Bool?) -> Void) -> Void = { _, done in done(nil) }
+    var setStreamingRegion: (String) -> Void = { _ in }
+    var setStreamingServices: ([GlassSettingsChoice]) -> Void = { _ in }
+    /// The services of a country, the most watched first (main queue; nil:
+    /// TMDB did not answer).
+    var loadStreamingServices: (String, @escaping ([GlassSettingsChoice]?) -> Void) -> Void = { _, done in done(nil) }
+    /// The countries TMDB has catalogues for, by name (main queue).
+    var loadStreamingRegions: (@escaping ([GlassSettingsChoice]) -> Void) -> Void = { done in done([]) }
+    /// "France" for "FR".
+    var regionName: (String) -> String = { $0 }
 }
 
 /// The page's state. Changes go through the methods, which call the actions.
@@ -128,6 +148,12 @@ final class GlassSettingsModel: ObservableObject {
     @Published private(set) var cacheBytes: Int64?
     /// nil: no Home section.
     @Published private(set) var home: GlassSettingsHome?
+    /// The services of the chosen country, once TMDB answered.
+    @Published private(set) var streamingServiceChoices: [GlassSettingsChoice]?
+    /// The countries offered, once known.
+    @Published private(set) var streamingRegionChoices: [GlassSettingsChoice]?
+    /// A key is being checked with TMDB.
+    @Published private(set) var isCheckingTMDBKey = false
     /// "5.1.0 (2)".
     let version: String
     /// Offered by the language pickers, in display order.
@@ -182,6 +208,90 @@ final class GlassSettingsModel: ObservableObject {
         home.groupedEpisodeLookup.toggle()
         self.home = home
         actions.setGroupedEpisodeLookup(home.groupedEpisodeLookup)
+    }
+
+    // MARK: Streaming services
+
+    /// Gives, replaces or removes (nil, "") the TMDB key; `completion`
+    /// gets TMDB's verdict (true: kept, false: refused, nil: not asked).
+    func setTMDBKey(_ key: String?, completion: @escaping (Bool?) -> Void) {
+        let key = key?.trimmingCharacters(in: .whitespacesAndNewlines)
+        isCheckingTMDBKey = true
+        actions.setTMDBKey(key?.isEmpty == false ? key : nil) { [weak self] verdict in
+            guard let self else { return }
+            self.isCheckingTMDBKey = false
+            if let stored = self.actions.readHome?() { self.home = stored }
+            // Another key: the services offered are asked again.
+            self.streamingServiceChoices = nil
+            completion(verdict)
+        }
+    }
+
+    func select(streamingRegion code: String) {
+        guard var home, home.streamingRegion != code else { return }
+        home.streamingRegion = code
+        self.home = home
+        streamingServiceChoices = nil
+        actions.setStreamingRegion(code)
+    }
+
+    /// Checks or unchecks a service: a checked one goes last on the page.
+    func toggle(streamingService choice: GlassSettingsChoice) {
+        guard var home else { return }
+        if let index = home.streamingServices.firstIndex(where: { $0.id == choice.id }) {
+            home.streamingServices.remove(at: index)
+        } else {
+            home.streamingServices.append(choice)
+        }
+        self.home = home
+        actions.setStreamingServices(home.streamingServices)
+    }
+
+    /// Asks the chosen country's services (once per country and key).
+    func loadStreamingServiceChoices() {
+        guard let home, home.hasTMDBKey, streamingServiceChoices == nil else { return }
+        let region = home.streamingRegion
+        actions.loadStreamingServices(region) { [weak self] choices in
+            guard let self, self.home?.streamingRegion == region, let choices else { return }
+            self.streamingServiceChoices = choices
+        }
+    }
+
+    func loadStreamingRegionChoices() {
+        guard streamingRegionChoices == nil else { return }
+        actions.loadStreamingRegions { [weak self] choices in
+            self?.streamingRegionChoices = choices
+        }
+    }
+
+    /// The services the picker lists: the chosen ones first (they may not
+    /// be in the country's list), then the country's others.
+    var streamingServiceOptions: [GlassSettingsChoice] {
+        let chosen = home?.streamingServices ?? []
+        let ids = Set(chosen.map(\.id))
+        return chosen + (streamingServiceChoices ?? []).filter { !ids.contains($0.id) }
+    }
+
+    var streamingRegionOptions: [GlassSettingsChoice] {
+        let current = home?.streamingRegion ?? "US"
+        let all = streamingRegionChoices ?? []
+        return all.contains { $0.id == current } ? all : [GlassSettingsChoice(id: current, title: actions.regionName(current))] + all
+    }
+
+    /// "Netflix, Disney+ +2", "Aucun".
+    var streamingServicesSummary: String {
+        let names = (home?.streamingServices ?? []).map(\.title)
+        guard !names.isEmpty else { return glassSettingsLocalized("None") }
+        let shown = names.prefix(2).joined(separator: ", ")
+        return names.count > 2 ? "\(shown) +\(names.count - 2)" : shown
+    }
+
+    var streamingRegionSummary: String {
+        actions.regionName(home?.streamingRegion ?? "US")
+    }
+
+    var tmdbKeySummary: String {
+        glassSettingsLocalized(home?.hasTMDBKey == true ? "Settings.TMDBKey.Set" : "Settings.TMDBKey.Missing")
     }
 
     /// "Toutes", "Anglais, Français", "Anglais, Français +2".
@@ -324,7 +434,7 @@ enum GlassSettingsPalette {
 
 /// The rows that open a picker.
 enum GlassSettingsPicker: String, Identifiable {
-    case quality, upNextCard, audio, subtitles, homeLanguages, homeShelves
+    case quality, upNextCard, audio, subtitles, homeLanguages, homeShelves, streamingRegion, streamingServices, tmdbKey
     var id: String { rawValue }
 }
 
@@ -332,6 +442,7 @@ enum GlassSettingsPicker: String, Identifiable {
 enum GlassSettingsRowID: Hashable {
     case quality, autoPlayNext, upNextCard, audio, subtitles, themeSongs, clearCache, trakt, version
     case homeLanguages, homeShelves, homeLookup
+    case tmdbKey, streamingRegion, streamingServices
 }
 
 struct GlassSettingsView: View {
@@ -348,6 +459,9 @@ struct GlassSettingsView: View {
     @State private var clearResult: Int64?
     @State private var showClearResult = false
     @State private var confirmSignOut = false
+    /// TMDB's verdict on the key just entered, for the alert that tells it.
+    @State private var tmdbKeyVerdict: Bool??
+    @State private var showTMDBKeyVerdict = false
     @FocusState private var focusedRow: GlassSettingsRowID?
 
     var body: some View {
@@ -400,6 +514,24 @@ struct GlassSettingsView: View {
         } message: {
             Text(glassSettingsLocalized("Are you sure you want to Sign Out?"))
         }
+        .alert(glassSettingsLocalized("Settings.TMDBKey"), isPresented: $showTMDBKeyVerdict) {
+            SwiftUI.Button(glassSettingsLocalized("OK"), role: .cancel) {}
+        } message: {
+            switch tmdbKeyVerdict {
+            case .some(.some(true)): Text(glassSettingsLocalized("Settings.TMDBKey.Accepted"))
+            case .some(.some(false)): Text(glassSettingsLocalized("Settings.TMDBKey.Refused"))
+            default: Text(glassSettingsLocalized("Settings.TMDBKey.Unchecked"))
+            }
+        }
+    }
+
+    private func saveTMDBKey(_ key: String?) {
+        let removing = key?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ?? true
+        model.setTMDBKey(key) { verdict in
+            guard !removing else { return }
+            tmdbKeyVerdict = .some(verdict)
+            showTMDBKeyVerdict = true
+        }
     }
 
     /// Page title, then two columns of sections.
@@ -421,6 +553,7 @@ struct GlassSettingsView: View {
                 .frame(maxWidth: .infinity)
                 VStack(alignment: .leading, spacing: 44) {
                     if model.home != nil { homeSection }
+                    if model.home != nil { streamingSection }
                     storageSection
                     if model.isTraktSignedIn { accountSection }
                     aboutSection
@@ -493,6 +626,34 @@ struct GlassSettingsView: View {
                              showsChevron: false) { model.toggleGroupedEpisodeLookup() }
                 .focused($focusedRow, equals: .homeLookup)
                 .accessibilityIdentifier("Settings.Row.homeLookup")
+        }
+    }
+
+    /// The Home's « On Netflix » shelves: the user's TMDB key, the country,
+    /// the services. TMDB's terms ask to credit JustWatch.
+    private var streamingSection: some View {
+        GlassSettingsSection(title: "Settings.Streaming", footer: "Settings.Streaming.Footer") {
+            GlassSettingsRow(symbol: "key.fill", tint: .yellow, title: "Settings.TMDBKey",
+                             detail: "Settings.TMDBKey.Detail",
+                             value: model.isCheckingTMDBKey ? "…" : model.tmdbKeySummary) { picker = .tmdbKey }
+            .focused($focusedRow, equals: .tmdbKey)
+            .accessibilityIdentifier("Settings.Row.tmdbKey")
+            GlassSettingsDivider()
+            GlassSettingsRow(symbol: "flag.fill", tint: .blue, title: "Settings.StreamingRegion",
+                             value: model.streamingRegionSummary) {
+                model.loadStreamingRegionChoices()
+                picker = .streamingRegion
+            }
+            .focused($focusedRow, equals: .streamingRegion)
+            .accessibilityIdentifier("Settings.Row.streamingRegion")
+            GlassSettingsDivider()
+            GlassSettingsRow(symbol: "play.tv.fill", tint: .red, title: "Settings.StreamingServices",
+                             value: model.streamingServicesSummary) {
+                model.loadStreamingServiceChoices()
+                picker = .streamingServices
+            }
+            .focused($focusedRow, equals: .streamingServices)
+            .accessibilityIdentifier("Settings.Row.streamingServices")
         }
     }
 
@@ -604,6 +765,44 @@ struct GlassSettingsView: View {
                 selectedID: model.home?.shelfChoices.first?.id ?? "",
                 checkedIDs: Set((model.home?.shelfChoices ?? []).map(\.id)).subtracting(model.home?.hiddenShelves ?? []),
                 onSelect: { id in model.toggle(homeShelf: id) },
+                onCancel: { self.picker = nil })
+        case .tmdbKey:
+            GlassSettingsTextSheet(
+                title: "Settings.TMDBKey",
+                message: "Settings.TMDBKey.Message",
+                placeholder: "Settings.TMDBKey.Placeholder",
+                removeTitle: model.home?.hasTMDBKey == true ? "Settings.TMDBKey.Remove" : nil,
+                onSave: { key in
+                    self.picker = nil
+                    saveTMDBKey(key)
+                },
+                onRemove: {
+                    self.picker = nil
+                    saveTMDBKey(nil)
+                },
+                onCancel: { self.picker = nil })
+        case .streamingRegion:
+            GlassSettingsPickerSheet(
+                title: "Settings.StreamingRegion",
+                message: "Settings.StreamingRegion.Message",
+                options: model.streamingRegionOptions.map { .init(id: $0.id, title: $0.title, detail: nil) },
+                selectedID: model.home?.streamingRegion ?? "",
+                onSelect: { id in
+                    model.select(streamingRegion: id)
+                    self.picker = nil
+                },
+                onCancel: { self.picker = nil })
+        case .streamingServices:
+            // Several can be checked: a press checks or unchecks, Menu closes.
+            GlassSettingsPickerSheet(
+                title: "Settings.StreamingServices",
+                message: model.home?.hasTMDBKey == true ? "Settings.StreamingServices.Message" : "Settings.StreamingServices.NoKey",
+                options: model.streamingServiceOptions.map { .init(id: $0.id, title: $0.title, detail: nil) },
+                selectedID: model.home?.streamingServices.first?.id ?? model.streamingServiceOptions.first?.id ?? "",
+                checkedIDs: Set((model.home?.streamingServices ?? []).map(\.id)),
+                onSelect: { id in
+                    if let choice = model.streamingServiceOptions.first(where: { $0.id == id }) { model.toggle(streamingService: choice) }
+                },
                 onCancel: { self.picker = nil })
         }
     }
@@ -884,6 +1083,73 @@ struct GlassSettingsPickerSheet: View {
         }
         .buttonStyle(GlassSettingsRowStyle(cornerRadius: 22))
         .focused($focusedID, equals: option.id)
+    }
+}
+
+/// Glass sheet with one text field (the TMDB key). Selecting the field
+/// opens tvOS's full-screen keyboard — the one the iPhone offers to type
+/// into (« Apple TV Keyboard » notification, or the Remote in Control
+/// Center), so a long key can be pasted from the phone. Menu closes it.
+struct GlassSettingsTextSheet: View {
+    let title: String
+    let message: String?
+    let placeholder: String
+    /// nil: no « Remove » button.
+    let removeTitle: String?
+    let onSave: (String) -> Void
+    let onRemove: () -> Void
+    let onCancel: () -> Void
+
+    @State private var text = ""
+    @FocusState private var focused: Field?
+    @Environment(\.glassSettingsFallback) private var fallback
+
+    private enum Field: Hashable { case text, save, remove, cancel }
+
+    private var trimmed: String { text.trimmingCharacters(in: .whitespacesAndNewlines) }
+
+    var body: some View {
+        ZStack {
+            Color.black.opacity(0.4)
+                .ignoresSafeArea()
+            VStack(alignment: .leading, spacing: 26) {
+                Text(glassSettingsLocalized(title))
+                    .font(.system(size: 46, weight: .bold))
+                    .foregroundStyle(.white)
+                if let message {
+                    Text(glassSettingsLocalized(message))
+                        .font(.system(size: 24))
+                        .foregroundStyle(GlassSettingsPalette.secondaryText)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                TextField(glassSettingsLocalized(placeholder), text: $text)
+                    .autocorrectionDisabled()
+                    .textInputAutocapitalization(.never)
+                    .keyboardType(.asciiCapable)
+                    .focused($focused, equals: .text)
+                    .onSubmit { if !trimmed.isEmpty { focused = .save } }
+                    .accessibilityIdentifier("Settings.TMDBKey.Field")
+                HStack(spacing: 24) {
+                    SwiftUI.Button(glassSettingsLocalized("Save")) { onSave(trimmed) }
+                        .disabled(trimmed.isEmpty)
+                        .focused($focused, equals: .save)
+                    if let removeTitle {
+                        SwiftUI.Button(glassSettingsLocalized(removeTitle), role: .destructive, action: onRemove)
+                            .focused($focused, equals: .remove)
+                    }
+                    SwiftUI.Button(glassSettingsLocalized("Cancel"), role: .cancel, action: onCancel)
+                        .focused($focused, equals: .cancel)
+                }
+            }
+            .padding(58)
+            .frame(width: 1100)
+            .fixedSize(horizontal: false, vertical: true)
+            .modifier(GlassSettingsCard(cornerRadius: 50, fallback: fallback))
+        }
+        .defaultFocus($focused, .text)
+        .onExitCommand(perform: onCancel)
+        .presentationBackground(.clear)
+        .accessibilityIdentifier("Settings.TextSheet")
     }
 }
 

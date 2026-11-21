@@ -20,6 +20,9 @@ public struct HomeRequest: Hashable, Sendable {
         case tvmaze
         /// apibay.org (blocked by some ISPs: always optional)
         case apibay
+        /// api.themoviedb.org, with the user's key (`TMDBStreamingClient`):
+        /// the streaming shelves, asked only when there is a key.
+        case tmdb
     }
 
     public var host: Host
@@ -47,6 +50,8 @@ struct HomeSource: Hashable, Sendable {
         case tvmaze
         /// An apibay precompiled list of movies or of shows.
         case apibay(HomeItem.Kind)
+        /// A TMDB `discover` page, each result with its IMDb id.
+        case tmdbDiscover(HomeItem.Kind)
     }
 
     /// Name of the list in memory and of its cache file.
@@ -245,7 +250,7 @@ struct HomeSource: Hashable, Sendable {
     /// the store's own files (`HomeStore` touches no other file of its
     /// folder), and the host of a list by its key.
     static let keyFamilies: [(prefix: String, host: HomeRequest.Host)] = [
-        ("cm-", .cinemeta), ("yts-", .yts), (tvmazePrefix, .tvmaze), (apibayPrefix, .apibay),
+        ("cm-", .cinemeta), ("yts-", .yts), (tvmazePrefix, .tvmaze), (apibayPrefix, .apibay), (tmdbPrefix, .tmdb),
     ]
 
     /// The service the list of a key comes from.
@@ -396,20 +401,31 @@ struct HomePlan: Sendable {
     /// the page reads does not change: a list a full refresh left in the
     /// same folder is still shown.
     let light: Bool
+    /// The lists of a page filtered on a service (`HomeSettings.homeService`):
+    /// its movies and shows in the user's country, in three orders. None
+    /// on the usual page.
+    let streaming: [HomeSource]
 
     init(now: Date, followedShowIds: [String], genres: [(kind: HomeItem.Kind, genre: String)], days: Int = HomeBuilder.Rules.airedDays,
-         light: Bool = false) {
+         light: Bool = false, service: StreamingService? = nil, region: String = "US") {
         year = CatalogDates.year(of: now)
         self.days = (0..<max(days, 1)).map { CatalogDates.dayString(now.addingTimeInterval(-Double($0) * 86_400)) }
         calendar = HomeSource.calendar(ids: followedShowIds)
         self.genres = genres.map { HomeSource.genre($0.kind, $0.genre) }
         self.light = light
+        let today = CatalogDates.dayString(now)
+        self.streaming = service.map { service in
+            HomeShelfID.streamingShelves.map {
+                HomeSource.streaming(service: service.id, kind: $0.kind, sort: $0.sort, region: region, today: today)
+            }
+        } ?? []
     }
 
     /// The first paint: hero, trending movies and shows, new movies, 4K, and
-    /// the latest episodes read off the trending shows.
+    /// the latest episodes read off the trending shows. On a page filtered
+    /// on a service, that service's lists first: they are the page.
     var phase1: [HomeSource] {
-        return [.movieTop, .seriesTop, .ytsNew(year), .yts4K] + (light ? [.topUHD] : [])
+        return (light ? [] : streaming) + [.movieTop, .seriesTop, .ytsNew(year), .yts4K] + (light ? [.topUHD] : [])
     }
 
     /// Right after: the shelves of the year, the new shows, the user's
@@ -444,6 +460,7 @@ struct HomePlan: Sendable {
         if key.hasPrefix(HomeSource.calendarPrefix) { return key == calendar?.key }
         if key.hasPrefix(HomeSource.tvmazePrefix) { return days.contains { key.hasSuffix($0) } }
         if key.hasPrefix(HomeSource.apibayPrefix) { return HomeSource.apibayLists.contains(key) }
+        if key.hasPrefix(HomeSource.tmdbPrefix) { return streaming.contains { $0.key == key } }
         return true
     }
 }

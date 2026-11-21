@@ -225,6 +225,7 @@ public struct HomeShelf: Codable, Hashable, Sendable, Identifiable {
     /// under the name the app's genres have ("Science Fiction" for
     /// Cinemeta's "Sci-Fi") when it is one of them — those are translated.
     public var titleArgument: String? {
+        if HomeShelfID.streamingService(of: id) != nil { return seeAll?.service?.name }
         guard let genre = HomeShelfID.genre(of: id)?.genre else { return nil }
         return HomeBuilder.appGenre(genre)?.rawValue ?? genre
     }
@@ -237,6 +238,9 @@ public struct HomeSeeAll: Codable, Hashable, Sendable {
         case movies
         case shows
         case watchlist
+        /// A streaming service's catalogue in a country
+        /// (`TMDBStreamingClient.CataloguePages`).
+        case streaming
     }
 
     public var catalogue: Catalogue
@@ -244,11 +248,27 @@ public struct HomeSeeAll: Codable, Hashable, Sendable {
     public var filter: String?
     /// Raw value of `NetworkManager.Genres`.
     public var genre: String?
+    /// `.streaming`: the service, the country of its catalogue, the kind
+    /// of titles (nil: both) — and `filter` is a `StreamingSort`.
+    public var service: StreamingService?
+    public var region: String?
+    public var kind: HomeItem.Kind?
 
-    public init(catalogue: Catalogue, filter: String? = nil, genre: String? = nil) {
+    public init(catalogue: Catalogue, filter: String? = nil, genre: String? = nil,
+                service: StreamingService? = nil, region: String? = nil, kind: HomeItem.Kind? = nil) {
         self.catalogue = catalogue
         self.filter = filter
         self.genre = genre
+        self.service = service
+        self.region = region
+        self.kind = kind
+    }
+
+    /// The pages of a `.streaming` See All, nil for the other catalogues.
+    public func streamingPages() -> TMDBStreamingClient.CataloguePages? {
+        guard catalogue == .streaming, let service, let region else { return nil }
+        return TMDBStreamingClient.CataloguePages(service: service.id, region: region, kinds: kind.map { [$0] } ?? [],
+                                                  sort: filter.flatMap(StreamingSort.init(rawValue:)) ?? .popular)
     }
 
     public var movieFilter: MovieManager.Filters? {
@@ -334,6 +354,9 @@ public enum HomeShelfID {
         case topMovies: return "Top 100 Movies"
         case watchlist: return "Watchlist"
         default:
+            // "Popular Movies on %@": the service's name is `HomeShelf.titleArgument`.
+            if let streaming = streaming(of: id) { return streamingTitle(streaming.kind, streaming.sort) }
+            if id == services { return "Services" }
             guard let genre = genre(of: id) else { return id }
             return genre.kind == .movie ? "%@ Movies" : "%@ Shows"
         }

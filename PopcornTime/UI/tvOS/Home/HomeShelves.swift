@@ -71,6 +71,34 @@ struct HomeShelfRow: View, Equatable {
 
     @ViewBuilder
     private func cardView(_ item: HomeItem) -> some View {
+        if shelf.id == HomeShelfID.services {
+            serviceCard(item)
+        } else {
+            titleCard(item)
+        }
+    }
+
+    /// A card of the « Services » row: the service's logo (its name when
+    /// there is none), the one the page shows checked; « All » first while
+    /// the page is filtered. No menu: it is not a title.
+    private func serviceCard(_ item: HomeItem) -> some View {
+        let selected = HomeServiceCard.isSelected(item)
+        return VStack(alignment: .leading, spacing: 0) {
+            SwiftUI.Button { actions.select(item, shelf) } label: {
+                HomeServiceArt(item: item, selected: selected)
+            }
+            .glassCardStyle()
+            .focused(focus, equals: .card(shelf: shelf.id, item: item.id))
+            .accessibilityLabel(Text(verbatim: item.title))
+            .accessibilityAddTraits(selected ? .isSelected : [])
+            .accessibilityIdentifier("Home.Card.\(item.id)")
+            HomeLandscapeCaption(title: item.title, caption: selected ? "Home.Services.Shown".localized : "")
+        }
+        .frame(width: TVHomeLayout.landscape.width, alignment: .leading)
+    }
+
+    @ViewBuilder
+    private func titleCard(_ item: HomeItem) -> some View {
         switch shelf.style {
         case .landscape:
             VStack(alignment: .leading, spacing: 0) {
@@ -220,6 +248,54 @@ struct HomeShelfTitle: View {
             .frame(height: TVHomeLayout.titleHeight, alignment: .bottomLeading)
             .padding(.horizontal, TVHomeLayout.side)
             .accessibilityAddTraits(.isHeader)
+    }
+}
+
+// MARK: - Services
+
+/// A service's card: its logo on dark glass (its name when it has none),
+/// a checkmark on the one the page shows; « All »: a grid symbol.
+struct HomeServiceArt: View {
+    let item: HomeItem
+    let selected: Bool
+
+    var body: some View {
+        let card = TVHomeLayout.landscape
+        ZStack {
+            LinearGradient(colors: [Color.white.opacity(0.16), Color.white.opacity(0.05)],
+                           startPoint: .topLeading, endPoint: .bottomTrailing)
+            if HomeServiceCard.isAll(item) {
+                Image(systemName: "square.grid.2x2.fill")
+                    .font(.system(size: 64, weight: .semibold))
+                    .foregroundStyle(GlassPalette.primaryText)
+            } else if let logo = item.posterURL {
+                HomeArtImage(urls: [logo], maxPixelSize: homePixels(150)) { name }
+                    .frame(width: 150, height: 150)
+                    .clipShape(RoundedRectangle(cornerRadius: 30, style: .continuous))
+            } else {
+                name
+            }
+        }
+        .frame(width: card.width, height: card.height)
+        .overlay(alignment: .topTrailing) {
+            if selected {
+                Image(systemName: "checkmark.circle.fill")
+                    .font(.system(size: 40, weight: .bold))
+                    .symbolRenderingMode(.palette)
+                    .foregroundStyle(.black, .white)
+                    .padding(16)
+            }
+        }
+    }
+
+    private var name: some View {
+        Text(verbatim: item.title)
+            .font(.system(size: 40, weight: .heavy))
+            .foregroundStyle(GlassPalette.primaryText)
+            .multilineTextAlignment(.center)
+            .lineLimit(2)
+            .minimumScaleFactor(0.6)
+            .padding(24)
     }
 }
 

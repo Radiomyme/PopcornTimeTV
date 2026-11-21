@@ -53,6 +53,9 @@ public enum HomeCachePolicy {
         public static let apibay = Lifetime(fresh: 2 * hour, usable: day)
         /// Metadata lookups: a title's card does not change.
         public static let lookup = Lifetime(fresh: 7 * day, usable: 7 * day)
+        /// TMDB's streaming catalogues: JustWatch updates them daily, and
+        /// what a service offers moves slowly.
+        public static let streaming = Lifetime(fresh: 12 * hour, usable: 7 * day)
     }
 
     /// The lifetime of a source's list, by its cache key. `now` tells today's
@@ -68,6 +71,7 @@ public enum HomeCachePolicy {
             return String(key.suffix(10)) >= CatalogDates.dayString(now) ? .tvmazeToday : .tvmazePast
         }
         if key.hasPrefix(HomeSource.apibayPrefix) { return .apibay }
+        if key.hasPrefix(HomeSource.tmdbPrefix) { return .streaming }
         return .tvmazeToday
     }
 

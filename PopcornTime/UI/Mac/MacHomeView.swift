@@ -358,6 +358,8 @@ final class MacShelfMore: ObservableObject {
     @Published private(set) var isLoading = false
     private var page = 0
     private var isOver = false
+    /// A streaming shelf's catalogue (TMDB), page after page.
+    private var pages: TMDBStreamingClient.CataloguePages?
 
     func loadNext(seeAll: HomeSeeAll?) {
         guard let seeAll, !isLoading, !isOver else { return }
@@ -389,6 +391,20 @@ final class MacShelfMore: ObservableObject {
             }
         case .watchlist:
             isOver = true
+        case .streaming:
+            if pages == nil { pages = seeAll.streamingPages() }
+            guard let pages else { isOver = true; return }
+            isLoading = true
+            pages.load { [weak self] items in
+                guard let self else { return }
+                self.isLoading = false
+                guard let items, !items.isEmpty else { self.isOver = pages.isOver || items == nil; return }
+                self.page = next
+                let media = items.compactMap(\.media)
+                let movies = Set(self.movies.map(\.id)), shows = Set(self.shows.map(\.id))
+                self.movies += media.compactMap { $0 as? Movie }.filter { !movies.contains($0.id) }
+                self.shows += media.compactMap { $0 as? Show }.filter { !shows.contains($0.id) }
+            }
         }
     }
 }

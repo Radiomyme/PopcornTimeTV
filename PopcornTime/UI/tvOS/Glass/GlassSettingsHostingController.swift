@@ -35,7 +35,13 @@ final class GlassSettingsHostingController: UIHostingController<GlassSettingsVie
             readHome: { GlassSettingsStore.home },
             setHomeLanguages: { GlassSettingsStore.store(homeLanguages: $0) },
             setHiddenHomeShelves: { GlassSettingsStore.store(hiddenHomeShelves: $0) },
-            setGroupedEpisodeLookup: { GlassSettingsStore.store(groupedEpisodeLookup: $0) })
+            setGroupedEpisodeLookup: { GlassSettingsStore.store(groupedEpisodeLookup: $0) },
+            setTMDBKey: { GlassSettingsStore.store(tmdbKey: $0, completion: $1) },
+            setStreamingRegion: { GlassSettingsStore.store(streamingRegion: $0) },
+            setStreamingServices: { GlassSettingsStore.store(streamingServices: $0) },
+            loadStreamingServices: { GlassSettingsStore.streamingServices(region: $0, completion: $1) },
+            loadStreamingRegions: { GlassSettingsStore.streamingRegions(completion: $0) },
+            regionName: { GlassSettingsStore.regionName($0) })
 
         let audio = PlaybackLanguagePreferences.preferredAudioLanguageCode
         let subtitles = PlaybackLanguagePreferences.preferredSubtitleLanguageCode
@@ -185,6 +191,10 @@ enum GlassSettingsStore {
         let hidden = settings.hiddenShelves
         let text = HomeText.standard
         var shelves = HomeShelfID.order.filter { $0 != HomeShelfID.hero }
+        // The « Services » row, under Continue Watching, once there is a key.
+        if settings.tmdbAPIKey != nil {
+            shelves.insert(HomeShelfID.services, at: min(1, shelves.count))
+        }
         let genres = HomeState.shared.shelves.map(\.id).filter { HomeShelfID.genre(of: $0) != nil }
             + hidden.filter { HomeShelfID.genre(of: $0) != nil }.sorted()
         for id in genres where !shelves.contains(id) { shelves.append(id) }
@@ -192,7 +202,90 @@ enum GlassSettingsStore {
                                  hiddenShelves: hidden,
                                  groupedEpisodeLookup: Library.shared.isBulkEpisodeLookupEnabled,
                                  languageChoices: languageChoices,
-                                 shelfChoices: shelves.map { GlassSettingsChoice(id: $0, title: text.title(ofShelf: $0)) })
+                                 shelfChoices: shelves.map { GlassSettingsChoice(id: $0, title: text.title(ofShelf: $0)) },
+                                 hasTMDBKey: settings.tmdbAPIKey != nil,
+                                 streamingRegion: settings.streamingRegion,
+                                 streamingServices: settings.streamingServices.map { GlassSettingsChoice(id: String($0.id), title: $0.name) })
+    }
+
+    // MARK: Streaming services ("popcornkit.tmdb.apiKey", "popcornkit.home.streamingRegion", "popcornkit.home.streamingServices")
+
+    /// Checks the key with TMDB; keeps it unless TMDB refused it. nil
+    /// removes the key (the streaming shelves go). The Home then asks the
+    /// lists it now reads, or drops the shelves it no longer has.
+    @MainActor
+    static func store(tmdbKey key: String?, completion: @escaping (Bool?) -> Void) {
+        let settings = HomeSettings(defaults: defaults)
+        guard let key else {
+            settings.tmdbAPIKey = nil
+            HomeState.shared.refreshLocal()
+            return completion(nil)
+        }
+        TMDBStreamingClient.shared.check(key: key) { verdict in
+            DispatchQueue.main.async {
+                if verdict != false {
+                    settings.tmdbAPIKey = key
+                    HomeState.shared.refreshLocal()
+                    // The services' logos, for the Home's « Services » row.
+                    streamingServices(region: settings.streamingRegion) { _ in }
+                }
+                completion(verdict)
+            }
+        }
+    }
+
+    @MainActor
+    static func store(streamingRegion code: String) {
+        HomeSettings(defaults: defaults).streamingRegion = code
+        HomeState.shared.refreshLocal()
+    }
+
+    /// The services TMDB listed last (their logos), by id.
+    @MainActor private static var knownServices: [Int: StreamingService] = [:]
+
+    @MainActor
+    static func store(streamingServices choices: [GlassSettingsChoice]) {
+        let settings = HomeSettings(defaults: defaults)
+        let stored = Dictionary(settings.streamingServices.map { ($0.id, $0) }) { first, _ in first }
+        settings.streamingServices = choices.compactMap { choice in
+            guard let id = Int(choice.id) else { return nil }
+            return knownServices[id] ?? stored[id] ?? StreamingService(id: id, name: choice.title)
+        }
+        HomeState.shared.refreshLocal()
+    }
+
+    /// Also gives the chosen services TMDB's logos (the defaults have none).
+    @MainActor
+    static func streamingServices(region: String, completion: @escaping ([GlassSettingsChoice]?) -> Void) {
+        TMDBStreamingClient.shared.services(region: region) { services in
+            DispatchQueue.main.async {
+                guard let services else { return completion(nil) }
+                for service in services { knownServices[service.id] = service }
+                let settings = HomeSettings(defaults: defaults)
+                let chosen = settings.streamingServices
+                let withLogos = chosen.map { knownServices[$0.id] ?? $0 }
+                if withLogos != chosen {
+                    settings.streamingServices = withLogos
+                    HomeState.shared.refreshLocal()
+                }
+                completion(services.map { GlassSettingsChoice(id: String($0.id), title: $0.name) })
+            }
+        }
+    }
+
+    /// TMDB's countries, else every country the system knows; by name.
+    static func streamingRegions(completion: @escaping ([GlassSettingsChoice]) -> Void) {
+        TMDBStreamingClient.shared.regions { codes in
+            let all = (codes?.isEmpty == false ? codes! : Locale.Region.isoRegions.map(\.identifier))
+                .filter { $0.count == 2 }
+            let choices = Set(all).map { GlassSettingsChoice(id: $0, title: regionName($0)) }
+                .sorted { $0.title.localizedCaseInsensitiveCompare($1.title) == .orderedAscending }
+            DispatchQueue.main.async { completion(choices) }
+        }
+    }
+
+    static func regionName(_ code: String) -> String {
+        Locale.current.localizedString(forRegionCode: code) ?? code
     }
 
     /// Empty: every language. The hub reads its settings when it builds the
