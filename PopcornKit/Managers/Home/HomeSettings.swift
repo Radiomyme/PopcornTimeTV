@@ -150,15 +150,20 @@ public struct HomeSettings {
         return code
     }
 
-    /// The services that have a shelf, in the page's order.
+    /// The services that have a shelf, in the page's order. A stored
+    /// choice reads back in the country's ids (Amazon Prime Video: 119 or 9,
+    /// `StreamingService.inRegion`), even when TMDB has not yet listed the
+    /// country's services for Settings (no key, no answer, a choice stored
+    /// by an earlier build).
     public var streamingServices: [StreamingService] {
         get {
+            let region = streamingRegion
             guard let data = defaults.data(forKey: Key.streamingServices),
                   let services = try? JSONDecoder().decode([StreamingService].self, from: data) else {
-                return StreamingService.defaults(for: streamingRegion)
+                return StreamingService.defaults(for: region)
             }
             var seen = Set<Int>()
-            return services.filter { seen.insert($0.id).inserted }
+            return services.map { $0.inRegion(region) }.filter { seen.insert($0.id).inserted }
         }
         nonmutating set {
             if let data = try? JSONEncoder().encode(newValue) { defaults.set(data, forKey: Key.streamingServices) }

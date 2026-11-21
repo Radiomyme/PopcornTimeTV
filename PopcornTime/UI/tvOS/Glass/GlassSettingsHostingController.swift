@@ -274,11 +274,7 @@ enum GlassSettingsStore {
             DispatchQueue.main.async {
                 guard let services else { return completion(nil) }
                 for service in services { knownServices[service.id] = service }
-                let settings = HomeSettings(defaults: defaults)
-                let chosen = settings.streamingServices
-                let matched = StreamingService.matching(chosen, in: services)
-                if settings.streamingRegion == region, matched != chosen {
-                    settings.streamingServices = matched
+                if HomeSettings(defaults: defaults).adoptServices(services, listedFor: region) {
                     HomeState.shared.refreshLocal()
                 }
                 completion(services.map { GlassSettingsChoice(id: String($0.id), title: $0.name) })

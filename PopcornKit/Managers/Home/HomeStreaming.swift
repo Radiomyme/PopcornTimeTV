@@ -57,6 +57,19 @@ public struct StreamingService: Codable, Hashable, Sendable, Identifiable {
     /// these five, never both).
     static let primeVideo9: Set<String> = ["AT", "DE", "GB", "JP", "US"]
 
+    /// The service as the country knows it: Amazon Prime Video's id of
+    /// that country (`primeVideo9`), with its name and logo (the same logo
+    /// under both ids on TMDB); any other service as it is. What a list
+    /// chosen in another country, or stored before the country mattered,
+    /// reads back as (`HomeSettings.streamingServices`), before Settings
+    /// matches it to the country's whole list (`matching`).
+    func inRegion(_ region: String) -> StreamingService {
+        guard id == 9 || id == 119 else { return self }
+        var service = self
+        service.id = StreamingService.primeVideo9.contains(region.uppercased()) ? 9 : 119
+        return service
+    }
+
     /// The services chosen, as a country's list (`available`, TMDB's
     /// services there) has them: the same id when the country has it, else
     /// the country's service of the same name (Amazon Prime Video: 119 in
@@ -71,6 +84,24 @@ public struct StreamingService: Codable, Hashable, Sendable, Identifiable {
         let byName = Dictionary(available.map { (key($0.name), $0) }) { first, _ in first }
         var seen = Set<Int>()
         return chosen.compactMap { byId[$0.id] ?? byName[key($0.name)] }.filter { seen.insert($0.id).inserted }
+    }
+}
+
+// MARK: - The country's services
+
+extension HomeSettings {
+    /// After TMDB listed a country's services (`available`): the chosen
+    /// services matched to them (`StreamingService.matching`), only while
+    /// `region` is still the country chosen — an answer for a country left
+    /// meanwhile changes nothing. true: the stored choice changed.
+    @discardableResult
+    public func adoptServices(_ available: [StreamingService], listedFor region: String) -> Bool {
+        guard streamingRegion == HomeSettings.regionCode(region) else { return false }
+        let chosen = streamingServices
+        let matched = StreamingService.matching(chosen, in: available)
+        guard matched != chosen else { return false }
+        streamingServices = matched
+        return true
     }
 }
 

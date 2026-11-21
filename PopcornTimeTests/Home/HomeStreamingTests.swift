@@ -62,8 +62,56 @@ final class HomeStreamingTests: CheckedTestCase {
         eq(american.streamingServices.map(\.id), [8, 119, 337, 350], "the country chosen in Settings decides: France, 119")
         american.streamingRegion = "GB"
         eq(american.streamingServices.map(\.id), [8, 9, 337, 350], "the United Kingdom: 9")
-        american.streamingServices = [StreamingService(id: 119, name: "Amazon Prime Video")]
-        eq(american.streamingServices.map(\.id), [119], "services the user chose are kept as they are")
+        american.streamingServices = [StreamingService(id: 381, name: "Canal+"), StreamingService(id: 8, name: "Netflix")]
+        eq(american.streamingServices.map(\.id), [381, 8], "services the user chose are kept as they are")
+    }
+
+    /// A choice stored in another country, or by the build before Prime Video's id depended on
+    /// the country (it stored [8, 119, 337, 350] for someone in the United States), is read in
+    /// the country's ids — even when TMDB never listed the new country's services to Settings
+    /// (no key, no answer): a 119 there would open an empty page.
+    func testAStoredChoiceReadsInTheCountrysIds() {
+        let sandbox = HomeSandbox()
+        defer { sandbox.discard() }
+        let settings = HomeSettings(defaults: sandbox.defaults, deviceRegion: { "FR" })
+        settings.streamingRegion = "US"
+        settings.streamingServices = [StreamingService(id: 8, name: "Netflix"),
+                                      StreamingService(id: 119, name: "Amazon Prime Video", logoPath: "/p.png"),
+                                      StreamingService(id: 337, name: "Disney Plus"), StreamingService(id: 350, name: "Apple TV")]
+        eq(settings.streamingServices.map(\.id), [8, 9, 337, 350], "the US: Prime Video is 9")
+        eq(settings.streamingServices[1].name, "Amazon Prime Video", "its name kept")
+        eq(settings.streamingServices[1].logoPath, "/p.png", "and its logo (TMDB's is the same under both ids)")
+        settings.streamingRegion = "FR"
+        eq(settings.streamingServices.map(\.id), [8, 119, 337, 350], "back in France: 119")
+        settings.streamingServices = [StreamingService(id: 9, name: "Amazon Prime Video"), StreamingService(id: 119, name: "Amazon Prime Video")]
+        eq(settings.streamingServices.map(\.id), [119], "France, a stored 9: 119, once")
+    }
+
+    /// The country changes in Settings: once TMDB lists the new country's services, the chosen
+    /// ones become that country's — unless the user has meanwhile chosen another country.
+    func testTheServicesFollowTheCountryChosenInSettings() {
+        let sandbox = HomeSandbox()
+        defer { sandbox.discard() }
+        let root = (try? JSONSerialization.jsonObject(with: HomeFixture.data("tmdb_providers_US.json"))) as? [String: Any]
+        let american = TMDBStreamingClient.services(root?["results"] as? [[String: Any]] ?? [], region: "US")
+        let settings = HomeSettings(defaults: sandbox.defaults, deviceRegion: { "FR" })
+        let french = [StreamingService(id: 8, name: "Netflix"), StreamingService(id: 119, name: "Amazon Prime Video"),
+                      StreamingService(id: 381, name: "Canal+")]
+
+        settings.streamingRegion = "FR"
+        settings.streamingServices = french
+        settings.streamingRegion = "US"
+        check(settings.adoptServices(american, listedFor: "US"), "the US list arrives: the choice changes")
+        eq(settings.streamingServices.map(\.id), [8, 9], "Prime Video is the US's 9, Canal+ is not in the US")
+        check(settings.streamingServices.allSatisfy { american.contains($0) }, "TMDB's US entries (names, logos)")
+        check(!settings.adoptServices(american, listedFor: "us"), "the same list again: nothing to change")
+
+        settings.streamingRegion = "FR"
+        settings.streamingServices = french
+        settings.streamingRegion = "US"
+        settings.streamingRegion = "FR"
+        check(!settings.adoptServices(american, listedFor: "US"), "the US answer arrives after a move back to France")
+        eq(settings.streamingServices.map(\.id), [8, 119, 381], "the French choice is left alone")
     }
 
     /// TMDB lists stores among its watch providers (Apple TV Store, Amazon Video, Rakuten TV…),
