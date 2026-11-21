@@ -154,6 +154,14 @@ final class HomeSeeAllMore: ObservableObject {
         loadNext()
     }
 
+    /// Empty pages in a row so far (`loadNext`).
+    private var emptyPages = 0
+    /// Empty pages in a row asked one after the other before the grid
+    /// waits for the user to reach its end again: a catalogue whose next
+    /// titles have no IMDb id was asked for page after page, up to TMDB's
+    /// 500th, with nothing for the user to see.
+    static let toleratedEmptyPages = 3
+
     func loadNext() {
         guard started, let pages, !isLoading, !pages.isOver else { return }
         isLoading = true
@@ -162,8 +170,9 @@ final class HomeSeeAllMore: ObservableObject {
             self.isLoading = false
             guard let page else { return }
             self.items += page
+            self.emptyPages = page.isEmpty ? self.emptyPages + 1 : 0
             // A page whose titles were all on the shelf: the one after.
-            if page.isEmpty, !pages.isOver { self.loadNext() }
+            if page.isEmpty, !pages.isOver, self.emptyPages < HomeSeeAllMore.toleratedEmptyPages { self.loadNext() }
         }
     }
 }
