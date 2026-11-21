@@ -13,6 +13,9 @@
 //   yts_4k.json                                      YTS, 2160p
 //   tvm_web_<day>.json, tvm_us_<day>.json            TVMaze's schedules of a day (2026-11-14)
 //   tpb_<list>.json                                  apibay's precompiled lists (207, 208, 211)
+//   tmdb_*.json                                      TMDB's discover pages, services, countries:
+//                                                    hand-made (tools/tmdb-fixtures.py), read by
+//                                                    `TMDBRecorded` (the streaming services)
 //
 // A request without a file answers what its host answers when it has
 // nothing (an empty page, an empty day), or fails when a real host would.
@@ -102,7 +105,7 @@ struct HomeRecordedTransport {
             guard name.hasPrefix(prefix), name.hasSuffix(".json"), isPlainName(name) else { return nil }
             return "tpb_" + name.dropFirst(prefix.count)
         case .tmdb:
-            return nil
+            return TMDBRecorded.fileName(for: path)
         }
     }
 
@@ -123,8 +126,11 @@ struct HomeRecordedTransport {
         case .tvmaze:
             // A day without a recorded schedule: a day without episodes.
             return recorded ?? Data("[]".utf8)
-        case .apibay, .tmdb:
+        case .apibay:
             return recorded
+        case .tmdb:
+            // A page not recorded: an empty last page.
+            return TMDBRecorded.answer(to: request.path, in: directory)
         }
     }
 

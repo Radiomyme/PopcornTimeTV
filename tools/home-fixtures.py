@@ -28,6 +28,8 @@
 #   apibay_top100_208.json          https://apibay.org/precompiled/data_top100_208.json
 #   The 48 h lists (tpb_48h_207.json, tpb_48h_208.json) are no longer asked: kept as the record
 #   of what the shelves were, for the parser's tests and the tests of the change.
+# The TMDB files of the same folder (tmdb_*.json, the streaming services) are not recordings:
+#   tools/tmdb-fixtures.py writes them from the Cinemeta files this script writes.
 # <lookups>: the cards of the rankings' titles no list had, recorded the same day.
 #   cm_last_videos_top48h.json      https://v3-cinemeta.strem.io/catalog/series/last-videos/lastVideosIds=<12 ids>.json
 #   cm_meta_movie_<tt>.json         https://v3-cinemeta.strem.io/meta/movie/<tt>.json (four ids)

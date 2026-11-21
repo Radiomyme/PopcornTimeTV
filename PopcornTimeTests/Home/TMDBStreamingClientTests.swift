@@ -333,4 +333,36 @@ final class TMDBStreamingClientTests: CheckedTestCase {
         check(failed != nil && failed! == nil, "no answer: nil (a failure, not the end)")
         check(!failing.isOver, "not over")
     }
+
+    // MARK: Recorded answers (DEBUG fixture runs)
+
+    func testRecordedAnswers() {
+        let recorded = Fixtures.url("Home")
+        let client = TMDBStreamingClient(recordedIn: recorded)
+        client.apiKey = { nil }
+        let first = titles(client)
+        eq(first?.items?.count, 12, "a recorded page, whatever the key")
+        eq(first?.more, true, "with a next one")
+        check(first?.items?.allSatisfy { HomeParse.isImdbId($0.imdbId) } == true, "every title known by its IMDb id")
+        eq(titles(client, page: 2)?.more, false, "the second is the last")
+        let third = titles(client, page: 3)
+        check(third?.items == [] && third?.more == false, "past it: the end")
+        eq(titles(client, kind: .show)?.items?.count, 12, "the shows")
+        eq(wait { done in client.check(key: "anything") { done($0) } }, .some(true), "any key is taken")
+        eq(wait { done in client.services(region: "FR") { done($0) } }??.first?.name, "Netflix", "the services of a country")
+        check((wait { done in client.regions { done($0) } }??.count ?? 0) > 3, "the countries")
+        eq(TMDBStub.requests.count, 0, "nothing asked of anyone")
+
+        // The hub's lists, as the recorded transports answer them (an IMDb id in every result).
+        let source = HomeSource.streaming(service: 8, kind: .movie, sort: .recent, region: "FR", today: "2026-11-14")
+        eq(TMDBRecorded.fileName(for: source.request.path), "tmdb_movie_recent_p1.json", "a list's file")
+        let entries = TMDBRecorded.answer(to: source.request.path, in: recorded).flatMap { HomeParse.tmdbDiscover($0, kind: .movie) }
+        eq(entries?.count, 12, "read as the hub reads it")
+        let replayed = HomeRecordedTransport.answer(to: HomeRequest(host: .tmdb, path: source.request.path), in: recorded)
+        eq(replayed, TMDBRecorded.answer(to: source.request.path, in: recorded), "the iOS and Mac recorded transport answers the same")
+        let unknown = TMDBRecorded.answer(to: "/movie/1/external_ids", in: recorded)
+            .flatMap { (try? JSONSerialization.jsonObject(with: $0)) as? [String: Any] }
+        check(unknown?["imdb_id"] is NSNull, "an id no page has: no IMDb id")
+        check(TMDBRecorded.answer(to: "/configuration", in: recorded) == nil, "nothing else")
+    }
 }

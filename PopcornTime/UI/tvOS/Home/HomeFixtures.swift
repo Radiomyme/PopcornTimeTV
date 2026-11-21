@@ -67,8 +67,9 @@ enum HomeFixtures {
             if path.hasSuffix("data_top100_211.json") { return .file("tpb_211.json") }
             return .none
         case .tmdb:
-            // No key in a fixture run: the streaming shelves are not asked.
-            return .none
+            // The streaming services' lists, hand-made (tools/tmdb-fixtures.py):
+            // asked only with a TMDB key (-popcornkit.tmdb.apiKey <any text>).
+            return TMDBRecorded.fileName(for: path).map { .file($0) } ?? .none
         }
     }
 
