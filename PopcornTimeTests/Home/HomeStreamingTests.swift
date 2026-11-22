@@ -320,6 +320,47 @@ final class HomeStreamingTests: CheckedTestCase {
         check(pages?.service == 8 && pages?.kinds == [.movie] && pages?.sort == .popular, "its pages")
     }
 
+    /// What a page filtered on a service shows under its row (`HomeServicePage`, the
+    /// iPhone, iPad and Mac Home's rule, as the Apple TV's HomeView does it).
+    func testTheStatesOfAPageFilteredOnAService() {
+        let netflix = StreamingService(id: 8, name: "Netflix"), disney = StreamingService(id: 337, name: "Disney+")
+        let usualRow = HomeShelf(id: HomeShelfID.services, style: .landscape,
+                                 items: [HomeServiceCard.item(netflix, selected: false), HomeServiceCard.item(disney, selected: false)])
+        let pickedRow = HomeShelf(id: HomeShelfID.services, style: .landscape,
+                                  items: [HomeServiceCard.all(title: "All"), HomeServiceCard.item(netflix, selected: true),
+                                          HomeServiceCard.item(disney, selected: false)])
+        let titles = HomeShelf(id: HomeShelfID.streaming(8, .movie, .popular), style: .posters,
+                               items: [HomeItem(imdbId: "tt1000001", kind: .movie, title: "One")])
+        let trending = HomeShelf(id: HomeShelfID.trendingMovies, style: .posters, items: titles.items)
+        func page(_ shelves: [HomeShelf], refreshing: Bool = false, unavailable: Bool = false, refused: Bool = false) -> HomeServicePage {
+            HomeServicePage(shelves: shelves, isRefreshing: refreshing, isUnavailable: unavailable, isKeyRefused: refused)
+        }
+
+        // The usual page, whatever happens to it: the screen's usual rules.
+        for state in [page([]), page([trending, usualRow]), page([usualRow], refreshing: true), page([usualRow], unavailable: true, refused: true)] {
+            eq(state, .usual, "no service picked")
+            check(!state.showsRowOnly, "drawn as always")
+        }
+        eq(HomeServiceCard.picked(in: [usualRow]), nil, "nothing picked")
+        eq(HomeServiceCard.picked(in: [trending, pickedRow])?.id, "service-8", "Netflix picked")
+
+        eq(page([pickedRow, titles]), .shelves, "its shelves")
+        eq(page([pickedRow, titles], refreshing: true), .shelves, "its shelves while the rest refreshes")
+        eq(page([pickedRow], refreshing: true), .loading, "its lists on their way: placeholders")
+        eq(page([pickedRow]), .empty, "it listed nothing: « No results »")
+        eq(page([pickedRow], unavailable: true), .failed(service: "Netflix", refused: false), "its lists failed: its own message")
+        eq(page([pickedRow], refreshing: true, unavailable: true, refused: true), .failed(service: "Netflix", refused: true),
+           "TMDB refused the key: said as such")
+        check(page([pickedRow]).showsRowOnly && page([pickedRow], refreshing: true).showsRowOnly
+              && page([pickedRow], unavailable: true).showsRowOnly && !page([pickedRow, titles]).showsRowOnly,
+              "the row alone, with the state's view under it")
+
+        // Never titles, and their order kept.
+        eq(HomeServiceCard.titles(pickedRow.items + titles.items).map(\.id), titles.items.map(\.id), "service cards are not titles")
+        check(HomeShelfID.keepsItsOrder(HomeShelfID.services) && HomeShelfID.keepsItsOrder(titles.id), "the row and a service's shelf keep their order")
+        check(!HomeShelfID.keepsItsOrder(HomeShelfID.trendingMovies), "not the usual shelves")
+    }
+
     /// Settings › Services stores TMDB's entries for the services chosen (their logos): the
     /// row's cards keep the names the user first saw only if the defaults are TMDB's names.
     /// This checks the defaults against the hand-made tmdb_providers.json

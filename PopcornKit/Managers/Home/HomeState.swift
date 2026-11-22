@@ -91,6 +91,32 @@ public final class HomeState {
         feed.refreshLocal()
     }
 
+    // MARK: Streaming services
+
+    /// The page filtered on a service (nil: the usual page), built again by
+    /// this hub — the one on screen, the recorded one of a DEBUG fixture
+    /// run: a service's lists that are missing or no longer fresh are asked
+    /// at once, or as soon as a running refresh ends (meanwhile
+    /// `isRefreshing` says so). The filter lasts the run of the app
+    /// (`HomeSettings.homeServiceFilter`). The same service again changes
+    /// nothing.
+    public func show(service id: Int?) {
+        let settings = HomeSettings()
+        guard settings.homeServiceFilter != id else { return }
+        settings.homeServiceFilter = id
+        feed.refreshLocal()
+    }
+
+    /// A card of the « Services » row picked (a tap, a click, Return):
+    /// its service's page, « All »'s the usual page — never a title's
+    /// page. false for any other card: a title, which the screen opens.
+    @discardableResult
+    public func pick(service item: HomeItem) -> Bool {
+        guard HomeServiceCard.isServiceCard(item) else { return false }
+        show(service: HomeServiceCard.serviceId(of: item))
+        return true
+    }
+
     public func shelf(_ id: String) -> HomeShelf? {
         return id == HomeShelfID.hero ? nil : shelves.first { $0.id == id }
     }

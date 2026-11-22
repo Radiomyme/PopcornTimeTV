@@ -1338,6 +1338,117 @@ final class HomeFeedTests: CheckedTestCase {
         eq(tmdbPaths.count, 6, "its six lists asked")
     }
 
+    // MARK: The services row on every platform
+
+    /// The row is on by default (`HomeFeed.defaultServicesRow`: one value for tvOS, iOS and
+    /// macOS, with no platform condition; this bundle runs on macOS, so the Mac's default is
+    /// the one read here). Without a key, on or off asks the same lists and builds the same
+    /// page, byte for byte: the rule that keeps iPhone, iPad and Mac as they were.
+    func testTheServicesRowIsOnEverywhereAndChangesNothingWithoutAKey() {
+        check(HomeFeed.defaultServicesRow, "on by default")
+        check(HomeFeed.Options().servicesRow, "the options' default")
+        check(HomeSettings(defaults: sandbox.defaults).tmdbAPIKey == nil, "no key")
+        var off = HomeFeed.Options(requestDeadline: .infinity, phaseGrace: .infinity)
+        off.servicesRow = false
+        let without = load(makeFeed(options: off))
+        let asked = network.requests.map { "\($0.host) \($0.path)" }.sorted()
+
+        // The same, row on, in a sandbox of its own (nothing cached).
+        sandbox.discard()
+        sandbox = HomeSandbox()
+        network.forget()
+        let with = load(makeFeed(options: HomeFeed.Options(requestDeadline: .infinity, phaseGrace: .infinity)))
+        eq(network.requests.map { "\($0.host) \($0.path)" }.sorted(), asked, "the same requests")
+        check(tmdbPaths.isEmpty, "none of TMDB's")
+        eq(with, without, "the same page")
+        check(with.shelf(HomeShelfID.services) == nil, "no « Services » row")
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = .sortedKeys
+        eq(try? encoder.encode(with.shelves), try? encoder.encode(without.shelves), "byte for byte")
+
+        // A key: the row, from the settings alone (TMDB is not asked for the usual page).
+        streaming(filter: nil)
+        network.forget()
+        let keyed = load(makeFeed(options: HomeFeed.Options(requestDeadline: .infinity, phaseGrace: .infinity)), force: true)
+        eq(keyed.shelf(HomeShelfID.services)?.items.map(\.id), ["service-8", "service-119", "service-337", "service-350"],
+           "France's four default services")
+        check(tmdbPaths.isEmpty, "no request to TMDB for the usual page")
+    }
+
+    /// A service picked through the page's own hub (`HomeState.pick(service:)`, what a tap,
+    /// a click or Return on its card does on iPhone, iPad and Mac), and what the page then
+    /// shows (`HomeServicePage`): placeholders while its lists come, its shelves, « No
+    /// results » for a service that lists nothing, its failure; « All » brings the usual
+    /// page back; a title's card is not the hub's to open.
+    @MainActor
+    func testAServicePickedThroughTheHubAndThePageStates() async {
+        streaming(filter: nil)
+        network.answer { [self] request in
+            // Apple TV (350) lists nothing, as in the recorded answers.
+            if request.host == .tmdb, request.path.contains("with_watch_providers=350") {
+                return .some(HomeStreamingTests.discover(kind: request.path.hasPrefix("/discover/tv") ? .show : .movie, ids: []))
+            }
+            return self.tmdbPage(request)
+        }
+        var options = HomeFeed.Options(requestDeadline: .infinity, phaseGrace: .infinity)
+        options.updateSpacing = 0
+        let feed = makeFeed(options: options)
+        let state = HomeState(feed: feed)
+        func page() -> HomeServicePage {
+            HomeServicePage(shelves: state.shelves, isRefreshing: state.isRefreshing, isUnavailable: state.isUnavailable,
+                            isKeyRefused: false)
+        }
+        state.start()
+        let loaded = await homeUntil { state.hasLoaded && !state.isRefreshing && state.shelf(HomeShelfID.trendingMovies) != nil }
+        check(loaded, "the usual page")
+        _ = await homeUntil { feed.isIdle }
+        eq(page(), .usual, "no service picked")
+        guard let netflix = state.shelf(HomeShelfID.services)?.items.first(where: { $0.id == "service-8" }),
+              let title = state.shelf(HomeShelfID.trendingMovies)?.items.first else { check(false, "the row and a title"); return }
+        check(!state.pick(service: title), "a title's card: the host opens it")
+        eq(HomeSettings().homeServiceFilter, nil, "and the page stays as it is")
+
+        // Netflix: its lists held, the page is on its way.
+        network.forget()
+        network.hold = true
+        check(state.pick(service: netflix), "a service card is the hub's")
+        let waiting = await homeUntil { page() == .loading }
+        check(waiting, "placeholders while its lists come", "\(state.shelves.ids) refreshing=\(state.isRefreshing)")
+        check(state.shelves.ids == [HomeShelfID.services], "the row alone, « All » first")
+        eq(state.shelf(HomeShelfID.services)?.items.first?.id, HomeServiceCard.allId, "« All » first")
+        network.hold = false
+        network.release()
+        let shown = await homeUntil { page() == .shelves && !state.isRefreshing }
+        check(shown, "its shelves", "\(state.shelves.ids)")
+        eq(state.shelves.filter { HomeShelfID.streamingService(of: $0.id) == 8 }.count, 6, "Netflix's six shelves")
+        eq(HomeServiceCard.picked(in: state.shelves)?.id, "service-8", "its card selected")
+        check(tmdbPaths.allSatisfy { $0.contains("with_watch_providers=8") } && !tmdbPaths.isEmpty, "only Netflix's lists asked")
+
+        // Apple TV lists nothing.
+        state.show(service: 350)
+        let empty = await homeUntil { page() == .empty }
+        check(empty, "« No results »", "\(state.shelves.ids)")
+
+        // Disney+ fails: its own message, not the key's.
+        network.down = [.tmdb]
+        state.show(service: 337)
+        let failed = await homeUntil { state.isUnavailable }
+        check(failed, "its lists failed")
+        eq(page(), .failed(service: "Disney Plus", refused: false), "its own message")
+        eq(HomeServicePage(shelves: state.shelves, isRefreshing: false, isUnavailable: true, isKeyRefused: true),
+           .failed(service: "Disney Plus", refused: true), "TMDB refused the key: said as such")
+        check(page().showsRowOnly && state.shelves.ids == [HomeShelfID.services], "the row stays: « All » is there")
+
+        // « All »: the usual page.
+        network.down = []
+        guard let all = state.shelf(HomeShelfID.services)?.items.first, HomeServiceCard.isAll(all) else { check(false, "« All »"); return }
+        check(state.pick(service: all), "« All » is the hub's too")
+        let usual = await homeUntil { page() == .usual && state.shelf(HomeShelfID.trendingMovies) != nil && !state.isUnavailable }
+        check(usual, "the usual page again")
+        eq(HomeSettings().homeServiceFilter, nil, "no filter")
+        _ = await homeUntil { feed.isIdle }
+    }
+
     // MARK: Observable state
 
     @MainActor

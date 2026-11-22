@@ -4,14 +4,15 @@ import Foundation
 /// offers in the user's country, from TMDB's `discover` with its watch
 /// providers (JustWatch's data, which TMDB asks apps to credit).
 ///
-/// - The Apple TV's Home has a « Services » row (`HomeShelfID.services`):
+/// - The Home of every app (Apple TV, iPhone and iPad, Mac) has a
+///   « Services » row (`HomeShelfID.services`) once there is a TMDB key:
 ///   one card per service the user chose (`HomeSettings.streamingServices`).
 ///   Picking one filters the page (`HomeSettings.homeServiceFilter`): it then
 ///   shows that service's shelves only — popular, recent and top rated
 ///   movies and shows — under a hero of its popular titles; « All » brings
 ///   the usual page back.
-/// - The Movies and Shows grids have a « Service » filter that pages through
-///   a service's catalogue (`TMDBStreamingClient.titles`).
+/// - The Apple TV's Movies and Shows grids have a « Service » filter that
+///   pages through a service's catalogue (`TMDBStreamingClient.titles`).
 ///
 /// TMDB knows its titles by TMDB ids: the client gives every answer its
 /// titles' IMDb ids before the parser reads it (the hub and the app know
@@ -158,7 +159,7 @@ extension ShowManager.Filters {
 // MARK: - Shelves
 
 extension HomeShelfID {
-    /// The Apple TV's row of service cards, the page's filter.
+    /// The row of service cards, the page's filter.
     public static let services = "services"
 
     static let streamingPrefix = "streaming-"
@@ -242,6 +243,79 @@ public enum HomeServiceCard {
     /// The card of the service the page shows.
     public static func isSelected(_ item: HomeItem) -> Bool {
         return item.rank == 1
+    }
+
+    /// The titles among `items`: the service cards left out (they are
+    /// not titles, and nothing may record them as one: `HomeTitleFacts`).
+    public static func titles(_ items: [HomeItem]) -> [HomeItem] {
+        return items.filter { !isServiceCard($0) }
+    }
+
+    /// The card of the service the page is filtered on, nil on the usual
+    /// page: the selected card of the « Services » row.
+    public static func picked(in shelves: [HomeShelf]) -> HomeItem? {
+        return shelves.first { $0.id == HomeShelfID.services }?.items.first(where: isSelected)
+    }
+}
+
+extension HomeShelfID {
+    /// The shelves of the « Services » row and of a filtered page: their
+    /// order is the point (the services as chosen; a service's titles by
+    /// popularity, date or rating), so a screen never reorders them.
+    public static func keepsItsOrder(_ id: String) -> Bool {
+        return id == services || streaming(of: id) != nil
+    }
+}
+
+// MARK: - A filtered page's state
+
+/// What a page filtered on a service shows under its « Services » row, as
+/// the Apple TV's Home does (HomeView, HomeBillboard): the service's
+/// shelves; placeholders while its lists are on their way; « No results »
+/// when it lists nothing; its own message and Try Again when its lists
+/// failed — the key's refusal said as such, pointing to Settings. The
+/// iPhone, iPad and Mac Home (`HomeScreen`) read it; no UI here.
+public enum HomeServicePage: Equatable, Sendable {
+    /// The usual page (no service picked): drawn as it always was.
+    case usual
+    /// A service's page with its shelves.
+    case shelves
+    /// A service just picked: its lists are on their way.
+    case loading
+    /// The service listed nothing in the country.
+    case empty
+    /// None of the service's lists came: TMDB refused the key
+    /// (`refused`), or did not answer. `service` is its name.
+    case failed(service: String, refused: Bool)
+
+    /// - Parameters:
+    ///   - shelves: the page's shelves (`HomeState.shelves`).
+    ///   - isRefreshing, isUnavailable: the hub's (`HomeState`): a picked
+    ///     service whose lists are awaited makes it refresh, and one whose
+    ///     lists all failed makes it unavailable (`HomeFeed`).
+    ///   - isKeyRefused: TMDB refused the key at its last request
+    ///     (`TMDBStreamingClient.isKeyRefused`).
+    public init(shelves: [HomeShelf], isRefreshing: Bool, isUnavailable: Bool, isKeyRefused: Bool) {
+        guard let service = HomeServiceCard.picked(in: shelves) else {
+            self = .usual
+            return
+        }
+        if isUnavailable {
+            self = .failed(service: service.title, refused: isKeyRefused)
+        } else if shelves.allSatisfy({ $0.id == HomeShelfID.services }) {
+            self = isRefreshing ? .loading : .empty
+        } else {
+            self = .shelves
+        }
+    }
+
+    /// Only the « Services » row is drawn, with this state's own view
+    /// under it (placeholders, « No results », the failure).
+    public var showsRowOnly: Bool {
+        switch self {
+        case .loading, .empty, .failed: return true
+        case .usual, .shelves: return false
+        }
     }
 }
 

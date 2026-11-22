@@ -92,8 +92,11 @@ public final class HomeFeed: @unchecked Sendable {
         /// title of a ranking is looked up.
         public var light = false
         /// The « Services » row and the page filtered on a service
-        /// (`HomeSettings.homeService`): the Apple TV's Home only, by
-        /// default. The unit tests, which run on macOS, turn it on.
+        /// (`HomeSettings.homeService`): on by default on every platform.
+        /// The row exists only once there is a TMDB key and services are
+        /// offered (`HomeSettings.streamingShelves`); without a key, on or
+        /// off reads and builds the same page. Off: the row and the
+        /// filtered page never exist, whatever the settings.
         public var servicesRow = HomeFeed.defaultServicesRow
 
         public init(requestDeadline: TimeInterval = 15, phaseGrace: TimeInterval = 1.5) {
@@ -130,13 +133,10 @@ public final class HomeFeed: @unchecked Sendable {
     /// TV app tells the system its Top Shelf may have changed.
     public static let didRefreshNotification = Notification.Name("PopcornKit.HomeFeed.didRefresh")
 
-    /// The « Services » row and the page filtered on a service: the Apple
-    /// TV's Home only (the other apps have no such row).
-    #if os(tvOS)
+    /// The « Services » row and the page filtered on a service: the Homes
+    /// of the Apple TV, the iPhone and iPad, and the Mac all have them (the
+    /// same value on every platform). Without a TMDB key they do not exist.
     public static let defaultServicesRow = true
-    #else
-    public static let defaultServicesRow = false
-    #endif
 
     public let store: HomeStore
     private let transport: HomeTransport
