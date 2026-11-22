@@ -8,7 +8,8 @@ import XCTest
 /// page back; the Movies grid's Service control filters and pages, its Sort
 /// and Genre offering only what the service's lists follow; Menu closes a
 /// grid's menu, the key sheet and the country and services pickers, and
-/// nothing more.
+/// nothing more; the key sheet shows a QR code to TMDB's API page, and
+/// « Check Again » once a key is stored.
 ///
 /// Runs like `HomeUITests`: the tvOS 26.5 simulator, a DEBUG build. The key
 /// is a made-up one (`-popcornkit.tmdb.apiKey`, the arguments domain, which
@@ -428,7 +429,87 @@ final class StreamingServicesUITests: XCTestCase {
         }
     }
 
+    /// The key sheet shows a QR code (TMDB's API page, for a phone) with or
+    /// without a key, and « Check Again » only with one. Check Again asks
+    /// the recorded answers, which take any key: the sheet closes, the
+    /// verdict says the saved key is accepted, the row still says « Set ».
+    /// Menu on Check Again closes the sheet only, as on its other buttons.
+    func testTheKeySheetShowsAQRCodeAndChecksAStoredKeyAgain() throws {
+        for key in [nil, Self.key] {
+            let name = key == nil ? "no-key" : "key"
+            let (row, sheet) = openKeySheet(key: key)
+            let qr = element("Settings.TMDBKey.QR"), check = element("Settings.TMDBKey.Check")
+            snap("key-sheet-\(name)")
+            XCTAssertTrue(qr.exists, "\(name): no QR code in the key sheet")
+            XCTAssertGreaterThan(qr.frame.width, 200, "\(name): the QR code is too small to scan: \(qr.frame)")
+            XCTAssertTrue(app.windows.firstMatch.frame.contains(qr.frame), "\(name): the QR code is not whole on the screen")
+            XCTAssertTrue(element("Settings.TMDBKey.Field").hasFocus, "\(name): the field does not have the focus: \(focusedLabel)")
+            guard key != nil else {
+                XCTAssertFalse(check.exists, "« Check Again » without a key")
+                app.terminate()
+                continue
+            }
+            XCTAssertTrue(check.exists, "no « Check Again » with a key")
+            XCTAssertTrue(focusOnButton(check), "« Check Again » never got the focus: \(focusedLabel)")
+            pause(1)
+            snap("key-sheet-check-focused")
+            // Menu on the button: the sheet closes, the focus back on the row.
+            remote.press(.menu)
+            pause(1.5)
+            XCTAssertFalse(sheet.exists, "Menu did not close the key sheet")
+            XCTAssertEqual(selectedTab, "settings", "Menu left Settings")
+            XCTAssertTrue(row.hasFocus, "Menu did not give the focus back to the row: \(focusedLabel)")
+
+            // Again, and this time Check Again.
+            remote.press(.select)
+            XCTAssertTrue(sheet.waitForExistence(timeout: 5), "the key sheet did not open again")
+            pause(1.5)
+            XCTAssertTrue(focusOnButton(check), "« Check Again » never got the focus: \(focusedLabel)")
+            remote.press(.select)
+            let alert = app.alerts.firstMatch
+            XCTAssertTrue(alert.waitForExistence(timeout: 10), "no verdict after Check Again")
+            pause(1)
+            snap("key-check-verdict")
+            XCTAssertFalse(sheet.exists, "the sheet is still open behind the verdict")
+            if isEnglish {
+                XCTAssertTrue(alert.staticTexts["TMDB accepts the saved key."].exists, "not the accepted verdict: \(alert.debugDescription)")
+            }
+            remote.press(.select)
+            XCTAssertTrue(waitUntil(timeout: 5) { !alert.exists }, "the verdict did not close")
+            pause(1)
+            if isEnglish { XCTAssertTrue(row.label.contains("Set"), "the key row does not say Set: \(row.label)") }
+            XCTAssertEqual(selectedTab, "settings", "the verdict left Settings")
+            app.terminate()
+        }
+    }
+
     // MARK: - Steps
+
+    /// Settings with the focus on the key row, then its sheet open.
+    private func openKeySheet(key: String?) -> (row: XCUIElement, sheet: XCUIElement) {
+        launch(key: key, ["-PTDebugTab", "settings", "-PTDebugFocusContent", "YES", "-PTDebugSettingsRow", "tmdbKey"])
+        let row = element("Settings.Row.tmdbKey"), sheet = element("Settings.TextSheet")
+        XCTAssertTrue(row.waitForExistence(timeout: 15), "the key row never showed")
+        pause(2)
+        if !row.hasFocus {
+            remote.press(.down)
+            pause(1)
+        }
+        XCTAssertTrue(row.hasFocus, "the key row never got the focus: \(focusedLabel)")
+        remote.press(.select)
+        XCTAssertTrue(sheet.waitForExistence(timeout: 5), "the key sheet did not open")
+        pause(1.5)
+        return (row, sheet)
+    }
+
+    /// Down from the field to the sheet's buttons, then sideways to `button`.
+    private func focusOnButton(_ button: XCUIElement) -> Bool {
+        for _ in 0..<6 where !button.hasFocus {
+            remote.press(element("Settings.TMDBKey.Field").hasFocus ? .down : (button.frame.minX < focusedElement.frame.minX ? .left : .right))
+            pause(1)
+        }
+        return button.hasFocus
+    }
 
     /// `key`: nil runs without a key (an empty one in the arguments domain
     /// hides one a simulator may have saved).

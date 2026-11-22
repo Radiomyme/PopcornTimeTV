@@ -123,6 +123,13 @@ struct GlassSettingsActions {
     /// key is removed). The completion (main queue) gets TMDB's verdict:
     /// nil when it could not be asked (the key is kept).
     var setTMDBKey: (String?, @escaping (Bool?) -> Void) -> Void = { _, done in done(nil) }
+    /// Asks TMDB again about the stored key (« Vérifier à nouveau »); the
+    /// key stays whatever the answer. The completion (main queue) gets the
+    /// verdict, nil when TMDB did not answer.
+    var checkTMDBKeyAgain: (@escaping (Bool?) -> Void) -> Void = { done in done(nil) }
+    /// The key sheet's QR code: TMDB's API settings page, where the key is
+    /// (never the key itself). nil: no code.
+    var tmdbKeyQRCode: () -> CGImage? = { nil }
     var setStreamingRegion: (String) -> Void = { _ in }
     var setStreamingServices: ([GlassSettingsChoice]) -> Void = { _ in }
     /// The services of a country, the most watched first (main queue; nil:
@@ -225,6 +232,19 @@ final class GlassSettingsModel: ObservableObject {
             if let stored = self.actions.readHome?() { self.home = stored }
             // Another key: the services offered are asked again.
             self.streamingServiceChoices = nil
+            completion(verdict)
+        }
+    }
+
+    /// Checks the stored key with TMDB again; `completion` gets the verdict
+    /// (true: taken, false: refused, nil: no answer). The row then says
+    /// « Définie » or « Refusée ».
+    func checkTMDBKeyAgain(completion: @escaping (Bool?) -> Void) {
+        isCheckingTMDBKey = true
+        actions.checkTMDBKeyAgain { [weak self] verdict in
+            guard let self else { return }
+            self.isCheckingTMDBKey = false
+            if let stored = self.actions.readHome?() { self.home = stored }
             completion(verdict)
         }
     }
@@ -466,6 +486,9 @@ struct GlassSettingsView: View {
     @State private var confirmSignOut = false
     /// TMDB's verdict on the key just entered, for the alert that tells it.
     @State private var tmdbKeyVerdict: Bool??
+    /// The verdict is on the stored key checked again (« Vérifier à
+    /// nouveau »), not on a key just entered: its own texts.
+    @State private var tmdbKeyRechecked = false
     @State private var showTMDBKeyVerdict = false
     @FocusState private var focusedRow: GlassSettingsRowID?
 
@@ -522,10 +545,13 @@ struct GlassSettingsView: View {
         .alert(glassSettingsLocalized("Settings.TMDBKey"), isPresented: $showTMDBKeyVerdict) {
             SwiftUI.Button(glassSettingsLocalized("OK"), role: .cancel) {}
         } message: {
-            switch tmdbKeyVerdict {
-            case .some(.some(true)): Text(glassSettingsLocalized("Settings.TMDBKey.Accepted"))
-            case .some(.some(false)): Text(glassSettingsLocalized("Settings.TMDBKey.Refused"))
-            default: Text(glassSettingsLocalized("Settings.TMDBKey.Unchecked"))
+            switch (tmdbKeyVerdict, tmdbKeyRechecked) {
+            case (.some(.some(true)), false): Text(glassSettingsLocalized("Settings.TMDBKey.Accepted"))
+            case (.some(.some(false)), false): Text(glassSettingsLocalized("Settings.TMDBKey.Refused"))
+            case (_, false): Text(glassSettingsLocalized("Settings.TMDBKey.Unchecked"))
+            case (.some(.some(true)), true): Text(glassSettingsLocalized("Settings.TMDBKey.Check.Accepted"))
+            case (.some(.some(false)), true): Text(glassSettingsLocalized("Settings.TMDBKey.Check.Refused"))
+            case (_, true): Text(glassSettingsLocalized("Settings.TMDBKey.Check.Unanswered"))
             }
         }
     }
@@ -535,6 +561,15 @@ struct GlassSettingsView: View {
         model.setTMDBKey(key) { verdict in
             guard !removing else { return }
             tmdbKeyVerdict = .some(verdict)
+            tmdbKeyRechecked = false
+            showTMDBKeyVerdict = true
+        }
+    }
+
+    private func checkTMDBKeyAgain() {
+        model.checkTMDBKeyAgain { verdict in
+            tmdbKeyVerdict = .some(verdict)
+            tmdbKeyRechecked = true
             showTMDBKeyVerdict = true
         }
     }
@@ -779,9 +814,16 @@ struct GlassSettingsView: View {
                 message: "Settings.TMDBKey.Message",
                 placeholder: "Settings.TMDBKey.Placeholder",
                 removeTitle: model.home?.hasTMDBKey == true ? "Settings.TMDBKey.Remove" : nil,
+                checkTitle: model.home?.hasTMDBKey == true ? "Settings.TMDBKey.Check" : nil,
+                qrCode: model.actions.tmdbKeyQRCode(),
+                qrCaption: "Settings.TMDBKey.QR",
                 onSave: { key in
                     self.picker = nil
                     saveTMDBKey(key)
+                },
+                onCheck: {
+                    self.picker = nil
+                    checkTMDBKeyAgain()
                 },
                 onRemove: {
                     self.picker = nil
@@ -1100,14 +1142,23 @@ struct GlassSettingsPickerSheet: View {
 /// Glass sheet with one text field (the TMDB key). Selecting the field
 /// opens tvOS's full-screen keyboard — the one the iPhone offers to type
 /// into (« Apple TV Keyboard » notification, or the Remote in Control
-/// Center), so a long key can be pasted from the phone. Menu closes it.
+/// Center), so a long key can be pasted from the phone. Beside it, a QR
+/// code a phone opens TMDB's API page with, to copy the key there. Menu
+/// closes it.
 struct GlassSettingsTextSheet: View {
     let title: String
     let message: String?
     let placeholder: String
     /// nil: no « Remove » button.
     let removeTitle: String?
+    /// nil: no « Check Again » button (no key stored).
+    var checkTitle: String? = nil
+    /// A QR code shown beside the text, on a light plate; nil: none.
+    var qrCode: CGImage? = nil
+    /// The line under the QR code, saying what it opens.
+    var qrCaption: String? = nil
     let onSave: (String) -> Void
+    var onCheck: () -> Void = {}
     let onRemove: () -> Void
     let onCancel: () -> Void
 
@@ -1115,7 +1166,7 @@ struct GlassSettingsTextSheet: View {
     @FocusState private var focused: Field?
     @Environment(\.glassSettingsFallback) private var fallback
 
-    private enum Field: Hashable { case text, save, remove, cancel }
+    private enum Field: Hashable { case text, save, check, remove, cancel }
 
     private var trimmed: String { text.trimmingCharacters(in: .whitespacesAndNewlines) }
 
@@ -1124,43 +1175,94 @@ struct GlassSettingsTextSheet: View {
             Color.black.opacity(0.4)
                 .ignoresSafeArea()
             VStack(alignment: .leading, spacing: 26) {
+                // The sheet's name for the UI tests, on its title only: on
+                // the whole sheet it would replace its controls' own.
                 Text(glassSettingsLocalized(title))
                     .font(.system(size: 46, weight: .bold))
                     .foregroundStyle(.white)
-                if let message {
-                    Text(glassSettingsLocalized(message))
-                        .font(.system(size: 24))
-                        .foregroundStyle(GlassSettingsPalette.secondaryText)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-                TextField(glassSettingsLocalized(placeholder), text: $text)
-                    .autocorrectionDisabled()
-                    .textInputAutocapitalization(.never)
-                    .keyboardType(.asciiCapable)
-                    .focused($focused, equals: .text)
-                    .onSubmit { if !trimmed.isEmpty { focused = .save } }
-                    .accessibilityIdentifier("Settings.TMDBKey.Field")
-                HStack(spacing: 24) {
-                    SwiftUI.Button(glassSettingsLocalized("Save")) { onSave(trimmed) }
-                        .disabled(trimmed.isEmpty)
-                        .focused($focused, equals: .save)
-                    if let removeTitle {
-                        SwiftUI.Button(glassSettingsLocalized(removeTitle), role: .destructive, action: onRemove)
-                            .focused($focused, equals: .remove)
+                    .accessibilityIdentifier("Settings.TextSheet")
+                // The code beside the text and the field; the buttons under
+                // both, on the sheet's whole width.
+                HStack(alignment: .top, spacing: 50) {
+                    form
+                    if let qrCode {
+                        qrPanel(qrCode)
                     }
-                    SwiftUI.Button(glassSettingsLocalized("Cancel"), role: .cancel, action: onCancel)
-                        .focused($focused, equals: .cancel)
                 }
+                buttons
             }
             .padding(58)
-            .frame(width: 1100)
+            .frame(width: qrCode == nil ? 1100 : 1500)
             .fixedSize(horizontal: false, vertical: true)
             .modifier(GlassSettingsCard(cornerRadius: 50, fallback: fallback))
         }
         .defaultFocus($focused, .text)
         .onExitCommand(perform: onCancel)
         .presentationBackground(.clear)
-        .accessibilityIdentifier("Settings.TextSheet")
+    }
+
+    /// The code on a white plate (a phone reads it on a dark screen), drawn
+    /// pixel for pixel, and one line under it. Not focusable.
+    private func qrPanel(_ image: CGImage) -> some View {
+        let caption = qrCaption.map(glassSettingsLocalized) ?? ""
+        return VStack(spacing: 18) {
+            Image(image, scale: 1, label: Text(caption))
+                .resizable()
+                .interpolation(.none)
+                .frame(width: 248, height: 248)
+                .padding(16)
+                .background(Color.white, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+                // One image element, named by the line under it.
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel(Text(caption))
+                .accessibilityAddTraits(.isImage)
+                .accessibilityIdentifier("Settings.TMDBKey.QR")
+            if !caption.isEmpty {
+                Text(caption)
+                    .font(.system(size: 22, weight: .medium))
+                    .foregroundStyle(GlassSettingsPalette.secondaryText)
+                    .multilineTextAlignment(.center)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .frame(width: 280)
+    }
+
+    private var form: some View {
+        VStack(alignment: .leading, spacing: 26) {
+            if let message {
+                Text(glassSettingsLocalized(message))
+                    .font(.system(size: 24))
+                    .foregroundStyle(GlassSettingsPalette.secondaryText)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            TextField(glassSettingsLocalized(placeholder), text: $text)
+                .autocorrectionDisabled()
+                .textInputAutocapitalization(.never)
+                .keyboardType(.asciiCapable)
+                .focused($focused, equals: .text)
+                .onSubmit { if !trimmed.isEmpty { focused = .save } }
+                .accessibilityIdentifier("Settings.TMDBKey.Field")
+        }
+    }
+
+    private var buttons: some View {
+        HStack(spacing: 24) {
+            SwiftUI.Button(glassSettingsLocalized("Save")) { onSave(trimmed) }
+                .disabled(trimmed.isEmpty)
+                .focused($focused, equals: .save)
+            if let checkTitle {
+                SwiftUI.Button(glassSettingsLocalized(checkTitle), action: onCheck)
+                    .focused($focused, equals: .check)
+                    .accessibilityIdentifier("Settings.TMDBKey.Check")
+            }
+            if let removeTitle {
+                SwiftUI.Button(glassSettingsLocalized(removeTitle), role: .destructive, action: onRemove)
+                    .focused($focused, equals: .remove)
+            }
+            SwiftUI.Button(glassSettingsLocalized("Cancel"), role: .cancel, action: onCancel)
+                .focused($focused, equals: .cancel)
+        }
     }
 }
 
