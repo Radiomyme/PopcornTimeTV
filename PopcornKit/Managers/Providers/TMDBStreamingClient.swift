@@ -69,8 +69,10 @@ public final class TMDBStreamingClient: @unchecked Sendable {
 
     private let session: URLSession
     private let ids: TMDBIdCache
-    /// The key TMDB refused last (401), until it takes it (`isKeyRefused`).
-    private let refusedKey = TMDBGathered<String?>(nil)
+    /// The keys TMDB refused (401), each until TMDB takes it
+    /// (`isKeyRefused`). Several: a mistyped key refused while saving
+    /// must not make TMDB's refusal of the stored one forgotten.
+    private let refusedKeys = TMDBGathered<Set<String>>([])
     private let lookups = TMDBRequestGate(limit: TMDBStreamingClient.parallelLookups)
 
     /// Recorded answers only: every key is refused, as TMDB refuses a
@@ -371,16 +373,15 @@ public final class TMDBStreamingClient: @unchecked Sendable {
     /// recorded answers, unless they refuse every key.
     public func isKeyRefused(_ key: String) -> Bool {
         if recorded != nil { return refusesEveryKey }
-        guard let refused = refusedKey.value else { return false }
-        return key == refused
+        return refusedKeys.value.contains(key)
     }
 
     /// Remembers a refusal of `key`, forgets it once TMDB takes the key.
     private func note(status: Int, key: String) {
         if status == 401 {
-            refusedKey.update { $0 = key }
+            refusedKeys.update { _ = $0.insert(key) }
         } else if (200..<300).contains(status) {
-            refusedKey.update { if $0 == key { $0 = nil } }
+            refusedKeys.update { _ = $0.remove(key) }
         }
     }
 

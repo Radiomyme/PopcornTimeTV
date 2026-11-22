@@ -69,6 +69,7 @@ public final class StreamingSettingsStore {
     @ObservationIgnored private let client: TMDBStreamingClient
     @ObservationIgnored private let locale: Locale
     @ObservationIgnored private let refreshHub: @MainActor () -> Void
+    @ObservationIgnored private let keyTaken: @MainActor () -> Void
     /// The services TMDB listed last (their logos), by id: a service checked
     /// is stored with TMDB's name and logo.
     @ObservationIgnored private var knownServices: [Int: StreamingService] = [:]
@@ -82,12 +83,17 @@ public final class StreamingSettingsStore {
     /// - Parameter locale: the language of the countries' names.
     /// - Parameter refreshHub: rebuilds the Home's page after a change (no
     ///   request: `HomeState.refreshLocal`).
+    /// - Parameter keyTaken: after a key was saved or taken again: the
+    ///   TMDB lists the old key could not read are asked again
+    ///   (`HomeState.tmdbKeyChanged`); `refreshHub` when nil.
     public init(settings: HomeSettings = HomeSettings(), client: TMDBStreamingClient = .shared,
-                locale: Locale = .current, refreshHub: @escaping @MainActor () -> Void) {
+                locale: Locale = .current, refreshHub: @escaping @MainActor () -> Void,
+                keyTaken: (@MainActor () -> Void)? = nil) {
         self.settings = settings
         self.client = client
         self.locale = locale
         self.refreshHub = refreshHub
+        self.keyTaken = keyTaken ?? refreshHub
         self.keys = TMDBKeySettings(settings: settings, client: client)
         self.region = settings.streamingRegion
         self.chosenServices = settings.streamingServices.map(StreamingChoice.init)
@@ -96,7 +102,8 @@ public final class StreamingSettingsStore {
 
     /// The store of an app's hub: the changes rebuild `hub`'s page.
     public convenience init(hub: HomeState, settings: HomeSettings = HomeSettings(), client: TMDBStreamingClient = .shared) {
-        self.init(settings: settings, client: client, refreshHub: { [weak hub] in hub?.refreshLocal() })
+        self.init(settings: settings, client: client, refreshHub: { [weak hub] in hub?.refreshLocal() },
+                  keyTaken: { [weak hub] in hub?.tmdbKeyChanged() })
     }
 
     // MARK: Reading
@@ -160,9 +167,11 @@ public final class StreamingSettingsStore {
     // MARK: Key
 
     /// Checks the key in `text` with TMDB, keeps it unless TMDB refused it
-    /// (`TMDBKeySettings.save`). Kept: the hub rebuilds its page and the
-    /// country's services are asked (their logos, for the row).
-    /// `completion` runs on the main queue.
+    /// (`TMDBKeySettings.save`). Kept: the hub rebuilds its page, asks the
+    /// TMDB lists it could not read, and the country's services are asked
+    /// (their logos, for the row) — and TMDB's countries, when only the
+    /// system's list could be offered. `completion` runs on the main queue;
+    /// not at all when a later save or removal came before TMDB's answer.
     public func saveKey(_ text: String, completion: @escaping (TMDBKeySettings.Verdict) -> Void) {
         isCheckingKey = true
         keys.save(text) { [weak self] verdict in
@@ -171,8 +180,9 @@ public final class StreamingSettingsStore {
             if verdict != .refused {
                 // Another key: the services offered are asked again.
                 self.forgetServiceChoices()
-                self.refreshHub()
+                self.keyTaken()
                 self.loadServices()
+                if self.regionsLoad == .failed { self.loadRegions() }
             }
             self.keyState = self.keys.state
             completion(verdict)
@@ -182,6 +192,8 @@ public final class StreamingSettingsStore {
     /// Removes the key: the « Services » row and the streaming shelves go.
     public func removeKey() {
         keys.remove()
+        // A save or check still waiting is dropped (`TMDBKeySettings`).
+        isCheckingKey = false
         forgetServiceChoices()
         keyState = keys.state
         refreshHub()
@@ -196,7 +208,7 @@ public final class StreamingSettingsStore {
             self.isCheckingKey = false
             self.keyState = self.keys.state
             // Taken again: the lists the Home could not read are asked again.
-            if verdict == .accepted { self.refreshHub() }
+            if verdict == .accepted { self.keyTaken() }
             completion(verdict)
         }
     }
@@ -254,6 +266,9 @@ public final class StreamingSettingsStore {
         client.services(region: region) { [weak self] services in
             DispatchQueue.main.async {
                 guard let self else { return }
+                // A 401 meanwhile: the key row says « Refusée », and the list
+                // says the key was refused, not that TMDB did not answer.
+                self.keyState = self.keys.state
                 let current = region == self.region && self.servicesRegion == region
                 guard let services else {
                     if current { self.servicesLoad = .failed }
@@ -276,7 +291,9 @@ public final class StreamingSettingsStore {
     }
 
     /// Asks TMDB its countries (once: they do not change during a run);
-    /// without an answer, every country the system knows. By name.
+    /// without an answer, every country the system knows, by name — and
+    /// `regionsLoad` is `.failed`, so the next call (a key saved, back
+    /// online) asks TMDB again.
     public func loadRegions(completion: (([StreamingChoice]) -> Void)? = nil) {
         if let regionChoices, regionsLoad == .loaded {
             completion?(regionChoices)
@@ -289,7 +306,8 @@ public final class StreamingSettingsStore {
             DispatchQueue.main.async {
                 if let self {
                     self.regionChoices = choices
-                    self.regionsLoad = .loaded
+                    self.regionsLoad = codes?.isEmpty == false ? .loaded : .failed
+                    self.keyState = self.keys.state
                 }
                 completion?(choices)
             }

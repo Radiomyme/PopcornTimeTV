@@ -19,21 +19,41 @@ private final class KeyCheckStub: URLProtocol {
 
     enum Reply {
         case status(Int)
+        /// 200 with this body.
+        case json(String)
         /// No answer at all (offline).
         case failure
+        /// No answer until the test releases it (`release`): a slow TMDB.
+        case held
     }
 
     private static let lock = NSLock()
     private static var reply: Reply = .failure
     private static var log: [URLRequest] = []
+    private static var waiting: [KeyCheckStub] = []
 
     static func answer(_ reply: Reply) {
         lock.lock(); self.reply = reply; lock.unlock()
     }
 
     static func reset() {
-        lock.lock(); reply = .failure; log = []; lock.unlock()
+        lock.lock(); reply = .failure; log = []; waiting = []; lock.unlock()
     }
+
+    /// Answers `status` to the held request whose address or header carries `key`.
+    static func release(_ key: String, status: Int) {
+        lock.lock()
+        let index = waiting.firstIndex { held in
+            let request = held.request
+            return request.url?.absoluteString.contains(key) == true
+                || request.value(forHTTPHeaderField: "Authorization")?.contains(key) == true
+        }
+        let held = index.map { waiting.remove(at: $0) }
+        lock.unlock()
+        held?.respond(.status(status))
+    }
+
+    static var heldCount: Int { lock.lock(); defer { lock.unlock() }; return waiting.count }
 
     static var requests: [URLRequest] { lock.lock(); defer { lock.unlock() }; return log }
 
@@ -51,15 +71,25 @@ private final class KeyCheckStub: URLProtocol {
         KeyCheckStub.lock.lock()
         KeyCheckStub.log.append(request)
         let reply = KeyCheckStub.reply
+        if case .held = reply { KeyCheckStub.waiting.append(self) }
         KeyCheckStub.lock.unlock()
+        respond(reply)
+    }
+
+    private func respond(_ reply: Reply) {
         guard let url = request.url else { return }
         switch reply {
+        case .held:
+            return
         case .failure:
             client?.urlProtocol(self, didFailWithError: NSError(domain: NSURLErrorDomain, code: NSURLErrorNotConnectedToInternet))
-        case .status(let code):
+        case .status, .json:
+            var code = 200, body = "{}"
+            if case .status(let status) = reply { code = status }
+            if case .json(let json) = reply { body = json }
             let response = HTTPURLResponse(url: url, statusCode: code, httpVersion: "HTTP/1.1", headerFields: nil)!
             client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
-            client?.urlProtocol(self, didLoad: Data("{}".utf8))
+            client?.urlProtocol(self, didLoad: Data(body.utf8))
             client?.urlProtocolDidFinishLoading(self)
         }
     }
@@ -146,6 +176,18 @@ final class TMDBKeySettingsTests: CheckedTestCase {
             ("\"\"", nil, "only quotes"),
             ("Bearer ", nil, "only « Bearer »"),
             ("api_key=", nil, "only api_key="),
+            ("\u{FEFF}\(key)", key, "a byte-order mark before it"),
+            ("\u{2060}\(key)\u{2060}", key, "word joiners around it"),
+            ("\(key)\u{200E}", key, "a left-to-right mark after it (a page in Arabic)"),
+            ("\u{200F}\(key)\u{200B}", key, "a right-to-left mark and a zero-width space"),
+            ("--header 'Authorization: Bearer \(token)'", token, "the header line of TMDB's curl example"),
+            ("curl --request GET \\\n  --header \"Authorization: Bearer \(token)\" \\", token, "more of the curl example"),
+            ("-H \"Authorization: Bearer \(token)\"", token, "curl's -H"),
+            ("API Key\n\(key)", key, "TMDB's « API Key » label copied with it"),
+            ("API Key: \(key)", key, "the label and a colon"),
+            ("API Read Access Token\n\(token)", token, "TMDB's token label copied with it"),
+            ("api_key: \(key)", key, "api_key: "),
+            ("api_key = \(key)", key, "api_key = "),
         ]
         for (text, expected, label) in cases {
             eq(TMDBKeySettings.cleaned(text), expected, label)
@@ -255,6 +297,122 @@ final class TMDBKeySettingsTests: CheckedTestCase {
         eq(keys.state, .set, "« Définie » again")
     }
 
+    /// A stored key TMDB refused stays « Refusée » when another key the user tries is refused
+    /// too: the second refusal does not make the first one forgotten.
+    func testARefusedStoredKeyStaysRefusedWhenAnotherKeyIsRefused() {
+        let client = makeClient()
+        let keys = makeKeys(client)
+        KeyCheckStub.answer(.failure)
+        eq(saved(key, keys), .unanswered, "stored while TMDB did not answer")
+        KeyCheckStub.answer(.status(401))
+        eq(checkedAgain(keys), .some(.refused), "TMDB refuses it")
+        eq(keys.state, .refused, "« Refusée »")
+
+        let mistyped = String(repeating: "e", count: 32)
+        eq(saved(mistyped, keys), .refused, "another key, refused too")
+        eq(settings.tmdbAPIKey, key, "not stored: the refused one stays")
+        eq(keys.state, .refused, "still « Refusée », not « Définie »")
+        check(client.isKeyRefused, "the Home still says the key was refused")
+        check(client.isKeyRefused(mistyped), "and the other one is known refused")
+
+        KeyCheckStub.answer(.status(200))
+        eq(checkedAgain(keys), .some(.accepted), "fixed on TMDB's side")
+        eq(keys.state, .set, "« Définie »")
+        check(client.isKeyRefused(mistyped), "the other one is still refused")
+    }
+
+    /// A slow answer to « Enregistrer » never undoes what the user did after it: a key removed
+    /// meanwhile stays removed, a key saved after it stays the one stored, whatever order the
+    /// answers come in — even through another instance (the iPhone makes one per sheet).
+    func testALateAnswerNeverUndoesALaterSaveOrRemoval() {
+        KeyCheckStub.answer(.held)
+        let first = makeKeys(), second = makeKeys()
+        var answers: [TMDBKeySettings.Verdict] = []
+
+        // Saved, then removed before TMDB answered.
+        first.save(key) { answers.append($0) }
+        homeWait(10) { KeyCheckStub.heldCount == 1 }
+        first.remove()
+        KeyCheckStub.release(key, status: 200)
+        _ = homeWait(0.5) { false }
+        check(settings.tmdbAPIKey == nil, "the removal wins: the late answer stores nothing")
+        check(answers.isEmpty, "and is not reported", "\(answers)")
+
+        // A saved, then B (another sheet); B answers first, then A.
+        let other = String(repeating: "c", count: 32)
+        first.save(key) { answers.append($0) }
+        homeWait(10) { KeyCheckStub.heldCount == 1 }
+        second.save(other) { answers.append($0) }
+        homeWait(10) { KeyCheckStub.heldCount == 2 }
+        KeyCheckStub.release(other, status: 200)
+        homeWait(10) { answers.count == 1 }
+        eq(settings.tmdbAPIKey, other, "B stored")
+        KeyCheckStub.release(key, status: 200)
+        _ = homeWait(0.5) { false }
+        eq(settings.tmdbAPIKey, other, "A's late answer does not replace B")
+        eq(answers, [.accepted], "only B's verdict reported")
+
+        // A check of the stored key, then a removal: the check's answer is dropped.
+        var checked: TMDBKeySettings.Verdict??
+        first.checkAgain { checked = .some($0) }
+        homeWait(10) { KeyCheckStub.heldCount == 1 }
+        first.remove()
+        KeyCheckStub.release(other, status: 200)
+        _ = homeWait(0.5) { false }
+        check(checked == nil, "no verdict about a key no longer stored")
+        check(settings.tmdbAPIKey == nil, "still removed")
+    }
+
+    // MARK: The Settings store
+
+    @MainActor
+    private func makeStore(_ client: TMDBStreamingClient) -> StreamingSettingsStore {
+        return StreamingSettingsStore(settings: settings, client: client, locale: Locale(identifier: "en_US"), refreshHub: {})
+    }
+
+    /// A key TMDB revoked since it was stored: the store learns it from its own lists (the
+    /// Services list, the countries), so the row says « Refusée » and the list says the key
+    /// was refused — not that TMDB did not answer.
+    @MainActor
+    func testTheStoreLearnsARefusalFromItsLists() {
+        settings.tmdbAPIKey = key
+        let store = makeStore(makeClient())
+        eq(store.keyState, .set, "« Définie » after a launch: nothing refused yet")
+        KeyCheckStub.answer(.status(401))
+        store.loadServices()
+        homeWait(10) { store.servicesLoad == .failed }
+        eq(store.servicesLoad, .failed, "the services list failed")
+        eq(store.keyState, .refused, "and the row says « Refusée » at once")
+
+        let other = makeStore(makeClient())
+        eq(other.keyState, .set, "another run")
+        other.loadRegions()
+        homeWait(10) { other.regionsLoad == .failed }
+        eq(other.keyState, .refused, "the countries' 401 says it too")
+    }
+
+    /// The countries asked without a key (or offline) give the system's list for now, and are
+    /// asked of TMDB again later — at once when a key is saved — instead of for the whole run.
+    @MainActor
+    func testTheCountriesAreAskedAgainAfterAFailure() {
+        let store = makeStore(makeClient())
+        var first: [StreamingChoice]?
+        store.loadRegions { first = $0 }
+        homeWait(10) { first != nil }
+        eq(store.regionsLoad, .failed, "no key: not TMDB's list")
+        check((first?.count ?? 0) > 200, "the system's countries meanwhile", "\(first?.count ?? 0)")
+        eq(KeyCheckStub.requests.count, 0, "nothing asked without a key")
+
+        KeyCheckStub.answer(.json(#"{"results":[{"iso_3166_1":"FR"},{"iso_3166_1":"BE"},{"iso_3166_1":"CA"}]}"#))
+        var verdict: TMDBKeySettings.Verdict?
+        store.saveKey(key) { verdict = $0 }
+        homeWait(10) { verdict != nil && store.regionsLoad == .loaded }
+        eq(verdict, .accepted, "a key saved")
+        eq(store.regionsLoad, .loaded, "TMDB's countries asked at once")
+        eq(store.regionChoices?.map(\.id), ["BE", "CA", "FR"], "TMDB's three, by name")
+        check(KeyCheckStub.requests.contains { $0.url?.path.hasSuffix("/watch/providers/regions") == true }, "asked of TMDB")
+    }
+
     /// A DEBUG fixture run's client takes any key, unasked, and never calls one refused.
     func testRecordedAnswersTakeAnyKey() {
         let client = TMDBStreamingClient(recordedIn: Fixtures.url("Home"))
@@ -284,5 +442,14 @@ final class TMDBKeySettingsTests: CheckedTestCase {
         var pixel = [UInt8](repeating: 0, count: 4)
         CIContext().render(corner, toBitmap: &pixel, rowBytes: 4, bounds: corner.extent, format: .RGBA8, colorSpace: nil)
         check(pixel[0] > 200 && pixel[1] > 200 && pixel[2] > 200, "a white margin", "\(pixel)")
+
+        // The very call of the Apple TV's sheet (`apiPageQRCode`, 8 px a module, drawn 248 pt
+        // wide), with a key stored: it reads as the page, and never carries the key.
+        settings.tmdbAPIKey = key
+        let sheet = try XCTUnwrap(TMDBKeySettings.apiPageQRCode())
+        eq(sheet.width % 8, 0, "whole modules at the sheet's scale")
+        let readOnSheet = detector.features(in: CIImage(cgImage: sheet)).compactMap { ($0 as? CIQRCodeFeature)?.messageString }
+        eq(readOnSheet, [page], "the sheet's code reads as TMDB's API page")
+        check(!readOnSheet.contains { $0.contains(key) }, "not the stored key")
     }
 }

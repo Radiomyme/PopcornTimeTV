@@ -244,7 +244,7 @@ enum GlassSettingsStore {
 
     /// The QR code of the key sheet: TMDB's API settings page, never the key.
     static func tmdbKeyQRCode() -> CGImage? {
-        return QRCodeImage.make(TMDBKeySettings.apiSettingsPage.absoluteString, scale: 8)
+        return TMDBKeySettings.apiPageQRCode(scale: 8)
     }
 
     /// The chosen services then follow the country as soon as TMDB lists
