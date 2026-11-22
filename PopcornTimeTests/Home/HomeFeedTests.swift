@@ -1449,6 +1449,53 @@ final class HomeFeedTests: CheckedTestCase {
         _ = await homeUntil { feed.isIdle }
     }
 
+    /// A page filtered on a service whose lists failed (a refused key), then a key saved or
+    /// taken again in Settings: its lists are asked again at once (`tmdbKeyChanged`), not only
+    /// after a Retry. A plain `refreshLocal` (any other Settings change) asks nothing.
+    @MainActor
+    func testAKeyTakenAgainAsksTheListsOfAServiceThatFailed() async {
+        streaming(filter: nil)
+        network.answer { [self] request in self.tmdbPage(request) }
+        var options = HomeFeed.Options(requestDeadline: .infinity, phaseGrace: .infinity)
+        options.updateSpacing = 0
+        let feed = makeFeed(options: options)
+        let state = HomeState(feed: feed)
+        func page() -> HomeServicePage {
+            HomeServicePage(shelves: state.shelves, isRefreshing: state.isRefreshing, isUnavailable: state.isUnavailable,
+                            isKeyRefused: false)
+        }
+        state.start()
+        let loaded = await homeUntil { state.hasLoaded && !state.isRefreshing && state.shelf(HomeShelfID.trendingMovies) != nil }
+        check(loaded, "the usual page")
+        _ = await homeUntil { feed.isIdle }
+        guard let netflix = state.shelf(HomeShelfID.services)?.items.first(where: { $0.id == "service-8" }) else {
+            check(false, "the row"); return
+        }
+
+        // TMDB refuses the key: Netflix's lists fail.
+        network.down = [.tmdb]
+        state.pick(service: netflix)
+        let failed = await homeUntil { state.isUnavailable && !state.isRefreshing }
+        check(failed, "its lists failed")
+        _ = await homeUntil { feed.isIdle }
+
+        // TMDB answers again, but nothing tells the hub: a rebuild asks nothing.
+        network.down = []
+        network.forget()
+        state.refreshLocal()
+        _ = await homeUntil { feed.isIdle }
+        check(tmdbPaths.isEmpty, "a plain rebuild asks TMDB nothing", "\(tmdbPaths)")
+        check(state.isUnavailable, "the page still says it cannot load")
+
+        // A key saved or taken again: the lists are asked at once.
+        state.tmdbKeyChanged()
+        let shown = await homeUntil { page() == .shelves && !state.isRefreshing && !state.isUnavailable }
+        check(shown, "Netflix's shelves", "\(state.shelves.ids)")
+        check(!tmdbPaths.isEmpty && tmdbPaths.allSatisfy { $0.contains("with_watch_providers=8") }, "Netflix's lists asked again")
+        eq(state.shelves.filter { HomeShelfID.streamingService(of: $0.id) == 8 }.count, 6, "its six shelves")
+        _ = await homeUntil { feed.isIdle }
+    }
+
     // MARK: Observable state
 
     @MainActor

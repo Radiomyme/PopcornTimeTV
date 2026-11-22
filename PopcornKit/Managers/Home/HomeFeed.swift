@@ -326,6 +326,26 @@ public final class HomeFeed: @unchecked Sendable {
         }
     }
 
+    /// The user's TMDB key changed or was taken again (saved, or checked
+    /// again in Settings): the TMDB lists the page reads that a refresh
+    /// asked with the old key — and could not read: a refused key — are
+    /// due again, at once. Otherwise `refreshLocal`: a page filtered on a
+    /// service that failed with a refused key would wait for a Retry. Before
+    /// the first refresh it only rebuilds the page (no request).
+    public func tmdbKeyChanged() {
+        whenReady {
+            self.readLocal()
+            self.queue.async {
+                self.planned = self.planned.filter { HomeSource.host(ofKey: $0) != .tmdb }
+                if self.running == nil, self.readsUnaskedLists() {
+                    self.begin(force: false, completion: nil)
+                } else {
+                    self.rebuild()
+                }
+            }
+        }
+    }
+
     /// The hub as the disk cache has it, without any request and without
     /// waiting: for the Top Shelf extension, or a first frame. The local
     /// shelves are the ones last read from the hooks. Any queue.

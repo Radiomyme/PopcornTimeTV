@@ -91,6 +91,12 @@ public final class HomeState {
         feed.refreshLocal()
     }
 
+    /// The user's TMDB key was saved or taken again: the TMDB lists a
+    /// refused key could not read are asked again (`HomeFeed.tmdbKeyChanged`).
+    public func tmdbKeyChanged() {
+        feed.tmdbKeyChanged()
+    }
+
     // MARK: Streaming services
 
     /// The page filtered on a service (nil: the usual page), built again by
