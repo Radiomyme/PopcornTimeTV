@@ -43,8 +43,14 @@ import PopcornKit
 /// - `-PTDebugSearch <text>`: typed in the Search tab's field;
 /// - `-PTDebugSettings YES`: opens the Settings sheet;
 ///   `-PTDebugSettingsScreen <name>` opens it too, and names the screen
-///   Settings pushes at once (`settingsScreen`: `tmdbKey`, `region`,
-///   `services` — read by the Settings screen that has them);
+///   Settings pushes at once, once per run (`tmdbKey`, `region`,
+///   `services`: the « Services de streaming » screens);
+/// - `-PTDebugTMDBKeyDraft <text>`: the key screen's field holds that text,
+///   as if pasted (a made-up key: never a real one); `-PTDebugTMDBKeySave
+///   YES` presses « Enregistrer » once, `-PTDebugTMDBKeyCheck YES`
+///   « Vérifier à nouveau » (with the fixtures, TMDB's recorded client
+///   answers: it takes any key, or refuses every key with
+///   `-PTDebugHomeState tmdbrefused`);
 /// - `-PTDebugExpensiveNetwork YES`: the connection counts as cellular;
 /// - `-PTDebugPressPlay YES`: an opened page presses Play once its sources
 ///   are known — only when that cannot start a stream: the cellular question
@@ -72,7 +78,8 @@ enum IOSDebugHooks {
                                "PTDebugDetailMetadataDelay", "PTDebugDetailSourcesDelay", "PTDebugDetailLastSourceDelay",
                                "PTDebugDetailSourcesFail", "PTDebugDetailFail",
                                "PTDebugHomeFixtures", "PTDebugHomeState", "PTDebugHomeShelf", "PTDebugHomeHeroPage",
-                               "PTDebugOpenURL", "PTDebugHomeService", "PTDebugSettingsScreen"]
+                               "PTDebugOpenURL", "PTDebugHomeService", "PTDebugSettingsScreen",
+                               "PTDebugTMDBKeyDraft", "PTDebugTMDBKeySave", "PTDebugTMDBKeyCheck"]
 
     static var isActive: Bool {
         keys.contains { defaults.object(forKey: $0) != nil }
@@ -105,6 +112,32 @@ enum IOSDebugHooks {
     /// (lowercased), over the sheet `apply(to:)` opens.
     static var settingsScreen: String? {
         defaults.string(forKey: "PTDebugSettingsScreen")?.lowercased()
+    }
+
+    @MainActor private static var didTakeSettingsScreen = false
+
+    /// The screen `-PTDebugSettingsScreen` names, the first time Settings
+    /// shows (nil afterwards: Back stays back).
+    @MainActor
+    static func takeSettingsScreen() -> StreamingSettingsScreen? {
+        guard !didTakeSettingsScreen else { return nil }
+        didTakeSettingsScreen = true
+        return settingsScreen.flatMap(StreamingSettingsScreen.init(rawValue:))
+    }
+
+    /// The key screen's hooks ran (once per run).
+    @MainActor static var didApplyKeyScreen = false
+
+    static var keyDraft: String? {
+        defaults.string(forKey: "PTDebugTMDBKeyDraft")
+    }
+
+    static var savesKey: Bool {
+        defaults.bool(forKey: "PTDebugTMDBKeySave")
+    }
+
+    static var checksKey: Bool {
+        defaults.bool(forKey: "PTDebugTMDBKeyCheck")
     }
 
     static var searchText: String? {

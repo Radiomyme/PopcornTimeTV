@@ -24,6 +24,12 @@ struct SettingsView: View {
     @State private var homeLanguages: String?
     @State private var homeHiddenShelves = ""
     @State private var sendsFollowedShows = Library.shared.isBulkEpisodeLookupEnabled
+    /// « Services de streaming »: the TMDB key, the country, the services
+    /// of the Home's « Services » row; a change rebuilds the Home's page.
+    @State private var streaming = StreamingSettingsStore(hub: IOSHome.state)
+    /// A screen of the streaming section pushed by a DEBUG launch
+    /// (`-PTDebugSettingsScreen`).
+    @State private var pushedScreen: StreamingSettingsScreen?
 
     /// The stored card time, one of the choices (anything else reads as 60 s).
     private var upNextCardLead: Binding<Int> {
@@ -80,6 +86,8 @@ struct SettingsView: View {
 
             homeSections
 
+            StreamingSettingsSection(store: streaming)
+
             // Trakt refuses the app's key, so nothing offers to sign in any
             // more. An account connected by an earlier version can still be
             // disconnected here.
@@ -118,7 +126,16 @@ struct SettingsView: View {
         .sheet(isPresented: $showWhatsNew) {
             WhatsNewView { showWhatsNew = false }
         }
-        .onAppear(perform: reloadHomeSettings)
+        .navigationDestination(item: $pushedScreen) { screen in
+            StreamingSettingsDestination(screen: screen, store: streaming)
+        }
+        .onAppear {
+            reloadHomeSettings()
+            streaming.reload()
+            #if DEBUG
+            if pushedScreen == nil, let screen = IOSDebugHooks.takeSettingsScreen() { pushedScreen = screen }
+            #endif
+        }
         .onReceive(NotificationCenter.default.publisher(for: .traktDidAuthenticate)) { _ in
             isTraktSignedIn = TraktManager.shared.isSignedIn()
         }

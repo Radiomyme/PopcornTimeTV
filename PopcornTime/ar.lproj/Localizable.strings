@@ -895,6 +895,8 @@
 "Settings.TMDBKey.Detail.HomeOnly" = "مفتاحك المجاني الخاص، من themoviedb.org › الإعدادات › API. يحتاجه صف «الخدمات» في الصفحة الرئيسية.";
 "Settings.TMDBKey.Accepted.HomeOnly" = "قبل TMDB المفتاح. يظهر صف «الخدمات» في الصفحة الرئيسية.";
 "Settings.StreamingServices.Message.HomeOnly" = "لكل خدمة محددة بطاقتها في صف «الخدمات» في الصفحة الرئيسية. الأكثر مشاهدة في بلدك تأتي أولًا.";
+/* The services list of the iPhone and iPad Settings when TMDB did not answer for the country. */
+"Settings.StreamingServices.Failed" = "لم يُرسل TMDB خدمات هذا البلد. تحقّق من اتصالك ثم أعد المحاولة.";
 "Services" = "الخدمات";
 "Home.Services.Shown" = "مختار";
 "Popular Movies on %@" = "أفلام شائعة على %@";

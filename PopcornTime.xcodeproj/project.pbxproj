@@ -147,6 +147,7 @@
 		2CEC3E362B95F4805B99A2FB /* MacGlassComponents.swift in Sources */ = {isa = PBXBuildFile; fileRef = BCF3939D56332BBE5241D6CF /* MacGlassComponents.swift */; };
 		2D245AF106582145558D5990 /* MacPlayerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7DA130AB1B495A42FD87FDF9 /* MacPlayerView.swift */; };
 		2D7299454D4077157F0F4E8A /* TorrentCachePurgeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6F9D32FE7AB6BC9E67C3D5B0 /* TorrentCachePurgeTests.swift */; };
+		2D778ED301F7E214AF386502 /* StreamingSettingsViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = C837225C43EFD8EA8144B71D /* StreamingSettingsViews.swift */; };
 		2DA9C6447FC7C3613CF78BCD /* DeepLink.swift in Sources */ = {isa = PBXBuildFile; fileRef = FCF893D67A9283294355F54A /* DeepLink.swift */; };
 		2DDFD29B22CACBCA9B2FEA83 /* DetailComponents.swift in Sources */ = {isa = PBXBuildFile; fileRef = D3E47D5AE31F6942353FEA5C /* DetailComponents.swift */; };
 		2E32790C9DE4E7FE9F0826B1 /* SubtitleCueController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8161BD22E8631E21ED23B515 /* SubtitleCueController.swift */; };
@@ -1450,6 +1451,7 @@
 		C67954FB01E96E1514859F96 /* ResumeProgressText.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = ResumeProgressText.swift; path = PopcornTime/Resources/Playback/ResumeProgressText.swift; sourceTree = SOURCE_ROOT; };
 		C6CEE8B378B84F46EAD207EE /* CellularStreamingPolicy.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = CellularStreamingPolicy.swift; path = PopcornKit/Managers/Catalog/CellularStreamingPolicy.swift; sourceTree = SOURCE_ROOT; };
 		C6D8316232536841928A0E73 /* VLCResumeWatch.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = VLCResumeWatch.swift; path = PopcornTime/Resources/Playback/VLCResumeWatch.swift; sourceTree = SOURCE_ROOT; };
+		C837225C43EFD8EA8144B71D /* StreamingSettingsViews.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = StreamingSettingsViews.swift; path = PopcornTime/UI/iOS/StreamingSettingsViews.swift; sourceTree = SOURCE_ROOT; };
 		C87816ADC09E5A71620437A3 /* HomeRecordedTransport.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = HomeRecordedTransport.swift; path = "PopcornTime/UI/Shared SwiftUI/Home/HomeRecordedTransport.swift"; sourceTree = SOURCE_ROOT; };
 		C9A55A79A522A197C0D4A925 /* HomeServiceTile.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = HomeServiceTile.swift; path = "PopcornTime/UI/Shared SwiftUI/Home/HomeServiceTile.swift"; sourceTree = SOURCE_ROOT; };
 		CA34A6A90D983AD61439BE83 /* ResumeStringsTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = ResumeStringsTests.swift; path = PopcornTimeTests/Playback/ResumeStringsTests.swift; sourceTree = SOURCE_ROOT; };
@@ -1754,6 +1756,7 @@
 				7F4E3E36B21F145EE4A70D70 /* IOSDebugHooks.swift */,
 				717C3E1EA14F4FC413918108 /* AppLink.swift */,
 				2187CEADB1AC0D29B6A61DFF /* HomeTabView.swift */,
+				C837225C43EFD8EA8144B71D /* StreamingSettingsViews.swift */,
 			);
 			name = iOS;
 			path = UI/iOS;
@@ -4137,6 +4140,7 @@
 				D5828F2F07B318E34435D631 /* ResumeProgressText.swift in Sources */,
 				9081E26AC818D8B8D9458D38 /* RemuxWaitNudge.swift in Sources */,
 				E40915524DB2B2DC8CAA92A4 /* HomeServiceTile.swift in Sources */,
+				2D778ED301F7E214AF386502 /* StreamingSettingsViews.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

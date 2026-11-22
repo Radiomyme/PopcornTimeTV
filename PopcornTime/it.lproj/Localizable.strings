@@ -892,6 +892,8 @@
 "Settings.TMDBKey.Detail.HomeOnly" = "La tua chiave gratuita, su themoviedb.org › Impostazioni › API. La riga «Servizi» della Home ne ha bisogno.";
 "Settings.TMDBKey.Accepted.HomeOnly" = "TMDB ha accettato la chiave. La riga «Servizi» compare nella Home.";
 "Settings.StreamingServices.Message.HomeOnly" = "Ogni servizio selezionato ha la sua scheda nella riga «Servizi» della Home. I più visti nel tuo paese sono in cima.";
+/* The services list of the iPhone and iPad Settings when TMDB did not answer for the country. */
+"Settings.StreamingServices.Failed" = "TMDB non ha inviato i servizi di questo paese. Controlla la connessione, poi riprova.";
 "Services" = "Servizi";
 "Home.Services.Shown" = "Selezionato";
 "Popular Movies on %@" = "Film popolari su %@";
