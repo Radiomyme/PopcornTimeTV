@@ -483,11 +483,38 @@ final class StreamingServicesUITests: XCTestCase {
         }
     }
 
+    /// A stored key TMDB now refuses (revoked on themoviedb.org): Check Again says so in its
+    /// own words, and the row says « Refused ». The recorded answers refuse every key here
+    /// (`-PTDebugHomeState tmdbrefused`): nothing reaches TMDB.
+    func testCheckAgainSaysAStoredKeyIsRefused() throws {
+        let (row, sheet) = openKeySheet(key: Self.key, ["-PTDebugHomeState", "tmdbrefused"])
+        let check = element("Settings.TMDBKey.Check")
+        XCTAssertTrue(check.exists, "no « Check Again » with a key")
+        XCTAssertTrue(focusOnButton(check), "« Check Again » never got the focus: \(focusedLabel)")
+        remote.press(.select)
+        let alert = app.alerts.firstMatch
+        XCTAssertTrue(alert.waitForExistence(timeout: 10), "no verdict after Check Again")
+        pause(1)
+        snap("key-check-refused")
+        XCTAssertFalse(sheet.exists, "the sheet is still open behind the verdict")
+        if isEnglish {
+            let text = "TMDB refuses the saved key: it may have been deleted or regenerated on themoviedb.org. Enter the new one."
+            XCTAssertTrue(alert.staticTexts[text].exists, "not the refused verdict: \(alert.debugDescription)")
+        }
+        remote.press(.select)
+        XCTAssertTrue(waitUntil(timeout: 5) { !alert.exists }, "the verdict did not close")
+        pause(1)
+        snap("key-check-refused-row")
+        if isEnglish { XCTAssertTrue(row.label.contains("Refused"), "the key row does not say Refused: \(row.label)") }
+        XCTAssertEqual(selectedTab, "settings", "the verdict left Settings")
+        app.terminate()
+    }
+
     // MARK: - Steps
 
     /// Settings with the focus on the key row, then its sheet open.
-    private func openKeySheet(key: String?) -> (row: XCUIElement, sheet: XCUIElement) {
-        launch(key: key, ["-PTDebugTab", "settings", "-PTDebugFocusContent", "YES", "-PTDebugSettingsRow", "tmdbKey"])
+    private func openKeySheet(key: String?, _ more: [String] = []) -> (row: XCUIElement, sheet: XCUIElement) {
+        launch(key: key, ["-PTDebugTab", "settings", "-PTDebugFocusContent", "YES", "-PTDebugSettingsRow", "tmdbKey"] + more)
         let row = element("Settings.Row.tmdbKey"), sheet = element("Settings.TextSheet")
         XCTAssertTrue(row.waitForExistence(timeout: 15), "the key row never showed")
         pause(2)
