@@ -33,6 +33,34 @@ struct HomeRecordedTransport {
         case silent
         /// Every request fails at once (with nothing cached: the error page).
         case down
+        /// TMDB fails at once, the other hosts answer: a page filtered on
+        /// a service says its catalogue cannot load.
+        case tmdbDown
+        /// TMDB never answers, the other hosts do: a service's page keeps
+        /// its placeholders.
+        case tmdbSilent
+    }
+
+    /// The mode a fixture run's `-PTDebugHomeState` asks for (iOS and
+    /// macOS hooks): `skeleton` (silent), `error` (down), `tmdbdown` and
+    /// `tmdbrefused` (TMDB fails; with `tmdbrefused` the app's TMDB client
+    /// also refuses every key: `TMDBStreamingClient.shared`), `tmdbsilent`;
+    /// anything else replays (`offline` starts by replaying).
+    static func mode(forState state: String?) -> Mode {
+        switch state?.lowercased() {
+        case "skeleton": return .silent
+        case "error": return .down
+        case "tmdbdown", "tmdbrefused": return .tmdbDown
+        case "tmdbsilent": return .tmdbSilent
+        default: return .replay
+        }
+    }
+
+    /// The service a fixture run's Home starts filtered on
+    /// (`-PTDebugHomeService`): a TMDB provider id ("8": Netflix; "350",
+    /// `TMDBRecorded.emptyService`, lists nothing); nil for anything else.
+    static func service(from argument: String?) -> Int? {
+        argument.flatMap { Int($0.trimmingCharacters(in: .whitespaces)) }.flatMap { $0 > 0 ? $0 : nil }
     }
 
     let directory: URL
@@ -66,6 +94,8 @@ struct HomeRecordedTransport {
             case .replay: completion(HomeRecordedTransport.answer(to: request, in: directory))
             case .down: completion(nil)
             case .silent: break   // the hub's own deadline ends the wait
+            case .tmdbDown: completion(request.host == .tmdb ? nil : HomeRecordedTransport.answer(to: request, in: directory))
+            case .tmdbSilent: if request.host != .tmdb { completion(HomeRecordedTransport.answer(to: request, in: directory)) }
             }
         })
     }

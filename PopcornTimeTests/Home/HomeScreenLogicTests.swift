@@ -226,6 +226,8 @@ final class HomeScreenLogicTests: CheckedTestCase {
         check(HomeFirstPaint.isCold(shelves: [HomeShelfID.continueWatching, HomeShelfID.watchlist], hasHero: false), "the library's shelves alone: still cold")
         check(!HomeFirstPaint.isCold(shelves: [movies], hasHero: false), "a list from a host: not cold")
         check(!HomeFirstPaint.isCold(shelves: [], hasHero: true), "a carousel: not cold")
+        check(HomeFirstPaint.isCold(shelves: [HomeShelfID.continueWatching, HomeShelfID.services], hasHero: false),
+              "the « Services » row (the settings alone) does not end the placeholders either")
 
         // A first load waits for the top of the page: the carousel, the rows it is made from,
         // and the catalogue rows of the first screen.
@@ -515,7 +517,99 @@ final class HomeScreenLogicTests: CheckedTestCase {
         check(end.isUnavailable, "then nothing came")
     }
 
+    /// The fixture runs of a TMDB key (iOS and Mac hooks): `-PTDebugHomeState`'s TMDB
+    /// modes and `-PTDebugHomeService`, through a real hub on the recorded answers — a
+    /// made-up key, and nothing ever reaches TMDB.
+    func testAHubFedFromTheRecordedTMDBAnswers() throws {
+        eq(HomeRecordedTransport.mode(forState: nil), .replay, "no state: replayed")
+        eq(HomeRecordedTransport.mode(forState: "skeleton"), .silent, "skeleton")
+        eq(HomeRecordedTransport.mode(forState: "ERROR"), .down, "error")
+        eq(HomeRecordedTransport.mode(forState: "tmdbdown"), .tmdbDown, "TMDB down")
+        eq(HomeRecordedTransport.mode(forState: "tmdbrefused"), .tmdbDown, "TMDB refusing: down too")
+        eq(HomeRecordedTransport.mode(forState: "tmdbsilent"), .tmdbSilent, "TMDB silent")
+        eq(HomeRecordedTransport.mode(forState: "offline"), .replay, "offline starts by replaying")
+        eq(HomeRecordedTransport.service(from: "8"), 8, "a provider id")
+        eq(HomeRecordedTransport.service(from: " 350 "), 350, "trimmed")
+        eq(HomeRecordedTransport.service(from: "all"), nil, "« all »: no service")
+        eq(HomeRecordedTransport.service(from: "0"), nil, "not an id")
+        eq(HomeRecordedTransport.service(from: nil), nil, "none")
+
+        let sandbox = HomeSandbox()
+        defer {
+            HomeSettings(defaults: sandbox.defaults).homeServiceFilter = nil
+            sandbox.discard()
+        }
+        let folder = Fixtures.url("Home")
+        let recordedAt = try XCTUnwrap(HomeRecordedTransport.recordedDate(in: folder))
+        let recorded = HomeRecordedTransport(directory: folder)
+        let settings = HomeSettings(defaults: sandbox.defaults, deviceRegion: { "FR" })
+        settings.tmdbAPIKey = "made-up-fixture-key"
+        settings.streamingRegion = "FR"
+        let feed = HomeFeed(store: HomeStore(directory: sandbox.directory, now: { recordedAt }), transport: recorded.transport,
+                            defaults: sandbox.defaults, deviceLanguages: { ["fr-FR"] },
+                            options: HomeFeed.Options(requestDeadline: 15), now: { recordedAt })
+        func load(force: Bool = false) -> HomeSnapshot {
+            let done = expectation(description: "refresh")
+            feed.refresh(force: force) { done.fulfill() }
+            wait(for: [done], timeout: 20)
+            return feed.snapshot
+        }
+        func state(_ snapshot: HomeSnapshot) -> HomeServicePage {
+            HomeServicePage(shelves: snapshot.rows, isRefreshing: snapshot.isRefreshing, isUnavailable: snapshot.isUnavailable,
+                            isKeyRefused: false)
+        }
+
+        // The usual page has the row, made of France's four default services.
+        let usual = load()
+        eq(usual.shelf(HomeShelfID.services)?.items.count, 4, "the « Services » row")
+        eq(state(usual), .usual, "the usual page")
+
+        // Netflix, replayed: its six shelves.
+        settings.homeServiceFilter = 8
+        let netflix = load()
+        eq(netflix.rows.filter { HomeShelfID.streamingService(of: $0.id) == 8 }.count, 6, "Netflix's six shelves, recorded")
+        eq(state(netflix), .shelves, "its page")
+        // Apple TV lists nothing in the recordings.
+        settings.homeServiceFilter = TMDBRecorded.emptyService
+        eq(state(load()), .empty, "« No results »")
+        // TMDB down, the rest replayed: Disney+'s catalogue cannot load.
+        recorded.mode = .tmdbDown
+        settings.homeServiceFilter = 337
+        let failed = load()
+        eq(state(failed), .failed(service: "Disney Plus", refused: false), "its own message")
+        check(!failed.isOffline, "online: the other hosts answer")
+    }
+
     // MARK: - Settings
+
+    /// The « Services » shelf is one to show or hide only once there is a TMDB key (as on
+    /// the Apple TV): without one the row does not exist.
+    func testTheServicesShelfIsListedOnlyWithAKey() {
+        let sandbox = HomeSandbox()
+        defer { sandbox.discard() }
+        let settings = HomeSettings(defaults: sandbox.defaults, deviceLanguages: { ["fr-FR"] })
+        let table = ["None": "Aucune", "Services": "Services"]
+        let model = HomeSettingsModel(settings: settings, locale: Locale(identifier: "fr_FR"),
+                                      text: HomeCardText(localize: { table[$0] ?? $0 }, locale: Locale(identifier: "fr_FR")))
+        eq(model.shelves(current: []).map(\.id), HomeShelfID.order, "no key: the usual shelves only")
+
+        settings.tmdbAPIKey = "made-up-fixture-key"
+        let rows = model.shelves(current: [])
+        eq(rows.map(\.id), [HomeShelfID.hero, HomeShelfID.continueWatching, HomeShelfID.services]
+            + HomeShelfID.order.dropFirst(2), "a key: « Services » under Continue Watching")
+        eq(rows.first { $0.id == HomeShelfID.services }?.title, "Services", "titled as on the page")
+        model.setShelf(HomeShelfID.services, shown: false)
+        check(settings.hiddenShelves.contains(HomeShelfID.services), "hidden")
+        eq(model.hiddenSummary, "1", "counted")
+        settings.homeServiceFilter = 8
+        defer { settings.homeServiceFilter = nil }
+        eq(settings.homeService, nil, "hidden: the usual page, whatever was picked")
+
+        // The key removed: the row is not listed, nor counted.
+        settings.tmdbAPIKey = nil
+        check(!model.shelves(current: []).contains { $0.id == HomeShelfID.services }, "no key: not listed")
+        eq(model.hiddenSummary, "Aucune", "nor counted")
+    }
 
     func testContentLanguages() {
         let sandbox = HomeSandbox()

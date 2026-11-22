@@ -18,6 +18,15 @@ import PopcornKit
 ///   `-PTDebugHomeState <skeleton|offline|error>` (with the fixtures): the
 ///   placeholders (no request is ever answered), the cached page with the
 ///   offline note, or the error page;
+/// - with the fixtures, a TMDB key and services: `-popcornkit.tmdb.apiKey
+///   <text>` is a made-up key read from the arguments (never stored: the
+///   Home gets its « Services » row; nothing reaches TMDB, whose answers
+///   are the recorded tmdb_*.json, for the hub and for
+///   `TMDBStreamingClient.shared`); `-PTDebugHomeService <TMDB provider
+///   id>` starts the Home filtered on that service (8: Netflix; 350 lists
+///   nothing); `-PTDebugHomeState tmdbdown|tmdbrefused|tmdbsilent`: TMDB
+///   fails / fails and refuses every key / never answers, the other hosts
+///   answer (see `HomeRecordedTransport.mode(forState:)`);
 /// - `-PTDebugHomeShelf <shelf id>`: the Home scrolls to that shelf once it
 ///   is on the page; `-PTDebugHomeHeroPage <n>`: the carousel shows its n-th
 ///   page (from 0) and does not turn by itself;
@@ -73,7 +82,9 @@ import PopcornKit
 ///   (`homehover` alone: nothing); `homeopen:<hero|shelf id>:<n>[:play]`
 ///   is a click on that card (`:play`: Space on it; nothing ever starts by
 ///   itself in these runs, see `MacGlassDetailController.run`);
-///   `homeseeall:<shelf id>` is its « See All »; `url:<link>` hands a link
+///   `homeseeall:<shelf id>` is its « See All »; `service:<TMDB id|all>`
+///   filters the Home on a service (« all »: the usual page), as its card
+///   in the « Services » row does; `url:<link>` hands a link
 ///   to the window; `settings` opens the Settings window and
 ///   `snapsettings:<name>` writes it (and its sheet) into `<name>.png`;
 ///   `snapwhatsnew:<name>` writes the "What's New" window (opened by
@@ -128,7 +139,7 @@ enum MacDebugHooks {
                                "PTDebugTop100Offline", "PTDebugSearch", "PTDebugSearchOffline", "PTDebugOpenRoute",
                                "PTDebugTour", "PTDebugHomeFixtures", "PTDebugHomeState", "PTDebugHomeShelf",
                                "PTDebugHomeHeroPage", "PTDebugOpenURL", "PTDebugSettingsSheet", "PTDebugNoAnimation",
-                               "PTDebugSettingsPane"]
+                               "PTDebugSettingsPane", "PTDebugHomeService"]
 
     static var isActive: Bool {
         keys.contains { defaults.object(forKey: $0) != nil }
@@ -213,7 +224,7 @@ enum MacDebugHooks {
         let directory = URL(fileURLWithPath: folder, isDirectory: true)
         let mode = defaults.string(forKey: "PTDebugHomeState")?.lowercased()
         let recorded = HomeRecordedTransport(directory: directory)
-        recorded.mode = mode == "skeleton" ? .silent : (mode == "error" ? .down : .replay)
+        recorded.mode = HomeRecordedTransport.mode(forState: mode)
         // Its own cache, emptied: every launch is a first load of the
         // same answers, and the app's real cache is left alone.
         let cache = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
@@ -223,12 +234,18 @@ enum MacDebugHooks {
         // day the answers were recorded, not from today.
         let recordedAt = HomeRecordedTransport.recordedDate(in: directory) ?? Date()
         // The placeholders stay as long as the snapshot needs them.
-        let options = HomeFeed.Options(requestDeadline: mode == "skeleton" ? 600 : 15)
+        let options = HomeFeed.Options(requestDeadline: mode == "skeleton" || mode == "tmdbsilent" ? 600 : 15)
         let feed = HomeFeed(store: HomeStore(directory: cache, now: { recordedAt }), transport: recorded.transport,
                             hooks: HomeLocalHooks(library: .shared), options: options, now: { recordedAt })
         feed.followChanges(of: .shared)
+        // `-PTDebugHomeService <id>`: the page starts filtered on that
+        // service (the made-up key of `-popcornkit.tmdb.apiKey <text>`
+        // makes the row; the recorded answers are its lists).
+        let service = HomeRecordedTransport.service(from: defaults.string(forKey: "PTDebugHomeService"))
+        if let service { HomeSettings().homeServiceFilter = service }
         let state = HomeState(feed: feed)
-        print("[MacDebug] Home fed from \(folder) as of \(recordedAt)" + (mode.map { ", state \($0)" } ?? ""))
+        print("[MacDebug] Home fed from \(folder) as of \(recordedAt)" + (mode.map { ", state \($0)" } ?? "")
+              + (service.map { ", service \($0)" } ?? "") + (HomeSettings().tmdbAPIKey == nil ? ", no TMDB key" : ", a TMDB key"))
         if mode == "offline" {
             // The page is loaded and cached from the recordings, then no
             // host answers a forced refresh: the cached page, offline.
@@ -528,6 +545,9 @@ enum MacDebugHooks {
                 }
             case "homeseeall":
                 if let shelf = navigator.home.shelf(argument) { MacHome.seeAll(shelf, in: navigator) }
+            case "service":
+                // `service:8`; `service:all` (or no id): the usual page.
+                navigator.home.show(service: HomeRecordedTransport.service(from: argument))
             case "url":
                 // The whole rest of the step: a link has colons of its own.
                 let text = String(step.dropFirst("url:".count))

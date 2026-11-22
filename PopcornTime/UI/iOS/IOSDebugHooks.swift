@@ -15,7 +15,19 @@ import PopcornKit
 ///   its hosts;
 /// - `-PTDebugHomeState <skeleton|offline|error>` (with the fixtures): the
 ///   page waiting for its first answers; the cached page with the offline
-///   note; no answer and nothing cached;
+///   note; no answer and nothing cached. With a TMDB key, also `tmdbdown`
+///   (TMDB fails, the other hosts answer: a service's page says its
+///   catalogue cannot load), `tmdbrefused` (the same, and the app's TMDB
+///   client refuses every key: the refused-key message and « Refused » in
+///   Settings) and `tmdbsilent` (TMDB never answers: a service's page keeps
+///   its placeholders);
+/// - `-popcornkit.tmdb.apiKey <text>` (with the fixtures): a made-up TMDB
+///   key, read from the arguments (never stored): the Home gets its
+///   « Services » row. With the fixtures nothing ever reaches TMDB — the
+///   hub's lists and `TMDBStreamingClient.shared` (Settings, See All) read
+///   the recorded tmdb_*.json files;
+/// - `-PTDebugHomeService <TMDB provider id>` (with the fixtures): the Home
+///   starts filtered on that service (8: Netflix; 350 lists nothing);
 /// - `-PTDebugHomeShelf <shelf id>`: the Home scrolls to that shelf
 ///   (`continueWatching`, `top48hMovies`…) once it is on the page;
 /// - `-PTDebugHomeHeroPage <n>`: the carousel shows its n-th page (from 0)
@@ -30,6 +42,9 @@ import PopcornKit
 ///   sort and genre at launch;
 /// - `-PTDebugSearch <text>`: typed in the Search tab's field;
 /// - `-PTDebugSettings YES`: opens the Settings sheet;
+///   `-PTDebugSettingsScreen <name>` opens it too, and names the screen
+///   Settings pushes at once (`settingsScreen`: `tmdbKey`, `region`,
+///   `services` — read by the Settings screen that has them);
 /// - `-PTDebugExpensiveNetwork YES`: the connection counts as cellular;
 /// - `-PTDebugPressPlay YES`: an opened page presses Play once its sources
 ///   are known — only when that cannot start a stream: the cellular question
@@ -57,7 +72,7 @@ enum IOSDebugHooks {
                                "PTDebugDetailMetadataDelay", "PTDebugDetailSourcesDelay", "PTDebugDetailLastSourceDelay",
                                "PTDebugDetailSourcesFail", "PTDebugDetailFail",
                                "PTDebugHomeFixtures", "PTDebugHomeState", "PTDebugHomeShelf", "PTDebugHomeHeroPage",
-                               "PTDebugOpenURL"]
+                               "PTDebugOpenURL", "PTDebugHomeService", "PTDebugSettingsScreen"]
 
     static var isActive: Bool {
         keys.contains { defaults.object(forKey: $0) != nil }
@@ -84,6 +99,12 @@ enum IOSDebugHooks {
 
     static var genre: NetworkManager.Genres? {
         defaults.string(forKey: "PTDebugGenre").flatMap(NetworkManager.Genres.init(rawValue:))
+    }
+
+    /// `-PTDebugSettingsScreen`: the screen of Settings shown at launch
+    /// (lowercased), over the sheet `apply(to:)` opens.
+    static var settingsScreen: String? {
+        defaults.string(forKey: "PTDebugSettingsScreen")?.lowercased()
     }
 
     static var searchText: String? {
@@ -159,7 +180,7 @@ enum IOSDebugHooks {
         let directory = URL(fileURLWithPath: folder, isDirectory: true)
         let mode = defaults.string(forKey: "PTDebugHomeState")?.lowercased()
         let recorded = HomeRecordedTransport(directory: directory)
-        recorded.mode = mode == "skeleton" ? .silent : (mode == "error" ? .down : .replay)
+        recorded.mode = HomeRecordedTransport.mode(forState: mode)
         // Its own cache, emptied: every launch is a first load of the
         // same answers, and the app's real cache is left alone.
         let cache = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
@@ -169,12 +190,18 @@ enum IOSDebugHooks {
         // day the answers were recorded, not from today.
         let recordedAt = HomeRecordedTransport.recordedDate(in: directory) ?? Date()
         // The placeholders stay as long as the screenshot needs them.
-        let options = HomeFeed.Options(requestDeadline: mode == "skeleton" ? 600 : 15)
+        let options = HomeFeed.Options(requestDeadline: mode == "skeleton" || mode == "tmdbsilent" ? 600 : 15)
         let feed = HomeFeed(store: HomeStore(directory: cache, now: { recordedAt }), transport: recorded.transport,
                             hooks: HomeLocalHooks(library: .shared), options: options, now: { recordedAt })
         feed.followChanges(of: .shared)
+        // `-PTDebugHomeService <id>`: the page starts filtered on that
+        // service (the made-up key of `-popcornkit.tmdb.apiKey <text>`
+        // makes the row; the recorded answers are its lists).
+        let service = HomeRecordedTransport.service(from: defaults.string(forKey: "PTDebugHomeService"))
+        if let service { HomeSettings().homeServiceFilter = service }
         let state = HomeState(feed: feed)
-        print("[iOSDebug] Home fed from \(folder) as of \(recordedAt)" + (mode.map { ", state \($0)" } ?? ""))
+        print("[iOSDebug] Home fed from \(folder) as of \(recordedAt)" + (mode.map { ", state \($0)" } ?? "")
+              + (service.map { ", service \($0)" } ?? "") + (HomeSettings().tmdbAPIKey == nil ? ", no TMDB key" : ", a TMDB key"))
         if mode == "offline" {
             // The page is loaded and cached from the recordings, then no
             // host answers a forced refresh: the cached page, offline.
@@ -192,7 +219,7 @@ enum IOSDebugHooks {
         let tab = self.tab ?? (searchText != nil ? .search : router.selection)
         router.selection = tab
         if let media { router.open(media, in: tab) }
-        if defaults.bool(forKey: "PTDebugSettings") { router.showsSettings = true }
+        if defaults.bool(forKey: "PTDebugSettings") || settingsScreen != nil { router.showsSettings = true }
         print("[iOSDebug] tab \(tab.rawValue)" + (media.map { ", page \($0.id)" } ?? ""))
         if let text = defaults.string(forKey: "PTDebugOpenURL"), let url = URL(string: text) {
             DispatchQueue.main.asyncAfter(deadline: .now() + 1) {
