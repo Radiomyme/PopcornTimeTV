@@ -752,7 +752,7 @@ PopcornTorrent's rule (it does not publish it).
 
 **⌘U**: pick the **PopcornTimeTests** scheme (or PopcornTimeMac), destination *My Mac*. The
 macOS unit-test target runs in about 15 seconds, offline, in English whatever the Mac's
-language: 907 tests, 24,905 checks of the extra sources (apibay, Knaben, Cinemeta, TVMaze, the
+language: 927 tests, 25,140 checks of the extra sources (apibay, Knaben, Cinemeta, TVMaze, the
 Top 100), the catalogs (each source's sorts and genres, the mirror races, the first pages kept
 on disk), the Home feed (`PopcornTimeTests/Home`: its parsers, shelves, cache and loader on
 the answers recorded on 2026-11-14, its transport on hosts played by a `URLProtocol`, and the
@@ -821,8 +821,9 @@ card), the Home tab (`HomeUITests`, fed from recorded answers) and the poster gr
 (`GridUITests`), the next episode's card over the player and its press guard (`UpNextUITests`, on a
 DEBUG fixture), and Siri Remote presses replayed on the player over a loopback test torrent
 (`RemoteScriptUITests`, through `tools/remote-rig/fx-run.sh`; skipped unless `PT_REMOTE_SCRIPT`
-is set), and the streaming services with and without a TMDB key (`StreamingServicesUITests`,
-on recorded TMDB answers and a made-up key). 82 tests. They read the public catalog APIs, never
+is set), and the streaming services with and without a TMDB key, the key sheet's QR code and
+Check Again included (`StreamingServicesUITests`, on recorded TMDB answers and a made-up key).
+83 tests. They read the public catalog APIs, never
 press Play, and set the app up with DEBUG launch arguments, so they are built with the DEBUG
 condition (the app for x86_64, the test runner for arm64). The second command names its own
 DerivedData and result bundle: without them the results go to a `PopcornTime-…` folder of
