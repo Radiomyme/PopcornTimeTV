@@ -91,6 +91,17 @@ struct HomeServiceState: View {
     let text: HomeCardText
     let retry: () -> Void
 
+    /// Where to check a refused key, by the name this app's Settings show:
+    /// the Mac's tab is « Streaming », the iPhone's section « Services de
+    /// streaming ».
+    static var refusedKey: LocalizedStringKey {
+        #if os(macOS)
+        return "Grid.Service.Refused.Mac"
+        #else
+        return "Grid.Service.Refused"
+        #endif
+    }
+
     var body: some View {
         switch page {
         case .loading:
@@ -113,7 +124,7 @@ struct HomeServiceState: View {
                 Label(String(format: "Home.Unavailable.Service".localized, service),
                       systemImage: refused ? "lock.slash" : "wifi.exclamationmark")
             } description: {
-                Text(refused ? "Grid.Service.Refused" : "Grid.Service.Unavailable")
+                Text(refused ? HomeServiceState.refusedKey : "Grid.Service.Unavailable")
             } actions: {
                 Button("Try Again", action: retry)
                     .glassActionStyle(prominent: true)

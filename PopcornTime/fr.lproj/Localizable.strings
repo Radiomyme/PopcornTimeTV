@@ -585,10 +585,9 @@
 "Settings.TMDBKey.Check.Unanswered" = "TMDB est injoignable. La clé reste enregistrée ; réessayez plus tard.";
 "Settings.TMDBKey.Checking" = "Vérification…";
 "Settings.TMDBKey.GetKey" = "Obtenir une clé gratuite";
-"Settings.TMDBKey.Paste" = "Coller";
 "Settings.TMDBKey.Hidden" = "Une fois enregistrée, la clé n’est plus affichée : collez-en une nouvelle pour la remplacer.";
-"Settings.TMDBKey.Message.Touch" = "Créez un compte gratuit sur themoviedb.org, puis copiez la clé d’API ou le jeton d’accès en lecture depuis Paramètres › API et collez-le ici. Avec elle, l’Accueil montre une rangée « Services » : ce que Netflix, Prime Video et les autres proposent dans votre pays, lu par Popcorn Time depuis ses propres sources.";
-"Settings.TMDBKey.Message.Mac" = "Créez un compte gratuit sur themoviedb.org, puis copiez la clé d’API ou le jeton d’accès en lecture depuis Paramètres › API et collez-le ci-dessous (⌘V). Avec elle, l’Accueil montre une rangée « Services » : ce que Netflix, Prime Video et les autres proposent dans votre pays, lu par Popcorn Time depuis ses propres sources.";
+"Settings.TMDBKey.Message.Touch" = "Créez un compte gratuit sur themoviedb.org, puis copiez la clé d’API ou le jeton d’accès en lecture depuis Paramètres › API et collez-le ici. Avec cette clé, l’Accueil montre une rangée « Services » : ce que Netflix, Prime Video et les autres proposent dans votre pays, des titres que Popcorn Time lit depuis ses propres sources.";
+"Settings.TMDBKey.Message.Mac" = "Créez un compte gratuit sur themoviedb.org, puis copiez la clé d’API ou le jeton d’accès en lecture depuis Paramètres › API et collez-le ci-dessous (⌘V). Avec cette clé, l’Accueil montre une rangée « Services » : ce que Netflix, Prime Video et les autres proposent dans votre pays, des titres que Popcorn Time lit depuis ses propres sources.";
 "Settings.TMDBKey.Detail.HomeOnly" = "Votre propre clé gratuite, sur themoviedb.org › Paramètres › API. La rangée « Services » de l’Accueil en a besoin.";
 "Settings.TMDBKey.Accepted.HomeOnly" = "TMDB a accepté la clé. La rangée « Services » apparaît sur l’Accueil.";
 "Settings.StreamingServices.Message.HomeOnly" = "Chaque service coché a sa carte dans la rangée « Services » de l’Accueil. Les plus regardés dans votre pays sont en tête.";
@@ -606,4 +605,5 @@
 "Service: %@" = "Service : %@";
 "Grid.Service.Unavailable" = "TMDB n’a pas répondu. Vérifiez votre connexion et votre clé TMDB dans les Réglages.";
 "Grid.Service.Refused" = "TMDB a refusé votre clé. Vérifiez-la dans Réglages › Services de streaming.";
+"Grid.Service.Refused.Mac" = "TMDB a refusé votre clé. Vérifiez-la dans Réglages › Streaming.";
 "Home.Unavailable.Service" = "Le catalogue %@ ne peut pas se charger";

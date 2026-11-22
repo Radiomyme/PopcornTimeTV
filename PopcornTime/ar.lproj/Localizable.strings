@@ -888,7 +888,6 @@
 "Settings.TMDBKey.Check.Unanswered" = "تعذّر الوصول إلى TMDB. يبقى المفتاح محفوظًا؛ حاول مرة أخرى لاحقًا.";
 "Settings.TMDBKey.Checking" = "جارٍ التحقق…";
 "Settings.TMDBKey.GetKey" = "احصل على مفتاح مجاني";
-"Settings.TMDBKey.Paste" = "لصق";
 "Settings.TMDBKey.Hidden" = "بعد حفظ المفتاح لا يُعرض مجددًا: الصق مفتاحًا جديدًا لاستبداله.";
 "Settings.TMDBKey.Message.Touch" = "أنشئ حسابًا مجانيًا على themoviedb.org، ثم انسخ مفتاح API أو رمز الوصول للقراءة من الإعدادات › API والصقه هنا. بفضله تعرض الصفحة الرئيسية صف «الخدمات»: ما تقدمه Netflix وPrime Video وغيرها في بلدك، يشغّله Popcorn Time من مصادره الخاصة.";
 "Settings.TMDBKey.Message.Mac" = "أنشئ حسابًا مجانيًا على themoviedb.org، ثم انسخ مفتاح API أو رمز الوصول للقراءة من الإعدادات › API والصقه أدناه (⌘V). بفضله تعرض الصفحة الرئيسية صف «الخدمات»: ما تقدمه Netflix وPrime Video وغيرها في بلدك، يشغّله Popcorn Time من مصادره الخاصة.";
@@ -909,4 +908,5 @@
 "Service: %@" = "الخدمة: %@";
 "Grid.Service.Unavailable" = "لم يستجب TMDB. تحقق من اتصالك ومن مفتاح TMDB في الإعدادات.";
 "Grid.Service.Refused" = "رفض TMDB مفتاحك. تحقق منه في الإعدادات › خدمات البث.";
+"Grid.Service.Refused.Mac" = "رفض TMDB مفتاحك. تحقق منه في الإعدادات › البث.";
 "Home.Unavailable.Service" = "تعذّر تحميل كتالوج %@";

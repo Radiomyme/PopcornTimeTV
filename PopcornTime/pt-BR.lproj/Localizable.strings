@@ -888,11 +888,10 @@
 "Settings.TMDBKey.QR" = "Escaneie com o celular para abrir a página de API do TMDB e copiar sua chave.";
 "Settings.TMDBKey.Check" = "Verificar novamente";
 "Settings.TMDBKey.Check.Accepted" = "O TMDB aceita a chave salva.";
-"Settings.TMDBKey.Check.Refused" = "O TMDB recusa a chave salva: ela pode ter sido excluída ou gerada de novo em themoviedb.org. Insira a nova.";
+"Settings.TMDBKey.Check.Refused" = "O TMDB recusa a chave salva: ela pode ter sido excluída ou regenerada em themoviedb.org. Insira a nova.";
 "Settings.TMDBKey.Check.Unanswered" = "Não foi possível acessar o TMDB. A chave continua salva; tente de novo mais tarde.";
 "Settings.TMDBKey.Checking" = "Verificando…";
 "Settings.TMDBKey.GetKey" = "Obter uma chave gratuita";
-"Settings.TMDBKey.Paste" = "Colar";
 "Settings.TMDBKey.Hidden" = "Depois de salva, a chave não aparece mais: cole uma nova para substituí-la.";
 "Settings.TMDBKey.Message.Touch" = "Crie uma conta gratuita em themoviedb.org, copie a chave de API ou o token de acesso de leitura em Configurações › API e cole aqui. Com ela, o Início mostra uma fileira “Serviços”: o que Netflix, Prime Video e os outros oferecem no seu país, reproduzido pelo Popcorn Time a partir das próprias fontes.";
 "Settings.TMDBKey.Message.Mac" = "Crie uma conta gratuita em themoviedb.org, copie a chave de API ou o token de acesso de leitura em Configurações › API e cole abaixo (⌘V). Com ela, o Início mostra uma fileira “Serviços”: o que Netflix, Prime Video e os outros oferecem no seu país, reproduzido pelo Popcorn Time a partir das próprias fontes.";
@@ -913,4 +912,5 @@
 "Service: %@" = "Serviço: %@";
 "Grid.Service.Unavailable" = "O TMDB não respondeu. Verifique sua conexão e sua chave do TMDB nos Ajustes.";
 "Grid.Service.Refused" = "O TMDB recusou sua chave. Verifique-a em Ajustes › Serviços de streaming.";
+"Grid.Service.Refused.Mac" = "O TMDB recusou sua chave. Verifique-a em Ajustes › Streaming.";
 "Home.Unavailable.Service" = "Não foi possível carregar o catálogo de %@";

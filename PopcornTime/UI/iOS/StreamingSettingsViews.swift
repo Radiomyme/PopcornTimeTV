@@ -102,6 +102,10 @@ struct TMDBKeySettingsView: View {
     /// What TMDB said last on this screen, in plain words.
     @State private var outcome: Outcome?
     @FocusState private var isFieldFocused: Bool
+    /// Changed when a save empties the field: a new field, whose
+    /// placeholder takes the usual face again (the old one kept the
+    /// typewriter face of the key it held, and cut the placeholder short).
+    @State private var fieldGeneration = 0
 
     /// A save's verdict, or a « Vérifier à nouveau »'s.
     enum Outcome: Equatable {
@@ -159,6 +163,7 @@ struct TMDBKeySettingsView: View {
                     .focused($isFieldFocused)
                     .accessibilityLabel(Text("Settings.TMDBKey"))
                     .accessibilityIdentifier("Settings.TMDBKey.Field")
+                    .id(fieldGeneration)
                 if draft.count > TMDBKeySettingsView.oneLine {
                     // A read token (about 200 characters) in full, to check
                     // by eye that the paste is whole; VoiceOver reads the field.
@@ -237,7 +242,11 @@ struct TMDBKeySettingsView: View {
         store.saveKey(draft) { verdict in
             outcome = .saved(verdict)
             // Kept: the field empties, the key is not shown again.
-            if verdict != .refused { draft = "" }
+            if verdict != .refused {
+                draft = ""
+                fieldGeneration += 1
+            }
+            TMDBKeySettingsView.announce(verdict, afterCheck: false)
         }
     }
 
@@ -245,7 +254,14 @@ struct TMDBKeySettingsView: View {
         outcome = nil
         store.checkKeyAgain { verdict in
             outcome = verdict.map(Outcome.checked)
+            if let verdict { TMDBKeySettingsView.announce(verdict, afterCheck: true) }
         }
+    }
+
+    /// VoiceOver says TMDB's verdict: the row that shows it appears under
+    /// the button, where the focus does not go by itself.
+    static func announce(_ verdict: TMDBKeySettings.Verdict, afterCheck: Bool) {
+        UIAccessibility.post(notification: .announcement, argument: verdict.messageKey(afterCheck: afterCheck).localized)
     }
 
     #if DEBUG

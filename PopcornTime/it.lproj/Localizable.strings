@@ -885,7 +885,6 @@
 "Settings.TMDBKey.Check.Unanswered" = "Impossibile raggiungere TMDB. La chiave resta salvata; riprova più tardi.";
 "Settings.TMDBKey.Checking" = "Verifica in corso…";
 "Settings.TMDBKey.GetKey" = "Ottieni una chiave gratuita";
-"Settings.TMDBKey.Paste" = "Incolla";
 "Settings.TMDBKey.Hidden" = "Una volta salvata, la chiave non viene più mostrata: incollane una nuova per sostituirla.";
 "Settings.TMDBKey.Message.Touch" = "Crea un account gratuito su themoviedb.org, poi copia la chiave API o il token di accesso in lettura da Impostazioni › API e incollalo qui. Con la chiave, la Home mostra una riga «Servizi»: ciò che Netflix, Prime Video e gli altri offrono nel tuo paese, riprodotto da Popcorn Time dalle sue fonti.";
 "Settings.TMDBKey.Message.Mac" = "Crea un account gratuito su themoviedb.org, poi copia la chiave API o il token di accesso in lettura da Impostazioni › API e incollalo qui sotto (⌘V). Con la chiave, la Home mostra una riga «Servizi»: ciò che Netflix, Prime Video e gli altri offrono nel tuo paese, riprodotto da Popcorn Time dalle sue fonti.";
@@ -906,4 +905,5 @@
 "Service: %@" = "Servizio: %@";
 "Grid.Service.Unavailable" = "TMDB non ha risposto. Controlla la connessione e la chiave TMDB nelle Impostazioni.";
 "Grid.Service.Refused" = "TMDB ha rifiutato la tua chiave. Controllala in Impostazioni › Servizi di streaming.";
+"Grid.Service.Refused.Mac" = "TMDB ha rifiutato la tua chiave. Controllala in Impostazioni › Streaming.";
 "Home.Unavailable.Service" = "Impossibile caricare il catalogo di %@";

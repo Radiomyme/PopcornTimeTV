@@ -585,7 +585,6 @@
 "Settings.TMDBKey.Check.Unanswered" = "TMDB could not be reached. The key stays saved; try again later.";
 "Settings.TMDBKey.Checking" = "Checking…";
 "Settings.TMDBKey.GetKey" = "Get a Free Key";
-"Settings.TMDBKey.Paste" = "Paste";
 "Settings.TMDBKey.Hidden" = "Once saved, the key is not shown again: paste a new one to replace it.";
 "Settings.TMDBKey.Message.Touch" = "Create a free account on themoviedb.org, then copy the API key or the API read access token from Settings › API and paste it here. With it, Home shows a « Services » row: what Netflix, Prime Video and the others offer in your country, played by Popcorn Time from its own sources.";
 "Settings.TMDBKey.Message.Mac" = "Create a free account on themoviedb.org, then copy the API key or the API read access token from Settings › API and paste it below (⌘V). With it, Home shows a « Services » row: what Netflix, Prime Video and the others offer in your country, played by Popcorn Time from its own sources.";
@@ -606,4 +605,5 @@
 "Service: %@" = "Service: %@";
 "Grid.Service.Unavailable" = "TMDB did not answer. Check your connection and your TMDB key in Settings.";
 "Grid.Service.Refused" = "TMDB refused your key. Check it in Settings › Streaming Services.";
+"Grid.Service.Refused.Mac" = "TMDB refused your key. Check it in Settings › Streaming.";
 "Home.Unavailable.Service" = "The %@ Catalog Can't Load";

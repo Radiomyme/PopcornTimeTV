@@ -892,10 +892,9 @@
 "Settings.TMDBKey.Check.Unanswered" = "No se pudo conectar con TMDB. La clave sigue guardada; inténtalo más tarde.";
 "Settings.TMDBKey.Checking" = "Comprobando…";
 "Settings.TMDBKey.GetKey" = "Obtener una clave gratuita";
-"Settings.TMDBKey.Paste" = "Pegar";
 "Settings.TMDBKey.Hidden" = "Una vez guardada, la clave ya no se muestra: pega una nueva para reemplazarla.";
-"Settings.TMDBKey.Message.Touch" = "Crea una cuenta gratuita en themoviedb.org, copia la clave de API o el token de acceso de lectura desde Configuración › API y pégalo aquí. Con ella, Inicio muestra una fila «Servicios»: lo que ofrecen Netflix, Prime Video y los demás en tu país, reproducido por Popcorn Time desde sus propias fuentes.";
-"Settings.TMDBKey.Message.Mac" = "Crea una cuenta gratuita en themoviedb.org, copia la clave de API o el token de acceso de lectura desde Configuración › API y pégalo abajo (⌘V). Con ella, Inicio muestra una fila «Servicios»: lo que ofrecen Netflix, Prime Video y los demás en tu país, reproducido por Popcorn Time desde sus propias fuentes.";
+"Settings.TMDBKey.Message.Touch" = "Crea una cuenta gratuita en themoviedb.org, copia la clave de API o el token de acceso de lectura desde Configuración › API y pégalo aquí. Con esa clave, Inicio muestra una fila «Servicios»: lo que ofrecen Netflix, Prime Video y los demás en tu país, reproducido por Popcorn Time desde sus propias fuentes.";
+"Settings.TMDBKey.Message.Mac" = "Crea una cuenta gratuita en themoviedb.org, copia la clave de API o el token de acceso de lectura desde Configuración › API y pégalo abajo (⌘V). Con esa clave, Inicio muestra una fila «Servicios»: lo que ofrecen Netflix, Prime Video y los demás en tu país, reproducido por Popcorn Time desde sus propias fuentes.";
 "Settings.TMDBKey.Detail.HomeOnly" = "Tu propia clave gratuita, en themoviedb.org › Configuración › API. La fila «Servicios» de Inicio la necesita.";
 "Settings.TMDBKey.Accepted.HomeOnly" = "TMDB aceptó la clave. La fila «Servicios» aparece en Inicio.";
 "Settings.StreamingServices.Message.HomeOnly" = "Cada servicio marcado tiene su tarjeta en la fila «Servicios» de Inicio. Los más vistos en tu país van primero.";
@@ -913,4 +912,5 @@
 "Service: %@" = "Servicio: %@";
 "Grid.Service.Unavailable" = "TMDB no respondió. Comprueba tu conexión y tu clave de TMDB en Ajustes.";
 "Grid.Service.Refused" = "TMDB rechazó tu clave. Revísala en Ajustes › Servicios de streaming.";
+"Grid.Service.Refused.Mac" = "TMDB rechazó tu clave. Revísala en Ajustes › Streaming.";
 "Home.Unavailable.Service" = "No se puede cargar el catálogo de %@";

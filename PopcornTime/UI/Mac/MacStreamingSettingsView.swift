@@ -293,6 +293,7 @@ struct MacTMDBKeySheet: View {
             // Kept: the field empties, the key is not shown again.
             if verdict != .refused { draft = "" }
             outcome = (verdict, false)
+            MacTMDBKeySheet.announce(verdict, afterCheck: false)
         }
     }
 
@@ -300,7 +301,17 @@ struct MacTMDBKeySheet: View {
         outcome = nil
         store.checkKeyAgain { verdict in
             outcome = verdict.map { ($0, true) }
+            if let verdict { MacTMDBKeySheet.announce(verdict, afterCheck: true) }
         }
+    }
+
+    /// VoiceOver says TMDB's verdict: the line that shows it appears
+    /// without the focus going there.
+    static func announce(_ verdict: TMDBKeySettings.Verdict, afterCheck: Bool) {
+        guard let window = NSApp.keyWindow ?? NSApp.mainWindow else { return }
+        NSAccessibility.post(element: window, notification: .announcementRequested,
+                             userInfo: [.announcement: verdict.messageKey(afterCheck: afterCheck).localized,
+                                        .priority: NSAccessibilityPriorityLevel.high.rawValue])
     }
 
     #if DEBUG
