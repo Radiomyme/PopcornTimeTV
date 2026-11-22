@@ -25,16 +25,33 @@ once, resumes a film that is still downloading in the native player, chains a sh
 
 On `master`, not in a release: the version stays 5.3.0 and What's New in the app is unchanged.
 Contributions by [RougeCiel](https://github.com/RougeCiel), reviewed and completed before the
-merge. Seen on Apple TV simulators with recorded answers, then against TMDB itself with a real
-key on 2026-11-21 (Settings, the Services row, the filtered pages and the grids' Service filter,
-in French and after a move to the United States); what that run found is corrected below. Not
-yet on a real Apple TV.
+merge. On the Apple TV it was seen on simulators with recorded answers, then against TMDB itself
+with a real key on 2026-11-21 (Settings, the Services row, the filtered pages and the grids'
+Service filter, in French and after a move to the United States); what that run found is
+corrected below. The iPhone, iPad and Mac side was seen on simulators and on the Mac with the
+recorded answers and a made-up key only (the client underneath is the one the Apple TV run used
+against TMDB). Not yet on a real Apple TV, iPhone, iPad or Mac.
 
-**Browse by streaming service (Apple TV)**
-- **What it needs**: your own free TMDB key (themoviedb.org › Settings › API), typed or pasted
-  from the iPhone in **Settings › Streaming Services**, with the country and the services to
-  offer (Netflix, Amazon Prime Video, Disney Plus and Apple TV until you choose). Without a
-  key the app looks and behaves as in 5.3.0, apart from that Settings section.
+**Browse by streaming service (Apple TV, iPhone / iPad, Mac)**
+- **What it needs**: your own free TMDB key (themoviedb.org › Settings › API), with the country
+  and the services to offer (Netflix, Amazon Prime Video, Disney Plus and Apple TV until you
+  choose). Without a key the app looks and behaves as in 5.3.0, apart from that Settings
+  section.
+- **Where the key goes**: one field takes the v3 API key or the v4 read access token, whichever
+  you paste. What is pasted is cleaned: spaces and line breaks, quotes, invisible marks, a
+  leading « Bearer », a whole `Authorization: Bearer …` or curl header line, `api_key=…` or an
+  address that carries it, the « API Key » label copied with it. TMDB checks the key before it
+  is kept; a key TMDB refuses is not stored, one saved while TMDB does not answer is kept and
+  tried at the next request. Once saved it is never shown again, only its state (Set, Refused,
+  Not Set); it stays in the app's preferences on that device (no iCloud, no Keychain).
+  - **Apple TV**: **Settings › Streaming Services**, typed or pasted from the iPhone; the key
+    sheet shows a QR code that opens TMDB's API page on a phone (the page, never the key) and,
+    once a key is stored, **Check Again**.
+  - **iPhone / iPad**: **Settings › Streaming Services**, under the Home sections: the key screen
+    (Paste, Save, Check Again, Remove Key, a link to TMDB's page in Safari), the country list
+    and the services list.
+  - **Mac**: the **Streaming** tab of Settings (⌘,): the key sheet (⌘V or Paste, Return saves,
+    Escape closes), the Country menu and the Services sheet.
 - **The services offered** are TMDB's for your country, the most watched first: the
   subscription and free ones, not the stores (Apple TV Store, Amazon Video, Rakuten TV, YouTube,
   Canal VOD…), whose lists would be titles they rent or sell. A service's page lists the titles
@@ -47,10 +64,13 @@ yet on a real Apple TV.
   on it — its popular, recent and top rated movies and shows in your country, placeholders while
   they come, « No results » when it lists nothing, an error with Try Again when TMDB does not
   answer, or saying so when TMDB refuses the key (Settings then shows the key as refused);
-  « All », or Menu at the top of the page, brings the usual page
+  « All », or Menu at the top of the page on the Apple TV, brings the usual page
   back. The choice lasts the session; hiding the row in Settings › Home shows the usual page.
-- **The Service filter** of the Movies and Shows grids, after Sort and Genre: the grid lists the
-  service's titles, with the sorts and genres its lists can follow.
+  The row and the filtered page are the same on iPhone, iPad and Mac (a tap, a click, Return or
+  Space on a card; the Mac's keyboard cursor walks the cards).
+- **The Service filter** of the Movies and Shows grids, after Sort and Genre (Apple TV only for
+  now: the iPhone, iPad and Mac grids do not have it yet): the grid lists the service's titles,
+  with the sorts and genres its lists can follow.
 - **What it is not**: the services' own apps or streams. Popcorn Time plays these titles from
   its own sources, as any other title. What each service offers comes from JustWatch, through
   TMDB; this product uses the TMDB API but is not endorsed or certified by TMDB.
@@ -752,7 +772,7 @@ PopcornTorrent's rule (it does not publish it).
 
 **⌘U**: pick the **PopcornTimeTests** scheme (or PopcornTimeMac), destination *My Mac*. The
 macOS unit-test target runs in about 15 seconds, offline, in English whatever the Mac's
-language: 934 tests, 25,217 checks of the extra sources (apibay, Knaben, Cinemeta, TVMaze, the
+language: 939 tests, 25,262 checks of the extra sources (apibay, Knaben, Cinemeta, TVMaze, the
 Top 100), the catalogs (each source's sorts and genres, the mirror races, the first pages kept
 on disk), the Home feed (`PopcornTimeTests/Home`: its parsers, shelves, cache and loader on
 the answers recorded on 2026-11-14, its transport on hosts played by a `URLProtocol`, and the
@@ -822,8 +842,8 @@ card), the Home tab (`HomeUITests`, fed from recorded answers) and the poster gr
 DEBUG fixture), and Siri Remote presses replayed on the player over a loopback test torrent
 (`RemoteScriptUITests`, through `tools/remote-rig/fx-run.sh`; skipped unless `PT_REMOTE_SCRIPT`
 is set), and the streaming services with and without a TMDB key, the key sheet's QR code and
-Check Again included (`StreamingServicesUITests`, on recorded TMDB answers and a made-up key).
-83 tests. They read the public catalog APIs, never
+Check Again included, accepted and refused (`StreamingServicesUITests`, on recorded TMDB answers
+and a made-up key). 84 tests. They read the public catalog APIs, never
 press Play, and set the app up with DEBUG launch arguments, so they are built with the DEBUG
 condition (the app for x86_64, the test runner for arm64). The second command names its own
 DerivedData and result bundle: without them the results go to a `PopcornTime-…` folder of
