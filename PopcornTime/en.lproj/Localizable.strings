@@ -594,6 +594,7 @@
 "Settings.StreamingServices.Message.HomeOnly" = "Each checked service has its card in the « Services » row of Home. The most watched in your country come first.";
 /* The services list of the iPhone and iPad Settings when TMDB did not answer for the country. */
 "Settings.StreamingServices.Failed" = "TMDB did not send the services of this country. Check your connection, then try again.";
+"Settings.Streaming.Tab" = "Streaming";
 "Services" = "Services";
 "Home.Services.Shown" = "Selected";
 "Popular Movies on %@" = "Popular Movies on %@";

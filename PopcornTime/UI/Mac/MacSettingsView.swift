@@ -7,9 +7,11 @@ import PopcornKit
 
 /// macOS Settings window (⌘,) mirroring the iOS `SettingsView`: same
 /// UserDefaults keys, so preferences carry the same meaning across platforms.
-/// Three panes, as a Mac's settings have — Playback, Home, About — each a
-/// grouped form no taller than its rows: in one pane the window had grown
-/// taller than a 14-inch screen once the Home's settings were added.
+/// Four panes, as a Mac's settings have — Playback, Home, Streaming
+/// (`MacStreamingSettingsPane`: the TMDB key, the country, the services),
+/// About — each a grouped form no taller than its rows: in one pane the
+/// window had grown taller than a 14-inch screen once the Home's settings
+/// were added.
 /// Trakt: no sign-in is offered — Trakt refuses the app's key (403), the
 /// browser flow could only end on an error. An account signed in with an
 /// earlier version still shows, so that it can be signed out.
@@ -50,6 +52,7 @@ struct MacSettingsView: View {
     private enum Pane: Hashable {
         case playback
         case home
+        case streaming
         case about
     }
 
@@ -63,6 +66,9 @@ struct MacSettingsView: View {
             form { homeSection }
                 .tabItem { Label("Home", systemImage: "house") }
                 .tag(Pane.home)
+            MacStreamingSettingsPane(store: MacStreamingSettings.store)
+                .tabItem { Label("Settings.Streaming.Tab", systemImage: "play.tv") }
+                .tag(Pane.streaming)
             form { aboutSections }
                 .tabItem { Label("About", systemImage: "info.circle") }
                 .tag(Pane.about)
@@ -73,13 +79,18 @@ struct MacSettingsView: View {
         .onAppear {
             reloadHomeSettings()
             #if DEBUG
-            // `-PTDebugSettingsPane <playback|home|about>`: that pane;
-            // `-PTDebugSettingsSheet <languages|shelves>`: the Home's pane
-            // with that list open.
+            // `-PTDebugSettingsPane <playback|home|streaming|about>`: that
+            // pane; `-PTDebugSettingsSheet <languages|shelves>`: the Home's
+            // pane with that list open, `<tmdbkey|services>`: the
+            // Streaming pane with that sheet open.
             switch MacDebugHooks.settingsPane {
             case "home": pane = .home
+            case "streaming": pane = .streaming
             case "about": pane = .about
             default: break
+            }
+            if MacDebugHooks.settingsSheet.flatMap(MacStreamingSettingsPane.Sheet.init(rawValue:)) != nil {
+                pane = .streaming
             }
             if homeList == nil, let list = MacDebugHooks.settingsSheet.flatMap(HomeList.init(rawValue:)) {
                 pane = .home
@@ -87,6 +98,9 @@ struct MacSettingsView: View {
             }
             #endif
         }
+        // A key saved or removed in the Streaming pane lists the
+        // « Services » shelf, or not, among the Home's.
+        .onChange(of: pane) { _, _ in reloadHomeSettings() }
         .sheet(item: $homeList, onDismiss: reloadHomeSettings) { list in
             MacHomeSettingsSheet(title: list == .languages ? "Home.Settings.Languages" : "Home.Settings.Shelves") {
                 switch list {
@@ -102,9 +116,7 @@ struct MacSettingsView: View {
     /// One pane: a grouped form as tall as its rows.
     private func form<Content: View>(@ViewBuilder _ content: () -> Content) -> some View {
         Form(content: content)
-            .formStyle(.grouped)
-            .frame(width: 480)
-            .fixedSize()
+            .macSettingsPane()
     }
 
     // MARK: Playback
@@ -279,10 +291,22 @@ struct MacSettingsView: View {
     }
 }
 
-/// One of the Home's lists (content languages, shelves) in a sheet over the
-/// Settings window: its title, the list shared with iOS, and OK.
-private struct MacHomeSettingsSheet<Content: View>: View {
+extension View {
+    /// A pane of the Settings window: a grouped form 480 pt wide, as tall
+    /// as its rows (the window takes the size of the pane shown).
+    func macSettingsPane() -> some View {
+        formStyle(.grouped)
+            .frame(width: 480)
+            .fixedSize()
+    }
+}
+
+/// One of the Home's lists (content languages, shelves) — or the Streaming
+/// pane's services — in a sheet over the Settings window: its title, the
+/// list, and OK (Return; Escape too when `closesOnEscape`).
+struct MacHomeSettingsSheet<Content: View>: View {
     let title: LocalizedStringKey
+    var closesOnEscape = false
     @ViewBuilder let content: () -> Content
     let close: () -> Void
 
@@ -301,6 +325,16 @@ private struct MacHomeSettingsSheet<Content: View>: View {
                 Spacer()
                 Button("OK", action: close)
                     .keyboardShortcut(.defaultAction)
+            }
+            .background {
+                if closesOnEscape {
+                    // Escape: a list of buttons takes no keyboard focus, so
+                    // no view would get the cancel command — a button does.
+                    Button("Close", action: close)
+                        .keyboardShortcut(.cancelAction)
+                        .opacity(0)
+                        .accessibilityHidden(true)
+                }
             }
             .padding(.horizontal, 20)
             .padding(.vertical, 12)

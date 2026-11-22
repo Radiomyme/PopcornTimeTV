@@ -32,8 +32,14 @@ import PopcornKit
 ///   page (from 0) and does not turn by itself;
 /// - `-PTDebugOpenURL <url>`: the URL is handed to the window's link handler
 ///   a moment after launch, as `onOpenURL` gets it (a popcorntime:// link);
-/// - `-PTDebugSettingsPane <playback|home|about>`: the Settings window
-///   opens on that pane; `-PTDebugSettingsSheet <languages|shelves>`: on the
+/// - `-PTDebugSettingsPane <playback|home|streaming|about>`: the Settings
+///   window opens on that pane; `-PTDebugSettingsSheet <tmdbkey|services>`:
+///   on the Streaming pane with that sheet open, and in the key's sheet
+///   `-PTDebugTMDBKeyDraft <made-up text>` fills the field (as if pasted),
+///   `-PTDebugTMDBKeySave YES` / `-PTDebugTMDBKeyCheck YES` press
+///   « Enregistrer » / « Vérifier à nouveau » (once a run; with the fixtures
+///   the recorded TMDB answers, which take any key); `-PTDebugSettingsSheet
+///   <languages|shelves>`: on the
 ///   Home's pane, with that list in its sheet;
 /// - `-PTDebugSearch <text>`: the Search section with that text in its field
 ///   (the live search runs as if it had been typed); `-PTDebugSearchOffline
@@ -89,7 +95,10 @@ import PopcornKit
 ///   `snapsettings:<name>` writes it (and its sheet) into `<name>.png`;
 ///   `snapwhatsnew:<name>` writes the "What's New" window (opened by
 ///   `menu:<app menu>:<What's New… item>` after `activate`);
-///   `sheet` logs what the sheet over the window says; `exit` ends the
+///   `sheet` logs what the sheet over the window says, `settingssheet[:tree]`
+///   what the Settings window's sheet says and which control has its
+///   keyboard; `sheetkey:<return|esc|tab|…>` types that key in the Settings
+///   window's sheet (Return saves the key, Escape closes); `exit` ends the
 ///   run there (a window under a sheet does not quit with `-PTDebugQuit`);
 /// - `-PTDebugScroll <hero|episodes|related|cast|info>`: scroll the open page
 ///   there once its sections have loaded (MacGlassDetailView);
@@ -139,7 +148,8 @@ enum MacDebugHooks {
                                "PTDebugTop100Offline", "PTDebugSearch", "PTDebugSearchOffline", "PTDebugOpenRoute",
                                "PTDebugTour", "PTDebugHomeFixtures", "PTDebugHomeState", "PTDebugHomeShelf",
                                "PTDebugHomeHeroPage", "PTDebugOpenURL", "PTDebugSettingsSheet", "PTDebugNoAnimation",
-                               "PTDebugSettingsPane", "PTDebugHomeService"]
+                               "PTDebugSettingsPane", "PTDebugHomeService", "PTDebugTMDBKeyDraft", "PTDebugTMDBKeySave",
+                               "PTDebugTMDBKeyCheck"]
 
     static var isActive: Bool {
         keys.contains { defaults.object(forKey: $0) != nil }
@@ -200,9 +210,30 @@ enum MacDebugHooks {
         defaults.string(forKey: "PTDebugSettingsPane")?.lowercased()
     }
 
-    /// `-PTDebugSettingsSheet <languages|shelves>`.
+    /// `-PTDebugSettingsSheet <languages|shelves|tmdbkey|services>`.
     static var settingsSheet: String? {
         defaults.string(forKey: "PTDebugSettingsSheet")?.lowercased()
+    }
+
+    /// The Streaming pane's sheet was opened by `-PTDebugSettingsSheet`
+    /// (once a run: closing it must not open it again).
+    @MainActor static var didOpenStreamingSheet = false
+    /// The key's sheet took its draft and its press (once a run).
+    @MainActor static var didApplyKeySheet = false
+
+    /// `-PTDebugTMDBKeyDraft <made-up text>`: the key's field, as if pasted.
+    static var tmdbKeyDraft: String? {
+        defaults.string(forKey: "PTDebugTMDBKeyDraft")
+    }
+
+    /// `-PTDebugTMDBKeySave YES`: « Enregistrer » pressed once the draft is in.
+    static var savesTMDBKey: Bool {
+        defaults.bool(forKey: "PTDebugTMDBKeySave")
+    }
+
+    /// `-PTDebugTMDBKeyCheck YES`: « Vérifier à nouveau » pressed.
+    static var checksTMDBKey: Bool {
+        defaults.bool(forKey: "PTDebugTMDBKeyCheck")
     }
 
     // MARK: Home
@@ -274,7 +305,7 @@ enum MacDebugHooks {
     private static func sendKey(_ name: String, command: Bool, to window: NSWindow) -> String {
         let keys: [String: (code: UInt16, characters: String)] = [
             "left": (123, "\u{F702}"), "right": (124, "\u{F703}"), "down": (125, "\u{F701}"), "up": (126, "\u{F700}"),
-            "return": (36, "\r"), "space": (49, " "), "esc": (53, "\u{1b}"),
+            "return": (36, "\r"), "space": (49, " "), "esc": (53, "\u{1b}"), "tab": (48, "\t"),
         ]
         // With ⌘, any other name is the character typed with it ("r"; on
         // an AZERTY keyboard the digit keys type & é " ').
@@ -579,6 +610,30 @@ enum MacDebugHooks {
                     if argument == "tree" { logViewTree(of: sheet, maxX: 10_000) }
                 } else {
                     print("[MacDebug] sheet: none")
+                }
+            case "settingssheet":
+                // The Settings window's sheet: its texts, and who has the keyboard.
+                if let sheet = settingsWindow?.attachedSheet {
+                    var texts: [String] = []
+                    for node in accessibilityNodes(in: sheet) {
+                        let text = node.value.isEmpty ? node.label : node.value
+                        if !text.isEmpty, !texts.contains(text) { texts.append(text) }
+                    }
+                    let responder = sheet.firstResponder
+                    let field = (responder as? NSTextView)?.delegate
+                    print("[MacDebug] Settings sheet \(Int(sheet.frame.width))×\(Int(sheet.frame.height)): \(texts.prefix(30))"
+                          + " · first responder: \(responder.map { String(describing: type(of: $0)) } ?? "none")"
+                          + (field.map { " (editor of \(type(of: $0)))" } ?? ""))
+                    if argument == "tree" { logViewTree(of: sheet, maxX: 10_000) }
+                } else {
+                    print("[MacDebug] Settings sheet: none")
+                }
+            case "sheetkey":
+                // A key typed in the Settings window's sheet (else the window).
+                if let window = settingsWindow?.attachedSheet ?? settingsWindow {
+                    print("[MacDebug] sheet key \(argument): \(sendKey(argument, command: false, to: window))")
+                } else {
+                    print("[MacDebug] sheetkey: no Settings window")
                 }
             case "exit":
                 // The run ends here, whatever is on screen: a window under a

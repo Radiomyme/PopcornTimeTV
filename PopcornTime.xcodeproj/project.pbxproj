@@ -56,6 +56,7 @@
 		0DEAC86AEE1D142E4229DD9C /* PTTorrentStreamer+Current.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2EE5B844F25564BDC0790767 /* PTTorrentStreamer+Current.swift */; };
 		0E22E905248D6C739B3D660D /* HomeSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7A49F1029CA5D1B634CDA233 /* HomeSettings.swift */; };
 		0E264CF6CCFCA154849A3AC1 /* BandwidthDeficit.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9FB14CFA7FB736D1431C02F1 /* BandwidthDeficit.swift */; };
+		0E5532BFDA66337B91B14307 /* MacStreamingSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8D0E45B162974D81E0052F59 /* MacStreamingSettingsView.swift */; };
 		0F42E9FDC2A12FD247EF67F3 /* ConnectionSpeed.swift in Sources */ = {isa = PBXBuildFile; fileRef = 60C76DC431BE729D5D6E4F46 /* ConnectionSpeed.swift */; };
 		0F55FC665C9779D61E64DFDE /* ResumeStartTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 98AB3D698AB5ABC3DD81B257 /* ResumeStartTests.swift */; };
 		0FD8EB769A92E9C6A81B33D0 /* DispatchQueue+Extension.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4DB0EA641E7D8C38004B57B1 /* DispatchQueue+Extension.swift */; };
@@ -1382,6 +1383,7 @@
 		8BB94E0D8A266A44948F11E0 /* Pods-PopcornTimetvOS.debug.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-PopcornTimetvOS.debug.xcconfig"; path = "Target Support Files/Pods-PopcornTimetvOS/Pods-PopcornTimetvOS.debug.xcconfig"; sourceTree = "<group>"; };
 		8C2EC1C69555712A03A2CCA7 /* MatroskaDemuxer.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MatroskaDemuxer.swift; sourceTree = "<group>"; };
 		8C67B73715C56D22328D9B0C /* HomeLibraryHooksTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = HomeLibraryHooksTests.swift; path = PopcornTimeTests/Home/HomeLibraryHooksTests.swift; sourceTree = SOURCE_ROOT; };
+		8D0E45B162974D81E0052F59 /* MacStreamingSettingsView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = MacStreamingSettingsView.swift; path = PopcornTime/UI/Mac/MacStreamingSettingsView.swift; sourceTree = SOURCE_ROOT; };
 		8D973D48D7B6EE2A9104EB81 /* HomeLayout.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = HomeLayout.swift; path = "PopcornTime/UI/Shared SwiftUI/Home/HomeLayout.swift"; sourceTree = SOURCE_ROOT; };
 		8EAB37B3640CD0C83AA92540 /* DetailSessionTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = DetailSessionTests.swift; path = PopcornTimeTests/Detail/DetailSessionTests.swift; sourceTree = SOURCE_ROOT; };
 		8F1673AD0C669496FCE4A3D4 /* ArtworkStore.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = ArtworkStore.swift; path = PopcornKit/Managers/Artwork/ArtworkStore.swift; sourceTree = SOURCE_ROOT; };
@@ -1728,6 +1730,7 @@
 				82CA9D09FACF730E0F166195 /* MacSearchView.swift */,
 				F3F0175A669901216BBDEC43 /* MacWatchlistView.swift */,
 				0BFDBCF9C73EA0A0EFD7F142 /* MacHomeView.swift */,
+				8D0E45B162974D81E0052F59 /* MacStreamingSettingsView.swift */,
 			);
 			name = Mac;
 			path = Mac;
@@ -4047,6 +4050,7 @@
 				6A03038F09737DF3C8C1305E /* ResumeProgressText.swift in Sources */,
 				B5FBEBEE66BE88CF6EFB3668 /* RemuxWaitNudge.swift in Sources */,
 				54E580182CDF17EA7D2AE57B /* HomeServiceTile.swift in Sources */,
+				0E5532BFDA66337B91B14307 /* MacStreamingSettingsView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
