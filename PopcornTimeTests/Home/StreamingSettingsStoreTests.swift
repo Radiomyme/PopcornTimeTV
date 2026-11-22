@@ -250,4 +250,42 @@ final class StreamingSettingsStoreTests: CheckedTestCase {
         eq(StreamingSettingsStore.shelves([HomeShelfID.services, "a"], hasKey: true), [HomeShelfID.services, "a"], "listed once")
         eq(StreamingSettingsStore.shelves([], hasKey: true), [HomeShelfID.services], "an empty list")
     }
+
+    /// What the Settings rows of the iPhone, the iPad and the Mac say.
+    @MainActor
+    func testWhatTheRowsSay() {
+        eq(StreamingSettingsStore.summary(of: []), nil, "no service: the row says « Aucune »")
+        eq(StreamingSettingsStore.summary(of: ["Netflix"]), "Netflix", "one")
+        eq(StreamingSettingsStore.summary(of: ["Netflix", "Canal+"]), "Netflix, Canal+", "two")
+        eq(StreamingSettingsStore.summary(of: ["Netflix", "Canal+", "Disney Plus", "Max"]), "Netflix, Canal+ +2", "the first two, then how many more")
+        let store = makeStore(settings())
+        store.setServices([StreamingChoice(id: "8", title: "Netflix"), StreamingChoice(id: "337", title: "Disney Plus"),
+                           StreamingChoice(id: "381", title: "Canal+")])
+        eq(store.servicesSummary, "Netflix, Disney Plus +1", "the chosen ones, in the row's order")
+
+        eq(TMDBKeySettings.State.none.summaryKey, "Settings.TMDBKey.Missing", "no key")
+        eq(TMDBKeySettings.State.set.summaryKey, "Settings.TMDBKey.Set", "a key")
+        eq(TMDBKeySettings.State.refused.summaryKey, "Settings.TMDBKey.Refused.Short", "a refused key")
+        // The keys are in the strings the apps ship (the test bundle has none of its own).
+        let english = URL(fileURLWithPath: "\(#filePath)").deletingLastPathComponent().deletingLastPathComponent()
+            .deletingLastPathComponent().appendingPathComponent("PopcornTime/en.lproj/Localizable.strings")
+        let strings = NSDictionary(contentsOf: english) as? [String: String] ?? [:]
+        for state in [TMDBKeySettings.State.none, .set, .refused] {
+            check(strings[state.summaryKey] != nil, "\(state.summaryKey) is in the strings")
+        }
+
+        // A verdict in plain words: a save's, a check's (the stored key's fate).
+        eq(TMDBKeySettings.Verdict.accepted.messageKey(afterCheck: false), "Settings.TMDBKey.Accepted.HomeOnly",
+           "accepted: the Home's row, no grids' filter promised")
+        eq(TMDBKeySettings.Verdict.refused.messageKey(afterCheck: false), "Settings.TMDBKey.Refused", "refused: copied whole?")
+        eq(TMDBKeySettings.Verdict.unanswered.messageKey(afterCheck: false), "Settings.TMDBKey.Unchecked", "kept, tried later")
+        eq(TMDBKeySettings.Verdict.accepted.messageKey(afterCheck: true), "Settings.TMDBKey.Check.Accepted", "checked: accepted")
+        eq(TMDBKeySettings.Verdict.refused.messageKey(afterCheck: true), "Settings.TMDBKey.Check.Refused", "checked: refused")
+        eq(TMDBKeySettings.Verdict.unanswered.messageKey(afterCheck: true), "Settings.TMDBKey.Check.Unanswered", "checked: no answer")
+        for verdict in [TMDBKeySettings.Verdict.accepted, .refused, .unanswered] {
+            for afterCheck in [false, true] {
+                check(strings[verdict.messageKey(afterCheck: afterCheck)] != nil, "\(verdict.messageKey(afterCheck: afterCheck)) is in the strings")
+            }
+        }
+    }
 }

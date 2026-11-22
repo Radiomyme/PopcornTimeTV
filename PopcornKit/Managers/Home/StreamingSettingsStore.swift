@@ -125,6 +125,19 @@ public final class StreamingSettingsStore {
         return chosenServices + (serviceChoices ?? []).filter { !ids.contains($0.id) }
     }
 
+    /// What the Services row says: "Netflix, Disney Plus +2" (the first two
+    /// chosen, then how many more); nil when no service is chosen.
+    public var servicesSummary: String? {
+        StreamingSettingsStore.summary(of: chosenServices.map(\.title))
+    }
+
+    /// `names` as the Services row says them: the first two, then "+n".
+    nonisolated public static func summary(of names: [String]) -> String? {
+        guard !names.isEmpty else { return nil }
+        let shown = names.prefix(2).joined(separator: ", ")
+        return names.count > 2 ? "\(shown) +\(names.count - 2)" : shown
+    }
+
     /// The countries a list offers: TMDB's, with the current one first when
     /// TMDB's list lacks it.
     public var regionOptions: [StreamingChoice] {

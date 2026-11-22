@@ -29,6 +29,17 @@ public struct TMDBKeySettings {
         /// TMDB refused the stored key (401) at its last request with it,
         /// and has not taken it since: « Refusée » / « Refused ».
         case refused
+
+        /// The string key of what a Settings row says of the key (it is
+        /// never shown again once saved): « Aucune », « Définie »,
+        /// « Refusée ». The same on the iPhone, the iPad and the Mac.
+        public var summaryKey: String {
+            switch self {
+            case .none: return "Settings.TMDBKey.Missing"
+            case .set: return "Settings.TMDBKey.Set"
+            case .refused: return "Settings.TMDBKey.Refused.Short"
+            }
+        }
     }
 
     /// TMDB's answer to a key being saved or checked again.
@@ -52,6 +63,21 @@ public struct TMDBKeySettings {
             case .accepted: return true
             case .refused: return false
             case .unanswered: return nil
+            }
+        }
+
+        /// The string key of the verdict in plain words, on the apps whose
+        /// Home alone uses the key (iPhone, iPad, Mac: no grids' filter to
+        /// promise): after « Enregistrer », or after « Vérifier à nouveau »
+        /// (`afterCheck`), which says the STORED key's fate.
+        public func messageKey(afterCheck: Bool) -> String {
+            switch (self, afterCheck) {
+            case (.accepted, false): return "Settings.TMDBKey.Accepted.HomeOnly"
+            case (.refused, false): return "Settings.TMDBKey.Refused"
+            case (.unanswered, false): return "Settings.TMDBKey.Unchecked"
+            case (.accepted, true): return "Settings.TMDBKey.Check.Accepted"
+            case (.refused, true): return "Settings.TMDBKey.Check.Refused"
+            case (.unanswered, true): return "Settings.TMDBKey.Check.Unanswered"
             }
         }
     }

@@ -85,23 +85,7 @@ struct StreamingSettingsDestination: View {
 extension TMDBKeySettings.State {
     /// « Définie », « Refusée », « Aucune »: all the key row ever says of
     /// the key (it is never shown again once saved).
-    var summary: LocalizedStringKey {
-        switch self {
-        case .none: return "Settings.TMDBKey.Missing"
-        case .set: return "Settings.TMDBKey.Set"
-        case .refused: return "Settings.TMDBKey.Refused.Short"
-        }
-    }
-}
-
-extension StreamingSettingsStore {
-    /// "Netflix, Disney Plus +2"; nil when no service is checked.
-    var servicesSummary: String? {
-        let names = chosenServices.map(\.title)
-        guard !names.isEmpty else { return nil }
-        let shown = names.prefix(2).joined(separator: ", ")
-        return names.count > 2 ? "\(shown) +\(names.count - 2)" : shown
-    }
+    var summary: LocalizedStringKey { LocalizedStringKey(summaryKey) }
 }
 
 // MARK: - Key
@@ -299,12 +283,8 @@ private struct TMDBKeyVerdictRow: View {
 
     private var text: LocalizedStringKey {
         switch outcome {
-        case .saved(.accepted): return "Settings.TMDBKey.Accepted.HomeOnly"
-        case .saved(.refused): return "Settings.TMDBKey.Refused"
-        case .saved(.unanswered): return "Settings.TMDBKey.Unchecked"
-        case .checked(.accepted): return "Settings.TMDBKey.Check.Accepted"
-        case .checked(.refused): return "Settings.TMDBKey.Check.Refused"
-        case .checked(.unanswered): return "Settings.TMDBKey.Check.Unanswered"
+        case .saved(let verdict): return LocalizedStringKey(verdict.messageKey(afterCheck: false))
+        case .checked(let verdict): return LocalizedStringKey(verdict.messageKey(afterCheck: true))
         }
     }
 
