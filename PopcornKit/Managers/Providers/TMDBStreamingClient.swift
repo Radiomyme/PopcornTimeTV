@@ -24,12 +24,20 @@ public final class TMDBStreamingClient: @unchecked Sendable {
     /// TMDB, and any key is taken (`check(key:)`) — or, with
     /// `-PTDebugHomeState tmdbrefused` (the iPhone and Mac fixture runs),
     /// every key is refused and nothing answers: the screens of a refused
-    /// key, without TMDB.
+    /// key, without TMDB. With `tmdbdown` no list answers and with
+    /// `tmdbsilent` none ever comes, as for the Home's hub: the Settings'
+    /// lists of services fail, or keep loading (a key is still taken).
     public static let shared: TMDBStreamingClient = {
         #if DEBUG
         if let folder = UserDefaults.standard.string(forKey: "PTDebugHomeFixtures"), !folder.isEmpty {
-            let refuses = UserDefaults.standard.string(forKey: "PTDebugHomeState")?.lowercased() == "tmdbrefused"
-            return TMDBStreamingClient(recordedIn: URL(fileURLWithPath: folder), refusesEveryKey: refuses)
+            let state = UserDefaults.standard.string(forKey: "PTDebugHomeState")?.lowercased()
+            let client = TMDBStreamingClient(recordedIn: URL(fileURLWithPath: folder), refusesEveryKey: state == "tmdbrefused")
+            if state == "tmdbdown" {
+                client.recorded = { _, completion in completion(nil) }
+            } else if state == "tmdbsilent" {
+                client.recorded = { _, _ in }
+            }
+            return client
         }
         #endif
         return TMDBStreamingClient()
