@@ -752,7 +752,7 @@ PopcornTorrent's rule (it does not publish it).
 
 **⌘U**: pick the **PopcornTimeTests** scheme (or PopcornTimeMac), destination *My Mac*. The
 macOS unit-test target runs in about 15 seconds, offline, in English whatever the Mac's
-language: 927 tests, 25,140 checks of the extra sources (apibay, Knaben, Cinemeta, TVMaze, the
+language: 933 tests, 25,194 checks of the extra sources (apibay, Knaben, Cinemeta, TVMaze, the
 Top 100), the catalogs (each source's sorts and genres, the mirror races, the first pages kept
 on disk), the Home feed (`PopcornTimeTests/Home`: its parsers, shelves, cache and loader on
 the answers recorded on 2026-11-14, its transport on hosts played by a `URLProtocol`, and the
