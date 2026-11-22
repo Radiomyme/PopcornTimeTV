@@ -424,5 +424,19 @@ final class TMDBStreamingClientTests: CheckedTestCase {
             .flatMap { (try? JSONSerialization.jsonObject(with: $0)) as? [String: Any] }
         check((show?["imdb_id"] as? String).map(HomeParse.isImdbId) == true && show?["tvdb_id"] is NSNull, "a recorded show: its IMDb id, a show's fields")
         check(TMDBRecorded.answer(to: "/configuration", in: recorded) == nil, "nothing else")
+        check(!client.isKeyRefused("anything"), "no key is ever refused")
+    }
+
+    /// `-PTDebugHomeState tmdbrefused` (the iPhone and Mac fixture runs): the recorded
+    /// client refuses every key and answers nothing — the screens of a revoked key, without
+    /// TMDB.
+    func testRecordedAnswersThatRefuseEveryKey() {
+        let client = TMDBStreamingClient(recordedIn: Fixtures.url("Home"), refusesEveryKey: true)
+        client.apiKey = { "made-up-key" }
+        eq(wait { done in client.check(key: "made-up-key") { done($0) } }, .some(false), "the key is refused")
+        check(client.isKeyRefused && client.isKeyRefused("another"), "every key reads « Refused »")
+        check(titles(client)?.items == nil, "no list: a failure, not an empty page")
+        eq(wait { done in client.services(region: "FR") { done($0) } }??.count, nil, "no services")
+        eq(TMDBStub.requests.count, 0, "nothing asked of anyone")
     }
 }

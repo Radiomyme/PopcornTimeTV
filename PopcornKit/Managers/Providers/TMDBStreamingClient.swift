@@ -21,11 +21,15 @@ public final class TMDBStreamingClient: @unchecked Sendable {
     /// The app's client. In a DEBUG run with `-PTDebugHomeFixtures <folder>`
     /// it answers from the recorded files of that folder (`TMDBRecorded`)
     /// and keeps the ids it reads in memory only: no request ever reaches
-    /// TMDB, and any key is taken (`check(key:)`).
+    /// TMDB, and any key is taken (`check(key:)`) — or, with
+    /// `-PTDebugHomeState tmdbrefused` (the iPhone and Mac fixture runs),
+    /// every key is refused and nothing answers: the screens of a refused
+    /// key, without TMDB.
     public static let shared: TMDBStreamingClient = {
         #if DEBUG
         if let folder = UserDefaults.standard.string(forKey: "PTDebugHomeFixtures"), !folder.isEmpty {
-            return TMDBStreamingClient(recordedIn: URL(fileURLWithPath: folder))
+            let refuses = UserDefaults.standard.string(forKey: "PTDebugHomeState")?.lowercased() == "tmdbrefused"
+            return TMDBStreamingClient(recordedIn: URL(fileURLWithPath: folder), refusesEveryKey: refuses)
         }
         #endif
         return TMDBStreamingClient()
@@ -61,12 +65,20 @@ public final class TMDBStreamingClient: @unchecked Sendable {
     private let refusedKey = TMDBGathered<String?>(nil)
     private let lookups = TMDBRequestGate(limit: TMDBStreamingClient.parallelLookups)
 
+    /// Recorded answers only: every key is refused, as TMDB refuses a
+    /// revoked one (`refusesEveryKey` of `init(recordedIn:)`).
+    private(set) var refusesEveryKey = false
+
     /// A client of recorded answers (`TMDBRecorded`, a DEBUG fixture run):
-    /// never a request, ids in memory only, every key taken.
-    convenience init(recordedIn folder: URL) {
+    /// never a request, ids in memory only, every key taken — or, with
+    /// `refusesEveryKey`, every key refused and no answer at all.
+    convenience init(recordedIn folder: URL, refusesEveryKey: Bool = false) {
         self.init(ids: TMDBIdCache(file: nil))
+        self.refusesEveryKey = refusesEveryKey
         recorded = { path, completion in
-            DispatchQueue.global(qos: .userInitiated).async { completion(TMDBRecorded.answer(to: path, in: folder)) }
+            DispatchQueue.global(qos: .userInitiated).async {
+                completion(refusesEveryKey ? nil : TMDBRecorded.answer(to: path, in: folder))
+            }
         }
     }
 
@@ -321,7 +333,7 @@ public final class TMDBStreamingClient: @unchecked Sendable {
     /// Does TMDB take this key? false: refused (401); nil: no answer
     /// (offline, TMDB down). Recorded answers take any key, unasked.
     public func check(key: String, completion: @escaping @Sendable (Bool?) -> Void) {
-        if recorded != nil { return completion(true) }
+        if recorded != nil { return completion(!refusesEveryKey) }
         guard let request = request("/configuration", key: key) else { return completion(false) }
         session.dataTask(with: request) { _, response, error in
             let status = (response as? HTTPURLResponse)?.statusCode
@@ -340,7 +352,7 @@ public final class TMDBStreamingClient: @unchecked Sendable {
     /// TMDB refused the user's key (401) at its last request with it, and
     /// has not taken it since: the screens say the key was refused, not
     /// that TMDB did not answer. False without a key, or with recorded
-    /// answers.
+    /// answers (unless they refuse every key).
     public var isKeyRefused: Bool {
         guard let key = apiKey() else { return false }
         return isKeyRefused(key)
@@ -348,9 +360,10 @@ public final class TMDBStreamingClient: @unchecked Sendable {
 
     /// TMDB refused this key at its last request with it (`isKeyRefused`
     /// for a key read elsewhere: Settings' own defaults). False with
-    /// recorded answers.
+    /// recorded answers, unless they refuse every key.
     public func isKeyRefused(_ key: String) -> Bool {
-        guard recorded == nil, let refused = refusedKey.value else { return false }
+        if recorded != nil { return refusesEveryKey }
+        guard let refused = refusedKey.value else { return false }
         return key == refused
     }
 
