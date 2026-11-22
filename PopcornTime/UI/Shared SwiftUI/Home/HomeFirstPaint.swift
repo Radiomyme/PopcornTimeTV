@@ -36,9 +36,10 @@ enum HomeFirstPaint {
 
     /// Nothing from the hosts or the cache yet: no carousel, and no shelf
     /// but the user's own (resume cards, the watchlist: the library answers
-    /// before any host does).
+    /// before any host does) and the « Services » row (made of the
+    /// settings alone, there from the first build when a TMDB key is set).
     static func isCold(shelves: [String], hasHero: Bool) -> Bool {
-        !hasHero && shelves.allSatisfy(HomeShelfID.local.contains)
+        !hasHero && shelves.allSatisfy { HomeShelfID.local.contains($0) || $0 == HomeShelfID.services }
     }
 
     /// A first load may show what it has: the refresh is over, or the top

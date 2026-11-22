@@ -423,6 +423,7 @@
 		540C9EFC06884BD12C36B500 /* TMDBStreamingClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = CB29BB9D89FDB0EC9FEDA88B /* TMDBStreamingClient.swift */; };
 		546488534A627EB435FF389B /* UpNextTV.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7CB5960CC1703A986D0F0D3A /* UpNextTV.swift */; };
 		54A2828B7414EC44885F1773 /* LoadingPhase.swift in Sources */ = {isa = PBXBuildFile; fileRef = AD48D854255C13ED3B2D36E7 /* LoadingPhase.swift */; };
+		54E580182CDF17EA7D2AE57B /* HomeServiceTile.swift in Sources */ = {isa = PBXBuildFile; fileRef = C9A55A79A522A197C0D4A925 /* HomeServiceTile.swift */; };
 		55377DA73E43516D450208D8 /* Top100Resolver.swift in Sources */ = {isa = PBXBuildFile; fileRef = E21D3391F815239A6A11AAB6 /* Top100Resolver.swift */; };
 		557615BB2C09FE05BFB55BBA /* Show.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4D0F9D1A1E6F298000860852 /* Show.swift */; };
 		558E4620622AECC140046938 /* FarTargetWatchP12Tests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E1648DBE827636A33AEA4406 /* FarTargetWatchP12Tests.swift */; };
@@ -807,6 +808,7 @@
 		E3638B77FB0DED123A2096BC /* DetailSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = 03B916517EA8ED6FEB44589B /* DetailSession.swift */; };
 		E36F899A26903CF33D4E572A /* UserNavigation.swift in Sources */ = {isa = PBXBuildFile; fileRef = 68A825FB534D33856FD687F0 /* UserNavigation.swift */; };
 		E38CD05A70BC7C0017C535ED /* PopcornKit macOS.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 45CDBF4716482AE9CE39BC5C /* PopcornKit macOS.framework */; };
+		E40915524DB2B2DC8CAA92A4 /* HomeServiceTile.swift in Sources */ = {isa = PBXBuildFile; fileRef = C9A55A79A522A197C0D4A925 /* HomeServiceTile.swift */; };
 		E4259C87D86B9273DF1765E8 /* ArtworkPrefetcher.swift in Sources */ = {isa = PBXBuildFile; fileRef = 333A3D66B0609FF4CFDDDB24 /* ArtworkPrefetcher.swift */; };
 		E46A9F5932B4D6C82C64BFCB /* WatchStateStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 13EDA54E66839AFFE399EB91 /* WatchStateStore.swift */; };
 		E4880DB73E428297B26C33A2 /* Cocoa.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = FD5F9FAF1BF7803BD37938F5 /* Cocoa.framework */; };
@@ -1449,6 +1451,7 @@
 		C6CEE8B378B84F46EAD207EE /* CellularStreamingPolicy.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = CellularStreamingPolicy.swift; path = PopcornKit/Managers/Catalog/CellularStreamingPolicy.swift; sourceTree = SOURCE_ROOT; };
 		C6D8316232536841928A0E73 /* VLCResumeWatch.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = VLCResumeWatch.swift; path = PopcornTime/Resources/Playback/VLCResumeWatch.swift; sourceTree = SOURCE_ROOT; };
 		C87816ADC09E5A71620437A3 /* HomeRecordedTransport.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = HomeRecordedTransport.swift; path = "PopcornTime/UI/Shared SwiftUI/Home/HomeRecordedTransport.swift"; sourceTree = SOURCE_ROOT; };
+		C9A55A79A522A197C0D4A925 /* HomeServiceTile.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = HomeServiceTile.swift; path = "PopcornTime/UI/Shared SwiftUI/Home/HomeServiceTile.swift"; sourceTree = SOURCE_ROOT; };
 		CA34A6A90D983AD61439BE83 /* ResumeStringsTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = ResumeStringsTests.swift; path = PopcornTimeTests/Playback/ResumeStringsTests.swift; sourceTree = SOURCE_ROOT; };
 		CB29BB9D89FDB0EC9FEDA88B /* TMDBStreamingClient.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = TMDBStreamingClient.swift; path = PopcornKit/Managers/Providers/TMDBStreamingClient.swift; sourceTree = SOURCE_ROOT; };
 		CCC57E13F19C4705C84F9012 /* HomeView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = HomeView.swift; path = PopcornTime/UI/tvOS/Home/HomeView.swift; sourceTree = SOURCE_ROOT; };
@@ -2557,6 +2560,7 @@
 				4F45F6C8DF6A98A2C5F255D3 /* HomeSettingsViews.swift */,
 				5F0487506CBCAA2690596913 /* HomeCursor.swift */,
 				6F51694DEF4F1B9C74CA891D /* HomeControls.swift */,
+				C9A55A79A522A197C0D4A925 /* HomeServiceTile.swift */,
 			);
 			name = Home;
 			sourceTree = "<group>";
@@ -4039,6 +4043,7 @@
 				C516DE0CA0ED6806CB93A4CC /* RemuxWaitProgress.swift in Sources */,
 				6A03038F09737DF3C8C1305E /* ResumeProgressText.swift in Sources */,
 				B5FBEBEE66BE88CF6EFB3668 /* RemuxWaitNudge.swift in Sources */,
+				54E580182CDF17EA7D2AE57B /* HomeServiceTile.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -4131,6 +4136,7 @@
 				E81BFEB2E9F386A4109BFFCE /* RemuxWaitProgress.swift in Sources */,
 				D5828F2F07B318E34435D631 /* ResumeProgressText.swift in Sources */,
 				9081E26AC818D8B8D9458D38 /* RemuxWaitNudge.swift in Sources */,
+				E40915524DB2B2DC8CAA92A4 /* HomeServiceTile.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

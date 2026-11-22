@@ -153,8 +153,8 @@ private struct HomeCardArtwork: View {
 /// title is in VoiceOver, and in the Mac's tooltip), then the detail right
 /// under it — always at the same height, so the facts of a row are on one
 /// line. The space of the caption is kept whatever this one says: a row
-/// never changes height.
-private struct HomeCardCaption<Detail: View>: View {
+/// never changes height. (A service card's caption too: `HomeServiceTile`.)
+struct HomeCardCaption<Detail: View>: View {
     let title: String
     var titleLines = 1
     @ViewBuilder var detail: () -> Detail

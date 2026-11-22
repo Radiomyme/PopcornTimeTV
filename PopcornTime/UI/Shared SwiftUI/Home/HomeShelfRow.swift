@@ -55,14 +55,18 @@ struct HomeShelfRow: View {
                                                              // The title's page is asked ahead while the
                                                              // pointer rests on its card (`DetailStore`:
                                                              // 0.4 s on it, two at a time), as on the grids.
+                                                             // A service card has no page.
+                                                             guard !isServices else { return }
                                                              if inside {
                                                                  DetailStore.shared.prewarm(item)
                                                              } else if let media = item.media {
                                                                  DetailStore.shared.stopPrewarm(of: media)
                                                              }
                                                          }))
-                        .contextMenu { HomeCardMenu(item: item, shelfID: shelf.id, open: open) }
-                        .accessibilityLabel(Text(verbatim: text.accessibilityLabel(of: item)))
+                        // A service card is not a title: no menu.
+                        .modifier(HomeTitleMenu(item: item, shelfID: shelf.id, isOn: !isServices, open: open))
+                        .accessibilityLabel(Text(verbatim: isServices ? item.title : text.accessibilityLabel(of: item)))
+                        .accessibilityAddTraits(isServices && HomeServiceCard.isSelected(item) ? .isSelected : [])
                         .accessibilityIdentifier("Home.Card.\(item.id)")
                     }
                 }
@@ -95,6 +99,9 @@ struct HomeShelfRow: View {
         .accessibilityIdentifier("Home.Section.\(shelf.id)")
     }
 
+    /// The « Services » row: its cards pick a service (`HomeServiceTile`).
+    private var isServices: Bool { shelf.id == HomeShelfID.services }
+
     /// A Continue Watching card resumes; every other card opens its page.
     private var intent: HomeSelection.Intent {
         shelf.id == HomeShelfID.continueWatching ? .play : .details
@@ -102,6 +109,15 @@ struct HomeShelfRow: View {
 
     @ViewBuilder
     private func card(_ item: HomeItem) -> some View {
+        if isServices {
+            HomeServiceTile(item: item, layout: layout)
+        } else {
+            titleCard(item)
+        }
+    }
+
+    @ViewBuilder
+    private func titleCard(_ item: HomeItem) -> some View {
         switch shelf.style {
         case .landscape:
             // A row of one episode (a single new episode of the user's
@@ -215,6 +231,23 @@ private struct HomeShelfEndsReader: ViewModifier {
     }
 }
 #endif
+
+/// A title card's menu (`HomeCardMenu`); none on a card that is not a
+/// title (the « Services » row's): not even an empty one.
+private struct HomeTitleMenu: ViewModifier {
+    let item: HomeItem
+    let shelfID: String
+    let isOn: Bool
+    let open: (HomeSelection) -> Void
+
+    func body(content: Content) -> some View {
+        if isOn {
+            content.contextMenu { HomeCardMenu(item: item, shelfID: shelfID, open: open) }
+        } else {
+            content
+        }
+    }
+}
 
 /// A shelf's title and, facing it, "See All" when a grid lists more.
 struct HomeShelfHeader: View {

@@ -30,6 +30,11 @@ enum MacHome {
     /// for (`MediaPageRequest.home`, the rule iOS follows too).
     static func open(_ selection: HomeSelection, in navigator: MacNavigator) {
         let item = selection.item
+        // A card of the « Services » row filters the page through the
+        // window's hub (the screen does it already; the verification
+        // tour's `homeopen` and `press` come here): never a title's page
+        // for « service-8 ».
+        if navigator.home.pick(service: item) { return }
         var request = MediaPageRequest.home(item: item, shelfID: selection.shelfID, plays: selection.intent == .play)
         // A show badged "NOUVEL ÉPISODE" opens on that episode, as its
         // episode card would: its season, and Play on it — not the pilot.

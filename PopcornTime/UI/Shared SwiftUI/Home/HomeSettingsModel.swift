@@ -91,15 +91,18 @@ struct HomeSettingsModel {
         let isShown: Bool
     }
 
-    /// The shelves a user can hide, in the page's order: the fixed ones,
-    /// then the genre shelves — the ones on the page now (`current`) and
-    /// the ones hidden earlier, so a hidden shelf can always be shown again.
+    /// The shelves a user can hide, in the page's order: the fixed ones —
+    /// the « Services » row under Continue Watching only once there is a
+    /// TMDB key, as on the Apple TV (`StreamingSettingsStore.shelves`;
+    /// hidden, the page is the usual one) — then the genre shelves — the
+    /// ones on the page now (`current`) and the ones hidden earlier, so a
+    /// hidden shelf can always be shown again.
     /// `listed` is what the open list already shows: those rows keep their
     /// place, so a switch never moves its row nor takes it off the list
     /// (a genre shown again is not on the page until the page is rebuilt).
     func shelves(current: [HomeShelf], listed: [Shelf] = []) -> [Shelf] {
         let hidden = settings.hiddenShelves
-        var ids = HomeShelfID.order
+        var ids = StreamingSettingsStore.shelves(HomeShelfID.order, hasKey: hasKey)
         let isGenre: (String) -> Bool = { HomeShelfID.genre(of: $0) != nil }
         let genres = listed.map(\.id).filter(isGenre)
             + current.map(\.id).filter(isGenre)
@@ -114,10 +117,15 @@ struct HomeSettingsModel {
         settings.setShelf(id, hidden: !shown)
     }
 
+    /// A TMDB key is stored: the « Services » row exists.
+    private var hasKey: Bool { settings.tmdbAPIKey != nil }
+
     /// How many shelves are hidden, for the row that opens the list: "2",
-    /// or "Aucune" (a count needs no plural rule in any language).
+    /// or "Aucune" (a count needs no plural rule in any language). The
+    /// « Services » row hidden while there is no key is not counted: it is
+    /// not listed.
     var hiddenSummary: String {
-        let count = settings.hiddenShelves.count
+        let count = settings.hiddenShelves.filter { $0 != HomeShelfID.services || hasKey }.count
         return count == 0 ? text.localize("None") : count.formatted(.number.locale(locale))
     }
 }

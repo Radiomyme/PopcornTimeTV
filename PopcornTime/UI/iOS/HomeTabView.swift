@@ -70,6 +70,9 @@ struct HomeTabView: View {
     /// (`MediaPageRequest.home`, the Mac's rule too) — an episode's card
     /// opens the show on that episode's season.
     private func open(_ selection: HomeSelection) {
+        // A card of the « Services » row filters the page (the screen does
+        // it already; never a title's page for « service-8 »).
+        if IOSHome.state.pick(service: selection.item) { return }
         let request = MediaPageRequest.home(item: selection.item, shelfID: selection.shelfID, plays: selection.intent == .play)
         guard let media = selection.item.media,
               let route = MediaRoute(media: media, zoomID: selection.sourceID, request: request) else { return }

@@ -6,6 +6,11 @@
 // is handed to `open`, a shelf's "See All" to `seeAll`, and each platform
 // shows its own pages. Sizes follow the space given (`HomeLayout`).
 //
+// With a TMDB key the page has a « Services » row (`HomeServiceTile`): a
+// card of it is never handed to `open` — it filters the page through the
+// screen's own hub (`HomeState.pick(service:)`), and the filtered page's
+// states are drawn here (`HomeServicePage`, `HomeServiceState`).
+//
 // On a Mac the window hands it its `HomeControls`: the page then takes the
 // keyboard — ← → turn the carousel, ↓ goes down to the shelves, the arrows
 // walk the cards, Return opens the card under the keyboard (or the
@@ -205,9 +210,32 @@ struct HomeScreen: View {
         case .handled:
             return true
         case .pick(let pick):
-            open(HomeSelection(item: pick.item, shelfID: pick.shelfID, intent: pick.plays ? .play : .details))
+            choose(HomeSelection(item: pick.item, shelfID: pick.shelfID, intent: pick.plays ? .play : .details))
             return true
         }
+    }
+
+    /// A card picked (a tap, a click, Return or Space): a service card
+    /// filters the page through its hub; any other is the host's to open.
+    private func choose(_ selection: HomeSelection) {
+        if state.pick(service: selection.item) { return }
+        open(selection)
+    }
+
+    /// The page filtered on a service, and what it shows (nothing more
+    /// than the usual page without one). TMDB's client is asked about the
+    /// key only when a picked service's lists failed: the usual page never
+    /// touches it.
+    private var servicePage: HomeServicePage {
+        let failed = state.isUnavailable && HomeServiceCard.picked(in: state.shelves) != nil
+        return HomeServicePage(shelves: state.shelves, isRefreshing: state.isRefreshing, isUnavailable: state.isUnavailable,
+                               isKeyRefused: failed && TMDBStreamingClient.shared.isKeyRefused)
+    }
+
+    /// A shelf's « See All »: never the « Services » row's (its cards are
+    /// not titles).
+    private func seeAllAction(for shelf: HomeShelf) -> ((HomeShelf) -> Void)? {
+        shelf.id != HomeShelfID.services && showsSeeAll(shelf) ? seeAll : nil
     }
 
     /// The shelves as the page draws them (`HomeHarmony.deduplicated`):
@@ -215,6 +243,10 @@ struct HomeScreen: View {
     private var shownShelves: [HomeShelf] { HomeHarmony.deduplicated(state.shelves) }
 
     private var isEmpty: Bool { state.shelves.isEmpty && state.heroItems.isEmpty }
+    /// Something besides the « Services » row, which is made of the
+    /// settings alone: a usual page that reached no host and has nothing
+    /// cached says so, rather than show the row by itself.
+    private var hasTitles: Bool { !state.heroItems.isEmpty || state.shelves.contains { $0.id != HomeShelfID.services } }
     /// Nothing to show yet: the disk has not been read, or a first load is
     /// on its way — also past its patience while it has brought nothing
     /// (hosts that hang): an empty page is only said empty, or failed, once
@@ -252,9 +284,10 @@ struct HomeScreen: View {
 
     @ViewBuilder
     private func page(layout: HomeLayout, topInset: CGFloat) -> some View {
+        let servicePage = self.servicePage
         if isLoading {
             HomeSkeleton(layout: layout, text: text)
-        } else if state.isUnavailable && isEmpty {
+        } else if state.isUnavailable && !hasTitles && servicePage == .usual {
             HomeUnavailable { Task { await state.refresh(force: true) } }
                 .frame(width: layout.width, height: layout.height - topInset)
                 .padding(.top, topInset)
@@ -273,7 +306,7 @@ struct HomeScreen: View {
                         .id(HomeScreen.topID)
                 } else {
                     HomeHeroCarousel(items: harmony.hero, layout: layout, text: text, topInset: topInset,
-                                     isActive: isActive && isShown && turnsByItself, pinnedPage: pinnedHeroPage, open: open)
+                                     isActive: isActive && isShown && turnsByItself, pinnedPage: pinnedHeroPage, open: choose)
                         // The first shelf's title sits close under the hero.
                         .padding(.bottom, -layout.shelfSpacing * 0.4)
                         .id(HomeScreen.topID)
@@ -282,13 +315,20 @@ struct HomeScreen: View {
                     HomeOfflineNote(detail: text.offlineDetail(lastUpdated: state.lastUpdated), layout: layout)
                 }
                 ForEach(harmony.shelves) { shelf in
-                    HomeShelfRow(shelf: shelf, layout: layout, text: text, memory: memory, open: open,
-                                 seeAll: showsSeeAll(shelf) ? seeAll : nil)
+                    HomeShelfRow(shelf: shelf, layout: layout, text: text, memory: memory, open: choose,
+                                 seeAll: seeAllAction(for: shelf))
                         .onAppear { prefetchShelf(after: shelf, layout: layout) }
                 }
-                // A first load that has shown its first shelves and is
-                // still asking for the rest.
-                if state.isRefreshing && state.shelves.count < 4 {
+                if servicePage.showsRowOnly {
+                    // A service just picked, one that listed nothing, or
+                    // one whose lists failed: never the row alone without
+                    // a word.
+                    HomeServiceState(page: servicePage, layout: layout, text: text) {
+                        Task { await state.refresh(force: true) }
+                    }
+                } else if state.isRefreshing && state.shelves.count < 4 {
+                    // A first load that has shown its first shelves and is
+                    // still asking for the rest.
                     HomeShelfSkeleton(style: .posters, layout: layout, text: text)
                         .modifier(HomePulse())
                 }
@@ -346,14 +386,20 @@ struct HomeHarmony {
         self.shelves = deduplicates ? HomeHarmony.deduplicated(harmonizedShelves) : harmonizedShelves
         self.hero = hero.map(harmonized)
         // The rest of the app (grids, Search, a title's page) tells these
-        // titles as the Home does.
-        HomeTitleFacts.shared.record(harmonizedShelves.flatMap(\.items) + self.hero)
+        // titles as the Home does. A service card is not a title.
+        HomeTitleFacts.shared.record(HomeServiceCard.titles(harmonizedShelves.flatMap(\.items)) + self.hero)
         HomeTitleFacts.shared.recordNewEpisodes(in: harmonizedShelves)
     }
 
-    /// The shelves whose order is the point: they are never reordered.
+    /// The shelves whose order is the point: they are never reordered —
+    /// nor are the « Services » row and a service's shelves
+    /// (`HomeShelfID.keepsItsOrder`: popular, new, top rated).
     static let keepsOrder: Set<String> = [HomeShelfID.continueWatching, HomeShelfID.watchlist,
                                           HomeShelfID.topMovies, HomeShelfID.topShows]
+
+    static func keepsOrder(_ id: String) -> Bool {
+        keepsOrder.contains(id) || HomeShelfID.keepsItsOrder(id)
+    }
 
     /// The user's own shelves: built from the library on the device, they
     /// arrive apart from the catalogue's, so they never reorder the
@@ -375,7 +421,7 @@ struct HomeHarmony {
                 shelf.items.removeAll { resumed.contains($0.imdbId) }
                 if shelf.items.isEmpty { return nil }
             }
-            if !keepsOrder.contains(shelf.id), shelf.style != .ranked {
+            if !keepsOrder(shelf.id), shelf.style != .ranked {
                 func shown(_ item: HomeItem) -> Bool { item.episode == nil && seen.contains(item.imdbId) }
                 let fresh = shelf.items.filter { !shown($0) }
                 // A shelf of titles all shown above keeps its own order.
