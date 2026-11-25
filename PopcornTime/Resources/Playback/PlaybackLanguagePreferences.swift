@@ -1,5 +1,8 @@
 import Foundation
 import AVFoundation
+#if canImport(PopcornKit)
+import PopcornKit
+#endif
 
 // CONTRACT FILE — owned by agent C2. Shared by the tvOS, iOS and macOS apps.
 //
@@ -16,9 +19,21 @@ import AVFoundation
 
 enum PlaybackLanguagePreferences {
 
-    /// UserDefaults keys (written by the Settings screens of the three apps).
-    static let audioLanguageDefaultsKey = "preferredAudioLanguage"
-    static let subtitleLanguageDefaultsKey = "preferredSubtitleLanguage"
+    /// UserDefaults keys (written by the Settings screens of the three apps):
+    /// the active profile's (`ProfileManager.scopedKey`; the primary
+    /// profile's are the plain keys, "profile.<id>.preferredAudioLanguage"
+    /// for the others).
+    static var audioLanguageDefaultsKey: String { scoped("preferredAudioLanguage") }
+    static var subtitleLanguageDefaultsKey: String { scoped("preferredSubtitleLanguage") }
+
+    /// The plain key where PopcornKit is not linked (the command-line benches).
+    private static func scoped(_ key: String) -> String {
+        #if canImport(PopcornKit)
+        return ProfileManager.shared.scopedKey(key)
+        #else
+        return key
+        #endif
+    }
 
     /// Common ISO 639-1 codes offered by the settings pickers (tvOS / iOS / macOS).
     static let pickerLanguageCodes: [String] = [

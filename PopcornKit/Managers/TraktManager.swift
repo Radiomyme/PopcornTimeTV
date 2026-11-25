@@ -52,7 +52,7 @@ open class TraktManager: NetworkManager {
      - Parameter completion:    Optional completion handler only called if an error is thrown.
      */
     open func scrobble(_ id: String, progress: Float, type: Trakt.MediaType, status: Trakt.WatchedStatus, completion: ((NSError) -> Void)? = nil) {
-        guard var credential = OAuthCredential(identifier: "trakt") else { return }
+        guard var credential = OAuthCredential(identifier: ProfileManager.shared.traktCredentialIdentifier) else { return }
         guard progress != 0 else { return removePlaybackProgress(id, type: type) }
         DispatchQueue.global(qos: .background).async {
             if credential.expired {
@@ -99,7 +99,7 @@ open class TraktManager: NetworkManager {
      - Parameter completion:    The completion handler for the request containing an array of media objects and an optional error.
      */
     open func getWatched<T: Media>(forMediaOfType type: T.Type, completion:@escaping ([T], NSError?) -> Void) {
-        guard var credential = OAuthCredential(identifier: "trakt") else { return }
+        guard var credential = OAuthCredential(identifier: ProfileManager.shared.traktCredentialIdentifier) else { return }
         // Resolve the history path here (a plain String, Sendable) so the
         // background closure below doesn't capture the non-Sendable `T.Type`
         // metatype value — which trips a Swift 6 concurrency warning.
@@ -145,7 +145,7 @@ open class TraktManager: NetworkManager {
      - Parameter completion: The completion handler for the request containing a dictionary of either imdbIds or tvdbIds depending on the type selected as keys and the users corrisponding watched progress as values and an optional error. Eg. ["tt1431045": 0.5] means you have watched half of Deadpool.
      */
     open func getPlaybackProgress<T: Media>(forMediaOfType type: T.Type, completion:@escaping ([T: Float], NSError?) -> Void) {
-        guard var credential = OAuthCredential(identifier: "trakt") else { return }
+        guard var credential = OAuthCredential(identifier: ProfileManager.shared.traktCredentialIdentifier) else { return }
         // Resolve the path from `type` here (a Sendable String) so the
         // background closure below doesn't capture the non-Sendable T.Type.
         let mediaType: String
@@ -203,7 +203,7 @@ open class TraktManager: NetworkManager {
      - Parameter completion: An optional completion handler called only if an error is thrown.
      */
     open func removePlaybackProgress(_ id: String, type: Trakt.MediaType, completion: ((NSError) -> Void)? = nil) {
-        guard var credential = OAuthCredential(identifier: "trakt") else { return }
+        guard var credential = OAuthCredential(identifier: ProfileManager.shared.traktCredentialIdentifier) else { return }
         DispatchQueue.global(qos: .background).async {
             if credential.expired {
                 do {
@@ -254,7 +254,7 @@ open class TraktManager: NetworkManager {
      - Parameter completion:    An optional completion handler called only if an error is thrown.
      */
     open func remove(_ id: String, fromWatchedlistOfType type: Trakt.MediaType, completion: ((NSError) -> Void)? = nil) {
-        guard var credential = OAuthCredential(identifier: "trakt") else { return }
+        guard var credential = OAuthCredential(identifier: ProfileManager.shared.traktCredentialIdentifier) else { return }
         DispatchQueue.global(qos: .background).async {
             if credential.expired {
                 do {
@@ -287,7 +287,7 @@ open class TraktManager: NetworkManager {
      - Parameter completion: The completion handler for the request containing an optional error if the request fails.
      */
     open func add(_ id: String, toWatchedlistOfType type: Trakt.MediaType, completion: ((NSError) -> Void)? = nil) {
-        guard var credential = OAuthCredential(identifier: "trakt") else { return }
+        guard var credential = OAuthCredential(identifier: ProfileManager.shared.traktCredentialIdentifier) else { return }
         DispatchQueue.global(qos: .background).async {
             if credential.expired {
                 do {
@@ -367,7 +367,7 @@ open class TraktManager: NetworkManager {
      - Parameter completion: The completion handler for the request containing an array of media that the user has added to their watchlist and an optional error.
      */
     open func getWatchlist<T: Media>(forMediaOfType type: T.Type, completion:@escaping ([T], NSError?) -> Void) {
-        guard var credential = OAuthCredential(identifier: "trakt") else { return }
+        guard var credential = OAuthCredential(identifier: ProfileManager.shared.traktCredentialIdentifier) else { return }
         // Resolve the path from `type` here (a Sendable String) so the
         // background closure below doesn't capture the non-Sendable T.Type.
         let mediaType: String
@@ -418,7 +418,7 @@ open class TraktManager: NetworkManager {
      - Parameter completion: The completion handler for the request containing an optional error if the request fails.
      */
     open func add(_ id: String, toWatchlistOfType type: Trakt.MediaType, completion: ((NSError) -> Void)? = nil) {
-        guard var credential = OAuthCredential(identifier: "trakt") else { return }
+        guard var credential = OAuthCredential(identifier: ProfileManager.shared.traktCredentialIdentifier) else { return }
         DispatchQueue.global(qos: .background).async {
             if credential.expired {
                 do {
@@ -449,7 +449,7 @@ open class TraktManager: NetworkManager {
      - Parameter completion: The completion handler for the request containing an optional error if the request fails.
      */
     open func remove(_ id: String, fromWatchlistOfType type: Trakt.MediaType, completion: ((NSError) -> Void)? = nil) {
-        guard var credential = OAuthCredential(identifier: "trakt") else { return }
+        guard var credential = OAuthCredential(identifier: ProfileManager.shared.traktCredentialIdentifier) else { return }
         DispatchQueue.global(qos: .background).async {
             if credential.expired {
                 do {
@@ -675,7 +675,7 @@ extension TraktManager {
      - Returns: Boolean value indicating the sucess of the operation.
      */
     public func logout() throws {
-        return try OAuthCredential.delete(withIdentifier: "trakt")
+        return try OAuthCredential.delete(withIdentifier: ProfileManager.shared.traktCredentialIdentifier)
     }
     
     /**
@@ -684,7 +684,7 @@ extension TraktManager {
      - Returns: Boolean value indicating the signed in status of the user.
      */
     public func isSignedIn() -> Bool {
-        return OAuthCredential(identifier: "trakt") != nil
+        return OAuthCredential(identifier: ProfileManager.shared.traktCredentialIdentifier) != nil
     }
     
     /**
@@ -722,7 +722,7 @@ extension TraktManager {
                                     redirectURI: "PopcornTime://trakt",
                                     clientID: Trakt.apiKey,
                                     clientSecret: Trakt.apiSecret,
-                                    useBasicAuthentication: false).store(withIdentifier: "trakt")
+                                    useBasicAuthentication: false).store(withIdentifier: ProfileManager.shared.traktCredentialIdentifier)
                 DispatchQueue.main.sync {
                     self.delegate?.authenticationDidSucceed?()
                 }

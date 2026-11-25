@@ -121,8 +121,8 @@ public final class HomeFeed: @unchecked Sendable {
     /// its local shelves — its hooks are the library's, and the shelves
     /// follow the library's changes (HomeLibraryHooks.swift).
     public static let shared: HomeFeed = {
-        let feed = HomeFeed(hooks: HomeLocalHooks(library: .shared))
-        feed.followChanges(of: .shared)
+        let feed = HomeFeed(hooks: HomeLocalHooks(libraryOf: { Library.shared }))
+        feed.followActiveProfile()
         return feed
     }()
 

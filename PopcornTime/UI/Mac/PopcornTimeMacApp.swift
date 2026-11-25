@@ -107,7 +107,7 @@ struct MacMainWindowScene: Scene {
             // popcorntime:// URLs — the links to a title, a section, a
             // search, and Trakt's sign-in redirect — are the window's
             // (`MacRootView.onOpenURL`).
-            MacRootView()
+            ProfileGate { MacRootView() }
                 .preferredColorScheme(.dark)
                 .frame(minWidth: 1000, minHeight: 640)
         }
@@ -128,7 +128,8 @@ struct MacSecondaryScenes: Scene {
     var body: some Scene {
         Settings {
             // Dark as the app's window: not a light panel beside it.
-            MacSettingsView()
+            // Made again for another profile: its language preferences.
+            ProfileScoped { MacSettingsView() }
                 .preferredColorScheme(.dark)
         }
 

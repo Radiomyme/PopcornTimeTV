@@ -48,7 +48,7 @@ struct PopcornTimeApp: App {
 
     var body: some Scene {
         WindowGroup {
-            RootTabView()
+            ProfileGate { RootTabView() }
                 .preferredColorScheme(.dark)
                 .tint(.accentColor)
                 .onOpenURL { url in

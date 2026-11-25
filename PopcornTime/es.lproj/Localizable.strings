@@ -914,3 +914,26 @@
 "Grid.Service.Refused" = "TMDB rechazó tu clave. Revísala en Ajustes › Servicios de streaming.";
 "Grid.Service.Refused.Mac" = "TMDB rechazó tu clave. Revísala en Ajustes › Streaming.";
 "Home.Unavailable.Service" = "No se puede cargar el catálogo de %@";
+
+/* Profiles: « Who’s Watching? », the profile editor, Settings */
+"Profiles.WhoIsWatching" = "¿Quién está viendo?";
+"Profiles.Manage" = "Administrar perfiles";
+"Profiles.Done" = "Listo";
+"Profiles.Add" = "Añadir perfil";
+"Profiles.Edit" = "Editar perfil";
+"Profiles.New" = "Nuevo perfil";
+"Profiles.Name" = "Nombre";
+"Profiles.Avatar" = "Avatar";
+"Profiles.Save" = "Guardar";
+"Profiles.Cancel" = "Cancelar";
+"Profiles.Delete" = "Eliminar perfil";
+"Profiles.Delete.Message" = "El historial, Seguir viendo, la lista y las preferencias de %@ se eliminarán de este dispositivo.";
+"Profiles.Error.EmptyName" = "Escribe un nombre.";
+"Profiles.Error.DuplicateName" = "Otro perfil ya tiene este nombre.";
+"Profiles.Error.TooMany" = "Este dispositivo ya tiene el máximo de perfiles.";
+"Profiles.DefaultName" = "Yo";
+"Profiles" = "Perfiles";
+"Profiles.Switch" = "Cambiar de perfil";
+"Profiles.Footer" = "Cada perfil tiene su propio historial, Seguir viendo, lista, idiomas de audio y subtítulos, y cuenta de Trakt.";
+"Profiles.Primary.Note" = "El perfil principal guarda el historial de antes de los perfiles: se puede renombrar, no eliminar.";
+"Profiles.Current" = "Perfil: %@";

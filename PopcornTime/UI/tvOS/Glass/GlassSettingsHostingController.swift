@@ -43,7 +43,16 @@ final class GlassSettingsHostingController: UIHostingController<GlassSettingsVie
             setStreamingServices: { GlassSettingsStore.store(streamingServices: $0) },
             loadStreamingServices: { GlassSettingsStore.streamingServices(region: $0, completion: $1) },
             loadStreamingRegions: { GlassSettingsStore.streamingRegions(completion: $0) },
-            regionName: { GlassSettingsStore.regionName($0) })
+            regionName: { GlassSettingsStore.regionName($0) },
+            readProfile: {
+                let profile = ProfileManager.shared.active
+                let style = ProfileAvatar.style(profile.avatar)
+                return GlassSettingsProfile(name: profile.name, symbol: style.symbol, tint: style.colors[0])
+            },
+            showProfiles: { managing in
+                guard let root = AppDelegate.shared.window?.rootViewController else { return }
+                ProfilesPresenter.present(from: root, managing: managing)
+            })
 
         let audio = PlaybackLanguagePreferences.preferredAudioLanguageCode
         let subtitles = PlaybackLanguagePreferences.preferredSubtitleLanguageCode
@@ -69,6 +78,8 @@ final class GlassSettingsHostingController: UIHostingController<GlassSettingsVie
         case "tmdbKey": row = .tmdbKey
         case "streamingRegion": row = .streamingRegion
         case "streamingServices": row = .streamingServices
+        case "switchProfile": row = .switchProfile
+        case "manageProfiles": row = .manageProfiles
         default: row = .quality
         }
         let picker = UserDefaults.standard.string(forKey: "PTDebugSettingsPicker").flatMap(GlassSettingsPicker.init(rawValue:))

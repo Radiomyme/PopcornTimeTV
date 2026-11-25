@@ -123,6 +123,7 @@ struct MacSettingsView: View {
 
     @ViewBuilder
     private var playbackSections: some View {
+        ProfilesSettingsSection()
         Section {
             // Labels only: the stored tags stay "Balanced" / "Highest" /
             // "Lowest" / "" (MacAutoQuality, the iOS / tvOS settings).
