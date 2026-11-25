@@ -1587,6 +1587,233 @@ public enum StreamBandwidth {
     }
 }
 
+// MARK: - Audio language
+
+/// The audio languages a release announces: words of its name ("FRENCH",
+/// "TRUEFRENCH", "VFF", "iTALiAN", "CASTELLANO", "DUBLADO"…) and, on
+/// Torrentio, the flags of its last title line ("Multi Audio / 🇫🇷").
+/// A release that names no language is usually in its original language
+/// (English for most of the catalogue): nothing is assumed for it.
+/// Subtitle notations are not audio: "VOSTFR", "SUBFRENCH", "ITA ENG SUBS",
+/// "Multi-Subs" name no audio language.
+public struct ReleaseLanguages: Equatable, CustomStringConvertible {
+
+    /// ISO 639-1 codes named explicitly.
+    public var codes: Set<String>
+    /// Several audio tracks ("MULTi", "DUAL", Torrentio's "Multi Audio").
+    public var isMulti: Bool
+
+    public static let empty = ReleaseLanguages(codes: [], isMulti: false)
+
+    public init(codes: Set<String> = [], isMulti: Bool = false) {
+        self.codes = codes
+        self.isMulti = isMulti
+    }
+
+    /// How a release fits a preferred audio language.
+    public enum Match: Int, Comparable {
+        /// Names another language only, or none.
+        case none = 0
+        /// Several audio tracks, languages not named ("MULTi" alone): the
+        /// preferred one is likely among them (the scene's MULTi is the
+        /// original plus the French dub).
+        case likely = 1
+        /// Names the preferred language.
+        case confirmed = 2
+
+        public static func < (lhs: Match, rhs: Match) -> Bool { return lhs.rawValue < rhs.rawValue }
+    }
+
+    public func match(_ code: String?) -> Match {
+        guard let code = code else { return .none }
+        if codes.contains(code) { return .confirmed }
+        if isMulti && codes.isEmpty { return .likely }
+        return .none
+    }
+
+    public func union(_ other: ReleaseLanguages) -> ReleaseLanguages {
+        return ReleaseLanguages(codes: codes.union(other.codes), isMulti: isMulti || other.isMulti)
+    }
+
+    public var isEmpty: Bool { return codes.isEmpty && !isMulti }
+
+    /// Short badge for the pickers: "VF", "VF · MULTi", "MULTi", "ITA",
+    /// nil when the release names nothing. The preferred language comes
+    /// first when named.
+    public func badge(preferred: String? = AudioLanguagePreference.current) -> String? {
+        var named = codes.sorted()
+        if let preferred = preferred, let index = named.firstIndex(of: preferred) {
+            named.insert(named.remove(at: index), at: 0)
+        }
+        var parts = named.prefix(2).map { ReleaseLanguages.badges[$0] ?? $0.uppercased() }
+        if isMulti { parts.append("MULTi") }
+        return parts.isEmpty ? nil : parts.joined(separator: " · ")
+    }
+
+    public var description: String {
+        return badge(preferred: nil) ?? "—"
+    }
+
+    /// Picker badges of the languages (release-name conventions).
+    static let badges: [String: String] = [
+        "fr": "VF", "en": "ENG", "de": "GER", "es": "ESP", "it": "ITA", "pt": "POR", "ru": "RUS", "nl": "NL",
+        "pl": "PL", "ja": "JPN", "ko": "KOR", "zh": "CHN", "hi": "HIN", "tr": "TUR", "ar": "ARA",
+    ]
+
+    /// Release-name words naming an audio language (tokens of `ReleaseName.tokens`).
+    static let words: [String: String] = [
+        "french": "fr", "truefrench": "fr", "vff": "fr", "vfq": "fr", "vfi": "fr", "vf": "fr", "vof": "fr",
+        "francais": "fr", "français": "fr",
+        "english": "en", "eng": "en",
+        "german": "de", "deutsch": "de", "ger": "de",
+        "spanish": "es", "castellano": "es", "español": "es", "espanol": "es", "esp": "es", "latino": "es",
+        "italian": "it", "italiano": "it", "ita": "it",
+        "portuguese": "pt", "portugues": "pt", "português": "pt", "dublado": "pt",
+        "russian": "ru", "rus": "ru",
+        "dutch": "nl", "flemish": "nl",
+        "polish": "pl", "pldub": "pl",
+        "japanese": "ja", "jpn": "ja", "jap": "ja",
+        "korean": "ko", "kor": "ko",
+        "chinese": "zh", "mandarin": "zh", "cantonese": "zh",
+        "hindi": "hi", "tamil": "ta", "telugu": "te", "turkish": "tr", "arabic": "ar",
+        "swedish": "sv", "danish": "da", "norwegian": "no", "finnish": "fi", "hungarian": "hu",
+        "czech": "cs", "romanian": "ro", "greek": "el", "ukrainian": "uk", "ukr": "uk", "hebrew": "he",
+    ]
+
+    static let multiWords: Set<String> = ["multi", "dual"]
+    static let subtitleWords: Set<String> = ["sub", "subs", "subbed", "subtitle", "subtitles", "subtitulado", "legendado"]
+
+    /// Words that open the part of a name after the title, besides a year
+    /// and "S01": "Breaking Bad Saison 1 FRENCH", "Dark Integrale MULTi".
+    static let afterTitleWords: Set<String> = ["saison", "season", "temporada", "stagione", "staffel", "integrale",
+                                               "complete", "1080", "720", "2160", "480"]
+
+    /// The languages a release name announces. Only the words after the
+    /// title count ("The.French.Dispatch.2021.1080p" names no language):
+    /// those after its year, season or episode marker or resolution, the
+    /// whole name when it has none of them.
+    public static func parse(_ name: String) -> ReleaseLanguages {
+        let tokens = ReleaseName.tokens(name)
+        var result = ReleaseLanguages.empty
+        var index = titleEnd(of: tokens)
+        while index < tokens.count {
+            // A run of language words ("ITA ENG", "MULTi VFF"): subtitles
+            // when a subtitle word follows or precedes it.
+            guard isLanguageWord(tokens[index]) else { index += 1; continue }
+            var end = index
+            while end + 1 < tokens.count, isLanguageWord(tokens[end + 1]) { end += 1 }
+            let before = index > 0 ? tokens[index - 1] : ""
+            let after = end + 1 < tokens.count ? tokens[end + 1] : ""
+            if !subtitleWords.contains(before) && !subtitleWords.contains(after) {
+                for token in tokens[index...end] {
+                    if multiWords.contains(token) { result.isMulti = true }
+                    if let code = words[token] { result.codes.insert(code) }
+                }
+            }
+            index = end + 1
+        }
+        return result
+    }
+
+    /// Index of the first token after the title (0 when no marker is found).
+    static func titleEnd(of tokens: [String]) -> Int {
+        for (i, token) in tokens.enumerated() where i > 0 {
+            if token.count == 4, let year = Int(token), (1900...2099).contains(year) { return i + 1 }
+            if token == "s", i + 1 < tokens.count, Int(tokens[i + 1]) != nil { return i }
+            if afterTitleWords.contains(token) { return i }
+        }
+        return 0
+    }
+
+    /// Words naming subtitles in a language, the audio being the original:
+    /// "VOSTFR", "SUBFRENCH", "SUBITA".
+    static let subtitleOnlyWords: [String: String] = [
+        "vostfr": "fr", "vost": "fr", "subfrench": "fr", "stfr": "fr", "subfr": "fr",
+        "subita": "it", "subesp": "es", "subspa": "es", "legendado": "pt",
+    ]
+
+    /// Languages a name gives as subtitles only (`subtitleOnlyWords`).
+    public static func subtitleOnlyCodes(of name: String) -> Set<String> {
+        return Set(ReleaseName.tokens(name).compactMap { subtitleOnlyWords[$0] })
+    }
+
+    static func isLanguageWord(_ token: String) -> Bool {
+        return words[token] != nil || multiWords.contains(token)
+    }
+
+    /// The languages of Torrentio's flags line ("Multi Audio / 🇫🇷 / 🇮🇹").
+    public static func parse(flags line: String) -> ReleaseLanguages {
+        var result = ReleaseLanguages.empty
+        let lowered = line.lowercased()
+        if lowered.contains("multi audio") || lowered.contains("dual audio") { result.isMulti = true }
+        var pending: UInt32?
+        for scalar in line.unicodeScalars {
+            let value = scalar.value
+            guard (0x1F1E6...0x1F1FF).contains(value) else { pending = nil; continue }
+            if let first = pending {
+                let country = String(UnicodeScalar(UInt8(first - 0x1F1E6 + 65))) + String(UnicodeScalar(UInt8(value - 0x1F1E6 + 65)))
+                if let code = countryLanguages[country] { result.codes.insert(code) }
+                pending = nil
+            } else {
+                pending = value
+            }
+        }
+        return result
+    }
+
+    /// Torrentio's flag → audio language.
+    static let countryLanguages: [String: String] = [
+        "GB": "en", "US": "en", "FR": "fr", "DE": "de", "ES": "es", "MX": "es", "IT": "it", "PT": "pt", "BR": "pt",
+        "RU": "ru", "NL": "nl", "PL": "pl", "JP": "ja", "KR": "ko", "CN": "zh", "TW": "zh", "HK": "zh",
+        "IN": "hi", "TR": "tr", "SA": "ar", "SE": "sv", "DK": "da", "NO": "no", "FI": "fi", "HU": "hu",
+        "CZ": "cs", "RO": "ro", "GR": "el", "UA": "uk", "IL": "he", "TH": "th", "VN": "vi",
+    ]
+}
+
+/// The audio language the user prefers (Settings › Audio language), as an
+/// ISO 639-1 code: the torrent lists, pickers and automatic picks favour
+/// releases in that language. Nil when unset or English (most releases
+/// name no language and are in English: nothing to favour).
+///
+/// The setting is stored by the apps ("preferredAudioLanguage": a
+/// localized name such as "Français", or a code); the apps install
+/// `resolver`, which turns it into a code (`PlaybackLanguagePreferences`).
+/// The code is cached against the stored value: a ranking reads it on
+/// every comparison. Thread-safe.
+public enum AudioLanguagePreference {
+
+    public static let defaultsKey = "preferredAudioLanguage"
+
+    /// The stored setting → ISO 639-1 code. Without one, a stored
+    /// 2-letter code is taken as is.
+    public static var resolver: ((String) -> String?)? {
+        get { lock.lock(); defer { lock.unlock() }; return _resolver }
+        set { lock.lock(); _resolver = newValue; cachedRaw = nil; lock.unlock() }
+    }
+
+    /// Tests: a fixed preference (`.some(nil)`: none), bypassing the defaults.
+    public static var override: String??
+
+    public static var current: String? {
+        if let forced = override { return forced == "en" ? nil : forced }
+        let raw = UserDefaults.standard.string(forKey: defaultsKey)
+        lock.lock(); defer { lock.unlock() }
+        if raw == cachedRaw { return cachedCode }
+        var code: String?
+        if let raw = raw?.trimmingCharacters(in: .whitespacesAndNewlines), !raw.isEmpty {
+            code = _resolver?(raw) ?? (raw.count == 2 ? raw.lowercased() : nil)
+        }
+        cachedRaw = raw
+        cachedCode = code == "en" ? nil : code
+        return cachedCode
+    }
+
+    private static let lock = NSLock()
+    private static var _resolver: ((String) -> String?)?
+    private static var cachedRaw: String??
+    private static var cachedCode: String?
+}
+
 // MARK: - Torrent
 
 public struct Torrent: Mappable, Equatable, Comparable {
@@ -1646,6 +1873,11 @@ public struct Torrent: Mappable, Equatable, Comparable {
     /// with the size it gives `estimatedBitrate`. Nil = unknown.
     public var mediaRuntime: TimeInterval?
 
+    /// Audio languages the release announces (`ReleaseLanguages`): read
+    /// from its name (the streamed file's name, else the magnet's `dn`);
+    /// providers that know more (Torrentio's torrent name and flags) set it.
+    public var audioLanguages: ReleaseLanguages
+
     public init?(map: Map) {
         do { self = try Torrent(map) }
         catch { return nil }
@@ -1659,6 +1891,7 @@ public struct Torrent: Mappable, Equatable, Comparable {
         self.payloadContainer = Torrent.payloadContainerExtension(ofMagnet: url)
         self.releaseFileName = nil
         self.streamedBytes = Torrent.streamedFileBytes(size: size, url: url)
+        self.audioLanguages = MagnetLink.displayName(of: url).map { ReleaseLanguages.parse($0) } ?? .empty
 
         // Quality may be supplied as a JSON field, or set later by Movie/Episode mapping.
         let qualityString: String? = try? map.value("quality")
@@ -1707,6 +1940,8 @@ public struct Torrent: Mappable, Equatable, Comparable {
         let fileName = fileName.flatMap { $0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : $0 }
         self.releaseFileName = fileName
         self.streamedBytes = Torrent.streamedFileBytes(size: size, url: url, fileName: fileName)
+        let dn = MagnetLink.displayName(of: url).map { ReleaseLanguages.parse($0) } ?? .empty
+        self.audioLanguages = (fileName.map { ReleaseLanguages.parse($0) } ?? .empty).union(dn)
         self._qualityOverride = quality.isEmpty ? nil : quality
         self.qualityValue     = VideoQuality.parse(quality)
         self.tags             = tags.isEmpty ? VideoTags.parse(quality) : tags
@@ -1761,6 +1996,7 @@ public struct Torrent: Mappable, Equatable, Comparable {
         copy.qualityValue = qualityValue
         copy.tags = tags
         copy.mediaRuntime = mediaRuntime
+        copy.audioLanguages = audioLanguages
         return copy
     }
 
@@ -1780,6 +2016,7 @@ public struct Torrent: Mappable, Equatable, Comparable {
         copy.qualityValue = qualityValue
         copy.tags = tags
         copy.mediaRuntime = mediaRuntime
+        copy.audioLanguages = audioLanguages
         return copy
     }
 }
@@ -1846,10 +2083,18 @@ public extension Torrent {
         return playability().score
     }
 
-    /// The ranking behind `<` for an explicit capability snapshot.
-    static func ranksBelow(_ lhs: Torrent, _ rhs: Torrent, capabilities: PlaybackCapabilities.Snapshot) -> Bool {
+    /// The ranking behind `<` for an explicit capability snapshot. Inside a
+    /// resolution, a release in the preferred audio language
+    /// (`AudioLanguagePreference`) ranks above one that is likely in it
+    /// (MULTi), which ranks above the others.
+    static func ranksBelow(_ lhs: Torrent, _ rhs: Torrent, capabilities: PlaybackCapabilities.Snapshot,
+                           language: String? = AudioLanguagePreference.current) -> Bool {
         if lhs.qualityValue != rhs.qualityValue {
             return lhs.qualityValue < rhs.qualityValue
+        }
+        if language != nil {
+            let lhsMatch = lhs.audioLanguages.match(language), rhsMatch = rhs.audioLanguages.match(language)
+            if lhsMatch != rhsMatch { return lhsMatch < rhsMatch }
         }
         let lhsScore = lhs.playability(for: capabilities).score
         let rhsScore = rhs.playability(for: capabilities).score
@@ -1912,9 +2157,55 @@ public extension Torrent {
     /// bandwidth rule, the most-seeded clean torrent (any torrent when none
     /// is clean) — the best shot at a quick start, never a dead light one
     /// over a seeded heavy one; lightness only breaks a tie of seeds.
+    ///
+    /// With a preferred audio language (`AudioLanguagePreference`), the
+    /// releases in that language are tried first, then the MULTi ones whose
+    /// languages are not named: the first of them that clears its seed
+    /// floor wins — a French 720p over an English 2160p —, else the best
+    /// seeded of them when it has `minimumLanguageSeeds`; only then the
+    /// whole list.
     static func balancedPick(from torrents: [Torrent],
                              capabilities: PlaybackCapabilities.Snapshot = PlaybackCapabilities.current,
-                             connection: Double? = StreamBandwidth.connectionEstimate) -> Torrent? {
+                             connection: Double? = StreamBandwidth.connectionEstimate,
+                             language: String? = AudioLanguagePreference.current) -> Torrent? {
+        if language != nil {
+            for match in [ReleaseLanguages.Match.confirmed, .likely] {
+                let pool = torrents.filter { $0.audioLanguages.match(language) == match }
+                if let pick = balancedPick(in: pool, capabilities: capabilities, connection: connection, healthyOnly: true) {
+                    return pick
+                }
+                if let pick = balancedPick(in: pool, capabilities: capabilities, connection: connection, healthyOnly: false),
+                   pick.seeds >= minimumLanguageSeeds {
+                    return pick
+                }
+            }
+        }
+        return balancedPick(in: torrents, capabilities: capabilities, connection: connection, healthyOnly: false)
+    }
+
+    /// Fewest seeders of a release in the preferred audio language picked
+    /// over a healthier one in another language.
+    static let minimumLanguageSeeds = 3
+
+    /// The releases an automatic pick ("Highest", "Lowest") chooses among:
+    /// those in the preferred audio language with a seeder, else the
+    /// seeded MULTi ones, else all of them. Order kept.
+    static func preferredLanguagePool(_ torrents: [Torrent],
+                                      language: String? = AudioLanguagePreference.current) -> [Torrent] {
+        guard language != nil else { return torrents }
+        for match in [ReleaseLanguages.Match.confirmed, .likely] {
+            let pool = torrents.filter { $0.audioLanguages.match(language) == match && $0.seeds >= minimumLanguageSeeds }
+            if !pool.isEmpty { return pool }
+        }
+        return torrents
+    }
+
+    /// `balancedPick` within one pool; `healthyOnly`: nil unless a release
+    /// clears its resolution's seed floor.
+    private static func balancedPick(in torrents: [Torrent],
+                                     capabilities: PlaybackCapabilities.Snapshot,
+                                     connection: Double?,
+                                     healthyOnly: Bool) -> Torrent? {
         guard !torrents.isEmpty else { return nil }
         typealias Assessed = (torrent: Torrent, playability: PlayabilityAssessment, tooHeavy: Bool)
         let assessed: [Assessed] = torrents.map {
@@ -1938,6 +2229,7 @@ public extension Torrent {
                 if let best = healthy.max(by: better) { return best.torrent }
             }
         }
+        if healthyOnly { return nil }
         let fallback = clean.isEmpty ? assessed : clean
         return fallback.max(by: { a, b in
             if a.torrent.seeds != b.torrent.seeds { return a.torrent.seeds < b.torrent.seeds }
@@ -2079,6 +2371,12 @@ public extension Torrent {
         guard let range = label.range(of: Torrent.sourceSeparator) else { return label }
         let head = label[..<range.lowerBound].trimmingCharacters(in: .whitespaces)
         return head.isEmpty ? label : head
+    }
+
+    /// The audio languages for the pickers ("VF", "VF · MULTi", "ITA"),
+    /// nil when the release names none (`ReleaseLanguages.badge`).
+    var languageBadge: String? {
+        return audioLanguages.badge()
     }
 
     /// Where the torrent was found ("TPB", "Knaben · 1337x", "T4P", a

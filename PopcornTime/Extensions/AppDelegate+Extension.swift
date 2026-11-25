@@ -258,7 +258,10 @@ extension AppDelegate {
         let connection = StreamBandwidth.connectionEstimate
         print("[chooseQuality] media=\(media.title) preference=\(preference) connection=\(connection.map { String(format: "%.1f Mb/s", StreamBandwidth.megabitsPerSecond($0)) } ?? "unknown") candidates=\(sorted.map { "\($0.quality ?? "?")(\($0.qualityValue)) s\($0.seeds)\($0.estimatedBitrate.map { String(format: " %.0fMb/s", StreamBandwidth.megabitsPerSecond($0)) } ?? "")" })")
 
-        if preference == "Highest".localized, let best = sorted.last {
+        // Highest / Lowest choose among the releases in the preferred audio
+        // language when there are seeded ones; Balanced does it itself.
+        let languagePool = Torrent.preferredLanguagePool(sorted)
+        if preference == "Highest".localized, let best = languagePool.last {
             print("[chooseQuality] picked HIGHEST: quality=\(best.quality ?? "?") seeds=\(best.seeds) url=\(best.url.prefix(120))")
             return completion(best)
         }
@@ -270,8 +273,8 @@ extension AppDelegate {
         // release inside it (the comparator puts penalized AVI / CAM / AV1-
         // without-hardware releases first within a bucket).
         if preference == "Lowest".localized,
-           let lowestBucket = sorted.first?.qualityValue,
-           let worst = sorted.last(where: { $0.qualityValue == lowestBucket }) {
+           let lowestBucket = languagePool.first?.qualityValue,
+           let worst = languagePool.last(where: { $0.qualityValue == lowestBucket }) {
             print("[chooseQuality] picked LOWEST: quality=\(worst.quality ?? "?")")
             return completion(worst)
         }
@@ -314,6 +317,8 @@ extension AppDelegate {
                 label = "⚠︎ " + label
                 flagged = true
             }
+            // The language first: tvOS cuts the middle of a row too long.
+            if let language = torrent.languageBadge { label = "[\(language)]  " + label }
             if torrent.url == recommendedURL { label = "⭐︎ " + label }
             let action = UIAlertAction(title: label, style: .default) { _ in completion(torrent) }
             alertController.addAction(action)

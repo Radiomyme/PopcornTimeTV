@@ -296,6 +296,7 @@ public enum UpNextPlanner {
         var torrent = Torrent(health: playing.health, url: playing.url, quality: playing.quality ?? "", seeds: playing.seeds,
                               peers: playing.peers, size: fileSize.map(sizeLabel), tags: playing.tags, fileName: nil)
         torrent.qualityValue = playing.qualityValue
+        torrent.audioLanguages = playing.audioLanguages
         return torrent
     }
 
