@@ -23,7 +23,10 @@ private let GB: Int64 = 1_000_000_000
 /// House of the Dragon S01, ten episodes, the finale the largest.
 private let hotd = (1...10).map { String(format: "House.of.the.Dragon.S01E%02d.2160p.HMAX.WEB-DL.DDP5.1.Atmos.DV.MP4.x265-DVSUX.mp4", $0) }
     + ["RARBG.txt", "House.of.the.Dragon.S01.Subs/2_English.srt"]
-private let hotdSizes: [Int64] = (1...10).map { Int64($0 == 10 ? 12 : 8) * GB + Int64($0) } + [100, 50_000]
+private let hotdSizes: [Int64] = (1...10).map { (episode: Int) -> Int64 in
+    let gigabytes: Int64 = episode == 10 ? 12 : 8
+    return gigabytes * GB + Int64(episode)
+} + [100, 50_000]
 private let packName = "House.of.the.Dragon.S01.2160p.HMAX.WEB-DL.DDP5.1.Atmos.DV.MP4.x265-DVSUX[rartv]"
 
 final class SeasonPackTests: CheckedTestCase {
