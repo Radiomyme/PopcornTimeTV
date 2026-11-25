@@ -907,3 +907,4 @@
 "Grid.Service.Refused" = "TMDB ha rifiutato la tua chiave. Controllala in Impostazioni › Servizi di streaming.";
 "Grid.Service.Refused.Mac" = "TMDB ha rifiutato la tua chiave. Controllala in Impostazioni › Streaming.";
 "Home.Unavailable.Service" = "Impossibile caricare il catalogo di %@";
+"Movies, shows, people" = "Film, serie, persone";
