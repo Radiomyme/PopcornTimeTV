@@ -102,8 +102,20 @@ struct HomeScreen: View {
                     guard let initialShelf, !didScrollToShelf, ids.contains(initialShelf) else { return }
                     didScrollToShelf = true
                     // After this update: the row has to be in the page first.
+                    // Then its mark, so that its title lands under the top
+                    // bar, not behind it (the row alone put its posters at
+                    // the top of an iPhone, its title under the bar).
                     DispatchQueue.main.async {
                         reader.scrollTo(initialShelf, anchor: UnitPoint(x: 0.5, y: 0.16))
+                        #if DEBUG
+                        // The mark has no height: whatever the anchor, its
+                        // point lands at that fraction of the page.
+                        let height = max(1, proxy.size.height + topInset)
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                            reader.scrollTo(HomeScreen.markerID(of: initialShelf),
+                                            anchor: UnitPoint(x: 0.5, y: (topInset + HomeScreen.topBarHeight) / height))
+                        }
+                        #endif
                     }
                 }
                 .onChange(of: controls?.shelfRequest) { _, request in
@@ -190,6 +202,21 @@ struct HomeScreen: View {
     /// The id of the page's first block (the carousel, or the space kept
     /// for the top bar): where the page scrolls back to.
     private static let topID = "Home.Top"
+
+    #if DEBUG
+    /// The mark at the top of the `initialShelf` row, scrolled to.
+    private static func markerID(of shelf: String) -> String { "\(shelf).top" }
+
+    /// The bar over the page: the iPhone's Settings row, the iPad's
+    /// floating tabs, the Mac's toolbar.
+    private static var topBarHeight: CGFloat {
+        #if os(macOS)
+        return 52
+        #else
+        return 64
+        #endif
+    }
+    #endif
 
     /// Scrolls the page to one of its blocks, eased (at once with Reduce
     /// Motion). After the update that asked for it: asked during it, the
@@ -315,6 +342,15 @@ struct HomeScreen: View {
                     HomeOfflineNote(detail: text.offlineDetail(lastUpdated: state.lastUpdated), layout: layout)
                 }
                 ForEach(harmony.shelves) { shelf in
+                    #if DEBUG
+                    // The mark `initialShelf` scrolls to: the row's top, the
+                    // stack's spacing taken back so that nothing moves.
+                    if shelf.id == initialShelf {
+                        Color.clear.frame(height: 0)
+                            .padding(.bottom, -layout.shelfSpacing)
+                            .id(HomeScreen.markerID(of: shelf.id))
+                    }
+                    #endif
                     HomeShelfRow(shelf: shelf, layout: layout, text: text, memory: memory, open: choose,
                                  seeAll: seeAllAction(for: shelf))
                         .onAppear { prefetchShelf(after: shelf, layout: layout) }
