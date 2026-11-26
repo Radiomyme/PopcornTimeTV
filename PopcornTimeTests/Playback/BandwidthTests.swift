@@ -192,7 +192,7 @@ final class BandwidthTests: CheckedTestCase {
         check(StreamBandwidth.fit(bitrate: nil, connection: 27 * mbit) == .unknown, "no estimate")
         check(StreamBandwidth.fit(bitrate: 72 * mbit, connection: 200 * mbit) == .fits, "fast connection")
 
-        let remux2160 = episodeTorrent("Game.of.Thrones.S01E01.2160p.BluRay.REMUX.HEVC.DTS-HD.MA.TrueHD.7.1.Atmos-FGT.mkv", "31.07 GB", seeds: 60, hash: "01")
+        let remux2160 = episodeTorrent("Game.of.Thrones.S01E01.2160p.BluRay.REMUX.HEVC.DTS-HD.MA.TrueHD.7.1.Atmos-FGT.mkv", "31.07 GB", seeds: 150, hash: "01")
         let x265_2160 = episodeTorrent("Game.of.Thrones.S01E01.2160p.UHD.BluRay.x265-SCOTLUHD.mkv", "11.74 GB", seeds: 50, hash: "02")
         let psa1080 = episodeTorrent("Game.of.Thrones.S01E01.Winter.Is.Coming.1080p.10bit.BluRay.6CH.x265.HEVC-PSA.mkv", "1.08 GB", seeds: 841, hash: "03")
         let lumi1080 = episodeTorrent("Game.of.Thrones.S01E01.1080p.BluRay.x265.10bit.6CH.ReEnc-LUMI.mkv", "2.36 GB", seeds: 372, hash: "04")
@@ -220,6 +220,30 @@ final class BandwidthTests: CheckedTestCase {
         // Unknown connection: the remux (> 40 Mb/s) is heavy, the 27 Mb/s 2160p x265 is not.
         let pickUnknown = Torrent.balancedPick(from: tagged, capabilities: caps, connection: nil)
         check(pickUnknown?.url == x265_2160.url, "unknown connection: the light 2160p, got \(pickUnknown?.quality ?? "nil")")
+
+        // The seed floor grows with the bitrate: 45 seeds carry a 25 Mb/s UHD
+        // stream, a 72.9 Mb/s remux needs ~2.9× as many (132); without an
+        // estimate, the resolution's floor.
+        let thinnerRemux = episodeTorrent("Game.of.Thrones.S01E01.2160p.BluRay.REMUX.HEVC.DTS-HD.MA-Y.mkv", "31.07 GB", seeds: 60, hash: "11")
+        check(thinnerRemux.quickStartSeedFloor == 45 && thinnerRemux.withMediaRuntime(3660).quickStartSeedFloor == 132,
+              "scaled floor: \(thinnerRemux.withMediaRuntime(3660).quickStartSeedFloor)")
+        check(x265_2160.withMediaRuntime(3660).quickStartSeedFloor == 50 && psa1080.withMediaRuntime(3660).quickStartSeedFloor == 10,
+              "light releases keep (about) their resolution's floor")
+        check(Torrent.balancedPick(from: ([thinnerRemux] + candidates.dropFirst()).withMediaRuntime(3660), capabilities: caps,
+                                   connection: 1_000 * mbit)?.url == x265_2160.url,
+              "a 60-seed remux is too thin for its bitrate: the healthy 2160p x265")
+
+        // A comfortable swarm (3× its floor) beats a better-scored release
+        // just over its floor: the announced counts are often stale.
+        let dvThin = episodeTorrent("Show.S01E01.2160p.WEB-DL.DV.HDR10.HEVC.DDP5.1.Atmos-A.mkv", "8 GB", seeds: 46, hash: "12")
+        let hdrCrowd = episodeTorrent("Show.S01E01.2160p.WEB-DL.HDR10.HEVC.DDP5.1-B.mkv", "8 GB", seeds: 800, hash: "13")
+        check(!dvThin.hasComfortableSwarm && hdrCrowd.hasComfortableSwarm, "comfortable swarms")
+        check(Torrent.balancedPick(from: [dvThin, hdrCrowd], capabilities: caps, connection: nil)?.url == hdrCrowd.url,
+              "800 seeds over 46 at the same resolution")
+        check(Torrent.precedesInListing(hdrCrowd, dvThin, capabilities: caps, connection: nil), "listed first too")
+        // Peers count a third: 40 seeds + 30 peers = 50.
+        let withPeers = Torrent(url: "magnet:?xt=urn:btih:14&dn=x.mkv", quality: "1080p", seeds: 40, peers: 30, size: "2 GB")
+        check(withPeers.effectiveSeeds == 50, "effective seeds")
 
         // No lighter HEALTHY release: the heavy one stays the pick.
         let thin = episodeTorrent("Game.of.Thrones.S01E01.1080p.WEB.x264.mkv", "1.5 GB", seeds: 3, hash: "07")
@@ -264,7 +288,7 @@ final class BandwidthTests: CheckedTestCase {
 
         // MARK: 6. Listing order and merge
 
-        let heavy1080 = episodeTorrent("Game.of.Thrones.S01E01.1080p.BluRay.REMUX.HEVC.TrueHD.Atmos-Y.mkv", "14 GB", seeds: 80, hash: "11")
+        let heavy1080 = episodeTorrent("Game.of.Thrones.S01E01.1080p.BluRay.REMUX.HEVC.TrueHD.Atmos-Y.mkv", "14 GB", seeds: 120, hash: "11")
         let light1080 = episodeTorrent("Game.of.Thrones.S01E01.1080p.BluRay.x264.AAC-Z.mkv", "2 GB", seeds: 40, hash: "12")
         check(Torrent.precedesInListing(heavy1080, light1080, capabilities: caps, connection: measured), "no runtime: score order as before")
         check(Torrent.precedesInListing(light1080.withMediaRuntime(3660), heavy1080.withMediaRuntime(3660), capabilities: caps, connection: measured),
@@ -273,6 +297,10 @@ final class BandwidthTests: CheckedTestCase {
               "strict order")
         check(Torrent.precedesInListing(heavy1080.withMediaRuntime(3660), light1080.withMediaRuntime(3660), capabilities: caps, connection: 1_000 * mbit),
               "fast connection: score order")
+        // Healthy (floor 33 at ≈ 33 Mb/s), not comfortable (99).
+        let marginalHeavy = episodeTorrent("Game.of.Thrones.S01E01.1080p.BluRay.REMUX.HEVC.TrueHD.Atmos-Y.mkv", "14 GB", seeds: 80, hash: "15").withMediaRuntime(3660)
+        check(Torrent.precedesInListing(light1080.withMediaRuntime(3660), marginalHeavy, capabilities: caps, connection: 1_000 * mbit),
+              "fast connection: a comfortable swarm before a better score on a marginal one")
 
         // Merge keeps the light 2160p when the slots are contested by heavy remuxes. The merge
         // reads the device's capabilities: those of an HDR, Dolby Vision display, whatever this

@@ -9,6 +9,10 @@ import PopcornKit
 struct SettingsView: View {
     @AppStorage("autoSelectQuality") private var autoSelectQuality = "Balanced"
     @AppStorage(CellularStreamingPolicy.defaultsKey) private var streamOnCellular = false
+    /// The automatic source pick (`SourcePreferences`).
+    @AppStorage(SourcePreferences.priorityKey) private var sourcePriority = SourcePriority.balanced.rawValue
+    @AppStorage(SourcePreferences.maximumResolutionKey) private var maximumResolution = 0
+    @AppStorage(SourcePreferences.languageFirstKey) private var languageFirst = true
     /// « Autoplay next episode » (episode chaining, on by default: D8).
     @AppStorage(UpNextPreferences.autoPlayNextKey) private var autoPlayNext = true
     /// « Next Episode Card » (seconds before the end; absent = 60).
@@ -57,6 +61,32 @@ struct SettingsView: View {
                 Text("Playback")
             } footer: {
                 Text("When this is off, Popcorn Time asks before it starts a stream on cellular data or a personal hotspot.")
+            }
+
+            Section {
+                Picker("Settings.SourcePriority", selection: $sourcePriority) {
+                    ForEach(SourcePriority.allCases, id: \.self) { priority in
+                        VStack(alignment: .leading) {
+                            Text(LocalizedStringKey(priority.settingsTitleKey))
+                            Text(LocalizedStringKey(priority.settingsDetailKey))
+                                .font(.footnote).foregroundStyle(.secondary)
+                        }
+                        .tag(priority.rawValue)
+                    }
+                }
+                .pickerStyle(.navigationLink)
+                Picker("Settings.MaxResolution", selection: $maximumResolution) {
+                    Text("Settings.MaxResolution.None").tag(0)
+                    ForEach(SourcePreferences.maximumResolutionChoices, id: \.self) { quality in
+                        Text(verbatim: quality.settingsLabel).tag(quality.rawValue)
+                    }
+                }
+                .pickerStyle(.navigationLink)
+                Toggle("Settings.LanguageFirst", isOn: $languageFirst)
+            } header: {
+                Text("Settings.Sources")
+            } footer: {
+                Text("Settings.LanguageFirst.Detail") + Text(verbatim: " ") + Text("Settings.Sources.Footer")
             }
 
             Section {

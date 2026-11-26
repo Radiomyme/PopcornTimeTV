@@ -607,3 +607,19 @@
 "Grid.Service.Refused" = "TMDB refused your key. Check it in Settings › Streaming Services.";
 "Grid.Service.Refused.Mac" = "TMDB refused your key. Check it in Settings › Streaming.";
 "Home.Unavailable.Service" = "The %@ Catalog Can't Load";
+/* Settings: Sources (automatic source pick) */
+"Settings.Sources" = "Sources";
+"Settings.Sources.Footer" = "These settings steer the automatic pick and the recommended source. Every source stays in the list.";
+"Settings.SourcePriority" = "Source Priority";
+"Settings.SourcePriority.Message" = "What the automatic pick favours when the size of the swarm and the picture disagree.";
+"Settings.SourcePriority.Speed" = "Quick Start";
+"Settings.SourcePriority.Speed.Detail" = "The biggest swarm, even with a lesser picture.";
+"Settings.SourcePriority.Balanced" = "Balanced";
+"Settings.SourcePriority.Balanced.Detail" = "A well-seeded release first, then the best picture.";
+"Settings.SourcePriority.Quality" = "Picture";
+"Settings.SourcePriority.Quality.Detail" = "The best picture once the swarm is large enough, even if it starts more slowly.";
+"Settings.MaxResolution" = "Maximum Resolution";
+"Settings.MaxResolution.Message" = "Releases above it are never picked automatically. They stay in the list.";
+"Settings.MaxResolution.None" = "No Limit";
+"Settings.LanguageFirst" = "Audio Language First";
+"Settings.LanguageFirst.Detail" = "A release in your audio language wins over a higher resolution in another language.";

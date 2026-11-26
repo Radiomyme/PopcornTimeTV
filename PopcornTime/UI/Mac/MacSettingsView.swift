@@ -17,6 +17,10 @@ import PopcornKit
 /// earlier version still shows, so that it can be signed out.
 struct MacSettingsView: View {
     @AppStorage("autoSelectQuality") private var autoSelectQuality = "Balanced"
+    /// The automatic source pick (`SourcePreferences`).
+    @AppStorage(SourcePreferences.priorityKey) private var sourcePriority = SourcePriority.balanced.rawValue
+    @AppStorage(SourcePreferences.maximumResolutionKey) private var maximumResolution = 0
+    @AppStorage(SourcePreferences.languageFirstKey) private var languageFirst = true
     /// « Autoplay next episode » (decision D8: on unless turned off).
     @AppStorage(UpNextPreferences.autoPlayNextKey) private var autoPlayNext = true
     /// « Next Episode Card » (seconds before the end; absent = 60).
@@ -150,6 +154,28 @@ struct MacSettingsView: View {
             Text("Playback")
         } footer: {
             footer("Settings.AutoPlayNext.Footer")
+        }
+
+        Section {
+            Picker("Settings.SourcePriority", selection: $sourcePriority) {
+                ForEach(SourcePriority.allCases, id: \.self) { priority in
+                    Text(LocalizedStringKey(priority.settingsTitleKey)).tag(priority.rawValue)
+                }
+            }
+            .pickerStyle(.menu)
+            Picker("Settings.MaxResolution", selection: $maximumResolution) {
+                Text("Settings.MaxResolution.None").tag(0)
+                ForEach(SourcePreferences.maximumResolutionChoices, id: \.self) { quality in
+                    Text(verbatim: quality.settingsLabel).tag(quality.rawValue)
+                }
+            }
+            .pickerStyle(.menu)
+            Toggle("Settings.LanguageFirst", isOn: $languageFirst)
+        } header: {
+            Text("Settings.Sources")
+        } footer: {
+            footer(LocalizedStringKey(SourcePriority(rawValue: sourcePriority).map { $0.settingsDetailKey }
+                                      ?? SourcePriority.balanced.settingsDetailKey))
         }
 
         Section {

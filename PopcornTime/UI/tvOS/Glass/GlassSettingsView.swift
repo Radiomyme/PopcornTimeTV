@@ -83,6 +83,25 @@ struct GlassSettingsHome: Equatable {
     var streamingServices: [GlassSettingsChoice] = []
 }
 
+/// The automatic source pick's settings, as the page shows them.
+struct GlassSettingsSources: Equatable {
+    struct Priority: Equatable {
+        let id: String
+        /// Localizable.strings keys.
+        let titleKey: String
+        let detailKey: String
+    }
+    /// Id of the current priority.
+    var priority: String
+    /// Lines of the highest resolution picked automatically; 0: no limit.
+    var maximumResolution: Int
+    /// A release in the preferred audio language wins over a higher resolution.
+    var languageFirst: Bool
+    var priorities: [Priority] = []
+    /// The limits offered (lines, label), highest first; "no limit" comes first.
+    var resolutions: [GlassSettingsChoice] = []
+}
+
 /// What the page does, provided by its host.
 struct GlassSettingsActions {
     var setAutoQuality: (GlassSettingsAutoQuality) -> Void = { _ in }
@@ -139,6 +158,12 @@ struct GlassSettingsActions {
     var loadStreamingRegions: (@escaping ([GlassSettingsChoice]) -> Void) -> Void = { done in done([]) }
     /// "France" for "FR".
     var regionName: (String) -> String = { $0 }
+    /// The source pick's settings as stored now. nil: no Sources section.
+    var readSources: (() -> GlassSettingsSources)? = nil
+    var setSourcePriority: (String) -> Void = { _ in }
+    /// 0: no limit.
+    var setMaximumResolution: (Int) -> Void = { _ in }
+    var setLanguageFirst: (Bool) -> Void = { _ in }
 }
 
 /// The page's state. Changes go through the methods, which call the actions.
@@ -163,6 +188,8 @@ final class GlassSettingsModel: ObservableObject {
     @Published private(set) var streamingRegionChoices: [GlassSettingsChoice]?
     /// A key is being checked with TMDB.
     @Published private(set) var isCheckingTMDBKey = false
+    /// nil: no Sources section.
+    @Published private(set) var sources: GlassSettingsSources?
     /// "5.1.0 (2)".
     let version: String
     /// Offered by the language pickers, in display order.
@@ -183,6 +210,40 @@ final class GlassSettingsModel: ObservableObject {
         self.actions = actions
         self.isTraktSignedIn = actions.isTraktSignedIn()
         self.home = actions.readHome?()
+        self.sources = actions.readSources?()
+    }
+
+    // MARK: Sources
+
+    func select(sourcePriority id: String) {
+        guard var sources else { return }
+        sources.priority = id
+        self.sources = sources
+        actions.setSourcePriority(id)
+    }
+
+    func select(maximumResolution lines: Int) {
+        guard var sources else { return }
+        sources.maximumResolution = lines
+        self.sources = sources
+        actions.setMaximumResolution(lines)
+    }
+
+    func toggleLanguageFirst() {
+        guard var sources else { return }
+        sources.languageFirst.toggle()
+        self.sources = sources
+        actions.setLanguageFirst(sources.languageFirst)
+    }
+
+    var currentSourcePriority: GlassSettingsSources.Priority? {
+        guard let sources else { return nil }
+        return sources.priorities.first { $0.id == sources.priority }
+    }
+
+    var maximumResolutionText: String {
+        guard let sources, sources.maximumResolution > 0 else { return glassSettingsLocalized("Settings.MaxResolution.None") }
+        return sources.resolutions.first { $0.id == String(sources.maximumResolution) }?.title ?? "\(sources.maximumResolution)p"
     }
 
     // MARK: Home
@@ -384,6 +445,7 @@ final class GlassSettingsModel: ObservableObject {
         if let stored = actions.readAutoPlayNext?(), stored != autoPlayNext { autoPlayNext = stored }
         if let stored = actions.readUpNextCardLead?(), stored != upNextCardLead { upNextCardLead = stored }
         if let stored = actions.readHome?(), stored != home { home = stored }
+        if let stored = actions.readSources?(), stored != sources { sources = stored }
         cacheBytes = nil
         let measure = actions.measureCache
         DispatchQueue.global(qos: .utility).async {
@@ -459,7 +521,7 @@ enum GlassSettingsPalette {
 
 /// The rows that open a picker.
 enum GlassSettingsPicker: String, Identifiable {
-    case quality, upNextCard, audio, subtitles, homeLanguages, homeShelves, streamingRegion, streamingServices, tmdbKey
+    case quality, upNextCard, audio, subtitles, homeLanguages, homeShelves, streamingRegion, streamingServices, tmdbKey, sourcePriority, maximumResolution
     var id: String { rawValue }
 }
 
@@ -468,6 +530,7 @@ enum GlassSettingsRowID: Hashable {
     case quality, autoPlayNext, upNextCard, audio, subtitles, themeSongs, clearCache, trakt, version
     case homeLanguages, homeShelves, homeLookup
     case tmdbKey, streamingRegion, streamingServices
+    case sourcePriority, maximumResolution, languageFirst
 }
 
 struct GlassSettingsView: View {
@@ -588,6 +651,7 @@ struct GlassSettingsView: View {
             HStack(alignment: .top, spacing: 60) {
                 VStack(alignment: .leading, spacing: 44) {
                     playbackSection
+                    if model.sources != nil { sourcesSection }
                     detailPagesSection
                 }
                 .frame(maxWidth: .infinity)
@@ -632,6 +696,29 @@ struct GlassSettingsView: View {
             GlassSettingsRow(symbol: "captions.bubble.fill", tint: .teal, title: "Subtitle Language",
                              value: model.languageName(model.subtitleLanguage)) { picker = .subtitles }
                 .focused($focusedRow, equals: .subtitles)
+        }
+    }
+
+    /// The automatic source pick: priority, resolution limit, language first.
+    private var sourcesSection: some View {
+        GlassSettingsSection(title: "Settings.Sources", footer: "Settings.Sources.Footer") {
+            GlassSettingsRow(symbol: "gauge.with.dots.needle.67percent", tint: .orange, title: "Settings.SourcePriority",
+                             detail: model.currentSourcePriority?.detailKey,
+                             value: model.currentSourcePriority.map { glassSettingsLocalized($0.titleKey) }) { picker = .sourcePriority }
+                .focused($focusedRow, equals: .sourcePriority)
+                .accessibilityIdentifier("Settings.Row.sourcePriority")
+            GlassSettingsDivider()
+            GlassSettingsRow(symbol: "4k.tv.fill", tint: .indigo, title: "Settings.MaxResolution",
+                             value: model.maximumResolutionText) { picker = .maximumResolution }
+                .focused($focusedRow, equals: .maximumResolution)
+                .accessibilityIdentifier("Settings.Row.maximumResolution")
+            GlassSettingsDivider()
+            GlassSettingsRow(symbol: "character.bubble.fill", tint: .blue, title: "Settings.LanguageFirst",
+                             detail: "Settings.LanguageFirst.Detail",
+                             value: glassSettingsLocalized(model.sources?.languageFirst == true ? "On" : "Off"),
+                             showsChevron: false) { model.toggleLanguageFirst() }
+                .focused($focusedRow, equals: .languageFirst)
+                .accessibilityIdentifier("Settings.Row.languageFirst")
         }
     }
 
@@ -798,6 +885,31 @@ struct GlassSettingsView: View {
                 selectedID: model.home?.languages.first ?? "",
                 checkedIDs: Set(model.home?.languages ?? []).union(model.home?.languages.isEmpty == false ? [] : [""]),
                 onSelect: { id in model.toggle(homeLanguage: id.isEmpty ? nil : id) },
+                onCancel: { self.picker = nil })
+        case .sourcePriority:
+            GlassSettingsPickerSheet(
+                title: "Settings.SourcePriority",
+                message: "Settings.SourcePriority.Message",
+                options: (model.sources?.priorities ?? []).map {
+                    .init(id: $0.id, title: glassSettingsLocalized($0.titleKey), detail: glassSettingsLocalized($0.detailKey))
+                },
+                selectedID: model.sources?.priority ?? "",
+                onSelect: { id in
+                    model.select(sourcePriority: id)
+                    self.picker = nil
+                },
+                onCancel: { self.picker = nil })
+        case .maximumResolution:
+            GlassSettingsPickerSheet(
+                title: "Settings.MaxResolution",
+                message: "Settings.MaxResolution.Message",
+                options: [.init(id: "0", title: glassSettingsLocalized("Settings.MaxResolution.None"), detail: nil)]
+                    + (model.sources?.resolutions ?? []).map { .init(id: $0.id, title: $0.title, detail: nil) },
+                selectedID: String(model.sources?.maximumResolution ?? 0),
+                onSelect: { id in
+                    if let lines = Int(id) { model.select(maximumResolution: lines) }
+                    self.picker = nil
+                },
                 onCancel: { self.picker = nil })
         case .homeShelves:
             GlassSettingsPickerSheet(

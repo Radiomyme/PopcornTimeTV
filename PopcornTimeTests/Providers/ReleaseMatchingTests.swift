@@ -612,6 +612,7 @@ final class ReleaseLanguageTests: XCTestCase {
 
     override func tearDown() {
         AudioLanguagePreference.override = nil
+        SourcePreferences.override = nil
         super.tearDown()
     }
 
@@ -670,9 +671,50 @@ final class ReleaseLanguageTests: XCTestCase {
         XCTAssertEqual(Torrent.balancedPick(from: all, connection: nil)?.url, french.url, "a healthy VF beats an English UHD")
         XCTAssertEqual(Torrent.preferredLanguagePool(all).map(\.url), [french.url])
 
+        // A nearly dead VF (under half its floor: 4 of 10) no longer wins over
+        // a healthy release in another language; at half its floor it does.
+        let thinFrench = torrent("Interstellar.2014.FRENCH.1080p.WEB.x264-T", "d", quality: "1080p", seeds: 4)
+        XCTAssertEqual(thinFrench.languageSeedFloor, 5)
+        XCTAssertEqual(Torrent.balancedPick(from: [english, thinFrench, uhd], connection: nil)?.url, uhd.url)
+        let halfFrench = torrent("Interstellar.2014.FRENCH.1080p.WEB.x264-H", "e", quality: "1080p", seeds: 5)
+        XCTAssertEqual(Torrent.balancedPick(from: [english, halfFrench, uhd], connection: nil)?.url, halfFrench.url)
+
         // English preference: nothing is favoured.
         AudioLanguagePreference.override = "en"
         XCTAssertNil(AudioLanguagePreference.current)
+    }
+
+    func testSourceSettingsSteerThePick() {
+        let caps = PlaybackCapabilities.Snapshot(av1HardwareDecode: false, hevcHardwareDecode: true, dolbyVision: true, hdr: true)
+        func pick(_ torrents: [Torrent], _ values: SourcePreferences.Values) -> String? {
+            SourcePreferences.override = values
+            return Torrent.balancedPick(from: torrents, capabilities: caps, connection: nil)?.url
+        }
+        AudioLanguagePreference.override = .some(nil)
+        // No runtime: floors 45 (2160p) / 10 (1080p), doubled with « Quick Start ».
+        // Tags come from the quality label (the name, as Torrentio's).
+        let dvName = "Movie.2020.2160p.WEB-DL.DV.HDR10.HEVC.DDP5.1.Atmos-A", hdrName = "Movie.2020.2160p.WEB-DL.HDR10.HEVC.DDP5.1-B"
+        let dolbyVision = torrent(dvName, "a", quality: dvName, seeds: 60, size: "8 GB")
+        let hdr10 = torrent(hdrName, "b", quality: hdrName, seeds: 120, size: "8 GB")
+        let fullHD = torrent("Movie.2020.1080p.WEB-DL.x264-C", "c", quality: "1080p", seeds: 900)
+        let all = [dolbyVision, hdr10, fullHD]
+        XCTAssertEqual(pick(all, .init(priority: .balanced)), dolbyVision.url, "neither is comfortable: the better picture")
+        XCTAssertEqual(pick(all, .init(priority: .quality)), dolbyVision.url)
+        XCTAssertEqual(pick(all, .init(priority: .speed)), hdr10.url, "floor 90: only the 120-seed UHD clears it")
+        XCTAssertEqual(pick([dolbyVision, fullHD], .init(priority: .speed)), fullHD.url, "no UHD clears 90: the 1080p")
+        XCTAssertEqual(pick(all, .init(maximumResolution: .hd1080)), fullHD.url, "limited to 1080p")
+        XCTAssertEqual(pick([dolbyVision, hdr10], .init(maximumResolution: .hd1080)), dolbyVision.url,
+                       "nothing under the limit: the limit is ignored")
+
+        // Language first, or only inside a resolution.
+        AudioLanguagePreference.override = "fr"
+        let french720 = torrent("Movie.2020.FRENCH.720p.WEB.x264-D", "d", quality: "720p", seeds: 40)
+        XCTAssertEqual(pick([fullHD, french720], .init()), french720.url)
+        XCTAssertEqual(pick([fullHD, french720], .init(languageFirst: false)), fullHD.url)
+        SourcePreferences.override = .init(languageFirst: false)
+        XCTAssertEqual(Torrent.preferredLanguagePool([fullHD, french720]).count, 2)
+        SourcePreferences.override = .init(maximumResolution: .hd720)
+        XCTAssertEqual(Torrent.preferredLanguagePool([fullHD, french720]).map(\.url), [french720.url])
     }
 
     func testMergeKeepsSlotsForThePreferredLanguage() {

@@ -43,7 +43,11 @@ final class GlassSettingsHostingController: UIHostingController<GlassSettingsVie
             setStreamingServices: { GlassSettingsStore.store(streamingServices: $0) },
             loadStreamingServices: { GlassSettingsStore.streamingServices(region: $0, completion: $1) },
             loadStreamingRegions: { GlassSettingsStore.streamingRegions(completion: $0) },
-            regionName: { GlassSettingsStore.regionName($0) })
+            regionName: { GlassSettingsStore.regionName($0) },
+            readSources: { GlassSettingsStore.sources },
+            setSourcePriority: { GlassSettingsStore.store(sourcePriority: $0) },
+            setMaximumResolution: { GlassSettingsStore.store(maximumResolution: $0) },
+            setLanguageFirst: { GlassSettingsStore.store(languageFirst: $0) })
 
         let audio = PlaybackLanguagePreferences.preferredAudioLanguageCode
         let subtitles = PlaybackLanguagePreferences.preferredSubtitleLanguageCode
@@ -155,6 +159,35 @@ enum GlassSettingsStore {
             codes.insert(code, at: 0)
         }
         return codes.map { GlassSettingsLanguage(code: $0, name: PlaybackLanguagePreferences.displayName(forCode: $0)) }
+    }
+
+    // MARK: Sources ("sourcePriority", "sourceMaximumResolution", "sourceLanguageFirst")
+
+    /// The automatic source pick's settings (`SourcePreferences`).
+    static var sources: GlassSettingsSources {
+        GlassSettingsSources(
+            priority: SourcePreferences.priority.rawValue,
+            maximumResolution: SourcePreferences.maximumResolution?.rawValue ?? 0,
+            languageFirst: SourcePreferences.languageFirst,
+            priorities: SourcePriority.allCases.map {
+                .init(id: $0.rawValue, titleKey: $0.settingsTitleKey, detailKey: $0.settingsDetailKey)
+            },
+            resolutions: SourcePreferences.maximumResolutionChoices.map {
+                GlassSettingsChoice(id: String($0.rawValue), title: $0.settingsLabel)
+            })
+    }
+
+    static func store(sourcePriority id: String) {
+        defaults.set(SourcePriority(rawValue: id)?.rawValue, forKey: SourcePreferences.priorityKey)
+    }
+
+    /// 0 removes the limit.
+    static func store(maximumResolution lines: Int) {
+        defaults.set(lines > 0 ? lines : nil, forKey: SourcePreferences.maximumResolutionKey)
+    }
+
+    static func store(languageFirst: Bool) {
+        defaults.set(languageFirst, forKey: SourcePreferences.languageFirstKey)
     }
 
     // MARK: Theme songs ("themeSongVolume", read by ThemeSongManager)

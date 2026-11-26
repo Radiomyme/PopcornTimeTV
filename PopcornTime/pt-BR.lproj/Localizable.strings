@@ -914,3 +914,19 @@
 "Grid.Service.Refused" = "O TMDB recusou sua chave. Verifique-a em Ajustes › Serviços de streaming.";
 "Grid.Service.Refused.Mac" = "O TMDB recusou sua chave. Verifique-a em Ajustes › Streaming.";
 "Home.Unavailable.Service" = "Não foi possível carregar o catálogo de %@";
+/* Settings: Sources (automatic source pick) */
+"Settings.Sources" = "Fontes";
+"Settings.Sources.Footer" = "Estes ajustes orientam a escolha automática e a fonte recomendada. Todas as fontes continuam na lista.";
+"Settings.SourcePriority" = "Prioridade das fontes";
+"Settings.SourcePriority.Message" = "O que a escolha automática favorece quando o tamanho do enxame e a imagem não combinam.";
+"Settings.SourcePriority.Speed" = "Início rápido";
+"Settings.SourcePriority.Speed.Detail" = "O maior enxame, mesmo com imagem pior.";
+"Settings.SourcePriority.Balanced" = "Equilibrado";
+"Settings.SourcePriority.Balanced.Detail" = "Primeiro uma versão bem compartilhada, depois a melhor imagem.";
+"Settings.SourcePriority.Quality" = "Imagem";
+"Settings.SourcePriority.Quality.Detail" = "A melhor imagem assim que o enxame basta, mesmo que demore mais para começar.";
+"Settings.MaxResolution" = "Resolução máxima";
+"Settings.MaxResolution.Message" = "Versões acima dela nunca são escolhidas automaticamente. Continuam na lista.";
+"Settings.MaxResolution.None" = "Sem limite";
+"Settings.LanguageFirst" = "Idioma do áudio primeiro";
+"Settings.LanguageFirst.Detail" = "Uma versão no seu idioma de áudio vence uma resolução maior em outro idioma.";

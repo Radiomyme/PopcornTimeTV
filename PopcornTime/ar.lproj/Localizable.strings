@@ -910,3 +910,19 @@
 "Grid.Service.Refused" = "رفض TMDB مفتاحك. تحقق منه في الإعدادات › خدمات البث.";
 "Grid.Service.Refused.Mac" = "رفض TMDB مفتاحك. تحقق منه في الإعدادات › البث.";
 "Home.Unavailable.Service" = "تعذّر تحميل كتالوج %@";
+/* Settings: Sources (automatic source pick) */
+"Settings.Sources" = "المصادر";
+"Settings.Sources.Footer" = "توجّه هذه الإعدادات الاختيار التلقائي والمصدر المُوصى به. تبقى كل المصادر في القائمة.";
+"Settings.SourcePriority" = "أولوية المصادر";
+"Settings.SourcePriority.Message" = "ما يفضّله الاختيار التلقائي عندما لا يتّفق حجم السرب مع جودة الصورة.";
+"Settings.SourcePriority.Speed" = "بدء سريع";
+"Settings.SourcePriority.Speed.Detail" = "السرب الأكبر، ولو بصورة أقل جودة.";
+"Settings.SourcePriority.Balanced" = "متوازن";
+"Settings.SourcePriority.Balanced.Detail" = "إصدار جيد المشاركة أولاً، ثم أفضل صورة.";
+"Settings.SourcePriority.Quality" = "الصورة";
+"Settings.SourcePriority.Quality.Detail" = "أفضل صورة متى كان السرب كافياً، ولو بدأ التشغيل أبطأ.";
+"Settings.MaxResolution" = "أقصى دقة";
+"Settings.MaxResolution.Message" = "لا تُختار الإصدارات الأعلى منها تلقائياً أبداً. تبقى في القائمة.";
+"Settings.MaxResolution.None" = "بلا حد";
+"Settings.LanguageFirst" = "لغة الصوت أولاً";
+"Settings.LanguageFirst.Detail" = "يتقدّم إصدار بلغة الصوت المفضّلة على دقة أعلى بلغة أخرى.";
