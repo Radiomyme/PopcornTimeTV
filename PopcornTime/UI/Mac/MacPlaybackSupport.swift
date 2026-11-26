@@ -47,8 +47,16 @@ struct MacQualityPickerSheet: View {
     let onPick: (Torrent?) -> Void
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            Text(title).font(.headline).lineLimit(2)
+        // The Settings sheets' build: the title, the list, then a bar with
+        // Cancel at its trailing end (Escape).
+        VStack(spacing: 0) {
+            Text(title)
+                .font(.headline)
+                .lineLimit(2)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 20)
+                .padding(.top, 18)
+                .padding(.bottom, 10)
             ScrollView {
                 let recommended = Torrent.recommendedURL(in: torrents)
                 VStack(spacing: 8) {
@@ -62,12 +70,18 @@ struct MacQualityPickerSheet: View {
                         .buttonStyle(.plain)
                     }
                 }
+                .padding(.horizontal, 20)
+                .padding(.bottom, 14)
             }
-            Button("Cancel", role: .cancel) { onPick(nil) }
-                .keyboardShortcut(.cancelAction)
-                .frame(maxWidth: .infinity)
+            Divider()
+            HStack {
+                Spacer()
+                Button("Cancel", role: .cancel) { onPick(nil) }
+                    .keyboardShortcut(.cancelAction)
+            }
+            .padding(.horizontal, 20)
+            .padding(.vertical, 12)
         }
-        .padding(20)
         .frame(minWidth: 460, minHeight: 380)
     }
 }

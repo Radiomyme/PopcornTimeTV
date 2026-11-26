@@ -3,10 +3,10 @@
 import SwiftUI
 import PopcornKit
 
-/// One torrent row shared by the iOS and macOS quality pickers, so all
-/// platforms present the same information for judging the quality/seeds
-/// tradeoff: resolution + codec/HDR/Atmos tags, a health-colored seed
-/// indicator with the source (TPB, Knaben · 1337x, a Torrentio indexer…),
+/// The Mac quality sheet's row, with the facts the iOS Sources list gives
+/// for judging the quality/seeds tradeoff: resolution + codec/HDR/Atmos
+/// tags, a health-colored seed indicator when the swarm's health is known,
+/// the source (TPB, Knaben · 1337x, a Torrentio indexer…), the localized
 /// seed/peer counts, size and estimated bitrate ("≈ 72 Mb/s", when the
 /// torrent carries its media runtime: `Torrent.withMediaRuntime`), a
 /// "Recommandé" badge on the best quality-vs-seeds-vs-connection pick
@@ -20,10 +20,14 @@ struct TorrentPickerRow: View {
 
     var body: some View {
         HStack(spacing: 12) {
-            // Swarm-health dot (red→green), same scale the tvOS list uses.
-            Circle()
-                .fill(Color(cgColor: torrent.health.color.cgColor))
-                .frame(width: 9, height: 9)
+            // Swarm-health dot (red→green), same scale the tvOS list uses;
+            // none for a scraped release whose health nobody knows (a grey
+            // dot on every row said nothing).
+            if torrent.health != .unknown {
+                Circle()
+                    .fill(Color(cgColor: torrent.health.color.cgColor))
+                    .frame(width: 9, height: 9)
+            }
 
             VStack(alignment: .leading, spacing: 3) {
                 HStack(spacing: 6) {
@@ -39,7 +43,7 @@ struct TorrentPickerRow: View {
                             .font(.caption2.weight(.bold))
                             .lineLimit(1)
                             .padding(.horizontal, 6).padding(.vertical, 2)
-                            .background(.tint, in: Capsule())
+                            .background(GlassPalette.accent, in: Capsule())
                             .foregroundStyle(.white)
                     }
                 }
@@ -68,8 +72,9 @@ struct TorrentPickerRow: View {
             }
 
             Spacer(minLength: 8)
+            // The app's red, as on the iPhone: not the system accent.
             Image(systemName: "play.circle.fill")
-                .foregroundStyle(.tint)
+                .foregroundStyle(GlassPalette.accent)
                 .font(.title2)
         }
         .padding(12)
@@ -90,13 +95,7 @@ struct TorrentPickerRow: View {
         return text
     }
 
-    private var detailLine: String {
-        var parts = ["\(torrent.seeds) seeds"]
-        if torrent.peers > 0 { parts.append("\(torrent.peers) peers") }
-        if let size = torrent.size, !size.isEmpty { parts.append(size) }
-        if let bitrate = torrent.bitrateLabel { parts.append(bitrate) }
-        return parts.joined(separator: " · ")
-    }
+    private var detailLine: String { torrent.pickerDetail }
 }
 
 /// The audio language of a release at the head of a quality row's metadata
@@ -122,6 +121,27 @@ struct LanguageTag: View {
 }
 
 extension Torrent {
+    /// "178 sources · 12 pairs · 7,19 Go · ≈ 7 Mb/s": the swarm, the size
+    /// and the bitrate in the UI's language (`Sources.Seeds`, `.Peers`, the
+    /// system's byte units and decimal mark). The iPhone's Sources rows and
+    /// the Mac's quality sheet.
+    var pickerDetail: String {
+        var parts: [String] = []
+        // YTS lists 100 / 100 for a release it has no count for.
+        let placeholder = seeds == 100 && peers == 100
+        if !placeholder {
+            parts.append(String(format: "Sources.Seeds".localized, seeds))
+            if peers > 0 { parts.append(String(format: "Sources.Peers".localized, peers)) }
+        }
+        if let bytes = sizeInBytes, bytes > 0 {
+            parts.append(ByteCountFormatter.string(fromByteCount: bytes, countStyle: .file))
+        } else if let size = size, !size.isEmpty {
+            parts.append(size)
+        }
+        if let bitrate = bitrateLabel { parts.append(bitrate) }
+        return parts.joined(separator: " · ")
+    }
+
     /// The recommended (best quality/seeds ratio the connection can carry)
     /// URL in a set — used to badge a row. Nil-safe: returns nil when there's
     /// no clear pick. Also starts measuring the connection

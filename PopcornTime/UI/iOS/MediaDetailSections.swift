@@ -239,22 +239,10 @@ struct SourceRow: View {
         AttributedString(SourceRow.detail(of: torrent))
     }
 
-    /// "178 sources · 12 pairs · 7,19 Go · ≈ 7 Mb/s".
+    /// "178 sources · 12 pairs · 7,19 Go · ≈ 7 Mb/s" (`Torrent.pickerDetail`,
+    /// the Mac's quality sheet's too).
     static func detail(of torrent: Torrent) -> String {
-        var parts: [String] = []
-        // YTS lists 100 / 100 for a release it has no count for.
-        let placeholder = torrent.seeds == 100 && torrent.peers == 100
-        if !placeholder {
-            parts.append(String(format: "Sources.Seeds".localized, torrent.seeds))
-            if torrent.peers > 0 { parts.append(String(format: "Sources.Peers".localized, torrent.peers)) }
-        }
-        if let bytes = torrent.sizeInBytes, bytes > 0 {
-            parts.append(ByteCountFormatter.string(fromByteCount: bytes, countStyle: .file))
-        } else if let size = torrent.size, !size.isEmpty {
-            parts.append(size)
-        }
-        if let bitrate = torrent.bitrateLabel { parts.append(bitrate) }
-        return parts.joined(separator: " · ")
+        return torrent.pickerDetail
     }
 }
 
