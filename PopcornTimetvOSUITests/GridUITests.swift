@@ -536,8 +536,10 @@ final class GridUITests: XCTestCase {
 
     // MARK: - Search
 
-    /// Search results are posters of the same grid: they start close under
-    /// the scope bar, and the focused one has its caption.
+    /// Search results are posters of the same grid, one titled row per
+    /// catalogue (Movies, then Shows), both on the first screen under the
+    /// keyboard; a row scrolls sideways, and the focused poster has its
+    /// caption, there too.
     func testSearchResultsArePostersWithACaption() throws {
         launch(["-PTDebugSearch", "dune"])
         let results = grid("SearchViewController")
@@ -550,8 +552,16 @@ final class GridUITests: XCTestCase {
         let rows = self.rows(of: results)
         XCTAssertFalse(rows.isEmpty)
         if let first = rows.first {
-            XCTAssertEqual(first.count, 6, "not six results in the first row")
+            // Six whole posters, and the edge of a seventh when there are more.
+            XCTAssertGreaterThanOrEqual(first.count, min(6, results.cells.count), "not six results in the first row")
             XCTAssertLessThanOrEqual(first.maxY, screen.maxY, "the first row of results is not whole on the screen")
+        }
+        // The rows' titles (not the tab bar's Movies and Shows).
+        let movies = results.staticTexts[isEnglish ? "Movies" : "Films"], shows = results.staticTexts[isEnglish ? "Shows" : "Séries"]
+        XCTAssertTrue(movies.exists && movies.isOnScreen(app), "no Movies title over the first row")
+        if shows.exists {
+            XCTAssertTrue(shows.isOnScreen(app) && shows.frame.minY < screen.maxY - 40, "the Shows row is not on the first screen")
+            XCTAssertGreaterThan(shows.frame.minY, movies.frame.maxY, "the shows come before the movies")
         }
         var cell = focusedCell(in: results)
         for _ in 0..<6 where cell == nil {
@@ -563,6 +573,92 @@ final class GridUITests: XCTestCase {
         pause(1)
         snap("search-result-focused")
         try expectCaption(element("Grid.Caption"), under: focusedResult, in: results)
+
+        // Along the row: it scrolls sideways, and the caption goes with the poster.
+        let rowY = focusedResult.frame.minY
+        for _ in 0..<7 {
+            remote.press(.right)
+            pause(0.6)
+        }
+        pause(1.2)
+        guard let further = focusedCell(in: results) else { return XCTFail("the focus left the row: \(focusedLabel)") }
+        XCTAssertLessThan(abs(further.frame.minY - rowY), 30, "Right left the row")
+        XCTAssertTrue(screen.contains(further.frame.insetBy(dx: 20, dy: 20)), "the focused poster is not on the screen: \(further.frame)")
+        snap("search-row-scrolled")
+        try expectCaption(element("Grid.Caption"), under: further, in: results)
+    }
+
+    /// A catalogue that could not be searched is said, with Try Again: under
+    /// the other one's row when it found titles, or as the grid's message
+    /// when nothing was found (it said "No results", or nothing at all).
+    func testASearchSourceThatFailedIsSaidWithTryAgain() throws {
+        launch(["-PTDebugSearch", "sherlock", "-PTDebugSearchFail", "movies"])
+        let results = grid("SearchViewController")
+        let notice = element("Grid.Notice"), retry = element("Grid.RetryNotice")
+        let moviesRow = results.staticTexts[isEnglish ? "Movies" : "Films"]
+        XCTAssertTrue(notice.waitForExistence(timeout: 40), "nothing says the movies could not be searched")
+        if isEnglish { XCTAssertEqual(notice.label, "Movies couldn’t be loaded.") }
+        XCTAssertTrue(retry.exists, "no Try Again next to it")
+        XCTAssertFalse(moviesRow.exists, "a Movies row although the movies failed")
+        snap("search-movies-failed")
+        // Down from the row reaches Try Again, which searches again.
+        var downs: [String] = []
+        for _ in 0..<5 where !hasFocus(retry) {
+            remote.press(.down)
+            pause(1)
+            downs.append(focusedLabel)
+        }
+        XCTAssertTrue(hasFocus(retry), "Down never reached Try Again: \(downs)")
+        remote.press(.select)
+        let deadline = Date().addingTimeInterval(40)
+        while Date() < deadline, notice.exists || !moviesRow.exists { pause(1) }
+        XCTAssertFalse(notice.exists, "the line stayed once the movies were found")
+        XCTAssertTrue(moviesRow.exists, "no Movies row after Try Again")
+        XCTAssertGreaterThan(results.cells.count, 0)
+        app.terminate()
+        pause(1)
+
+        // Both failed: the grid's message and its Try Again.
+        launch(["-PTDebugSearch", "sherlock", "-PTDebugSearchFail", "all"])
+        let message = element("Grid.Retry")
+        XCTAssertTrue(message.waitForExistence(timeout: 30), "no Try Again when nothing could be searched")
+        XCTAssertFalse(element("Grid.Notice").exists)
+        snap("search-all-failed")
+    }
+
+    /// The results of a new query land while the focus is on a poster of
+    /// the last one's (a search link): the focus stays on that title when
+    /// it is still found, or on the first poster of its row; it never jumps
+    /// to the keyboard or to the first poster of another row.
+    func testTheFocusStaysWhenNewSearchResultsLand() throws {
+        launch(["-PTDebugOpenURL", "popcorntime://search?q=star", "-PTDebugOpenURL2", "popcorntime://search?q=star%20wars",
+                "-PTDebugOpenURL2After", "22"])
+        let results = grid("SearchViewController")
+        var deadline = Date().addingTimeInterval(20)
+        while Date() < deadline, !(results.exists && results.cells.count > 3) { pause(1) }
+        guard results.exists, results.cells.count > 3 else { throw XCTSkip("the search found too few results") }
+        for _ in 0..<6 where focusedCell(in: results) == nil {
+            remote.press(.down)
+            pause(1)
+        }
+        guard focusedCell(in: results) != nil else { return XCTFail("Down never reached the results") }
+        remote.press(.right)
+        pause(0.8)
+        remote.press(.right)
+        pause(1)
+        guard let before = focusedCell(in: results) else { return XCTFail("the focus left the results") }
+        let title = before.label, rowY = before.frame.minY
+        // The second query is sent 22 s after the first, then answered.
+        deadline = Date().addingTimeInterval(45)
+        while Date() < deadline, !(element("Debug.LinkResult").exists && element("Debug.LinkResult").label == "opened twice") { pause(1) }
+        pause(12)
+        snap("search-focus-after-new-results")
+        guard let after = focusedCell(in: results) else { return XCTFail("the focus left the results when the new ones landed: \(focusedLabel)") }
+        XCTAssertLessThan(abs(after.frame.minY - rowY), 30, "the focus moved to another row")
+        let same = results.cells.matching(NSPredicate(format: "label == %@", title)).firstMatch
+        if same.exists {
+            XCTAssertEqual(after.label, title, "the title still found lost the focus")
+        }
     }
 
     // MARK: - Scrolling

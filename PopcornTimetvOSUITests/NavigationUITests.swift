@@ -414,10 +414,11 @@ final class NavigationUITests: XCTestCase {
         expectMenuGoesHomeThenLeavesTheApp("Search")
     }
 
-    /// Search with results: Up from a result goes back to the scope bar, the
-    /// keyboard and the tab bar (a focus guide above the keyboard sent it
-    /// back to the first result, so the tab bar could not be reached and Menu
-    /// left the app); also once the results have scrolled down.
+    /// Search with results: Up from a result goes back to the keyboard and
+    /// the tab bar (a focus guide above the keyboard sent it back to the
+    /// first result, so the tab bar could not be reached and Menu left the
+    /// app); also from the second row (Shows), once the results have
+    /// scrolled down.
     func testUpFromSearchResultsReachesTheTabBar() throws {
         launch(["-PTDebugSearch", "star"])
         let results = grid(named: "SearchViewController")
@@ -440,7 +441,7 @@ final class NavigationUITests: XCTestCase {
         XCTAssertTrue(tabBarHasFocus, "Up from a result never reached the tab bar: \(ups)")
         XCTAssertEqual(app.state, .runningForeground)
 
-        // Two rows further down (the results scroll), then Up again.
+        // Further down (the results scroll: the Shows row), then Up again.
         downs = []
         for _ in 0..<8 where focusedCell(in: results) == nil {
             remote.press(.down)
@@ -458,7 +459,7 @@ final class NavigationUITests: XCTestCase {
             pause(1)
             ups.append(focusedLabel)
         }
-        XCTAssertTrue(tabBarHasFocus, "Up from the third row of results never reached the tab bar: \(ups)")
+        XCTAssertTrue(tabBarHasFocus, "Up from the last row of results never reached the tab bar: \(ups)")
         XCTAssertEqual(app.state, .runningForeground)
     }
 
