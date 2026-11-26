@@ -92,6 +92,9 @@ final class MacNavigator: ObservableObject {
     @Published var path = NavigationPath()
     /// Bumped by `focusSearch()`: the Search page focuses its field.
     @Published private(set) var searchFocusRequest = 0
+    /// « Who's Watching? » as a sheet on this window (Popcorn Time ›
+    /// Switch Profile…).
+    @Published var showsProfilePicker = false
 
     /// The Home has been shown in this window: its page then stays alive
     /// under the other sections (`MacRootView`), so that coming back finds
@@ -291,6 +294,9 @@ final class MacFrontNavigator: ObservableObject {
     private(set) weak var navigator: MacNavigator?
     private let all = NSHashTable<MacNavigator>.weakObjects()
     private var changes: AnyCancellable?
+    /// Switch Profile… was chosen with no main window open: the window
+    /// opened for it shows the picker.
+    private var showsProfilePickerInNextWindow = false
 
     private init() {}
 
@@ -298,6 +304,16 @@ final class MacFrontNavigator: ObservableObject {
     func windowAppeared(_ navigator: MacNavigator) {
         all.add(navigator)
         if self.navigator == nil { setFront(navigator) }
+        if showsProfilePickerInNextWindow {
+            showsProfilePickerInNextWindow = false
+            DispatchQueue.main.async { navigator.showsProfilePicker = true }
+        }
+    }
+
+    /// Switch Profile… with no main window: one is opened, and shows it.
+    func showProfilePickerInNewWindow() {
+        showsProfilePickerInNextWindow = true
+        MacWindowNet.openMainWindow(reason: "profiles")
     }
 
     /// A window got the keyboard.

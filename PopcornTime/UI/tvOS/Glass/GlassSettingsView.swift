@@ -141,19 +141,30 @@ struct GlassSettingsActions {
     var regionName: (String) -> String = { $0 }
     /// The active profile, re-read by `refresh()`. nil: no Profiles section.
     var readProfile: (() -> GlassSettingsProfile)? = nil
-    /// « Who's Watching? » over the app; true: in its Manage mode.
-    var showProfiles: (Bool) -> Void = { _ in }
-    /// Your Preferences: what the active profile's taste learnt.
-    var showTaste: () -> Void = {}
+    /// « Who's Watching? » over the app (its own Manage Profiles button
+    /// edits the profiles).
+    var showProfiles: () -> Void = {}
+    /// Your Preferences: what the active profile's taste learned, a facet a
+    /// line, best first.
+    var readTaste: () -> [GlassSettingsTasteLine] = { [] }
+    /// Forgets what it learned.
+    var resetTaste: () -> Void = {}
 }
 
 /// The active profile as the Profiles section shows it.
 struct GlassSettingsProfile: Equatable {
     var name: String
-    var symbol: String
-    var tint: Color
-    /// Its strongest genres ("Sci-Fi, Drama"); nil: nothing learnt yet.
+    /// Its avatar (`ProfileAvatar`), the Switch Profile row's icon.
+    var avatar: Int
+    /// Its strongest genres ("Sci-Fi, Drama"); nil: nothing learned yet.
     var preferences: String? = nil
+}
+
+/// A line of Your Preferences: a facet ("Genres") and its values, joined.
+struct GlassSettingsTasteLine: Identifiable, Equatable {
+    var id: String
+    var title: String
+    var values: String
 }
 
 /// The page's state. Changes go through the methods, which call the actions.
@@ -180,6 +191,8 @@ final class GlassSettingsModel: ObservableObject {
     @Published private(set) var isCheckingTMDBKey = false
     /// nil: no Profiles section.
     @Published private(set) var profile: GlassSettingsProfile?
+    /// Your Preferences, read when its sheet opens (`loadTaste`).
+    @Published private(set) var taste: [GlassSettingsTasteLine] = []
     /// "5.1.0 (2)".
     let version: String
     /// Offered by the language pickers, in display order.
@@ -430,6 +443,21 @@ final class GlassSettingsModel: ObservableObject {
         }
     }
 
+    // MARK: Profiles
+
+    /// Your Preferences as learned now.
+    func loadTaste() {
+        taste = actions.readTaste()
+    }
+
+    /// Forgets what the active profile's taste learned: the sheet shows its
+    /// empty state, the row its « Nothing yet ».
+    func resetTaste() {
+        actions.resetTaste()
+        taste = actions.readTaste()
+        if let stored = actions.readProfile?(), stored != profile { profile = stored }
+    }
+
     func languageName(_ code: String?) -> String {
         guard let code else { return glassSettingsLocalized("None") }
         return languages.first { $0.code == code }?.name ?? code
@@ -479,6 +507,7 @@ enum GlassSettingsPalette {
 /// The rows that open a picker.
 enum GlassSettingsPicker: String, Identifiable {
     case quality, upNextCard, audio, subtitles, homeLanguages, homeShelves, streamingRegion, streamingServices, tmdbKey
+    case taste
     var id: String { rawValue }
 }
 
@@ -487,7 +516,7 @@ enum GlassSettingsRowID: Hashable {
     case quality, autoPlayNext, upNextCard, audio, subtitles, themeSongs, clearCache, trakt, version
     case homeLanguages, homeShelves, homeLookup
     case tmdbKey, streamingRegion, streamingServices
-    case switchProfile, manageProfiles, profilePreferences
+    case switchProfile, profilePreferences
 }
 
 struct GlassSettingsView: View {
@@ -527,7 +556,10 @@ struct GlassSettingsView: View {
         .background { GlassSettingsBackdrop().ignoresSafeArea() }
         .defaultFocus($focusedRow, defaultFocusRow)
         #if DEBUG
-        .onAppear { if let initialPicker { picker = initialPicker } }
+        .onAppear {
+            if initialPicker == .taste { model.loadTaste() }
+            if let initialPicker { picker = initialPicker }
+        }
         #endif
         .fullScreenCover(item: $picker) { picker in
             pickerSheet(picker)
@@ -720,23 +752,23 @@ struct GlassSettingsView: View {
         }
     }
 
+    /// Two rows: Switch Profile, its icon the profile's own avatar (the
+    /// picker's Manage Profiles edits them), and Your Preferences.
     private var profilesSection: some View {
         GlassSettingsSection(title: "Profiles", footer: "Profiles.Footer") {
             if let profile = model.profile {
-                GlassSettingsRow(symbol: profile.symbol, tint: profile.tint, title: "Profiles.Switch",
-                                 value: profile.name) { model.actions.showProfiles(false) }
+                GlassSettingsRow(symbol: "", tint: .clear, leading: AnyView(ProfileAvatarView(avatar: profile.avatar, size: 56)),
+                                 title: "Profiles.Switch", value: profile.name) { model.actions.showProfiles() }
                     .focused($focusedRow, equals: .switchProfile)
                     .accessibilityIdentifier("Settings.Row.switchProfile")
                 GlassSettingsDivider()
-                GlassSettingsRow(symbol: "person.2.fill", tint: .indigo, title: "Profiles.Manage",
-                                 value: nil) { model.actions.showProfiles(true) }
-                    .focused($focusedRow, equals: .manageProfiles)
-                    .accessibilityIdentifier("Settings.Row.manageProfiles")
-                GlassSettingsDivider()
                 GlassSettingsRow(symbol: "sparkles", tint: .pink, title: "Profiles.Taste",
-                                 value: profile.preferences ?? "Profiles.Taste.Nothing".localized) { model.actions.showTaste() }
-                    .focused($focusedRow, equals: .profilePreferences)
-                    .accessibilityIdentifier("Settings.Row.profilePreferences")
+                                 value: profile.preferences ?? glassSettingsLocalized("Profiles.Taste.Nothing")) {
+                    model.loadTaste()
+                    picker = .taste
+                }
+                .focused($focusedRow, equals: .profilePreferences)
+                .accessibilityIdentifier("Settings.Row.profilePreferences")
             }
         }
     }
@@ -895,6 +927,12 @@ struct GlassSettingsView: View {
                     if let choice = model.streamingServiceOptions.first(where: { $0.id == id }) { model.toggle(streamingService: choice) }
                 },
                 onCancel: { self.picker = nil })
+        case .taste:
+            GlassSettingsTasteSheet(
+                lines: model.taste,
+                profileName: model.profile?.name ?? "",
+                onReset: { model.resetTaste() },
+                onClose: { self.picker = nil })
         }
     }
 
@@ -934,8 +972,9 @@ private struct GlassSettingsSection<Rows: View>: View {
     }
 }
 
-/// Regular Liquid Glass on tvOS 26+, an ultra-thin material with a hairline before.
-private struct GlassSettingsCard: ViewModifier {
+/// Regular Liquid Glass on tvOS 26+, an ultra-thin material with a hairline
+/// before. Also the profile editor's card (ProfileViews.swift).
+struct GlassSettingsCard: ViewModifier {
     let cornerRadius: CGFloat
     let fallback: Bool
 
@@ -965,6 +1004,9 @@ private struct GlassSettingsDivider: View {
 private struct GlassSettingsRow: View {
     let symbol: String
     let tint: Color
+    /// Drawn in the 56 pt icon slot instead of the tinted symbol (the
+    /// profile's avatar).
+    var leading: AnyView? = nil
     let title: String
     var subtitle: String? = nil
     /// One sentence that says what the setting does, under the title and
@@ -979,11 +1021,16 @@ private struct GlassSettingsRow: View {
     var body: some View {
         SwiftUI.Button(action: action) {
             HStack(spacing: 24) {
-                Image(systemName: symbol)
-                    .font(.system(size: 27, weight: .semibold))
-                    .foregroundStyle(.white)
-                    .frame(width: 56, height: 56)
-                    .background(tint.gradient, in: RoundedRectangle(cornerRadius: 15, style: .continuous))
+                if let leading {
+                    leading
+                        .frame(width: 56, height: 56)
+                } else {
+                    Image(systemName: symbol)
+                        .font(.system(size: 27, weight: .semibold))
+                        .foregroundStyle(.white)
+                        .frame(width: 56, height: 56)
+                        .background(tint.gradient, in: RoundedRectangle(cornerRadius: 15, style: .continuous))
+                }
                 if let detail {
                     VStack(alignment: .leading, spacing: 5) {
                         titleAndValue
@@ -1178,6 +1225,126 @@ struct GlassSettingsPickerSheet: View {
         }
         .buttonStyle(GlassSettingsRowStyle(cornerRadius: 22))
         .focused($focusedID, equals: option.id)
+    }
+}
+
+/// Your Preferences (Settings › Profiles), a glass sheet like the pickers:
+/// what the active profile's taste learned, a facet a line — not focusable,
+/// there is nothing to choose — and Reset Preferences, the one focus.
+/// Nothing learned: one centred line, which holds the focus so that Menu
+/// still reaches the sheet. Menu closes it.
+struct GlassSettingsTasteSheet: View {
+    let lines: [GlassSettingsTasteLine]
+    /// For the confirmation (« Forget what was learned about Alex? »).
+    let profileName: String
+    let onReset: () -> Void
+    let onClose: () -> Void
+
+    @State private var confirmReset = false
+    @Environment(\.glassSettingsFallback) private var fallback
+
+    var body: some View {
+        ZStack {
+            Color.black.opacity(0.4)
+                .ignoresSafeArea()
+            VStack(alignment: .leading, spacing: 18) {
+                Text(glassSettingsLocalized("Profiles.Taste"))
+                    .font(.system(size: 46, weight: .bold))
+                    .foregroundStyle(.white)
+                    .accessibilityAddTraits(.isHeader)
+                    .accessibilityIdentifier("Profiles.Taste.Title")
+                    .padding(.horizontal, 58)
+                Text(glassSettingsLocalized("Profiles.Taste.Footer"))
+                    .font(.system(size: 24))
+                    .foregroundStyle(GlassSettingsPalette.secondaryText)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.horizontal, 58)
+                if lines.isEmpty {
+                    empty
+                } else {
+                    facts
+                }
+            }
+            .padding(.top, 44)
+            .padding(.bottom, 20)
+            .frame(width: 1000)
+            .frame(maxHeight: 880)
+            .fixedSize(horizontal: false, vertical: true)
+            .modifier(GlassSettingsCard(cornerRadius: 50, fallback: fallback))
+        }
+        .onExitCommand(perform: onClose)
+        .presentationBackground(.clear)
+        .alert(String(format: glassSettingsLocalized("Profiles.Taste.ResetConfirm"), profileName), isPresented: $confirmReset) {
+            SwiftUI.Button(glassSettingsLocalized("Profiles.Taste.Reset"), role: .destructive, action: onReset)
+            SwiftUI.Button(glassSettingsLocalized("Cancel"), role: .cancel) {}
+        } message: {
+            Text(glassSettingsLocalized("Profiles.Taste.ResetMessage"))
+        }
+    }
+
+    /// The facts, then Reset Preferences under them.
+    private var facts: some View {
+        VStack(spacing: 0) {
+            ForEach(Array(lines.enumerated()), id: \.element.id) { index, line in
+                if index > 0 {
+                    Rectangle()
+                        .fill(Color.white.opacity(0.1))
+                        .frame(height: 1)
+                        .padding(.horizontal, 26)
+                }
+                HStack(spacing: 0) {
+                    Text(line.title)
+                        .font(.system(size: 31, weight: .medium))
+                        .foregroundStyle(GlassSettingsPalette.secondaryText)
+                        .lineLimit(1)
+                    Spacer(minLength: 24)
+                    Text(line.values)
+                        .font(.system(size: 31))
+                        .foregroundStyle(.white)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.75)
+                        .multilineTextAlignment(.trailing)
+                }
+                .padding(.horizontal, 26)
+                .padding(.vertical, 18)
+                // One element a facet: « Genres, Drama · Science Fiction ».
+                .accessibilityElement(children: .combine)
+                .accessibilityIdentifier("Profiles.Taste.\(line.id)")
+            }
+            // Red words on the card, still red on the focused white platter
+            // (large text): never red on red. The confirmation carries the
+            // destructive role.
+            SwiftUI.Button { confirmReset = true } label: {
+                Text(glassSettingsLocalized("Profiles.Taste.Reset"))
+                    .font(.system(size: 31, weight: .medium))
+                    .foregroundStyle(GlassSettingsPalette.accent)
+                    .lineLimit(1)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 26)
+                    .padding(.vertical, 18)
+            }
+            .buttonStyle(GlassSettingsRowStyle(cornerRadius: 22))
+            .accessibilityIdentifier("Profiles.Taste.Reset")
+            .padding(.top, 16)
+        }
+        .padding(.vertical, 16)
+        .padding(.horizontal, 36)
+    }
+
+    private var empty: some View {
+        Text(glassSettingsLocalized("Profiles.Taste.Empty"))
+            .font(.system(size: 29))
+            .foregroundStyle(GlassSettingsPalette.secondaryText)
+            .multilineTextAlignment(.center)
+            .fixedSize(horizontal: false, vertical: true)
+            .frame(maxWidth: .infinity)
+            .padding(26)
+            // The sheet's one focus target, drawn as nothing: without one,
+            // Menu would not reach the sheet.
+            .focusable()
+            .focusEffectDisabled()
+            .accessibilityIdentifier("Profiles.Taste.Empty")
+            .padding(.horizontal, 36)
     }
 }
 

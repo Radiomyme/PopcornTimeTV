@@ -1,7 +1,9 @@
 // ProfileTasteView.swift — Settings › Profiles › Your Preferences: what the
-// active profile's taste has learnt (`ProfileTaste`), and a way to forget
-// it. Apple TV (ProfilesPresenter.presentTaste), iPhone / iPad and Mac
-// (ProfilesSettingsSection, as a sheet).
+// active profile's taste has learned (`ProfileTaste`), and a way to forget
+// it. iPhone / iPad: a page pushed from Settings (`ProfileTasteView`); Mac:
+// sections of the Settings window's Profiles pane (`ProfileTasteSections`);
+// Apple TV: a glass sheet of Settings (`GlassSettingsTasteSheet`, fed by
+// `ProfileTasteModel.lines`).
 
 import SwiftUI
 import PopcornKit
@@ -78,110 +80,119 @@ final class ProfileTasteModel: ObservableObject {
     }
 }
 
+#if os(iOS)
+/// Your Preferences on the iPhone and iPad, pushed from Settings: one row per
+/// facet, the values on its trailing side; Reset Preferences… once something
+/// has been learned. Back returns to Settings.
 struct ProfileTasteView: View {
     @StateObject private var model: ProfileTasteModel
-    let onClose: () -> Void
     @State private var confirmReset = false
 
-    init(model: @autoclosure @escaping () -> ProfileTasteModel = ProfileTasteModel(), onClose: @escaping () -> Void) {
+    init(model: @autoclosure @escaping () -> ProfileTasteModel = ProfileTasteModel()) {
         _model = StateObject(wrappedValue: model())
-        self.onClose = onClose
     }
-
-    #if os(tvOS)
-    private let titleFont = Font.system(size: 56, weight: .bold)
-    private let lineFont = Font.system(size: 30)
-    private let width: CGFloat = 1200
-    #else
-    private let titleFont = Font.title.bold()
-    private let lineFont = Font.body
-    private let width: CGFloat = 560
-    #endif
 
     var body: some View {
-        ZStack {
-            LinearGradient(colors: [Color(white: 0.10), Color(white: 0.02)], startPoint: .top, endPoint: .bottom)
-                .ignoresSafeArea()
-            ScrollView {
-                VStack(alignment: .leading, spacing: 28) {
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text(profilesLocalized("Profiles.Taste"))
-                            .font(titleFont)
-                            .foregroundStyle(.white)
-                            .accessibilityIdentifier("Profiles.Taste.Title")
-                        Text(String(format: profilesLocalized("Profiles.Current"), model.profileName))
-                            .font(lineFont)
-                            .foregroundStyle(.white.opacity(0.6))
-                    }
-                    if model.lines.isEmpty {
-                        Text(profilesLocalized("Profiles.Taste.Empty"))
-                            .font(lineFont)
-                            .foregroundStyle(.white.opacity(0.7))
-                            .accessibilityIdentifier("Profiles.Taste.Empty")
-                    } else {
-                        Grid(alignment: .leadingFirstTextBaseline, horizontalSpacing: 30, verticalSpacing: 18) {
-                            ForEach(model.lines) { line in
-                                GridRow {
-                                    Text(line.title)
-                                        .foregroundStyle(.white.opacity(0.6))
-                                    Text(line.values.joined(separator: " · "))
-                                        .foregroundStyle(.white)
-                                        .accessibilityIdentifier("Profiles.Taste.\(line.id)")
-                                }
-                                .font(lineFont)
-                            }
-                        }
-                    }
-                    Text(profilesLocalized("Profiles.Taste.Footer"))
-                        .font(.footnote)
-                        .foregroundStyle(.white.opacity(0.5))
-                    buttons
+        Group {
+            if model.lines.isEmpty {
+                ContentUnavailableView {
+                    Label(profilesLocalized("Profiles.Taste.Nothing"), systemImage: "sparkles")
+                } description: {
+                    Text(verbatim: profilesLocalized("Profiles.Taste.Empty"))
                 }
-                .frame(maxWidth: width, alignment: .leading)
-                .padding(tvOS ? 80 : 28)
-                .frame(maxWidth: .infinity)
+                .accessibilityIdentifier("Profiles.Taste.Empty")
+            } else {
+                Form {
+                    Section {
+                        ForEach(model.lines) { line in
+                            LabeledContent(line.title, value: line.values.joined(separator: " · "))
+                                .accessibilityIdentifier("Profiles.Taste.\(line.id)")
+                        }
+                    } footer: {
+                        Text(verbatim: profilesLocalized("Profiles.Taste.Footer"))
+                    }
+                    Section {
+                        Button(profilesLocalized("Profiles.Taste.Reset") + "…", role: .destructive) { confirmReset = true }
+                            .accessibilityIdentifier("Profiles.Taste.Reset")
+                    }
+                }
             }
         }
-        #if os(tvOS)
-        .onExitCommand(perform: onClose)
-        #endif
-        .alert(String(format: profilesLocalized("Profiles.Taste.ResetConfirm"), model.profileName), isPresented: $confirmReset) {
-            SwiftUI.Button(profilesLocalized("Profiles.Taste.Reset"), role: .destructive) { model.reset() }
-            SwiftUI.Button(profilesLocalized("Profiles.Cancel"), role: .cancel) {}
-        } message: {
-            Text(profilesLocalized("Profiles.Taste.ResetMessage"))
-        }
-        .onReceive(NotificationCenter.default.publisher(for: ProfileTaste.didChangeNotification).receive(on: RunLoop.main)) { _ in
-            model.reload()
-        }
-    }
-
-    private var buttons: some View {
-        HStack(spacing: 30) {
-            SwiftUI.Button(profilesLocalized("Profiles.Done"), action: onClose)
-                .accessibilityIdentifier("Profiles.Taste.Done")
-                #if !os(tvOS)
-                .keyboardShortcut(.defaultAction)
-                #endif
-            // No destructive role here: on the Apple TV it draws red text on a
-            // red button. The confirmation says it.
-            SwiftUI.Button(profilesLocalized("Profiles.Taste.Reset")) { confirmReset = true }
-                .disabled(model.lines.isEmpty)
-                .accessibilityIdentifier("Profiles.Taste.Reset")
-        }
-        #if os(tvOS)
-        .focusSection()
-        #else
-        .buttonStyle(.bordered)
-        #endif
-        .padding(.top, 12)
-    }
-
-    private var tvOS: Bool {
-        #if os(tvOS)
-        return true
-        #else
-        return false
-        #endif
+        .navigationTitle(profilesLocalized("Profiles.Taste"))
+        .navigationBarTitleDisplayMode(.inline)
+        .modifier(ProfileTasteReset(model: model, isPresented: $confirmReset))
     }
 }
+#endif
+
+#if os(macOS)
+/// Your Preferences in the Mac's Profiles pane: a row per facet, the values
+/// trailing in grey, cut at the pane's width; Reset Preferences… once
+/// something has been learned.
+struct ProfileTasteSections: View {
+    @StateObject private var model = ProfileTasteModel()
+    @State private var confirmReset = false
+
+    var body: some View {
+        Section {
+            if model.lines.isEmpty {
+                Text(verbatim: profilesLocalized("Profiles.Taste.Empty"))
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .accessibilityIdentifier("Profiles.Taste.Empty")
+                    .modifier(ProfileTasteReset(model: model, isPresented: $confirmReset))
+            } else {
+                ForEach(model.lines) { line in
+                    LabeledContent {
+                        Text(verbatim: line.values.joined(separator: " · "))
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                            .truncationMode(.tail)
+                            .accessibilityIdentifier("Profiles.Taste.\(line.id)")
+                    } label: {
+                        Text(verbatim: line.title)
+                    }
+                }
+                HStack {
+                    Spacer()
+                    Button(profilesLocalized("Profiles.Taste.Reset") + "…", role: .destructive) { confirmReset = true }
+                        .accessibilityIdentifier("Profiles.Taste.Reset")
+                }
+                // On a row, not on the section: a section's modifiers do
+                // not reach a form's rows the same way on every macOS.
+                .modifier(ProfileTasteReset(model: model, isPresented: $confirmReset))
+            }
+        } header: {
+            Text(verbatim: profilesLocalized("Profiles.Taste"))
+                .accessibilityIdentifier("Settings.ProfilePreferences")
+        } footer: {
+            Text(verbatim: profilesLocalized("Profiles.Taste.Footer"))
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+}
+#endif
+
+#if !os(tvOS)
+/// The confirmation before forgetting, and the page kept current with what
+/// is learned meanwhile.
+private struct ProfileTasteReset: ViewModifier {
+    @ObservedObject var model: ProfileTasteModel
+    @Binding var isPresented: Bool
+
+    func body(content: Content) -> some View {
+        content
+            .alert(String(format: profilesLocalized("Profiles.Taste.ResetConfirm"), model.profileName), isPresented: $isPresented) {
+                SwiftUI.Button(profilesLocalized("Profiles.Taste.Reset"), role: .destructive) { model.reset() }
+                SwiftUI.Button(profilesLocalized("Profiles.Cancel"), role: .cancel) {}
+            } message: {
+                Text(verbatim: profilesLocalized("Profiles.Taste.ResetMessage"))
+            }
+            .onReceive(NotificationCenter.default.publisher(for: ProfileTaste.didChangeNotification).receive(on: RunLoop.main)) { _ in
+                model.reload()
+            }
+    }
+}
+#endif

@@ -192,6 +192,12 @@ class AppDelegate: UIResponder, UIApplicationDelegate, UITabBarControllerDelegat
     func open(_ link: DeepLink, allowsAutoPlay: Bool = true) -> Bool {
         // The last link wins: one kept before is dropped.
         pendingLink = nil
+        // « Who's Watching? » at launch: the interface is not there yet. The
+        // link is opened once a profile is picked (SceneDelegate).
+        if mainTabBarController == nil, ProfilesPresenter.keepUntilPicked(link, allowsAutoPlay: allowsAutoPlay) {
+            print("[DeepLink] \(link) kept until a profile is picked")
+            return false
+        }
         // The Terms of Service come first (a fresh install): nothing opens
         // behind them.
         guard UserDefaults.standard.bool(forKey: "tosAccepted"), let tabBarController = mainTabBarController else {

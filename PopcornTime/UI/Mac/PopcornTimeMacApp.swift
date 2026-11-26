@@ -112,8 +112,17 @@ struct MacMainWindowScene: Scene {
         WindowGroup(id: MacWindowNet.mainWindowID) {
             // popcorntime:// URLs — the links to a title, a section, a
             // search, and Trakt's sign-in redirect — are the window's
-            // (`MacRootView.onOpenURL`).
+            // (`MacRootView.onOpenURL`; while « Who's Watching? » asks, the
+            // gate holds them for after the pick).
             ProfileGate { MacRootView() }
+                // The AppKit window, as soon as there is one, whatever the
+                // gate shows (`MacWindowReader`): the launch question's
+                // window is the app's main window too, and the safety net
+                // must not open a second one behind it.
+                .background(MacWindowReader())
+                // A link goes to a window that is open, not to a new one —
+                // also while it asks « Who's Watching? ».
+                .handlesExternalEvents(preferring: ["*"], allowing: ["*"])
                 .preferredColorScheme(.dark)
                 .frame(minWidth: 1000, minHeight: 640)
         }
@@ -125,6 +134,7 @@ struct MacMainWindowScene: Scene {
             SidebarCommands()
             MacGoCommands()
             MacPlaybackCommands()
+            MacProfileCommands()
         }
     }
 }
@@ -198,13 +208,14 @@ final class MacAppDelegate: NSObject, NSApplicationDelegate {
     }
 }
 
-/// The app's main windows (those `MacRootView` is drawn in) and how to open
+/// The app's main windows (those the main scene's content is drawn in:
+/// `MacRootView`, or « Who's Watching? » before it) and how to open
 /// one when there is none.
 @MainActor
 enum MacWindowNet {
     static let mainWindowID = "main"
 
-    /// The windows `MacRootView` has been put in (`MacWindowReader`).
+    /// The windows the main scene's content has been put in (`MacWindowReader`).
     private static let windows = NSHashTable<NSWindow>.weakObjects()
     /// The scenes' window opener, kept from the menus (which exist with no
     /// window open).

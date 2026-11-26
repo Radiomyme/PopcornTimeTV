@@ -57,6 +57,13 @@ struct RootTabView: View {
             router.open(url: url)
         }
         .task {
+            // A link that came while « Who's Watching? » asked (`ProfileGate`
+            // held it): opened now that the tabs are here, without the
+            // release notes over its page, as for a launch by link.
+            if let url = ProfileLaunchQuestion.shared.takeHeldLink() {
+                _ = whatsNewCheck.linkOpened()
+                router.open(url: url)
+            }
             #if DEBUG
             // The verification hooks pick the tab and the page themselves.
             if IOSDebugHooks.isActive {

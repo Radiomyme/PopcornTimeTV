@@ -53,6 +53,39 @@ struct MacGoCommands: Commands {
     }
 }
 
+// MARK: - Profiles
+
+/// Popcorn Time › Switch Profile… (⇧⌘P), under Settings…: « Who's
+/// Watching? » as a sheet on the window in front (`MacRootView`); with no
+/// main window, one is opened for it. Not while a window asks the launch
+/// question (it is already on screen), nor under a sheet — the player
+/// among them: a switch makes the window again and would close it.
+struct MacProfileCommands: Commands {
+    @FocusedObject private var focused: MacNavigator?
+    @ObservedObject private var front = MacFrontNavigator.shared
+    @ObservedObject private var question = ProfileLaunchQuestion.shared
+
+    var body: some Commands {
+        CommandGroup(after: .appSettings) {
+            Button(profilesLocalized("Profiles.Switch") + "…") { switchProfile() }
+                .keyboardShortcut("p", modifiers: [.command, .shift])
+                .disabled(question.isAsking)
+        }
+    }
+
+    private func switchProfile() {
+        if MacNavigator.isASheetUp {
+            NSSound.beep()
+            return
+        }
+        if let navigator = focused ?? front.navigator {
+            navigator.showsProfilePicker = true
+        } else {
+            front.showProfilePickerInNewWindow()
+        }
+    }
+}
+
 // MARK: - Playback
 
 /// A track (audio, subtitles) a player offers the Playback menu.

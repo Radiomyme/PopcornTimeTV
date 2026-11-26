@@ -7,11 +7,12 @@ import PopcornKit
 
 /// macOS Settings window (⌘,) mirroring the iOS `SettingsView`: same
 /// UserDefaults keys, so preferences carry the same meaning across platforms.
-/// Four panes, as a Mac's settings have — Playback, Home, Streaming
-/// (`MacStreamingSettingsPane`: the TMDB key, the country, the services),
-/// About — each a grouped form no taller than its rows: in one pane the
-/// window had grown taller than a 14-inch screen once the Home's settings
-/// were added.
+/// Five panes, as a Mac's settings have — Profiles (`MacProfilesSettingsPane`:
+/// who is watching, each profile's editor, Your Preferences), Playback,
+/// Home, Streaming (`MacStreamingSettingsPane`: the TMDB key, the country,
+/// the services), About — each a grouped form no taller than its rows: in
+/// one pane the window had grown taller than a 14-inch screen once the
+/// Home's settings were added.
 /// Trakt: no sign-in is offered — Trakt refuses the app's key (403), the
 /// browser flow could only end on an error. An account signed in with an
 /// earlier version still shows, so that it can be signed out.
@@ -50,16 +51,23 @@ struct MacSettingsView: View {
 
     /// The window's panes.
     private enum Pane: Hashable {
+        case profiles
         case playback
         case home
         case streaming
         case about
     }
 
-    @State private var pane = Pane.playback
+    /// The pane shown last, kept outside the view: a profile switch makes
+    /// the window's content again (`ProfileScoped`), on the pane it was on.
+    @MainActor private static var lastPane = Pane.playback
+    @State private var pane = MacSettingsView.lastPane
 
     var body: some View {
         TabView(selection: $pane) {
+            MacProfilesSettingsPane()
+                .tabItem { Label(profilesLocalized("Profiles"), systemImage: "person.2") }
+                .tag(Pane.profiles)
             form { playbackSections }
                 .tabItem { Label("Playback", systemImage: "play.circle") }
                 .tag(Pane.playback)
@@ -79,11 +87,12 @@ struct MacSettingsView: View {
         .onAppear {
             reloadHomeSettings()
             #if DEBUG
-            // `-PTDebugSettingsPane <playback|home|streaming|about>`: that
+            // `-PTDebugSettingsPane <profiles|playback|home|streaming|about>`: that
             // pane; `-PTDebugSettingsSheet <languages|shelves>`: the Home's
             // pane with that list open, `<tmdbkey|services>`: the
             // Streaming pane with that sheet open.
             switch MacDebugHooks.settingsPane {
+            case "profiles": pane = .profiles
             case "home": pane = .home
             case "streaming": pane = .streaming
             case "about": pane = .about
@@ -100,7 +109,10 @@ struct MacSettingsView: View {
         }
         // A key saved or removed in the Streaming pane lists the
         // « Services » shelf, or not, among the Home's.
-        .onChange(of: pane) { _, _ in reloadHomeSettings() }
+        .onChange(of: pane) { _, pane in
+            MacSettingsView.lastPane = pane
+            reloadHomeSettings()
+        }
         .sheet(item: $homeList, onDismiss: reloadHomeSettings) { list in
             MacHomeSettingsSheet(title: list == .languages ? "Home.Settings.Languages" : "Home.Settings.Shelves") {
                 switch list {
@@ -123,7 +135,6 @@ struct MacSettingsView: View {
 
     @ViewBuilder
     private var playbackSections: some View {
-        ProfilesSettingsSection()
         Section {
             // Labels only: the stored tags stay "Balanced" / "Highest" /
             // "Lowest" / "" (MacAutoQuality, the iOS / tvOS settings).

@@ -46,18 +46,19 @@ final class GlassSettingsHostingController: UIHostingController<GlassSettingsVie
             regionName: { GlassSettingsStore.regionName($0) },
             readProfile: {
                 let profile = ProfileManager.shared.active
-                let style = ProfileAvatar.style(profile.avatar)
-                return GlassSettingsProfile(name: profile.name, symbol: style.symbol, tint: style.colors[0],
+                return GlassSettingsProfile(name: profile.name, avatar: profile.avatar,
                                             preferences: ProfileTasteModel.summary())
             },
-            showProfiles: { managing in
+            showProfiles: {
                 guard let root = AppDelegate.shared.window?.rootViewController else { return }
-                ProfilesPresenter.present(from: root, managing: managing)
+                ProfilesPresenter.present(from: root)
             },
-            showTaste: {
-                guard let root = AppDelegate.shared.window?.rootViewController else { return }
-                ProfilesPresenter.presentTaste(from: root)
-            })
+            readTaste: {
+                ProfileTasteModel.lines(of: .shared).map {
+                    GlassSettingsTasteLine(id: $0.id, title: $0.title, values: $0.values.joined(separator: " · "))
+                }
+            },
+            resetTaste: { ProfileTaste.shared.reset() })
 
         let audio = PlaybackLanguagePreferences.explicitAudioLanguageCode
         let subtitles = PlaybackLanguagePreferences.explicitSubtitleLanguageCode
@@ -70,9 +71,10 @@ final class GlassSettingsHostingController: UIHostingController<GlassSettingsVie
                                    actions: actions)
         #if DEBUG
         // `-PTDebugSettingsRow <row>` (homeLanguages, homeShelves, homeLookup,
-        // tmdbKey, streamingRegion, streamingServices…):
-        // the row that takes the focus; `-PTDebugSettingsPicker <picker>`
-        // (homeLanguages, homeShelves…): the sheet open at first display.
+        // tmdbKey, streamingRegion, streamingServices, switchProfile,
+        // profilePreferences…): the row that takes the focus;
+        // `-PTDebugSettingsPicker <picker>` (homeLanguages, homeShelves,
+        // taste…): the sheet open at first display.
         let row: GlassSettingsRowID
         switch UserDefaults.standard.string(forKey: "PTDebugSettingsRow") {
         case "homeLanguages": row = .homeLanguages
@@ -84,7 +86,6 @@ final class GlassSettingsHostingController: UIHostingController<GlassSettingsVie
         case "streamingRegion": row = .streamingRegion
         case "streamingServices": row = .streamingServices
         case "switchProfile": row = .switchProfile
-        case "manageProfiles": row = .manageProfiles
         case "profilePreferences": row = .profilePreferences
         default: row = .quality
         }

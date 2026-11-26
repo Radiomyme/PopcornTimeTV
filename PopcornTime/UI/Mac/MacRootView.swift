@@ -25,6 +25,8 @@ struct MacRootView: View {
     /// over a launch by link).
     @State private var showWhatsNew = false
     @State private var whatsNewCheck = WhatsNewLaunchCheck()
+    /// The profile picked in the Switch Profile… sheet.
+    @State private var profilePicked: String?
     #if DEBUG
     /// `-PTDebugPlayTorrent` (BoundedStorageDebugHooks): the player sheet.
     @State private var debugPlayback: MacPendingPlayback?
@@ -60,8 +62,6 @@ struct MacRootView: View {
             // pages are: never the window's grey.
             .background(HomePalette.background.ignoresSafeArea())
         }
-        // The AppKit window, as soon as there is one (`MacWindowReader`).
-        .background(MacWindowReader())
         .environmentObject(navigator)
         .environmentObject(navigator.library)
         // The Go menu acts on the window in front (MacCommands): the
@@ -89,8 +89,6 @@ struct MacRootView: View {
                 }
             }
         }
-        // A link goes to a window that is open, not to a new one.
-        .handlesExternalEvents(preferring: ["*"], allowing: ["*"])
         .onChange(of: controlActiveState) { _, state in
             if state == .key { MacFrontNavigator.shared.windowBecameKey(navigator) }
         }
@@ -100,7 +98,18 @@ struct MacRootView: View {
             if depth == 0 { navigator.library.reload() }
         }
         .task {
+            // A link that came while « Who's Watching? » asked: this window
+            // is the first to show the content, it opens it — no release
+            // notes over its page, as for a launch by link.
+            if let url = ProfileLaunchQuestion.shared.takeHeldLink() {
+                _ = whatsNewCheck.linkOpened()
+                navigator.open(url: url)
+            }
             #if DEBUG
+            if ProfilesDebugScreen.take(["sheet"]) != nil {
+                try? await Task.sleep(for: .seconds(1))
+                navigator.showsProfilePicker = true
+            }
             // Verification runs (-PTDebug… launch arguments): no release
             // notes over the page, and the requested section / page.
             if MacDebugHooks.isActive || BoundedStorageDebugHooks.isActive {
@@ -115,6 +124,19 @@ struct MacRootView: View {
         }
         .sheet(isPresented: $showWhatsNew) {
             WhatsNewView { showWhatsNew = false }
+        }
+        // Popcorn Time › Switch Profile… (`MacProfileCommands`). Another
+        // profile is made active once the sheet has gone: the window is
+        // then made again for it (`ProfileGate`).
+        .sheet(isPresented: $navigator.showsProfilePicker, onDismiss: {
+            guard let id = profilePicked else { return }
+            profilePicked = nil
+            if id != ProfileManager.shared.activeID { ProfileManager.shared.activate(id) }
+        }) {
+            MacProfilePickerSheet { picked in
+                profilePicked = picked
+                navigator.showsProfilePicker = false
+            }
         }
         #if DEBUG
         .sheet(item: $debugPlayback) { item in
@@ -259,7 +281,9 @@ struct MacRootView: View {
 
 // MARK: - The window
 
-/// The AppKit window the root view is drawn in, as soon as it has one.
+/// The AppKit window the main scene's content is drawn in, as soon as it has
+/// one (put by `MacMainWindowScene`, around « Who's Watching? » and the root
+/// view alike).
 struct MacWindowReader: NSViewRepresentable {
     func makeNSView(context: Context) -> ReaderView { ReaderView() }
     func updateNSView(_ view: ReaderView, context: Context) {}

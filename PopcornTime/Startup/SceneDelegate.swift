@@ -40,10 +40,11 @@ class SceneDelegate: UIResponder, UIWindowSceneDelegate {
         let launchURL = connectionOptions.urlContexts.first?.url
         // « Who's Watching? » first when the device has several profiles —
         // not for a launch to open a link (the Top Shelf's Play): the last
-        // profile watches it.
+        // profile watches it. A link that comes while it asks is opened
+        // after the pick.
         if ProfileManager.shared.asksAtLaunch && launchURL == nil {
-            ProfilesPresenter.launchPicker(in: window) { [weak self] in
-                self?.installInterface(in: window, launchURL: nil, animated: true)
+            ProfilesPresenter.launchPicker(in: window) { [weak self] kept in
+                self?.installInterface(in: window, launchURL: nil, keptLink: kept, animated: true)
             }
             window.makeKeyAndVisible()
         } else {
@@ -53,10 +54,13 @@ class SceneDelegate: UIResponder, UIWindowSceneDelegate {
     }
 
     /// The tab bar from the storyboard, then what a launch shows over it.
-    private func installInterface(in window: UIWindow, launchURL: URL?, animated: Bool) {
+    /// `keptLink`: a link that came while « Who's Watching? » asked.
+    private func installInterface(in window: UIWindow, launchURL: URL?,
+                                  keptLink: ProfilesPresenter.KeptLink? = nil, animated: Bool) {
         let root = UIStoryboard(name: "tvOS", bundle: nil).instantiateInitialViewController()
         if animated {
-            UIView.transition(with: window, duration: 0.35, options: .transitionCrossDissolve) {
+            let duration = UIAccessibility.isReduceMotionEnabled ? 0 : 0.35
+            UIView.transition(with: window, duration: duration, options: .transitionCrossDissolve) {
                 window.rootViewController = root
             }
         } else {
@@ -78,11 +82,13 @@ class SceneDelegate: UIResponder, UIWindowSceneDelegate {
             WhatsNewPresenter.presentAtLaunchIfNeeded(
                 from: root,
                 isFreshInstall: !UserDefaults.standard.bool(forKey: "tosAccepted"),
-                launchedFromURL: launchURL != nil || debugLaunchURL != nil)
+                launchedFromURL: launchURL != nil || debugLaunchURL != nil || keptLink != nil)
         }
 
         if let launchURL {
             AppDelegate.shared.open(launchURL)
+        } else if let keptLink {
+            AppDelegate.shared.open(keptLink.link, allowsAutoPlay: keptLink.allowsAutoPlay)
         } else if let debugLaunchURL {
             AppDelegate.shared.open(debugLaunchURL, allowsAutoPlay: false)
         }
