@@ -163,7 +163,7 @@ TMDB itself with a real key (2026-11-21). Not yet on a real Apple TV, iPhone, iP
 - Unit tests for the profiles (`ProfileManagerTests`: the migration, a 5.3.0 install and a
   downgrade, real defaults, switching, separation, deletion, a late Trakt answer), the taste and
   « For You » (`ProfileTasteTests`), the release languages (`ReleaseLanguageTests`), the search
-  session (`SearchSessionTests`), the language settings' three states and What's New: 1,008
+  session (`SearchSessionTests`), the language settings' three states and What's New: 1,014
   unit tests.
 - Apple TV UI tests: `ProfilesUITests` (the launch picker, switching from Settings, Menu, the
   editor, links held, « For You » and Your Preferences) and Search in rows, its failures and a
