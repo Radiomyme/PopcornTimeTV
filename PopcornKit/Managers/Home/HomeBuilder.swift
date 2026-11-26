@@ -78,8 +78,13 @@ enum HomeBuilder {
         /// « For You »: its cards at most, and at least (fewer: no shelf).
         var forYouLimit = 20
         var forYouMinimum = 6
-        /// A title below this score (`TasteSnapshot.score`) is not offered.
+        /// A title below this score (`TasteSnapshot.score`) is not offered…
         var forYouMinimumScore = 0.12
+        /// … nor one whose genres the profile likes less than this
+        /// (`TasteSnapshot.genreScore`): a recent, well-rated title of a
+        /// genre it never watches is no pick for it, and too few that are
+        /// make no shelf rather than a copy of Trending.
+        var forYouMinimumGenreScore = 0.2
         /// Metadata lookups for the titles of a ranking no list knows.
         var lookupLimit = 8
         /// A light refresh (`HomePlan.light`): the Top Shelf extension's.
@@ -806,10 +811,11 @@ private struct Context {
     /// card per service, the one shown marked. Empty without services (no
     /// TMDB key): no row.
     /// « For You »: the titles of the other shelves (the hero, the
-    /// catalogues, the rankings, the genres; no episode, no service card),
-    /// each once, ranked by the profile's taste; the ones it played, gave up
-    /// on, or listed left out. nil without a taste confident enough, or with
-    /// too few titles it should like.
+    /// catalogues, the rankings, the genres; no episode, no service card;
+    /// none the user hid in Settings › Home), each once, ranked by the
+    /// profile's taste; the ones it played, gave up on, or listed left out,
+    /// and the ones of genres it does not like. nil without a taste
+    /// confident enough, or with too few titles it should like.
     func forYou(from drafts: [HomeBuilder.Draft]) -> HomeBuilder.Draft? {
         guard let taste = inputs.local.taste, taste.isConfident, !inputs.hidden.contains(HomeShelfID.forYou) else { return nil }
         var excluded = taste.excluded
@@ -818,12 +824,13 @@ private struct Context {
                                     HomeShelfID.services, HomeShelfID.airedEpisodes]
         var seen = Set<String>()
         var scored: [(entry: HomeEntry, score: Double, order: Int)] = []
-        for draft in drafts where !skipped.contains(draft.id) {
+        for draft in drafts where !skipped.contains(draft.id) && !inputs.hidden.contains(draft.id) {
             for entry in draft.entries {
                 let item = facts(of: entry.item)
                 guard item.episode == nil, !item.imdbId.isEmpty, !item.title.isEmpty, !excluded.contains(item.imdbId),
                       !HomeServiceCard.isServiceCard(item), !item.badges.contains(.upcoming),
                       seen.insert(item.imdbId).inserted else { continue }
+                guard taste.genreScore(item.genres) >= rules.forYouMinimumGenreScore else { continue }
                 let score = taste.score(item)
                 guard score >= rules.forYouMinimumScore else { continue }
                 var cleaned = entry
