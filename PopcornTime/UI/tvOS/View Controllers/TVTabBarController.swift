@@ -255,19 +255,65 @@ class TVTabBarController: UITabBarController {
     ///
     /// Downloads is an icon too (it was the system item, a text):
     /// "Téléchargements" took the place of two tabs, and the bar has to hold
-    /// one more title, Home. VoiceOver still reads "Downloads". Its badge
-    /// counts the downloads not finished (failed ones left out).
+    /// one more title, Home. VoiceOver still reads "Downloads". The number of
+    /// downloads not finished (failed ones left out) is drawn into the icon
+    /// (`downloadsIcon`): the system badge sat on the arrow and hid it.
     private func installGlassDownloads() {
         guard let downloadsTab = viewControllers?.first(where: { name(of: $0) == .downloads }) else { return }
         (downloadsTab as? UINavigationController)?.setViewControllers([GlassDownloadsHostingController()], animated: false)
         downloadsTab.tabBarItem = TVTabBarController.iconItem("arrow.down.circle.fill", label: "Downloads".localized)
         downloadsBadge = DownloadsStore.shared.$entries
             .receive(on: DispatchQueue.main)
-            .sink { [weak downloadsTab] _ in
-                let count = DownloadsStore.shared.activeCount
-                downloadsTab?.tabBarItem.badgeValue = count == 0 ? nil
+            .map { _ in DownloadsStore.shared.activeCount }
+            .removeDuplicates()
+            .sink { [weak downloadsTab] count in
+                guard let item = downloadsTab?.tabBarItem else { return }
+                item.image = TVTabBarController.downloadsIcon(count: count)
+                item.accessibilityValue = count == 0 ? nil
                     : NumberFormatter.localizedString(from: NSNumber(value: count), number: .none)
             }
+    }
+
+    /// The Downloads glyph with, when downloads are under way, their number
+    /// in a small disc at its top-trailing corner — cut out of the disc, and
+    /// the disc cut out of the arrow's circle with a thin gap. One template
+    /// image: the tab bar tints it like the other icons (white, black on the
+    /// focused tab), nothing of the arrow is hidden.
+    static func downloadsIcon(count: Int) -> UIImage? {
+        let glyph = UIImage(systemName: "arrow.down.circle.fill",
+                            withConfiguration: UIImage.SymbolConfiguration(pointSize: 32, weight: .bold))
+        guard let glyph, count > 0 else { return glyph }
+        let number = NumberFormatter.localizedString(from: NSNumber(value: min(count, 99)), number: .none)
+        let font = UIFont.systemFont(ofSize: 15, weight: .heavy)
+        let textSize = (number as NSString).size(withAttributes: [.font: font])
+        let discHeight: CGFloat = 22
+        let disc = CGSize(width: max(discHeight, ceil(textSize.width) + 10), height: discHeight)
+        let gap: CGFloat = 2.5
+        // The disc's centre on the circle's top-trailing edge; the canvas
+        // grows by the same amount on every side, so the arrow stays centred.
+        let overhang = CGSize(width: disc.width / 2 - glyph.size.width * 0.12, height: disc.height / 2 - glyph.size.height * 0.12)
+        let pad = CGSize(width: max(overhang.width, 0) + 1, height: max(overhang.height, 0) + 1)
+        let canvas = CGSize(width: glyph.size.width + pad.width * 2, height: glyph.size.height + pad.height * 2)
+        let glyphRect = CGRect(origin: CGPoint(x: pad.width, y: pad.height), size: glyph.size)
+        let discRect = CGRect(x: glyphRect.maxX - glyph.size.width * 0.12 - disc.width / 2,
+                              y: glyphRect.minY + glyph.size.height * 0.12 - disc.height / 2,
+                              width: disc.width, height: disc.height)
+        let format = UIGraphicsImageRendererFormat.preferred()
+        let image = UIGraphicsImageRenderer(size: canvas, format: format).image { context in
+            let cg = context.cgContext
+            glyph.withTintColor(.black).draw(in: glyphRect)
+            // The gap around the disc.
+            cg.setBlendMode(.clear)
+            UIBezierPath(roundedRect: discRect.insetBy(dx: -gap, dy: -gap), cornerRadius: (disc.height + gap * 2) / 2).fill()
+            cg.setBlendMode(.normal)
+            UIColor.black.setFill()
+            UIBezierPath(roundedRect: discRect, cornerRadius: disc.height / 2).fill()
+            // The number, cut out of the disc.
+            cg.setBlendMode(.destinationOut)
+            let origin = CGPoint(x: discRect.midX - textSize.width / 2, y: discRect.midY - textSize.height / 2)
+            (number as NSString).draw(at: origin, withAttributes: [.font: font, .foregroundColor: UIColor.black])
+        }
+        return image.withRenderingMode(.alwaysTemplate)
     }
 
     private var downloadsBadge: AnyCancellable?
