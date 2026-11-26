@@ -234,6 +234,10 @@ private struct MacVLCResumeOverlay: View {
 
 @MainActor
 final class MacVLCController: NSObject, ObservableObject, VLCMediaPlayerDelegate {
+    /// The profile that started the play: its position goes there, even
+    /// once another is in use (`PlaybackRecorder.save`).
+    let profileID = ProfileManager.shared.activeID
+
     struct TrackItem: Identifiable, Equatable {
         let id: String
         let name: String
@@ -531,7 +535,7 @@ final class MacVLCController: NSObject, ObservableObject, VLCMediaPlayerDelegate
         notePlayerPosition()
         // Every 30 s of playback, as the native player does: a crash or a
         // forced quit loses half a minute, not the session.
-        if player.state == .playing, MacPlaybackProgress.isCheckpointDue() { saveProgress() }
+        if player.state == .playing, MacPlaybackProgress.isCheckpointDue() { saveProgress(status: .watching) }
         // Not while a resume is on its way: VLC's clock then shows 0:00 or
         // the target without playing there — bounded storage would take a
         // step between them for a rewind (a forced seek and its message,
@@ -868,7 +872,7 @@ final class MacVLCController: NSObject, ObservableObject, VLCMediaPlayerDelegate
     /// unless the session — the native player before VLC, or VLC — played
     /// past it (`VLCWatchProgress`, `ResumePolicy`). At close, and at the
     /// 30 s checkpoints.
-    private func saveProgress() {
+    private func saveProgress(status: Trakt.WatchedStatus = .finished) {
         if let media, let current = watch.current,
            let value = ResumePolicy.progressToSave(current: current, resumePoint: watch.resumePoint,
                                                    highWater: max(watch.highWater, current, nativeHighWater),
@@ -876,7 +880,7 @@ final class MacVLCController: NSObject, ObservableObject, VLCMediaPlayerDelegate
                                                    // offer, once playback from 0:00 really ran
                                                    // (`VLCSlowResumeRestart`): the user's choice.
                                                    userRestarted: watch.userRestarted) {
-            MacPlaybackProgress.store(value, for: media)
+            MacPlaybackProgress.store(value, for: media, status: status, profileID: profileID)
         }
     }
 

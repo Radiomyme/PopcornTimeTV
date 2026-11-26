@@ -65,6 +65,9 @@ enum MacAppLaunch {
         // The torrent lists favour releases in the preferred audio language:
         // PopcornKit reads the setting through the app's language names.
         PlaybackLanguagePreferences.installReleaseLanguageResolver()
+        // The profiles' tastes keep a position saved again in memory a
+        // while: written when the app goes behind another and when it quits.
+        ProfileTaste.flushes(on: [NSApplication.didResignActiveNotification, NSApplication.willTerminateNotification])
         // GCDWebServer (torrent streaming + remux HLS servers): quiet about
         // the players' cancelled requests. First: -PTDebugHTTPTrace replaces it.
         GCDWebServerLogging.configure()

@@ -107,6 +107,9 @@ import PopcornKit
 /// (UIKit-only: the native macOS app has its own AVPlayerView-based player —
 /// the shared `RemuxPlayback` engine is what both build on.)
 final class RemuxAVPlayerViewController: AVPlayerViewController {
+    /// The profile that started the play: its position goes there, even
+    /// once another is in use (`PlaybackRecorder.save`).
+    let profileID = ProfileManager.shared.activeID
 
     /// Called at most once, on the main queue, when the native path can't
     /// play the payload (or the user resumes through VLC). `resumeFraction`
@@ -2327,7 +2330,7 @@ final class RemuxAVPlayerViewController: AVPlayerViewController {
             return
         }
         // With the titles and the length: the Continue Watching card.
-        PlaybackRecorder.save(value, of: media, duration: lastKnownDuration, status: status)
+        PlaybackRecorder.save(value, of: media, duration: lastKnownDuration, status: status, profileID: profileID)
     }
 
     /// From the 1 Hz tick, while playing: the position every 30 s

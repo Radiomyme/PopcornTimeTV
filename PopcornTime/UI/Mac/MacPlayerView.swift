@@ -677,6 +677,9 @@ struct MacResumeQuestion: Equatable {
 /// to VLC.
 @MainActor
 final class MacPlayerController: ObservableObject {
+    /// The profile that started the play: its position goes there, even
+    /// once another is in use (`PlaybackRecorder.save`).
+    let profileID = ProfileManager.shared.activeID
     @Published var player: AVPlayer?
     @Published var buffering: Double = 0
     @Published var statusLine = LoadingPhase.starting.line
@@ -2266,7 +2269,7 @@ final class MacPlayerController: ObservableObject {
         }
         noteHighWater()
         tickUpNext()
-        if MacPlaybackProgress.isCheckpointDue(), player?.timeControlStatus == .playing { saveProgressIfNeeded() }
+        if MacPlaybackProgress.isCheckpointDue(), player?.timeControlStatus == .playing { saveProgressIfNeeded(status: .watching) }
         reportPlaybackPositions()
         checkResumingText()
         publishCommandState()
@@ -2511,11 +2514,12 @@ final class MacPlayerController: ObservableObject {
     /// title watched) — never below the session's resume point unless it
     /// played past it. Nothing while buffering, and nothing once VLC took
     /// over: MacVLCController saves its own position.
-    private func saveProgressIfNeeded() {
+    private func saveProgressIfNeeded(status: Trakt.WatchedStatus = .finished) {
         guard !stopped, vlcURL == nil, player != nil, let media,
               let fraction = knownPlaybackFraction(), fraction > 0 else { return }
         noteHighWater()
-        MacPlaybackProgress.save(fraction, for: media, resumePoint: resumePoint, highWater: highWater)
+        MacPlaybackProgress.save(fraction, for: media, resumePoint: resumePoint, highWater: highWater,
+                                 status: status, profileID: profileID)
     }
 
     /// `MacAVPlayerRepresentable`: Picture in Picture started / ended.

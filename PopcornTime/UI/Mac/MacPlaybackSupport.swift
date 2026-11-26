@@ -124,8 +124,11 @@ enum MacPlaybackProgress {
         checkpoint.isDue()
     }
 
-    /// The native player at close (or at a checkpoint): `fraction` where it is.
-    static func save(_ fraction: Float, for media: Media, resumePoint: Float, highWater: Float) {
+    /// The native player at close (`.finished`) or at a checkpoint
+    /// (`.watching`): `fraction` where it is, into `profileID`'s library —
+    /// the profile that started the play (`PlaybackRecorder.save`).
+    static func save(_ fraction: Float, for media: Media, resumePoint: Float, highWater: Float,
+                     status: Trakt.WatchedStatus, profileID: String) {
         guard fraction.isFinite, fraction > 0 else { return }
         let current = min(fraction, 1)
         guard let value = ResumePolicy.progressToSave(current: current, resumePoint: resumePoint,
@@ -133,7 +136,7 @@ enum MacPlaybackProgress {
             print("[Player] progress \(Int(current * 100)) % not saved — keeps the resume point at \(Int(resumePoint * 100)) %")
             return
         }
-        store(value, for: media)
+        store(value, for: media, status: status, profileID: profileID)
     }
 
     /// The point a session opening now protects: the saved progress, 0
@@ -151,9 +154,9 @@ enum MacPlaybackProgress {
 
     /// Writes a value already checked against the saved one (`save`, or
     /// the VLC fallback's own check, MacVLCController.stop).
-    static func store(_ value: Float, for media: Media) {
+    static func store(_ value: Float, for media: Media, status: Trakt.WatchedStatus, profileID: String) {
         guard value.isFinite, value > 0 else { return }
         // With the titles: the Continue Watching entry.
-        PlaybackRecorder.save(min(value, 1), of: media, status: .finished)
+        PlaybackRecorder.save(min(value, 1), of: media, status: status, profileID: profileID)
     }
 }

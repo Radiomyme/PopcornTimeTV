@@ -282,6 +282,48 @@ final class ProfileManagerTests: CheckedTestCase {
         eq(profiles.activeID, sam.id, "Sam stays active")
     }
 
+    func testDeletingTheActiveProfileAnnouncesTheSwitch() throws {
+        let center = NotificationCenter()
+        let profiles = manager(MemoryLibraryStorage(), center: center)
+        let alex = try profiles.create(name: "Alex", avatar: 1)
+        profiles.activate(alex.id)
+        var switches = 0
+        let token = center.addObserver(forName: .activeProfileDidChange, object: nil, queue: nil) { _ in switches += 1 }
+        defer { center.removeObserver(token) }
+        try profiles.delete(alex.id)
+        eq(profiles.activeID, Profile.primaryID, "the primary profile takes over")
+        eq(switches, 1, "and the windows are told (a player up there would close)")
+    }
+
+    // MARK: - A play's position
+
+    func testAPlaysPositionGoesToTheProfileThatStartedIt() throws {
+        let storage = MemoryLibraryStorage()
+        let profiles = manager(storage)
+        let alex = try profiles.create(name: "Alex", avatar: 1)
+        let clock = F.Clock("2026-11-25T12:00:00Z")
+        profiles.activate(alex.id)
+        let started = profiles.activeID
+        // Another profile is made active while Alex's player is up.
+        profiles.activate(Profile.primaryID)
+        eq(PlaybackRecorder.owner(started, in: profiles), alex.id, "the save still belongs to Alex")
+        eq(PlaybackRecorder.owner(nil, in: profiles), Profile.primaryID, "a player that did not say: the active profile")
+
+        let alexLibrary = library(profiles, alex.id, clock: clock), me = library(profiles, Profile.primaryID, clock: clock)
+        let taste = ProfileTaste(storage: profiles.storage(for: alex.id), center: NotificationCenter(), now: { clock.now })
+        var movie = Movie(title: "Arrival", id: "tt2543164")
+        movie.genres = ["Drama"]
+        PlaybackRecorder.record(0.4, of: movie, details: PlaybackDetails(media: movie), status: .finished,
+                                library: alexLibrary, taste: taste, isActive: false)
+        eq(alexLibrary.progress("tt2543164"), 0.4, "Alex's library has the position")
+        eq(me.progress("tt2543164"), 0, "the profile in use now does not")
+        let stored = ProfileTaste(storage: profiles.storage(for: alex.id), center: NotificationCenter(), now: { clock.now })
+        check((stored.snapshot().genres["Drama"] ?? 0) > 0, "Alex's taste learnt from the play", "\(stored.snapshot().genres)")
+
+        try profiles.delete(alex.id)
+        eq(PlaybackRecorder.owner(started, in: profiles), nil, "Alex deleted meanwhile: the position is saved nowhere")
+    }
+
     // MARK: - A Trakt answer on its way
 
     func testATraktAnswerGoesToTheProfileThatAsked() throws {

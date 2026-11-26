@@ -104,29 +104,66 @@ public enum PlaybackRecorder {
     /// - Parameters:
     ///   - progress: 0…1; 0 deletes the saved position.
     ///   - position, duration: seconds, when the player knows them.
+    ///   - status: `.watching` for a checkpoint (30 s, the hand-off to
+    ///     VLC), `.paused` at the pause or the background, `.finished` at
+    ///     the end of the play.
+    ///   - profileID: the profile that started the play (`ProfileManager.activeID`
+    ///     then); nil, the active one. A switch or a deletion while a player
+    ///     is up (a Mac window, Settings in another) never writes one
+    ///     profile's position into another's library.
     public static func save(_ progress: Float, of media: Media, position: TimeInterval? = nil, duration: TimeInterval? = nil,
-                            status: Trakt.WatchedStatus) {
-        let details = PlaybackDetails(media: media, position: position, duration: duration)
-        if let movie = media as? Movie {
-            WatchedlistManager<Movie>.movie.setCurrentProgress(progress, for: movie.id, with: status, details: details)
-        } else if let episode = media as? Episode {
-            if let show = episode.show, !show.episodes.isEmpty { Library.shared.noteGuide(of: show, always: true) }
-            WatchedlistManager<Episode>.episode.setCurrentProgress(progress, for: episode.id, with: status, details: details)
+                            status: Trakt.WatchedStatus, profileID: String? = nil) {
+        let active = ProfileManager.shared.activeID
+        guard let owner = owner(profileID, in: .shared) else {
+            print("[Library] the profile that started the play is gone: its position is not saved")
+            return
         }
-        noteTaste(progress, of: media, release: details.release)
-        // The taste writes a position saved again only now and then (the
-        // Mac's checkpoints say `.finished` too): what is left, at the pause
-        // or when the app goes to the background.
-        if status == .paused { ProfileTaste.shared.flush() }
+        let details = PlaybackDetails(media: media, position: position, duration: duration)
+        record(progress, of: media, details: details, status: status, library: Library.library(for: owner),
+               taste: ProfileTaste.taste(for: owner), isActive: owner == active)
+    }
+
+    /// The profile a play's saves go to: the one that started it while it
+    /// exists (nil once deleted), the active one when the player did not say.
+    static func owner(_ profileID: String?, in manager: ProfileManager) -> String? {
+        guard let profileID = profileID else { return manager.activeID }
+        return manager.profile(withID: profileID) != nil ? profileID : nil
+    }
+
+    /// `save` into a given profile's library and taste. The active
+    /// profile's goes through `WatchedlistManager` (Trakt's scrobble);
+    /// another's is written to its library alone.
+    static func record(_ progress: Float, of media: Media, details: PlaybackDetails, status: Trakt.WatchedStatus,
+                       library: Library, taste: ProfileTaste, isActive: Bool) {
+        if let movie = media as? Movie {
+            if isActive {
+                WatchedlistManager<Movie>.movie.setCurrentProgress(progress, for: movie.id, with: status, details: details)
+            } else {
+                _ = library.setProgress(progress, id: movie.id, list: .movies, details: details)
+            }
+        } else if let episode = media as? Episode {
+            if let show = episode.show, !show.episodes.isEmpty { library.noteGuide(of: show, always: true) }
+            if isActive {
+                WatchedlistManager<Episode>.episode.setCurrentProgress(progress, for: episode.id, with: status, details: details)
+            } else {
+                _ = library.setProgress(progress, id: episode.id, list: .episodes, details: details)
+            }
+        }
+        noteTaste(progress, of: media, release: details.release, policy: library.policy, taste: taste)
+        // The taste writes a position saved again only now and then
+        // (`ProfileTaste.Policy.quietSaveInterval`): what is left at the
+        // pause and at the end of the play, never at a checkpoint — else a
+        // play left early is remembered at its first position, and given up
+        // on two weeks after that.
+        if status != .watching { taste.flush() }
     }
 
     /// The profile's taste learns from the play: the title (once it really
     /// started), and the quality of the release the first time it counts.
-    private static func noteTaste(_ progress: Float, of media: Media, release: RememberedRelease?) {
-        let policy = Library.shared.policy
+    private static func noteTaste(_ progress: Float, of media: Media, release: RememberedRelease?, policy: LibraryPolicy,
+                                  taste: ProfileTaste) {
         guard progress.isFinite, progress > 0, policy.isStarted(progress: progress, position: nil) || policy.isFinished(progress: progress),
               let title = TasteTitle(media: media) else { return }
-        let taste = ProfileTaste.shared
         let episodeID = (media as? Episode).flatMap { episode -> String? in
             guard let show = episode.show, episode.season >= 0, episode.episode >= 0 else { return nil }
             return LibraryID.episodeID(showID: show.id, EpisodeNumber(season: episode.season, episode: episode.episode))

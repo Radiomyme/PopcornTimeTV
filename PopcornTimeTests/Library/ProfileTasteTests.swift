@@ -363,6 +363,25 @@ final class ProfileTasteTests: CheckedTestCase {
         eq(stored.snapshot(), taste.snapshot(), "what is stored is what is learnt")
     }
 
+    func testThePositionKeptInMemoryIsWrittenAtTheEndOfThePlay() {
+        /// A play of 20 minutes left at 12 %; read again from its storage
+        /// 14 days after it started, a little less after it ended.
+        /// Its genre's weight then: below 0 once given up on.
+        func romance(flushedAtTheEnd: Bool) -> Double {
+            let clock = F.Clock("2026-11-01T12:00:00Z")
+            let storage = MemoryLibraryStorage()
+            let taste = taste(storage, clock: clock)
+            taste.notePlayback(of: notebook, progress: 0.1, isFinished: false)
+            clock.advance(20 * 60)
+            taste.notePlayback(of: notebook, progress: 0.12, isFinished: false)
+            if flushedAtTheEnd { taste.flush() }
+            clock.advance(14 * day - 10 * 60)
+            return self.taste(storage, clock: clock).snapshot().genres["Romance"] ?? 0
+        }
+        check(romance(flushedAtTheEnd: false) < 0, "only its start stored: given up on already")
+        check(romance(flushedAtTheEnd: true) > 0, "its last moment written: not given up on yet")
+    }
+
     func testTheWatchlistSeedIsWrittenOnce() {
         let clock = F.Clock("2026-11-25T12:00:00Z")
         let entries: [[String: Any]] = (0..<300).map {

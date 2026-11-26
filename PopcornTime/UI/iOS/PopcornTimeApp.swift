@@ -25,6 +25,9 @@ struct PopcornTimeApp: App {
         // PopcornKit reads the setting through the app's language names
         // (as the tvOS and Mac apps do at launch).
         PlaybackLanguagePreferences.installReleaseLanguageResolver()
+        // The profiles' tastes keep a position saved again in memory a
+        // while: written before the app may be killed.
+        ProfileTaste.flushes(on: [UIApplication.didEnterBackgroundNotification, UIApplication.willTerminateNotification])
 
         #if DEBUG
         IOSDebugHooks.applySourceSwitches()

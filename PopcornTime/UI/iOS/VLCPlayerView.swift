@@ -68,6 +68,9 @@ final class VLCAudioLogFilter: NSObject, VLCLogging {
 /// fraction unless VLC played past it (`VLCWatchProgress`, PlaybackRouting.swift:
 /// the same rules as the tvOS VLC player).
 final class VLCPlayerViewController: UIViewController, VLCMediaPlayerDelegate, UIGestureRecognizerDelegate {
+    /// The profile that started the play: its position goes there, even
+    /// once another is in use (`PlaybackRecorder.save`).
+    let profileID = ProfileManager.shared.activeID
     var url: URL!
     var streamer: PTTorrentStreamer?
     /// OpenSubtitles candidates offered next to the file's own text tracks.
@@ -1201,7 +1204,7 @@ final class VLCPlayerViewController: UIViewController, VLCMediaPlayerDelegate, U
             return
         }
         // With the titles and the length: the Continue Watching card.
-        PlaybackRecorder.save(value, of: media, duration: durationSeconds, status: status)
+        PlaybackRecorder.save(value, of: media, duration: durationSeconds, status: status, profileID: profileID)
     }
 
     /// From the time tick: the position every 30 s of playback

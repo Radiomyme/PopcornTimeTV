@@ -332,6 +332,24 @@ public final class ProfileTaste {
         return taste
     }
 
+    /// Writes every profile's quiet changes (`flush`) — a player of another
+    /// profile may still have some.
+    public static func flushAll() {
+        tastesLock.lock()
+        let all = Array(tastes.values)
+        tastesLock.unlock()
+        all.forEach { $0.flush() }
+    }
+
+    /// The app calls it at launch with its notifications for leaving the
+    /// foreground and quitting: what was kept in memory is written before
+    /// the app may be killed (`flushAll`).
+    public static func flushes(on names: [Notification.Name], center: NotificationCenter = .default) {
+        for name in names {
+            _ = center.addObserver(forName: name, object: nil, queue: nil) { _ in flushAll() }
+        }
+    }
+
     /// Drops a deleted profile's taste (its keys are gone with the profile's).
     static func forget(profileID: String) {
         tastesLock.lock(); defer { tastesLock.unlock() }
@@ -457,7 +475,8 @@ public final class ProfileTaste {
     }
 
     /// Writes what changed quietly since the last write (a position saved
-    /// again): a player calls it at the pause and at the end of a play.
+    /// again): `PlaybackRecorder` calls it at the pause and at the end of a
+    /// play, the app when it leaves the foreground (`flushes(on:)`).
     public func flush() {
         lock.lock()
         if isSavePending { save() }

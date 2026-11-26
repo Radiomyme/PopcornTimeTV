@@ -43,6 +43,9 @@ final class VLCAudioLogFilter: NSObject, VLCLogging {
 #endif
 
 class PCTPlayerViewController: UIViewController, VLCMediaPlayerDelegate, UIGestureRecognizerDelegate, UpNextViewControllerDelegate, OptionsViewControllerDelegate {
+    /// The profile that started the play: its position goes there, even
+    /// once another is in use (`PlaybackRecorder.save`).
+    let profileID = ProfileManager.shared.activeID
     
     // MARK: - IBOutlets
     
@@ -1786,7 +1789,8 @@ class PCTPlayerViewController: UIViewController, VLCMediaPlayerDelegate, UIGestu
             return
         }
         // With the titles and the length: the Continue Watching card.
-        PlaybackRecorder.save(value, of: media, duration: streamDuration > 0 ? Double(streamDuration) / 1000 : nil, status: status)
+        PlaybackRecorder.save(value, of: media, duration: streamDuration > 0 ? Double(streamDuration) / 1000 : nil, status: status,
+                              profileID: profileID)
     }
     
     // MARK: UpNextViewControllerDelegate

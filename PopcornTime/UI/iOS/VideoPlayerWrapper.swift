@@ -71,6 +71,9 @@ struct VideoPlayerWrapper: UIViewControllerRepresentable {
     /// (AVKit calls it on the main thread).
     @MainActor
     final class Coordinator: NSObject, @preconcurrency AVPlayerViewControllerDelegate {
+        /// The profile that started the play: its position goes there, even
+        /// once another is in use (`PlaybackRecorder.save`).
+        let profileID = ProfileManager.shared.activeID
         var onFallback: ((_ reason: String, _ resumeFraction: Float, _ resumeDecided: Bool) -> Void)?
         var onCannotContinue: (() -> Void)?
         /// The player's view controller (bounded storage's alert).
@@ -751,7 +754,7 @@ struct VideoPlayerWrapper: UIViewControllerRepresentable {
                 return
             }
             // With the titles and the length: the Continue Watching card.
-            PlaybackRecorder.save(value, of: media, duration: lastKnownDuration, status: status)
+            PlaybackRecorder.save(value, of: media, duration: lastKnownDuration, status: status, profileID: profileID)
         }
 
         /// From the 1 Hz tick, while playing: the position every 30 s
