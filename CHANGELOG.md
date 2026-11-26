@@ -5,40 +5,13 @@ What changed in each version of this fork of PopcornTimeTV, newest first. The in
 (`PopcornTime/UI/Shared SwiftUI/WhatsNew.swift`). The technical reference (formats, Top Shelf,
 logs, tests) is in [docs/TECHNICAL.md](docs/TECHNICAL.md).
 
-## Unreleased
-
-**Choosing the source (Apple TV, iPhone / iPad, Mac)**
-([#14](https://github.com/Radiomyme/PopcornTimeTV/pull/14), by
-[RougeCiel](https://github.com/RougeCiel), rebuilt on 5.4.0)
-- **Floors that follow the bitrate**: the seeds a release needs before it starts quickly grow
-  with its estimated bitrate (up to four times its resolution's floor): a 73 Mb/s UHD remux
-  needs 132 seeds where a 27 Mb/s UHD encode needs 50. Without an estimate (size or runtime
-  unknown, a season pack) the resolution's floor, as before.
-- **Comfortable swarms first**: at a resolution, a release with three times its floor comes
-  before one just over it, whatever their picture (an HDR10 release with 800 seeds before a
-  Dolby Vision one with 46: announced counts are often days old). Peers count a third of a
-  seed, never more than the seeds themselves.
-- **Your language, with enough seeds**: a release in the preferred audio language needs half
-  its floor (at least 3) to come first; a French release with 3 seeds no longer beats a
-  healthy MULTi one. The 5.4.0 rules stay: never a CAM, a release the display can't show or
-  one too heavy for the connection because of its language, and never a dub in another
-  language.
-- **Settings**: Auto Select Quality offers Quick Start, Balanced, Best Picture and Always
-  Ask, each with its sentence. Highest and Lowest are gone: a device set to Highest now uses
-  Best Picture (the best picture among the sources shared widely enough), one set to Lowest
-  Quick Start (the most shared source), converted at launch. Maximum Resolution (No Limit, 4K, 1080p,
-  720p) keeps the automatic choice at or under it, the other sources stay in the lists;
-  Prefer Your Language, under Audio Language, lets a higher resolution in another language
-  win. They are the same on every device and for every profile (they are about the screen
-  and the connection).
-
 ## 5.4.0
 
 Their short form is shown once in the app after the update (`WhatsNewRelease.v5_4_0` in
 `PopcornTime/UI/Shared SwiftUI/WhatsNew.swift`; keep the two in step). This release is built
 on the work of [RougeCiel](https://github.com/RougeCiel): the pull requests
 [#9](https://github.com/Radiomyme/PopcornTimeTV/pull/9) to
-[#13](https://github.com/Radiomyme/PopcornTimeTV/pull/13), reviewed, merged and then reworked
+[#14](https://github.com/Radiomyme/PopcornTimeTV/pull/14), reviewed, merged and then reworked
 to the app's design and rules on every platform, and
 [#6](https://github.com/Radiomyme/PopcornTimeTV/pull/6) to
 [#8](https://github.com/Radiomyme/PopcornTimeTV/pull/8), merged after 5.3.0 (the streaming
@@ -116,6 +89,31 @@ TMDB itself with a real key (2026-11-21). Not yet on a real Apple TV, iPhone, iP
 - Dubbed season packs are kept for an episode on the Mac only, until one has played on an Apple
   TV with bounded storage.
 
+**Choosing the source (Apple TV, iPhone / iPad, Mac)**
+([#14](https://github.com/Radiomyme/PopcornTimeTV/pull/14), by
+[RougeCiel](https://github.com/RougeCiel), rebuilt on the 5.4.0 rules)
+- **Floors that follow the bitrate**: the seeds a release needs before it starts quickly grow
+  with its estimated bitrate (up to four times its resolution's floor): a 73 Mb/s UHD remux
+  needs 132 seeds where a 27 Mb/s UHD encode needs 50. Without an estimate (size or runtime
+  unknown, a season pack) the resolution's floor, as before.
+- **Comfortable swarms first**: at a resolution, a release with three times its floor comes
+  before one just over it, whatever their picture (an HDR10 release with 800 seeds before a
+  Dolby Vision one with 46: announced counts are often days old). Peers count a third of a
+  seed, never more than the seeds themselves.
+- **Your language, with enough seeds**: a release in the preferred audio language needs half
+  its floor (at least 3) to come first; a French release with 3 seeds no longer beats a
+  healthy MULTi one. The 5.4.0 rules stay: never a CAM, a release the display can't show or
+  one too heavy for the connection because of its language, and never a dub in another
+  language.
+- **Settings**: Auto Select Quality offers Quick Start, Balanced, Best Picture and Always
+  Ask, each with its sentence. Highest and Lowest are gone: a device set to Highest now uses
+  Best Picture (the best picture among the sources shared widely enough), one set to Lowest
+  Quick Start (the most shared source), converted at launch. Maximum Resolution (No Limit, 4K, 1080p,
+  720p) keeps the automatic choice at or under it, the other sources stay in the lists;
+  Prefer Your Language, under Audio Language, lets a higher resolution in another language
+  win. They are the same on every device and for every profile (they are about the screen
+  and the connection).
+
 **Apple TV**
 - **One search** ([#11](https://github.com/Radiomyme/PopcornTimeTV/pull/11)): no more Movies /
   Shows / People scope bar. A query searches both catalogues at once and shows a row of movies
@@ -128,6 +126,19 @@ TMDB itself with a real key (2026-11-21). Not yet on a real Apple TV, iPhone, iP
   the encoding, the sound), and reused rows no longer keep a dark text or icon.
 - **The quality chooser**: rows that fit (44 characters at most, the quality always readable),
   sizes in the interface's units (« 9,1 Go » in French).
+- **Downloads**: the Downloads page is rebuilt in the Glass style. A download in progress
+  shows its share in large type, its speed, the time left and how much is on disk, over a bar
+  as wide as the row (the app's red, grey when paused); a failed one stays listed with its
+  reason in the interface's language (« Échec — espace insuffisant (1,9 Go à libérer) »), with
+  Try Again. Finished downloads are a shelf of posters. Select opens Pause, Resume, Try Again,
+  Play or Delete (asked first; deleting frees the disk), Play/Pause on the remote pauses or
+  resumes, and Pause All / Resume All sit by the title, over a gauge of the space downloads
+  take and the space left. The progress is saved every 5 % or 30 s and when the app leaves
+  the screen, so a relaunch shows it; what was downloading when the app quit starts again,
+  what was paused stays paused; folders left by an old download are removed at launch; a
+  release larger than the free space is refused with the sizes before it starts. The Download
+  button of a title page opens the same choices instead of pausing silently. The Downloads
+  icon carries its count in a small disc that leaves the arrow visible.
 - **Menu at a tab's first screen goes to Home**
   ([#8](https://github.com/Radiomyme/PopcornTimeTV/pull/8)); Menu on Home leaves the app, as
   before.
@@ -190,11 +201,13 @@ TMDB itself with a real key (2026-11-21). Not yet on a real Apple TV, iPhone, iP
 - Unit tests for the profiles (`ProfileManagerTests`: the migration, a 5.3.0 install and a
   downgrade, real defaults, switching, separation, deletion, a late Trakt answer), the taste and
   « For You » (`ProfileTasteTests`), the release languages (`ReleaseLanguageTests`), the search
-  session (`SearchSessionTests`), the language settings' three states and What's New: 1,014
-  unit tests.
+  session (`SearchSessionTests`), the language settings' three states, What's New, the source
+  pick (#14), the retired quality choices and the downloads' status lines
+  (`DownloadsCatalogTests`): 1,029 unit tests.
 - Apple TV UI tests: `ProfilesUITests` (the launch picker, switching from Settings, Menu, the
   editor, links held, « For You » and Your Preferences) and Search in rows, its failures and a
-  focus that stays; 93 tests.
+  focus that stays, `DownloadsUITests` (the page, its actions, a delete, Pause All) and the
+  new Settings rows; 98 tests.
 
 **Known limits**
 - **Devices**: nothing of 5.4.0 ran on a real Apple TV, iPhone, iPad or Mac.
@@ -203,6 +216,8 @@ TMDB itself with a real key (2026-11-21). Not yet on a real Apple TV, iPhone, iP
 - **Taste**: learnt only from what is played or listed on this device; the quality is shown,
   not applied.
 - **Streaming services**: the Service filter is on the Apple TV grids only.
+- **Downloads**: on the Apple TV only (the iPhone, iPad and Mac apps have none); checked with
+  made-up downloads, never with a real one.
 
 ## 5.3.0
 
