@@ -127,6 +127,39 @@ final class SearchSessionTests: CheckedTestCase {
         eq(s.failures, [:], "cleared")
     }
 
+    func testOneFailedAndTheOtherEmptyIsAFailureNotNoResults() {
+        // The Apple TV's Search: the movies could not be searched and no show
+        // matches — the error with Try Again, since the title may well be a
+        // movie (it said "No results").
+        var s = session()
+        let token = s.begin("dune", submitted: true)!
+        s.receive(.shows, count: 0, error: nil, token: token)
+        eq(s.phase, .searching, "the movies are still out")
+        s.receive(.movies, count: 0, error: "The request timed out.", token: token)
+        eq(s.phase, .failed("The request timed out."), "a failure, not .empty")
+        eq(s.failures, [.movies: "The request timed out."], "the movies are the ones to ask again")
+        check(s.begin("dune", submitted: true) != nil, "Try Again sends the query once more")
+        // Blank: back to the starting screen, not "No results for "  "".
+        check(s.begin("   ", submitted: true) == nil, "nothing to send")
+        eq(s.phase, .idle, "idle")
+        eq(s.query, "", "no query to quote")
+    }
+
+    func testTheFocusStaysOnItsTitleWhenTheRowsAreReplaced() {
+        typealias Row = (kind: Kind, items: [String])
+        let rows: [Row] = [(.movies, ["dune", "dune-2", "dune-1984"]), (.shows, ["dune-prophecy"])]
+        let focus = { (focused: (kind: Kind, id: String)?, rows: [Row]) in Session.focusAfterReplacing(focused, rows: rows) }
+        check(focus(nil, rows) == (0, 0), "from the keyboard: the first title of the first row")
+        check(focus((.movies, "dune-1984"), rows) == (0, 2), "the same title, where it now is")
+        check(focus((.shows, "dune-prophecy"), rows) == (1, 0), "in its own row")
+        check(focus((.movies, "arrival"), rows) == (0, 0), "gone: the first title of its row")
+        check(focus((.shows, "the-expanse"), rows) == (1, 0), "gone from the second row: its first title, not the first row's")
+        let showsOnly: [Row] = [(.shows, ["dune-prophecy"])]
+        check(focus((.shows, "dune-prophecy"), showsOnly) == (0, 0), "its row is now the first")
+        check(focus((.movies, "dune"), showsOnly) == (0, 0), "its row is gone: the first row")
+        check(focus((.movies, "dune"), []) == (0, 0), "nothing left")
+    }
+
     func testClearingDropsAnswersOnTheirWay() {
         var s = session()
         let token = s.begin("dune")!

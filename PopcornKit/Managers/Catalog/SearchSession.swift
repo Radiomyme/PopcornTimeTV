@@ -112,3 +112,17 @@ public struct SearchSession<Kind: Hashable> {
         return true
     }
 }
+
+extension SearchSession {
+
+    /// Where the focus goes when the rows of a new answer replace those it
+    /// was on (the Apple TV's Search, one row per kind): on the same title
+    /// when its row still lists it, otherwise on the first title of its row,
+    /// otherwise on the first title of the first row. `focused` is nil when
+    /// the focus is not on a title (the keyboard): the first row's first.
+    public static func focusAfterReplacing<ID: Equatable>(_ focused: (kind: Kind, id: ID)?,
+                                                          rows: [(kind: Kind, items: [ID])]) -> (row: Int, item: Int) {
+        guard let focused = focused, let row = rows.firstIndex(where: { $0.kind == focused.kind }) else { return (0, 0) }
+        return (row, rows[row].items.firstIndex(of: focused.id) ?? 0)
+    }
+}
