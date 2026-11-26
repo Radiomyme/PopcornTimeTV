@@ -13,6 +13,9 @@ public struct HomeLocal: Hashable, Sendable {
     /// Ids ("tt…:season:episode") of the followed shows' recent episodes the
     /// user has watched: they are not "new episodes" any more.
     public var watchedEpisodeIds: Set<String> = []
+    /// The profile's taste (`ProfileTaste`): « For You » ranks the page's
+    /// titles by it. nil: no such shelf.
+    public var taste: TasteSnapshot?
 
     public init() {}
 }
@@ -72,6 +75,11 @@ enum HomeBuilder {
         /// The followed shows' episodes airing within this are "upcoming".
         var followedUpcoming: TimeInterval = 7 * 86_400
         var genreShelves = 4
+        /// « For You »: its cards at most, and at least (fewer: no shelf).
+        var forYouLimit = 20
+        var forYouMinimum = 6
+        /// A title below this score (`TasteSnapshot.score`) is not offered.
+        var forYouMinimumScore = 0.12
         /// Metadata lookups for the titles of a ranking no list knows.
         var lookupLimit = 8
         /// A light refresh (`HomePlan.light`): the Top Shelf extension's.
@@ -145,6 +153,7 @@ enum HomeBuilder {
         drafts.append(Draft(HomeShelfID.continueWatching, inputs.local.continueWatching.map { HomeEntry(item: $0) }))
         drafts.append(context.servicesRow())
         drafts.append(context.yourShows())
+        let forYouIndex = drafts.count
         drafts += [
             trendingMovies, context.newMovies(), context.uhd(), context.airedEpisodes(), trendingShows,
             context.newShows(), context.moviesOfTheYear(), context.topRatedOfTheYear(),
@@ -153,6 +162,9 @@ enum HomeBuilder {
         ].compactMap { $0 }
         drafts.append(Draft(HomeShelfID.watchlist, inputs.local.watchlist.map { HomeEntry(item: $0) }))
         drafts += context.genres()
+        // « For You »: the page's own titles the profile should like most,
+        // right under what it is watching.
+        if let forYou = context.forYou(from: drafts) { drafts.insert(forYou, at: forYouIndex) }
 
         let shelves = HomeBuilder.sameFormats(context.finished(drafts))
         // The grids, Search and the title pages of every platform tell
@@ -793,6 +805,37 @@ private struct Context {
     /// The « Services » row: « All » while the page is filtered, then a
     /// card per service, the one shown marked. Empty without services (no
     /// TMDB key): no row.
+    /// « For You »: the titles of the other shelves (the hero, the
+    /// catalogues, the rankings, the genres; no episode, no service card),
+    /// each once, ranked by the profile's taste; the ones it played, gave up
+    /// on, or listed left out. nil without a taste confident enough, or with
+    /// too few titles it should like.
+    func forYou(from drafts: [HomeBuilder.Draft]) -> HomeBuilder.Draft? {
+        guard let taste = inputs.local.taste, taste.isConfident, !inputs.hidden.contains(HomeShelfID.forYou) else { return nil }
+        var excluded = taste.excluded
+        for item in inputs.local.continueWatching + inputs.local.watchlist + inputs.local.newEpisodes { excluded.insert(item.imdbId) }
+        let skipped: Set<String> = [HomeShelfID.continueWatching, HomeShelfID.yourShows, HomeShelfID.watchlist,
+                                    HomeShelfID.services, HomeShelfID.airedEpisodes]
+        var seen = Set<String>()
+        var scored: [(entry: HomeEntry, score: Double, order: Int)] = []
+        for draft in drafts where !skipped.contains(draft.id) {
+            for entry in draft.entries {
+                let item = facts(of: entry.item)
+                guard item.episode == nil, !item.imdbId.isEmpty, !item.title.isEmpty, !excluded.contains(item.imdbId),
+                      !HomeServiceCard.isServiceCard(item), !item.badges.contains(.upcoming),
+                      seen.insert(item.imdbId).inserted else { continue }
+                let score = taste.score(item)
+                guard score >= rules.forYouMinimumScore else { continue }
+                var cleaned = entry
+                cleaned.item.rank = nil
+                scored.append((cleaned, score, scored.count))
+            }
+        }
+        guard scored.count >= rules.forYouMinimum else { return nil }
+        let ranked = scored.sorted { $0.score != $1.score ? $0.score > $1.score : $0.order < $1.order }
+        return HomeBuilder.Draft(HomeShelfID.forYou, ranked.prefix(rules.forYouLimit).map(\.entry))
+    }
+
     func servicesRow() -> HomeBuilder.Draft {
         guard !inputs.streaming.isEmpty else { return HomeBuilder.Draft(HomeShelfID.services, []) }
         let all = inputs.service == nil ? [] : [HomeServiceCard.all(title: inputs.allServicesTitle)]
@@ -1013,7 +1056,10 @@ private struct Context {
             // A service's shelf is its catalogue: a title on Netflix is
             // there even when a shelf above showed it. The « Services » row
             // holds no title.
-            let exempt = HomeShelfID.local.contains(draft.id) || (style == .ranked && rules.rankedShelvesAreComplete)
+            // « For You » picks among the shelves' titles: a title in it is
+            // not taken from the shelf it comes from.
+            let exempt = HomeShelfID.local.contains(draft.id) || draft.id == HomeShelfID.forYou
+                || (style == .ranked && rules.rankedShelvesAreComplete)
                 || HomeShelfID.streamingService(of: draft.id) != nil || draft.id == HomeShelfID.services
             let limit = style == .hero ? rules.heroLimit : style == .ranked ? rules.rankedLimit : rules.shelfLimit
             // A genre shelf: the titles not shown above first; the ones shown

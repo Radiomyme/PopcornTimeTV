@@ -63,6 +63,7 @@ open class WatchedlistManager<N: Media & Hashable> {
     open func add(_ id: String) {
         TraktManager.shared.add(id, toWatchedlistOfType: currentType)
         Library.shared.setWatched(true, id: id, list: currentType)
+        ProfileTaste.shared.noteWatched(true, mediaID: id, kind: currentType == .movies ? .movie : .show)
     }
     
     /**
@@ -74,6 +75,7 @@ open class WatchedlistManager<N: Media & Hashable> {
         TraktManager.shared.remove(id, fromWatchedlistOfType: currentType)
         TraktManager.shared.scrobble(id, progress: 0, type: currentType, status: .finished)
         Library.shared.setWatched(false, id: id, list: currentType)
+        ProfileTaste.shared.noteWatched(false, mediaID: id, kind: currentType == .movies ? .movie : .show)
     }
     
     /**

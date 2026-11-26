@@ -33,6 +33,8 @@ public struct HomeLocalHooks {
     public var newEpisodes: () -> [HomeItem] = { [] }
     /// Has the user watched this episode of this show?
     public var isWatched: (_ imdbId: String, _ season: Int, _ episode: Int) -> Bool = { _, _, _ in false }
+    /// The profile's taste, for « For You » (nil: no such shelf).
+    public var taste: () -> TasteSnapshot? = { nil }
     /// The hub is about to refresh (`start`, `refresh`; not `refreshLocal`):
     /// the moment for the library to bring up to date what it keeps from
     /// the network itself (the followed shows' airings, the titles its cards
@@ -121,7 +123,7 @@ public final class HomeFeed: @unchecked Sendable {
     /// its local shelves — its hooks are the library's, and the shelves
     /// follow the library's changes (HomeLibraryHooks.swift).
     public static let shared: HomeFeed = {
-        let feed = HomeFeed(hooks: HomeLocalHooks(libraryOf: { Library.shared }))
+        let feed = HomeFeed(hooks: HomeLocalHooks(libraryOf: { Library.shared }, tasteOf: { ProfileTaste.shared }))
         feed.followActiveProfile()
         return feed
     }()
@@ -406,6 +408,7 @@ public final class HomeFeed: @unchecked Sendable {
         fresh.watchlist = mainHooks.watchlist()
         fresh.followedShowIds = mainHooks.followedShowIds()
         fresh.newEpisodes = mainHooks.newEpisodes()
+        fresh.taste = mainHooks.taste()
         fresh.watchedEpisodeIds = watched(among: fresh)
         lock.lock()
         local = fresh

@@ -35,6 +35,7 @@
 		0930D5907F3CA9AEEC97BCC5 /* OAuthCredential.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4D0F9D651E6F2CEB00860852 /* OAuthCredential.swift */; };
 		09358FC069E1A94A273160AC /* PopcornKit.framework in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = 383706534E1BC6C3E1A47C8A /* PopcornKit.framework */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
 		0948BED322374A13668E72F9 /* LoadingPhase.swift in Sources */ = {isa = PBXBuildFile; fileRef = AD48D854255C13ED3B2D36E7 /* LoadingPhase.swift */; };
+		0957573802954CDBF8389B82 /* ProfileTaste.swift in Sources */ = {isa = PBXBuildFile; fileRef = 90DCBD14826E22041050CC2C /* ProfileTaste.swift */; };
 		09798D07F560AEBE6EBB5AFE /* OAuthCredential.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4D0F9D651E6F2CEB00860852 /* OAuthCredential.swift */; };
 		0A2237B0ECC9AA84A9F10701 /* PlaybackStartMeasure.swift in Sources */ = {isa = PBXBuildFile; fileRef = 418CFD2171BD6B1F3C4DCF58 /* PlaybackStartMeasure.swift */; };
 		0A49400D01191E6E8E2E7090 /* OpenMetadata.swift in Sources */ = {isa = PBXBuildFile; fileRef = 553D30058F419833207146DC /* OpenMetadata.swift */; };
@@ -82,6 +83,7 @@
 		19DEE3C42127A00342CE186E /* CatalogGrid.swift in Sources */ = {isa = PBXBuildFile; fileRef = 70E165C1159CD4ADC17E23CD /* CatalogGrid.swift */; };
 		19EDA467EC698B0EB8F75E2C /* MirrorChain.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3ADF95B9DDB389CAF0F85570 /* MirrorChain.swift */; };
 		1A0B2B460B8864109190C840 /* UpNextUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8607FFADBE24E23C95714CF3 /* UpNextUITests.swift */; };
+		1A0D18B7648B38EB11AA1312 /* ProfileTasteView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8E0CBD13B05542BBB3181563 /* ProfileTasteView.swift */; };
 		1ABD9C745166D5D97847CB30 /* HomeHeroPager.swift in Sources */ = {isa = PBXBuildFile; fileRef = E9A1E5C4E19387B8694683C3 /* HomeHeroPager.swift */; };
 		1AC041EC46699C489B4E2DE4 /* HomeFixtures.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7EECEB654566C70D36309FE3 /* HomeFixtures.swift */; };
 		1AD7F9EFF746F69B6EB62F56 /* Top100Resolver.swift in Sources */ = {isa = PBXBuildFile; fileRef = E21D3391F815239A6A11AAB6 /* Top100Resolver.swift */; };
@@ -176,11 +178,13 @@
 		3388D86E236845C4252495BA /* BandwidthTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3ADA2B8C6EFAB91CB81AED98 /* BandwidthTests.swift */; };
 		33B33D555FA1B3F824F9A49F /* HomeCards.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3C31B25F1B22D4C8299A4D72 /* HomeCards.swift */; };
 		33EFA9508DA33D97705E31CB /* HomeDebug.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0B49560E3C79464603FE5912 /* HomeDebug.swift */; };
+		34112B6F8532DAD9ECD0F677 /* ProfileTaste.swift in Sources */ = {isa = PBXBuildFile; fileRef = 90DCBD14826E22041050CC2C /* ProfileTaste.swift */; };
 		3480B337DD59EBCB0C10ECD2 /* HomeStyle.swift in Sources */ = {isa = PBXBuildFile; fileRef = 29C42F25AA0AC5B17957BEB2 /* HomeStyle.swift */; };
 		3528E084005C929D5308EFDE /* HomeParsers.swift in Sources */ = {isa = PBXBuildFile; fileRef = 808D9FF876C6F09389C72ACE /* HomeParsers.swift */; };
 		35E7FCB06AFDCC0A5E172EEC /* CinemetaClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 78E93FE7FC06148BF5498E30 /* CinemetaClient.swift */; };
 		360310500D68152952109857 /* HomeCardText.swift in Sources */ = {isa = PBXBuildFile; fileRef = FB1E41B9DD7219A8B505AD56 /* HomeCardText.swift */; };
 		36CCE8E32860CDE85AC5242E /* MacHomeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0BFDBCF9C73EA0A0EFD7F142 /* MacHomeView.swift */; };
+		37284588249C8F8199E16119 /* ProfileTasteView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8E0CBD13B05542BBB3181563 /* ProfileTasteView.swift */; };
 		3743DB05D71C4F092D0D2465 /* Movie.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4D0F9D1C1E6F298000860852 /* Movie.swift */; };
 		378127B8C5B222984F9F1E89 /* HLSPlaylists.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4B349F9C64DEB0228DE4C1AD /* HLSPlaylists.swift */; };
 		37D1B6DCEE65B2BC4DCA536D /* ArtworkPipeline.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2FC816A2632F65C28E8EDB4E /* ArtworkPipeline.swift */; };
@@ -565,6 +569,7 @@
 		84AA94C895B29E567B28DC09 /* LastPosterWatch.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9BE5BFCBA81147DB47DA6959 /* LastPosterWatch.swift */; };
 		84B69C80C51B2BC82713DA87 /* MacGridViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 55A3056F35D301366ACA3A2F /* MacGridViews.swift */; };
 		84DE26A4FBBDFA5731BFE619 /* RemuxCodecs.swift in Sources */ = {isa = PBXBuildFile; fileRef = ACE7601285B6B25366D04FEF /* RemuxCodecs.swift */; };
+		856543C9E8CEB7D8CA4EC004 /* ProfileTasteView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8E0CBD13B05542BBB3181563 /* ProfileTasteView.swift */; };
 		8576C414999B778B33E11346 /* CatalogCacheTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6BBE010CD714CB0465766487 /* CatalogCacheTests.swift */; };
 		8590BB6FC22FE7E6C36EE139 /* Pods_PopcornKit_iOS.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 1EA105EEC765A7BAF4B04611 /* Pods_PopcornKit_iOS.framework */; };
 		85EFF8A2321690A41225F649 /* HomeLayout.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8D973D48D7B6EE2A9104EB81 /* HomeLayout.swift */; };
@@ -600,6 +605,7 @@
 		926D649AF630A9E1EDB154B8 /* VLCKit.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = 4A47114027B7F775E0001A71 /* VLCKit.xcframework */; };
 		92958B8FCC3F71FC3C633055 /* Localizable.strings in Resources */ = {isa = PBXBuildFile; fileRef = 4D1440131E9AF16600B78269 /* Localizable.strings */; };
 		9296D0F89198C614AC5350F5 /* WhatsNew.swift in Sources */ = {isa = PBXBuildFile; fileRef = 183512CDB2D5F647BC5011FB /* WhatsNew.swift */; };
+		929CDEEEBC141DCD5AB2A720 /* ProfileTasteTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = CBE8AB1CC27BD0E9FB1C83F5 /* ProfileTasteTests.swift */; };
 		9466D9BF16E8943D0CB93834 /* TopShelfModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A3ADADC9F10FDF6C0BDD6D1F /* TopShelfModel.swift */; };
 		948D64B7C10EED78226ABEA9 /* MacVLCPlayerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D68B9D49F99BBA923F0A9374 /* MacVLCPlayerView.swift */; };
 		94CEA843733D801FA96304B2 /* SubtitlesManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4D0F9CFD1E6F296400860852 /* SubtitlesManager.swift */; };
@@ -766,6 +772,7 @@
 		CFE26433C13EE1916F59BD94 /* AVPlayerItemFailureObserver.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0E3DA7B2D4D7CA055941C925 /* AVPlayerItemFailureObserver.swift */; };
 		CFF28C83BA9559AE2AEE0449 /* ProfileViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = F0377E882C33FBD724D1E73C /* ProfileViews.swift */; };
 		D007C19FE40158F8BF181DF6 /* TopShelfTestSupport.swift in Sources */ = {isa = PBXBuildFile; fileRef = FED95F7522F6B79481F7A838 /* TopShelfTestSupport.swift */; };
+		D01151340B2FD28E38FA3179 /* ProfileTaste.swift in Sources */ = {isa = PBXBuildFile; fileRef = 90DCBD14826E22041050CC2C /* ProfileTaste.swift */; };
 		D0F5E20C3717499188269427 /* GlassDetailAdapter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5E6A06A3C14423A1029C0F6A /* GlassDetailAdapter.swift */; };
 		D144E6290DCEAF1805795B2D /* FMP4Muxer.swift in Sources */ = {isa = PBXBuildFile; fileRef = E38A8C092311013400C4BC6B /* FMP4Muxer.swift */; };
 		D1AA02B920E4E499E546C527 /* HomeCache.swift in Sources */ = {isa = PBXBuildFile; fileRef = 37627209580725FEBC094496 /* HomeCache.swift */; };
@@ -1396,11 +1403,13 @@
 		8C67B73715C56D22328D9B0C /* HomeLibraryHooksTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = HomeLibraryHooksTests.swift; path = PopcornTimeTests/Home/HomeLibraryHooksTests.swift; sourceTree = SOURCE_ROOT; };
 		8D0E45B162974D81E0052F59 /* MacStreamingSettingsView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = MacStreamingSettingsView.swift; path = PopcornTime/UI/Mac/MacStreamingSettingsView.swift; sourceTree = SOURCE_ROOT; };
 		8D973D48D7B6EE2A9104EB81 /* HomeLayout.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = HomeLayout.swift; path = "PopcornTime/UI/Shared SwiftUI/Home/HomeLayout.swift"; sourceTree = SOURCE_ROOT; };
+		8E0CBD13B05542BBB3181563 /* ProfileTasteView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = ProfileTasteView.swift; path = "PopcornTime/UI/Shared SwiftUI/Profiles/ProfileTasteView.swift"; sourceTree = SOURCE_ROOT; };
 		8EAB37B3640CD0C83AA92540 /* DetailSessionTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = DetailSessionTests.swift; path = PopcornTimeTests/Detail/DetailSessionTests.swift; sourceTree = SOURCE_ROOT; };
 		8F1673AD0C669496FCE4A3D4 /* ArtworkStore.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = ArtworkStore.swift; path = PopcornKit/Managers/Artwork/ArtworkStore.swift; sourceTree = SOURCE_ROOT; };
 		8F1FE13D464218A2D957E49E /* MacGlassDetailView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MacGlassDetailView.swift; sourceTree = "<group>"; };
 		8F39A694A002B782CDABC014 /* RemuxJumpBookkeepingTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = RemuxJumpBookkeepingTests.swift; path = PopcornTimeTests/Remux/RemuxJumpBookkeepingTests.swift; sourceTree = SOURCE_ROOT; };
 		8FED5C453F5D040547028646 /* GlassDetailView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = GlassDetailView.swift; sourceTree = "<group>"; };
+		90DCBD14826E22041050CC2C /* ProfileTaste.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = ProfileTaste.swift; path = PopcornKit/Managers/Profiles/ProfileTaste.swift; sourceTree = SOURCE_ROOT; };
 		910078B6ED3564885E7DC3FA /* GlassShelves.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = GlassShelves.swift; sourceTree = "<group>"; };
 		92EA5B85F317F8FA490EF748 /* HomeShelfRow.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = HomeShelfRow.swift; path = "PopcornTime/UI/Shared SwiftUI/Home/HomeShelfRow.swift"; sourceTree = SOURCE_ROOT; };
 		93A4CBBE36C30AE3F3835B20 /* BoundedStorageSession.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = BoundedStorageSession.swift; sourceTree = "<group>"; };
@@ -1470,6 +1479,7 @@
 		C9A55A79A522A197C0D4A925 /* HomeServiceTile.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = HomeServiceTile.swift; path = "PopcornTime/UI/Shared SwiftUI/Home/HomeServiceTile.swift"; sourceTree = SOURCE_ROOT; };
 		CA34A6A90D983AD61439BE83 /* ResumeStringsTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = ResumeStringsTests.swift; path = PopcornTimeTests/Playback/ResumeStringsTests.swift; sourceTree = SOURCE_ROOT; };
 		CB29BB9D89FDB0EC9FEDA88B /* TMDBStreamingClient.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = TMDBStreamingClient.swift; path = PopcornKit/Managers/Providers/TMDBStreamingClient.swift; sourceTree = SOURCE_ROOT; };
+		CBE8AB1CC27BD0E9FB1C83F5 /* ProfileTasteTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = ProfileTasteTests.swift; path = PopcornTimeTests/Library/ProfileTasteTests.swift; sourceTree = SOURCE_ROOT; };
 		CCC57E13F19C4705C84F9012 /* HomeView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = HomeView.swift; path = PopcornTime/UI/tvOS/Home/HomeView.swift; sourceTree = SOURCE_ROOT; };
 		CD50DBBC91FE0CBE44E91861 /* FarTargetWatchP13Tests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = FarTargetWatchP13Tests.swift; path = PopcornTimeTests/Playback/FarTargetWatchP13Tests.swift; sourceTree = SOURCE_ROOT; };
 		CE896A50B2CD3BECA7D57BEF /* HomeTransportTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = HomeTransportTests.swift; path = PopcornTimeTests/Home/HomeTransportTests.swift; sourceTree = SOURCE_ROOT; };
@@ -1641,6 +1651,7 @@
 			isa = PBXGroup;
 			children = (
 				3463E41449A1CC806795FF17 /* ProfileManager.swift */,
+				90DCBD14826E22041050CC2C /* ProfileTaste.swift */,
 			);
 			name = Profiles;
 			sourceTree = "<group>";
@@ -1659,6 +1670,7 @@
 			isa = PBXGroup;
 			children = (
 				F0377E882C33FBD724D1E73C /* ProfileViews.swift */,
+				8E0CBD13B05542BBB3181563 /* ProfileTasteView.swift */,
 			);
 			name = Profiles;
 			sourceTree = "<group>";
@@ -2623,6 +2635,7 @@
 				A8D4DEC18AD6159096B680B6 /* NextUpTests.swift */,
 				B7BF7017285A28707331B38E /* RememberedReleaseTests.swift */,
 				C28893230E5DFE59BDA0D7B2 /* ProfileManagerTests.swift */,
+				CBE8AB1CC27BD0E9FB1C83F5 /* ProfileTasteTests.swift */,
 			);
 			name = Library;
 			sourceTree = "<group>";
@@ -3452,6 +3465,7 @@
 				D77D93921C72389F87929F6F /* TMDBKeySettingsTests.swift in Sources */,
 				29F95D2EC362B0BFADBF8708 /* StreamingSettingsStoreTests.swift in Sources */,
 				4E340F62F794D0F6937A826C /* ProfileManagerTests.swift in Sources */,
+				929CDEEEBC141DCD5AB2A720 /* ProfileTasteTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -3652,6 +3666,7 @@
 				C5366CBCE3B068723B00CAEA /* RemuxWaitNudge.swift in Sources */,
 				5C51C5269716E9CBC10586A7 /* ProfileViews.swift in Sources */,
 				3193F1A94C04E32269288271 /* ProfilesPresenter.swift in Sources */,
+				856543C9E8CEB7D8CA4EC004 /* ProfileTasteView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -3766,6 +3781,7 @@
 				A1E3D9E462AA22B900FFC35C /* QRCodeImage.swift in Sources */,
 				F71AD91CD58E6DC32E02E396 /* StreamingSettingsStore.swift in Sources */,
 				1E48A00CBC581269B0CCC25D /* ProfileManager.swift in Sources */,
+				0957573802954CDBF8389B82 /* ProfileTaste.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -3890,6 +3906,7 @@
 				61A4264817393288BAA0E763 /* QRCodeImage.swift in Sources */,
 				0C2D1685BA4BE80F8525BAC4 /* StreamingSettingsStore.swift in Sources */,
 				2B38C39E8EB1EA1450406E96 /* ProfileManager.swift in Sources */,
+				34112B6F8532DAD9ECD0F677 /* ProfileTaste.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -4001,6 +4018,7 @@
 				B810271CA4EABAB051EFEEB2 /* QRCodeImage.swift in Sources */,
 				005F0F659ADC4D7873165CFC /* StreamingSettingsStore.swift in Sources */,
 				5B35B00BFB70A8B16310B4BA /* ProfileManager.swift in Sources */,
+				D01151340B2FD28E38FA3179 /* ProfileTaste.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -4094,6 +4112,7 @@
 				54E580182CDF17EA7D2AE57B /* HomeServiceTile.swift in Sources */,
 				0E5532BFDA66337B91B14307 /* MacStreamingSettingsView.swift in Sources */,
 				CFF28C83BA9559AE2AEE0449 /* ProfileViews.swift in Sources */,
+				37284588249C8F8199E16119 /* ProfileTasteView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -4189,6 +4208,7 @@
 				E40915524DB2B2DC8CAA92A4 /* HomeServiceTile.swift in Sources */,
 				2D778ED301F7E214AF386502 /* StreamingSettingsViews.swift in Sources */,
 				82C7A8AD1A446F772F82F29B /* ProfileViews.swift in Sources */,
+				1A0D18B7648B38EB11AA1312 /* ProfileTasteView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

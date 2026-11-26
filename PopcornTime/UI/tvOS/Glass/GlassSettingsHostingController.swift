@@ -47,15 +47,20 @@ final class GlassSettingsHostingController: UIHostingController<GlassSettingsVie
             readProfile: {
                 let profile = ProfileManager.shared.active
                 let style = ProfileAvatar.style(profile.avatar)
-                return GlassSettingsProfile(name: profile.name, symbol: style.symbol, tint: style.colors[0])
+                return GlassSettingsProfile(name: profile.name, symbol: style.symbol, tint: style.colors[0],
+                                            preferences: ProfileTasteModel.summary())
             },
             showProfiles: { managing in
                 guard let root = AppDelegate.shared.window?.rootViewController else { return }
                 ProfilesPresenter.present(from: root, managing: managing)
+            },
+            showTaste: {
+                guard let root = AppDelegate.shared.window?.rootViewController else { return }
+                ProfilesPresenter.presentTaste(from: root)
             })
 
-        let audio = PlaybackLanguagePreferences.preferredAudioLanguageCode
-        let subtitles = PlaybackLanguagePreferences.preferredSubtitleLanguageCode
+        let audio = PlaybackLanguagePreferences.explicitAudioLanguageCode
+        let subtitles = PlaybackLanguagePreferences.explicitSubtitleLanguageCode
         model = GlassSettingsModel(autoQuality: GlassSettingsStore.autoQuality,
                                    audioLanguage: audio,
                                    subtitleLanguage: subtitles,
@@ -80,6 +85,7 @@ final class GlassSettingsHostingController: UIHostingController<GlassSettingsVie
         case "streamingServices": row = .streamingServices
         case "switchProfile": row = .switchProfile
         case "manageProfiles": row = .manageProfiles
+        case "profilePreferences": row = .profilePreferences
         default: row = .quality
         }
         let picker = UserDefaults.standard.string(forKey: "PTDebugSettingsPicker").flatMap(GlassSettingsPicker.init(rawValue:))

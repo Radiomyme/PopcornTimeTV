@@ -113,6 +113,25 @@ public enum PlaybackRecorder {
             if let show = episode.show, !show.episodes.isEmpty { Library.shared.noteGuide(of: show, always: true) }
             WatchedlistManager<Episode>.episode.setCurrentProgress(progress, for: episode.id, with: status, details: details)
         }
+        noteTaste(progress, of: media, release: details.release)
+    }
+
+    /// The profile's taste learns from the play: the title (once it really
+    /// started), and the quality of the release the first time it counts.
+    private static func noteTaste(_ progress: Float, of media: Media, release: RememberedRelease?) {
+        let policy = Library.shared.policy
+        guard progress.isFinite, progress > 0, policy.isStarted(progress: progress, position: nil) || policy.isFinished(progress: progress),
+              let title = TasteTitle(media: media) else { return }
+        let taste = ProfileTaste.shared
+        let episodeID = (media as? Episode).flatMap { episode -> String? in
+            guard let show = episode.show, episode.season >= 0, episode.episode >= 0 else { return nil }
+            return LibraryID.episodeID(showID: show.id, EpisodeNumber(season: episode.season, episode: episode.episode))
+        }
+        if let quality = release?.quality.map(VideoQuality.parse), let label = quality.tasteLabel,
+           taste.isFirstPlay(of: episodeID ?? title.imdbID) {
+            taste.note(.quality(label))
+        }
+        taste.notePlayback(of: title, progress: progress, isFinished: policy.isFinished(progress: progress), episodeID: episodeID)
     }
 }
 
@@ -142,5 +161,15 @@ public struct PlaybackCheckpoint {
     /// A save just happened for another reason (pause, background).
     public mutating func reset(now: Date = Date()) {
         last = now
+    }
+}
+
+extension VideoQuality {
+    /// "2160p", "1080p"…; nil for 3D and unknown.
+    var tasteLabel: String? {
+        switch self {
+        case .sd480, .hd720, .hd1080, .uhd2160: return "\(rawValue)p"
+        case .unknown, .threeD: return nil
+        }
     }
 }

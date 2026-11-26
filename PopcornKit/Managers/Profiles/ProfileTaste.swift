@@ -1,0 +1,747 @@
+import Foundation
+
+// What a profile likes, learnt from what it does — nothing asked, nothing
+// sent: no network, no account. One model per profile, under the profile's
+// keys (`ProfileManager.storage(for:)`): a profile deleted takes its taste
+// with it, « Reset » in Settings › Profiles clears it.
+//
+// The model is a handful of decaying weights:
+//
+//   - features of the titles the profile played, finished, gave up on or
+//     added to its list: genres, decade, movie or show, original language,
+//     people (directors, the first actors);
+//   - the choices it makes while watching: audio and subtitle languages,
+//     the quality of the release it played.
+//
+// Every weight halves every `Policy.halfLife` (60 days): what was watched
+// last week counts more than what was watched last year. An event updates
+// the weights at once (no recomputation of the history), and the same event
+// twice is counted once: each title remembers what it has added so far
+// (`TitleRecord.credited`) and only the difference with what it is worth
+// now is applied — a movie played 3 times, then finished, is a movie
+// finished; a movie finished then marked unwatched is nothing again.
+//
+// Read by the Home (« For You », `HomeLocalHooks`), by the players (an audio
+// or subtitle language the profile never set itself, `preferredChoice`) and
+// by Settings › Profiles (`topAffinities`, `reset`).
+
+// MARK: - What an event is about
+
+/// The features of a movie or a show the taste is learnt from.
+public struct TasteTitle: Equatable, Sendable {
+
+    public enum Kind: String, Codable, Sendable {
+        case movie
+        case show
+    }
+
+    /// IMDb id of the movie or of the show (an episode counts for its show).
+    public var imdbID: String
+    public var kind: Kind
+    public var genres: [String]
+    public var year: Int?
+    /// ISO 639-1 code of the original language, when a source says it.
+    public var language: String?
+    /// Directors and the first actors.
+    public var people: [String]
+
+    public init(imdbID: String, kind: Kind, genres: [String] = [], year: Int? = nil,
+                language: String? = nil, people: [String] = []) {
+        self.imdbID = imdbID
+        self.kind = kind
+        self.genres = genres
+        self.year = year
+        self.language = language
+        self.people = people
+    }
+}
+
+public extension TasteTitle {
+
+    init(movie: Movie) {
+        self.init(imdbID: movie.id, kind: .movie, genres: movie.genres, year: Int(movie.year.prefix(4)),
+                  people: TasteTitle.people(crew: movie.crew, actors: movie.actors))
+    }
+
+    init(show: Show) {
+        self.init(imdbID: show.id, kind: .show, genres: show.genres, year: Int(show.year.prefix(4)),
+                  people: TasteTitle.people(crew: show.crew, actors: show.actors))
+    }
+
+    /// A movie, or the show of an episode (nil: an episode without its show).
+    init?(media: Media) {
+        if let movie = media as? Movie {
+            self.init(movie: movie)
+        } else if let show = media as? Show {
+            self.init(show: show)
+        } else if let show = (media as? Episode)?.show {
+            self.init(show: show)
+        } else {
+            return nil
+        }
+    }
+
+    private static func people(crew: [Crew], actors: [Actor]) -> [String] {
+        let directors = crew.filter { $0.job.localizedCaseInsensitiveContains("director") && !$0.job.localizedCaseInsensitiveContains("photography") }
+            .prefix(2).map(\.name)
+        return Array((directors + actors.prefix(3).map(\.name)).filter { !$0.isEmpty }.prefix(5))
+    }
+}
+
+/// A choice made while watching.
+public enum TasteChoice: Equatable, Sendable {
+    /// An audio language (ISO 639-1).
+    case audio(String)
+    /// A subtitle language (ISO 639-1); nil: subtitles off.
+    case subtitle(String?)
+    /// The quality of the release played ("2160p", "1080p", "720p", "480p").
+    case quality(String)
+
+    public enum Kind: String, CaseIterable, Sendable {
+        case audio
+        case subtitle
+        case quality
+    }
+
+    public var kind: Kind {
+        switch self {
+        case .audio: return .audio
+        case .subtitle: return .subtitle
+        case .quality: return .quality
+        }
+    }
+
+    /// "audio:fr", "subtitle:off", "quality:1080p".
+    var key: String {
+        switch self {
+        case .audio(let code): return "audio:\(code.lowercased())"
+        case .subtitle(let code): return "subtitle:\(code?.lowercased() ?? TasteChoice.off)"
+        case .quality(let label): return "quality:\(label.lowercased())"
+        }
+    }
+
+    static let off = "off"
+}
+
+// MARK: - What the model says
+
+/// One facet of the taste, for Settings › Profiles.
+public struct TasteAffinity: Hashable, Sendable {
+
+    public enum Facet: String, CaseIterable, Sendable {
+        case genre
+        case decade
+        case kind
+        case language
+        case person
+    }
+
+    public var facet: Facet
+    /// The genre (Cinemeta's name: "Sci-Fi"), the decade ("1990"), "movie"
+    /// or "show", the language code, the person's name.
+    public var value: String
+    /// −1…1: 1 is the facet the profile likes most.
+    public var score: Double
+
+    public init(facet: Facet, value: String, score: Double) {
+        self.facet = facet
+        self.value = value
+        self.score = score
+    }
+}
+
+/// The taste at one moment, as plain values: what the Home ranks with. Pure
+/// (Hashable, Sendable): the Home's builder reads it on its own queue.
+public struct TasteSnapshot: Hashable, Sendable {
+    /// Cinemeta's genre name → −1…1.
+    public var genres: [String: Double]
+    /// First year of the decade → −1…1.
+    public var decades: [Int: Double]
+    /// "movie" / "show" → −1…1.
+    public var kinds: [String: Double]
+    /// IMDb ids not to recommend: played, finished, given up on, listed.
+    public var excluded: Set<String>
+    /// How much the profile has done, decayed: under `minimumSignal` there is
+    /// nothing to recommend with.
+    public var signal: Double
+
+    public static let minimumSignal = 1.5
+
+    public init(genres: [String: Double] = [:], decades: [Int: Double] = [:], kinds: [String: Double] = [:],
+                excluded: Set<String> = [], signal: Double = 0) {
+        self.genres = genres
+        self.decades = decades
+        self.kinds = kinds
+        self.excluded = excluded
+        self.signal = signal
+    }
+
+    /// Enough was learnt to rank titles by it.
+    public var isConfident: Bool {
+        return signal >= TasteSnapshot.minimumSignal && genres.values.contains { $0 > 0 }
+    }
+
+    /// How much the profile should like a card, about −1…1: its genres first
+    /// (the first ones count more), then its decade, movie or show, and a
+    /// little of its rating (between two titles it likes alike, the better).
+    public func score(_ item: HomeItem) -> Double {
+        return score(kind: item.kind.rawValue, genres: item.genres, year: item.year, rating: item.rating)
+    }
+
+    public func score(kind: String, genres: [String], year: Int?, rating: Double?) -> Double {
+        let weights = [1.0, 0.7, 0.5]
+        var genreScore = 0.0
+        var total = 0.0
+        for (index, genre) in TasteSnapshot.genreKeys(genres).prefix(weights.count).enumerated() {
+            genreScore += weights[index] * (self.genres[genre] ?? 0)
+            total += weights[index]
+        }
+        if total > 0 { genreScore /= total }
+        let decade = year.map { decades[TasteSnapshot.decade(of: $0)] ?? 0 } ?? 0
+        let kindScore = kinds[kind] ?? 0
+        let ratingScore = rating.flatMap { $0 > 0 ? max(-1, min(1, ($0 - 6.5) / 2.5)) : nil } ?? 0
+        return 0.6 * genreScore + 0.15 * decade + 0.1 * kindScore + 0.15 * ratingScore
+    }
+
+    /// The genres under one spelling each (Cinemeta's: "Sci-Fi", "Sport"),
+    /// without repeats, in order.
+    static func genreKeys(_ genres: [String]) -> [String] {
+        var seen = Set<String>()
+        return genres.compactMap { ProfileTaste.genreKey($0) }.filter { seen.insert($0).inserted }
+    }
+
+    static func decade(of year: Int) -> Int {
+        return year / 10 * 10
+    }
+}
+
+// MARK: - The engine
+
+/// A profile's taste. `ProfileTaste.shared` is the active profile's.
+public final class ProfileTaste {
+
+    public struct Policy: Sendable {
+        /// A weight halves in this much time.
+        public var halfLife: TimeInterval = 60 * 86_400
+        /// A title played less than this…
+        public var abandonedFraction: Float = 0.25
+        /// … and not played again for this long was given up on.
+        public var abandonedAfter: TimeInterval = 14 * 86_400
+        /// What a title is worth.
+        public var finished = 1.0
+        public var started = 0.3
+        public var abandoned = -0.6
+        public var watchlisted = 0.4
+        /// Taken out of the list without being watched.
+        public var unwatchlisted = -0.15
+        /// A show: what each finished episode adds, up to `showMaximum`.
+        public var perEpisode = 0.2
+        public var showMaximum = 1.4
+        /// How much each feature of a title takes of its worth.
+        public var genreFactor = 1.0
+        public var decadeFactor = 0.5
+        public var kindFactor = 0.3
+        public var languageFactor = 0.5
+        public var personFactor = 0.4
+        /// Titles remembered (the most recent kept).
+        public var maxTitles = 400
+        /// Features kept (the strongest).
+        public var maxFeatures = 300
+        /// A learnt choice is used when it is at least this much of its kind…
+        public var choiceShare = 0.6
+        /// … and was made about this many times (decayed).
+        public var choiceMinimum = 2.0
+
+        public init() {}
+
+        public static let standard = Policy()
+    }
+
+    /// Posted on the main queue when a taste changed in a way that matters to
+    /// the screens (reset, a play, the list); the object is the taste.
+    public static let didChangeNotification = Notification.Name("PopcornKit.ProfileTaste.didChange")
+
+    /// The key of the model in the profile's storage.
+    public static let storageKey = "tasteProfile"
+
+    // MARK: One per profile
+
+    /// The active profile's taste (`ProfileManager`).
+    public static var shared: ProfileTaste {
+        return taste(for: ProfileManager.shared.activeID)
+    }
+
+    private static let tastesLock = NSLock()
+    private static var tastes: [String: ProfileTaste] = [:]
+
+    /// A profile's taste (kept once made). The first time a profile has one,
+    /// its watchlist seeds it (`seed(from:)`).
+    public static func taste(for profileID: String) -> ProfileTaste {
+        tastesLock.lock(); defer { tastesLock.unlock() }
+        if let taste = tastes[profileID] { return taste }
+        let taste = ProfileTaste(storage: ProfileManager.shared.storage(for: profileID))
+        if !taste.hasStoredModel { taste.seed(from: Library.library(for: profileID)) }
+        #if DEBUG
+        // `-PTDebugTasteGenres "Sci-Fi,Drama"` (UI tests, screenshots): the
+        // profile picked first has finished three movies of these genres.
+        if profileID == ProfileManager.shared.activeID, let genres = UserDefaults.standard.string(forKey: "PTDebugTasteGenres"), taste.isEmpty {
+            let list = genres.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }
+            for index in 0..<3 {
+                taste.notePlayback(of: TasteTitle(imdbID: "tt99999\(index)", kind: .movie, genres: list, year: 2015),
+                                   progress: 1, isFinished: true)
+            }
+        }
+        #endif
+        tastes[profileID] = taste
+        return taste
+    }
+
+    /// Drops a deleted profile's taste (its keys are gone with the profile's).
+    static func forget(profileID: String) {
+        tastesLock.lock(); defer { tastesLock.unlock() }
+        tastes[profileID] = nil
+    }
+
+    // MARK: State
+
+    public let policy: Policy
+    private let storage: LibraryStorage
+    private let now: () -> Date
+    private let center: NotificationCenter
+    private let lock = NSLock()
+    private var model: Model
+    private let hasStoredModel: Bool
+
+    public init(storage: LibraryStorage, policy: Policy = .standard, center: NotificationCenter = .default,
+                now: @escaping () -> Date = Date.init) {
+        self.storage = storage
+        self.policy = policy
+        self.center = center
+        self.now = now
+        if let data = storage.object(forKey: ProfileTaste.storageKey) as? Data,
+           let stored = try? ProfileTaste.decoder.decode(Model.self, from: data), stored.version == Model.currentVersion {
+            model = stored
+            hasStoredModel = true
+        } else {
+            model = Model()
+            hasStoredModel = false
+        }
+    }
+
+    // MARK: Events
+
+    /// A movie or an episode played up to `progress` (0…1); `isFinished`:
+    /// the library counts it as watched. `episodeID` for an episode: its
+    /// show counts each finished episode once.
+    public func notePlayback(of title: TasteTitle, progress: Float, isFinished: Bool, episodeID: String? = nil) {
+        update(title) { record, now in
+            record.lastPlayedAt = now
+            record.abandoned = false
+            if record.kind == TasteTitle.Kind.show.rawValue {
+                record.started = true
+                if isFinished, let episodeID { record.finishedEpisodes.insert(episodeID) }
+            } else {
+                record.progress = max(record.progress, progress)
+                record.started = record.started || progress > 0
+                record.finished = record.finished || isFinished
+            }
+        }
+    }
+
+    /// Marked watched (or not any more) by hand. `episodeID` for an episode
+    /// of `title`'s show.
+    public func noteWatched(_ isWatched: Bool, of title: TasteTitle, episodeID: String? = nil) {
+        update(title) { record, _ in
+            if let episodeID {
+                if isWatched { record.finishedEpisodes.insert(episodeID) } else { record.finishedEpisodes.remove(episodeID) }
+            } else {
+                record.finished = isWatched
+                if !isWatched { record.progress = 0; record.started = false; record.abandoned = false }
+            }
+        }
+    }
+
+    /// The same, from the library's ids only ("tt…" or "tt…-s1e2"): counted
+    /// for a title the taste already knows the features of, an exclusion for
+    /// one it does not.
+    public func noteWatched(_ isWatched: Bool, mediaID: String, kind: TasteTitle.Kind) {
+        if let (showID, _) = LibraryID.episode(mediaID) {
+            noteWatched(isWatched, of: TasteTitle(imdbID: showID, kind: .show), episodeID: mediaID)
+        } else {
+            noteWatched(isWatched, of: TasteTitle(imdbID: mediaID, kind: kind))
+        }
+    }
+
+    /// Added to the list, or taken out of it.
+    public func noteWatchlist(_ isAdded: Bool, of title: TasteTitle) {
+        noteWatchlist(isAdded, of: title, notifies: true)
+    }
+
+    private func noteWatchlist(_ isAdded: Bool, of title: TasteTitle, notifies: Bool) {
+        update(title, notifies: notifies) { record, _ in record.watchlisted = isAdded }
+    }
+
+    /// A choice made while watching.
+    public func note(_ choice: TasteChoice) {
+        let now = self.now()
+        lock.lock()
+        var decayed = model.choices[choice.key] ?? Decayed()
+        decayed.add(1, at: now, halfLife: policy.halfLife)
+        model.choices[choice.key] = decayed
+        save()
+        lock.unlock()
+    }
+
+    /// True the first time it is asked about a media id ("tt…" or
+    /// "tt…-s1e2"; the last 200 are remembered): a play's quality is
+    /// counted once, not at every saved position.
+    public func isFirstPlay(of mediaID: String) -> Bool {
+        lock.lock(); defer { lock.unlock() }
+        guard !model.played.contains(mediaID) else { return false }
+        model.played.append(mediaID)
+        if model.played.count > 200 { model.played.removeFirst(model.played.count - 200) }
+        save()
+        return true
+    }
+
+    /// The titles started long ago and left early are given up on. Cheap:
+    /// run when the Home reads the taste (launch, profile switch, a change).
+    public func sweep() {
+        let now = self.now()
+        lock.lock(); defer { lock.unlock() }
+        var changed = false
+        for (id, var record) in model.titles where !record.abandoned && record.started && !record.finished && record.finishedEpisodes.isEmpty {
+            guard let played = record.lastPlayedAt, now.timeIntervalSince(played) >= policy.abandonedAfter,
+                  record.kind == TasteTitle.Kind.show.rawValue || record.progress < policy.abandonedFraction else { continue }
+            record.abandoned = true
+            credit(&record, now: now)
+            model.titles[id] = record
+            changed = true
+        }
+        if changed { save() }
+    }
+
+    /// Forgets everything learnt (Settings › Profiles › Reset). Nothing is
+    /// seeded again: the profile starts over from what it does next.
+    public func reset() {
+        lock.lock()
+        model = Model()
+        model.seeded = true
+        save()
+        lock.unlock()
+        post()
+    }
+
+    /// The first taste of a profile that existed before tastes did: its
+    /// watchlist (the one place the library keeps genres and years).
+    func seed(from library: Library) {
+        lock.lock()
+        let seeded = model.seeded
+        lock.unlock()
+        guard !seeded else { return }
+        for kind in [ContinueWatchingItem.Kind.movie, .show] {
+            for entry in library.watchlist(kind).reversed() {
+                noteWatchlist(true, of: TasteTitle(imdbID: entry.imdbID, kind: kind == .movie ? .movie : .show,
+                                                   genres: entry.genres, year: entry.year.flatMap { Int($0.prefix(4)) }),
+                              notifies: false)
+            }
+        }
+        lock.lock()
+        model.seeded = true
+        save()
+        lock.unlock()
+    }
+
+    // MARK: Reads
+
+    /// The taste as the Home ranks with it. `alsoExcluded`: what the library
+    /// knows was watched that the taste never saw.
+    public func snapshot(alsoExcluded: Set<String> = []) -> TasteSnapshot {
+        sweep()
+        let now = self.now()
+        lock.lock(); defer { lock.unlock() }
+        var genres: [String: Double] = [:]
+        var decades: [Int: Double] = [:]
+        var kinds: [String: Double] = [:]
+        for (key, decayed) in model.features {
+            let value = decayed.value(at: now, halfLife: policy.halfLife)
+            guard let (facet, name) = Feature.parse(key) else { continue }
+            switch facet {
+            case .genre: genres[name] = value
+            case .decade: if let year = Int(name) { decades[year] = value }
+            case .kind: kinds[name] = value
+            case .language, .person: break
+            }
+        }
+        var excluded = alsoExcluded
+        for (id, record) in model.titles where record.started || record.finished || record.abandoned
+            || !record.finishedEpisodes.isEmpty || record.watchlisted == true {
+            excluded.insert(id)
+        }
+        return TasteSnapshot(genres: ProfileTaste.normalized(genres), decades: ProfileTaste.normalized(decades),
+                             kinds: ProfileTaste.normalized(kinds), excluded: excluded,
+                             signal: model.signal.value(at: now, halfLife: policy.halfLife))
+    }
+
+    /// The strongest facets, best first, at most `limit` per facet: what
+    /// Settings › Profiles shows. Only what the profile likes (score > 0).
+    public func topAffinities(limit: Int = 3) -> [TasteAffinity.Facet: [TasteAffinity]] {
+        let now = self.now()
+        lock.lock()
+        var byFacet: [TasteAffinity.Facet: [String: Double]] = [:]
+        for (key, decayed) in model.features {
+            guard let (facet, name) = Feature.parse(key) else { continue }
+            byFacet[facet, default: [:]][name] = decayed.value(at: now, halfLife: policy.halfLife)
+        }
+        lock.unlock()
+        var result: [TasteAffinity.Facet: [TasteAffinity]] = [:]
+        for (facet, values) in byFacet {
+            let top = ProfileTaste.normalized(values).filter { $0.value > 0.05 }
+                .sorted { $0.value != $1.value ? $0.value > $1.value : $0.key < $1.key }
+                .prefix(limit).map { TasteAffinity(facet: facet, value: $0.key, score: $0.value) }
+            if !top.isEmpty { result[facet] = top }
+        }
+        return result
+    }
+
+    /// The choice the profile makes most of a kind, when it makes it often
+    /// enough (`Policy.choiceShare`, `choiceMinimum`). For subtitles, "off"
+    /// is a choice too: nil then, as when nothing was learnt —
+    /// `prefersSubtitlesOff` tells them apart.
+    public func preferredChoice(_ kind: TasteChoice.Kind) -> String? {
+        guard let (value, _) = leadingChoice(kind), value != TasteChoice.off else { return nil }
+        return value
+    }
+
+    /// The profile turns subtitles off, mostly.
+    public var prefersSubtitlesOff: Bool {
+        return leadingChoice(.subtitle)?.value == TasteChoice.off
+    }
+
+    /// Choices of a kind with their decayed counts, most made first.
+    public func choices(_ kind: TasteChoice.Kind) -> [(value: String, count: Double)] {
+        let now = self.now()
+        let prefix = kind.rawValue + ":"
+        lock.lock(); defer { lock.unlock() }
+        return model.choices.compactMap { key, decayed -> (value: String, count: Double)? in
+            guard key.hasPrefix(prefix) else { return nil }
+            return (String(key.dropFirst(prefix.count)), decayed.value(at: now, halfLife: policy.halfLife))
+        }.sorted { $0.count != $1.count ? $0.count > $1.count : $0.value < $1.value }
+    }
+
+    /// Nothing learnt yet (or everything reset).
+    public var isEmpty: Bool {
+        lock.lock(); defer { lock.unlock() }
+        return model.features.isEmpty && model.choices.isEmpty
+    }
+
+    private func leadingChoice(_ kind: TasteChoice.Kind) -> (value: String, count: Double)? {
+        let all = choices(kind)
+        let total = all.reduce(0) { $0 + $1.count }
+        guard let first = all.first, total > 0, first.count >= policy.choiceMinimum,
+              first.count / total >= policy.choiceShare else { return nil }
+        return first
+    }
+
+    // MARK: Updating
+
+    /// Changes a title's record, then credits the difference of its worth.
+    private func update(_ title: TasteTitle, notifies: Bool = true, _ change: (inout TitleRecord, Date) -> Void) {
+        guard !title.imdbID.isEmpty else { return }
+        let now = self.now()
+        lock.lock()
+        var record = model.titles[title.imdbID] ?? TitleRecord(kind: title.kind.rawValue)
+        let features = ProfileTaste.features(of: title, policy: policy)
+        // Features learnt late (an entry known by its id, then played from
+        // its page) replace none: what was credited stays on the old ones.
+        if record.features.isEmpty || (record.credited.value == 0 && !features.isEmpty) { record.features = features }
+        change(&record, now)
+        record.updatedAt = now
+        credit(&record, now: now)
+        model.titles[title.imdbID] = record
+        trim()
+        save()
+        lock.unlock()
+        if notifies { post() }
+    }
+
+    /// Applies `worth(record) - credited` to the record's features (under the lock).
+    private func credit(_ record: inout TitleRecord, now: Date) {
+        let target = worth(of: record)
+        let delta = target - record.credited.value(at: now, halfLife: policy.halfLife)
+        guard abs(delta) > 0.0001 else { return }
+        for (feature, factor) in record.features {
+            var decayed = model.features[feature] ?? Decayed()
+            decayed.add(delta * factor, at: now, halfLife: policy.halfLife)
+            model.features[feature] = decayed
+        }
+        model.signal.add(abs(delta), at: now, halfLife: policy.halfLife)
+        record.credited = Decayed(value: target, at: now)
+    }
+
+    /// What a title is worth now.
+    func worth(of record: TitleRecord) -> Double {
+        var worth: Double
+        if record.abandoned {
+            worth = policy.abandoned
+        } else if record.kind == TasteTitle.Kind.show.rawValue, !record.finishedEpisodes.isEmpty {
+            worth = min(policy.showMaximum, policy.started + policy.perEpisode * Double(record.finishedEpisodes.count))
+        } else if record.finished {
+            worth = policy.finished
+        } else if record.started {
+            worth = policy.started
+        } else {
+            worth = 0
+        }
+        if record.watchlisted == true {
+            worth += policy.watchlisted
+        } else if record.watchlisted == false, worth == 0 {
+            worth = policy.unwatchlisted
+        }
+        return worth
+    }
+
+    /// The oldest titles and the weakest features go first (under the lock).
+    private func trim() {
+        if model.titles.count > policy.maxTitles {
+            let oldest = model.titles.sorted { $0.value.updatedAt < $1.value.updatedAt }.prefix(model.titles.count - policy.maxTitles)
+            for (id, _) in oldest { model.titles[id] = nil }
+        }
+        if model.features.count > policy.maxFeatures {
+            let now = self.now()
+            let weakest = model.features.sorted { abs($0.value.value(at: now, halfLife: policy.halfLife)) < abs($1.value.value(at: now, halfLife: policy.halfLife)) }
+                .prefix(model.features.count - policy.maxFeatures)
+            for (key, _) in weakest { model.features[key] = nil }
+        }
+    }
+
+    /// Under the lock.
+    private func save() {
+        guard let data = try? ProfileTaste.encoder.encode(model) else { return }
+        storage.set(data, forKey: ProfileTaste.storageKey)
+    }
+
+    private func post() {
+        let center = self.center
+        let send = { center.post(name: ProfileTaste.didChangeNotification, object: self) }
+        if Thread.isMainThread { send() } else { DispatchQueue.main.async(execute: send) }
+    }
+
+    // MARK: Features
+
+    /// A title's features with the share of its worth each takes.
+    static func features(of title: TasteTitle, policy: Policy) -> [String: Double] {
+        var features: [String: Double] = [:]
+        let genres = TasteSnapshot.genreKeys(title.genres).prefix(3)
+        // Three genres do not make a title count three times more than one.
+        let genreShare = genres.isEmpty ? 0 : policy.genreFactor / Double(genres.count).squareRoot()
+        for genre in genres { features[Feature.key(.genre, genre)] = genreShare }
+        if let year = title.year, year > 1800 { features[Feature.key(.decade, String(TasteSnapshot.decade(of: year)))] = policy.decadeFactor }
+        if !genres.isEmpty || title.year != nil { features[Feature.key(.kind, title.kind.rawValue)] = policy.kindFactor }
+        if let language = title.language?.lowercased(), !language.isEmpty { features[Feature.key(.language, language)] = policy.languageFactor }
+        for person in title.people.prefix(5) { features[Feature.key(.person, person)] = policy.personFactor }
+        return features
+    }
+
+    /// One spelling per genre: Cinemeta's ("Sci-Fi" for "Science Fiction"),
+    /// else the name capitalised. nil for an empty one.
+    public static func genreKey(_ name: String) -> String? {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+        return HomeBuilder.cinemetaGenre(trimmed) ?? trimmed.capitalized
+    }
+
+    /// Divided by the largest magnitude: −1…1.
+    static func normalized<Key: Hashable>(_ values: [Key: Double]) -> [Key: Double] {
+        let largest = values.values.map(abs).max() ?? 0
+        guard largest > 0.0001 else { return [:] }
+        return values.mapValues { $0 / largest }
+    }
+
+    private static let encoder: JSONEncoder = {
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .secondsSince1970
+        return encoder
+    }()
+
+    private static let decoder: JSONDecoder = {
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .secondsSince1970
+        return decoder
+    }()
+}
+
+// MARK: - Stored model
+
+/// A weight that halves every `halfLife`: stored as its value at `at`.
+struct Decayed: Codable, Equatable {
+    var value: Double = 0
+    var at: Date = .distantPast
+
+    func value(at now: Date, halfLife: TimeInterval) -> Double {
+        guard value != 0 else { return 0 }
+        let elapsed = max(0, now.timeIntervalSince(at))
+        return value * pow(0.5, elapsed / halfLife)
+    }
+
+    mutating func add(_ amount: Double, at now: Date, halfLife: TimeInterval) {
+        value = value(at: now, halfLife: halfLife) + amount
+        at = now
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case value = "v"
+        case at = "t"
+    }
+}
+
+/// What the taste remembers of a title.
+struct TitleRecord: Codable, Equatable {
+    var kind: String
+    /// Feature key → share of the title's worth.
+    var features: [String: Double] = [:]
+    var progress: Float = 0
+    var started = false
+    var finished = false
+    var abandoned = false
+    /// nil: never listed; false: taken out of the list.
+    var watchlisted: Bool?
+    /// A show's episodes finished ("tt…-s1e2").
+    var finishedEpisodes: Set<String> = []
+    var lastPlayedAt: Date?
+    /// What the title has added to the features so far.
+    var credited = Decayed()
+    var updatedAt: Date = .distantPast
+
+    init(kind: String) {
+        self.kind = kind
+    }
+}
+
+private struct Model: Codable {
+    static let currentVersion = 1
+    var version = Model.currentVersion
+    /// The watchlist was read once (`ProfileTaste.seed`).
+    var seeded = false
+    /// "genre:Sci-Fi", "decade:1990", "kind:movie", "language:fr", "person:…".
+    var features: [String: Decayed] = [:]
+    /// "audio:fr", "subtitle:off", "quality:1080p".
+    var choices: [String: Decayed] = [:]
+    /// IMDb id → record.
+    var titles: [String: TitleRecord] = [:]
+    /// Everything credited, in magnitude: how much is known.
+    var signal = Decayed()
+    /// Media ids whose play was counted (`isFirstPlay`), the latest last.
+    var played: [String] = []
+}
+
+private enum Feature {
+    static func key(_ facet: TasteAffinity.Facet, _ value: String) -> String {
+        return "\(facet.rawValue):\(value)"
+    }
+
+    static func parse(_ key: String) -> (TasteAffinity.Facet, String)? {
+        guard let colon = key.firstIndex(of: ":"), let facet = TasteAffinity.Facet(rawValue: String(key[..<colon])) else { return nil }
+        return (facet, String(key[key.index(after: colon)...]))
+    }
+}

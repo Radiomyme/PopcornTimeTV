@@ -544,6 +544,8 @@ struct ProfileScoped<Content: View>: View {
 /// Profile, Manage Profiles.
 struct ProfilesSettingsSection: View {
     @StateObject private var model = ProfilesModel()
+    @State private var showsTaste = false
+    @State private var tasteSummary = ProfileTasteModel.summary()
 
     var body: some View {
         Section {
@@ -565,6 +567,22 @@ struct ProfilesSettingsSection: View {
                 Label(profilesLocalized("Profiles.Manage"), systemImage: "person.2")
             }
             .accessibilityIdentifier("Settings.ManageProfiles")
+            Button {
+                showsTaste = true
+            } label: {
+                LabeledContent {
+                    Text(tasteSummary ?? profilesLocalized("Profiles.Taste.Nothing"))
+                } label: {
+                    Label(profilesLocalized("Profiles.Taste"), systemImage: "sparkles")
+                }
+            }
+            .accessibilityIdentifier("Settings.ProfilePreferences")
+            .sheet(isPresented: $showsTaste, onDismiss: { tasteSummary = ProfileTasteModel.summary() }) {
+                ProfileTasteView(onClose: { showsTaste = false })
+                    #if os(macOS)
+                    .frame(minWidth: 560, minHeight: 460)
+                    #endif
+            }
         } header: {
             Text(profilesLocalized("Profiles"))
         } footer: {

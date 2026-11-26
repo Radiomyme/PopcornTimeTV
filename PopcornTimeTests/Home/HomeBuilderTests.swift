@@ -1005,7 +1005,7 @@ final class HomeBuilderTests: CheckedTestCase {
     // MARK: Model
 
     func testShelfIdsAndTitles() {
-        eq(HomeShelfID.order, ["hero", "continueWatching", "yourShows", "trendingMovies", "newMovies", "uhd", "airedEpisodes", "trendingShows",
+        eq(HomeShelfID.order, ["hero", "continueWatching", "yourShows", "forYou", "trendingMovies", "newMovies", "uhd", "airedEpisodes", "trendingShows",
                                "newShows", "moviesOfTheYear", "topRatedOfTheYear", "top48hShows", "top48hMovies", "watchlist"], "the fixed shelves in page order")
         eq(HomeShelfID.genre(.movie, "Action"), "genre-movie-Action", "a genre shelf's id")
         eq(HomeShelfID.genre(of: "genre-show-Sci-Fi")?.genre, "Sci-Fi", "a genre with a dash")

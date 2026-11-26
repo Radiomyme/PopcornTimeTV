@@ -938,3 +938,25 @@
 "Profiles.Footer" = "Cada perfil tiene su propio historial, Seguir viendo, lista, idiomas de audio y subtítulos, y cuenta de Trakt.";
 "Profiles.Primary.Note" = "El perfil principal guarda el historial de antes de los perfiles: se puede renombrar, no eliminar.";
 "Profiles.Current" = "Perfil: %@";
+
+/* Profile preferences (ProfileTaste): the Home's « For You » shelf, Settings › Profiles › Your Preferences. */
+"For You" = "Para ti";
+"Profiles.Taste" = "Tus preferencias";
+"Profiles.Taste.Footer" = "Aprendido en este dispositivo a partir de lo que este perfil ve, añade a su lista y elige durante la reproducción. No se envía nada.";
+"Profiles.Taste.Empty" = "Aún no se ha aprendido nada. Mira algunos títulos y « Para ti » aparecerá en Inicio.";
+"Profiles.Taste.Nothing" = "Nada aún";
+"Profiles.Taste.Genres" = "Géneros";
+"Profiles.Taste.Kinds" = "Películas o series";
+"Profiles.Taste.Movies" = "Películas";
+"Profiles.Taste.Shows" = "Series";
+"Profiles.Taste.Decades" = "Décadas";
+"Profiles.Taste.Decade" = "Años %@";
+"Profiles.Taste.People" = "Artistas";
+"Profiles.Taste.Languages" = "Idiomas originales";
+"Profiles.Taste.Audio" = "Audio";
+"Profiles.Taste.Subtitles" = "Subtítulos";
+"Profiles.Taste.Quality" = "Calidad";
+"Profiles.Taste.Off" = "Desactivados";
+"Profiles.Taste.Reset" = "Restablecer preferencias";
+"Profiles.Taste.ResetConfirm" = "¿Olvidar lo aprendido sobre %@?";
+"Profiles.Taste.ResetMessage" = "« Para ti » desaparece hasta que este perfil vuelva a ver algo. Su historial y su lista se conservan.";

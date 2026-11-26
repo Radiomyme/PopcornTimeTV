@@ -256,8 +256,9 @@ final class HomeScreenLogicTests: CheckedTestCase {
         check(ready([], hero: false, hidden: [hero, movies, new, uhd, shows]), "nothing to wait for")
         eq(HomeFirstPaint.awaited(hidden: []), [hero, movies, new, uhd, shows], "the top of the page")
         eq(HomeFirstPaint.awaited(hidden: [uhd]), [hero, movies, new, shows], "less what the user hid")
-        // The rows waited for are the first catalogue rows of the page's order.
-        let catalogue = HomeShelfID.order.filter { $0 != hero && !HomeShelfID.local.contains($0) }
+        // The rows waited for are the first catalogue rows of the page's order
+        // (« For You » is made of them: it comes with them).
+        let catalogue = HomeShelfID.order.filter { $0 != hero && $0 != HomeShelfID.forYou && !HomeShelfID.local.contains($0) }
         eq(Array(catalogue.prefix(3)), [movies, new, uhd], "the first three catalogue rows of the order")
         check(HomeFirstPaint.patience > 1 && HomeFirstPaint.patience <= 3, "a host that hangs holds the page a moment, not more")
 

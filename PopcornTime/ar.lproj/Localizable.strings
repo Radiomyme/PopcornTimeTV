@@ -934,3 +934,25 @@
 "Profiles.Footer" = "لكل ملف شخصي سجل مشاهدة ومتابعة مشاهدة وقائمة مشاهدة ولغات صوت وترجمة وحساب Trakt خاص به.";
 "Profiles.Primary.Note" = "يحتفظ الملف الشخصي الرئيسي بالسجل السابق للملفات الشخصية: يمكن إعادة تسميته وليس حذفه.";
 "Profiles.Current" = "الملف الشخصي: %@";
+
+/* Profile preferences (ProfileTaste): the Home's « For You » shelf, Settings › Profiles › Your Preferences. */
+"For You" = "مقترح لك";
+"Profiles.Taste" = "تفضيلاتك";
+"Profiles.Taste.Footer" = "يُتعلَّم على هذا الجهاز مما يشاهده هذا الملف ويضيفه إلى قائمته ويختاره أثناء التشغيل. لا يُرسَل أي شيء.";
+"Profiles.Taste.Empty" = "لم يُتعلَّم شيء بعد. شاهد بعض العناوين وسيظهر « مقترح لك » في الصفحة الرئيسية.";
+"Profiles.Taste.Nothing" = "لا شيء بعد";
+"Profiles.Taste.Genres" = "الأنواع";
+"Profiles.Taste.Kinds" = "أفلام أم مسلسلات";
+"Profiles.Taste.Movies" = "أفلام";
+"Profiles.Taste.Shows" = "مسلسلات";
+"Profiles.Taste.Decades" = "العقود";
+"Profiles.Taste.Decade" = "سنوات %@";
+"Profiles.Taste.People" = "الفنانون";
+"Profiles.Taste.Languages" = "اللغات الأصلية";
+"Profiles.Taste.Audio" = "الصوت";
+"Profiles.Taste.Subtitles" = "الترجمة";
+"Profiles.Taste.Quality" = "الجودة";
+"Profiles.Taste.Off" = "متوقفة";
+"Profiles.Taste.Reset" = "إعادة تعيين التفضيلات";
+"Profiles.Taste.ResetConfirm" = "هل تريد نسيان ما تم تعلّمه عن %@؟";
+"Profiles.Taste.ResetMessage" = "يختفي « مقترح لك » حتى يشاهد هذا الملف شيئًا مجددًا. يُحتفَظ بالسجل والقائمة.";

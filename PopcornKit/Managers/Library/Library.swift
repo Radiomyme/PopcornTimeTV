@@ -458,6 +458,16 @@ public final class Library {
         lock.unlock()
     }
 
+    /// IMDb ids of the movies marked watched and of the shows with an
+    /// episode watched: what « For You » never offers.
+    public func watchedTitleIDs() -> Set<String> {
+        var ids = state.watchedSet(.movies)
+        for id in state.watchedSet(.episodes) {
+            if let (showID, _) = LibraryID.episode(id) { ids.insert(showID) }
+        }
+        return ids
+    }
+
     // MARK: - Watchlist
 
     /// Whether a movie or a show (IMDb id) is in the watchlist.

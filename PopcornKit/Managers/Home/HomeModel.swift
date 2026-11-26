@@ -289,6 +289,8 @@ public enum HomeShelfID {
     public static let hero = "hero"
     public static let continueWatching = "continueWatching"
     public static let yourShows = "yourShows"
+    /// The page's titles the active profile should like most (`ProfileTaste`).
+    public static let forYou = "forYou"
     public static let trendingMovies = "trendingMovies"
     public static let newMovies = "newMovies"
     public static let uhd = "uhd"
@@ -326,7 +328,7 @@ public enum HomeShelfID {
 
     /// The fixed shelves in display order; the genre shelves come after.
     public static let order: [String] = [
-        hero, continueWatching, yourShows, trendingMovies, newMovies, uhd, airedEpisodes,
+        hero, continueWatching, yourShows, forYou, trendingMovies, newMovies, uhd, airedEpisodes,
         trendingShows, newShows, moviesOfTheYear, topRatedOfTheYear, topShows, topMovies, watchlist,
     ]
 
@@ -341,6 +343,7 @@ public enum HomeShelfID {
         case hero: return "Featured"
         case continueWatching: return "Continue Watching"
         case yourShows: return "New Episodes of Your Shows"
+        case forYou: return "For You"
         case trendingMovies: return "Trending Movies"
         case newMovies: return "New Movies"
         case uhd: return "New in 4K"

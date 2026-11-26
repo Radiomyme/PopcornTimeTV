@@ -931,3 +931,25 @@
 "Profiles.Footer" = "Ogni profilo ha la propria cronologia, Continua a guardare, lista, lingue audio e sottotitoli e account Trakt.";
 "Profiles.Primary.Note" = "Il profilo principale conserva la cronologia di prima dei profili: si può rinominare, non eliminare.";
 "Profiles.Current" = "Profilo: %@";
+
+/* Profile preferences (ProfileTaste): the Home's « For You » shelf, Settings › Profiles › Your Preferences. */
+"For You" = "Per te";
+"Profiles.Taste" = "Le tue preferenze";
+"Profiles.Taste.Footer" = "Appreso su questo dispositivo da ciò che questo profilo guarda, aggiunge alla sua lista e sceglie durante la riproduzione. Non viene inviato nulla.";
+"Profiles.Taste.Empty" = "Ancora nulla di appreso. Guarda qualche titolo e « Per te » comparirà nella Home.";
+"Profiles.Taste.Nothing" = "Ancora nulla";
+"Profiles.Taste.Genres" = "Generi";
+"Profiles.Taste.Kinds" = "Film o serie";
+"Profiles.Taste.Movies" = "Film";
+"Profiles.Taste.Shows" = "Serie";
+"Profiles.Taste.Decades" = "Decenni";
+"Profiles.Taste.Decade" = "Anni %@";
+"Profiles.Taste.People" = "Artisti";
+"Profiles.Taste.Languages" = "Lingue originali";
+"Profiles.Taste.Audio" = "Audio";
+"Profiles.Taste.Subtitles" = "Sottotitoli";
+"Profiles.Taste.Quality" = "Qualità";
+"Profiles.Taste.Off" = "Disattivati";
+"Profiles.Taste.Reset" = "Reimposta preferenze";
+"Profiles.Taste.ResetConfirm" = "Dimenticare ciò che è stato appreso su %@?";
+"Profiles.Taste.ResetMessage" = "« Per te » scompare finché questo profilo non guarda di nuovo qualcosa. La cronologia e la lista restano.";

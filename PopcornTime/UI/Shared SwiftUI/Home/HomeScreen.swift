@@ -394,7 +394,7 @@ struct HomeHarmony {
     /// The shelves whose order is the point: they are never reordered —
     /// nor are the « Services » row and a service's shelves
     /// (`HomeShelfID.keepsItsOrder`: popular, new, top rated).
-    static let keepsOrder: Set<String> = [HomeShelfID.continueWatching, HomeShelfID.watchlist,
+    static let keepsOrder: Set<String> = [HomeShelfID.continueWatching, HomeShelfID.watchlist, HomeShelfID.forYou,
                                           HomeShelfID.topMovies, HomeShelfID.topShows]
 
     static func keepsOrder(_ id: String) -> Bool {
@@ -404,7 +404,10 @@ struct HomeHarmony {
     /// The user's own shelves: built from the library on the device, they
     /// arrive apart from the catalogue's, so they never reorder the
     /// catalogue's shelves (a row would jump under the eyes when they come).
-    static let personal: Set<String> = [HomeShelfID.continueWatching, HomeShelfID.watchlist, HomeShelfID.yourShows]
+    /// « For You » is ranked by the profile's taste and picks among the
+    /// catalogue's titles: it pushes none of them down the shelves below.
+    static let personal: Set<String> = [HomeShelfID.continueWatching, HomeShelfID.watchlist, HomeShelfID.yourShows,
+                                        HomeShelfID.forYou]
 
     /// A page that does not repeat its headline titles: a title already
     /// shown higher up in the catalogue's shelves goes to the end of a

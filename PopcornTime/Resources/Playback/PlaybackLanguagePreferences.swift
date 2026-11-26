@@ -42,14 +42,67 @@ enum PlaybackLanguagePreferences {
         "sl", "da", "fi", "no", "sv", "ca", "hi", "th", "vi", "id", "ms", "fa",
     ]
 
-    /// ISO 639-1 code of the preferred audio language, nil = none.
+    /// ISO 639-1 code of the preferred audio language, nil = none: the
+    /// profile's setting, else the language it picks itself most often
+    /// (`ProfileTaste`, learnt from the players' menus).
     static var preferredAudioLanguageCode: String? {
+        return explicitAudioLanguageCode ?? learnedCode(.audio)
+    }
+
+    /// ISO 639-1 code of the preferred subtitle language, nil = none: the
+    /// profile's setting, else the language it turns on itself most often.
+    static var preferredSubtitleLanguageCode: String? {
+        return explicitSubtitleLanguageCode ?? learnedCode(.subtitle)
+    }
+
+    /// What the profile set in Settings (what the Settings screens show).
+    static var explicitAudioLanguageCode: String? {
         return storedCode(forKey: audioLanguageDefaultsKey)
     }
 
-    /// ISO 639-1 code of the preferred subtitle language, nil = none.
-    static var preferredSubtitleLanguageCode: String? {
+    static var explicitSubtitleLanguageCode: String? {
         return storedCode(forKey: subtitleLanguageDefaultsKey)
+    }
+
+    /// The user picked an audio track in a player's menu: the profile's
+    /// taste counts it (nothing for a track without a known language).
+    static func noteChosenAudio(languageOrName: String?) {
+        #if canImport(PopcornKit)
+        guard let value = languageOrName, let code = isoCode(for: value) ?? code(inTrackName: value) else { return }
+        ProfileTaste.shared.note(.audio(code))
+        #endif
+    }
+
+    /// The user picked subtitles in a player's menu (nil: turned them off).
+    static func noteChosenSubtitle(languageOrName: String?, isOff: Bool) {
+        #if canImport(PopcornKit)
+        if isOff { return ProfileTaste.shared.note(.subtitle(nil)) }
+        guard let value = languageOrName, let code = isoCode(for: value) ?? code(inTrackName: value) else { return }
+        ProfileTaste.shared.note(.subtitle(code))
+        #endif
+    }
+
+    /// The first picker language a free-form track name speaks of
+    /// ("Track 1 - [French]").
+    private static func code(inTrackName name: String) -> String? {
+        return pickerLanguageCodes.first { matches(name, code: $0) }
+    }
+
+    private static func learnedCode(_ kind: LearnedKind) -> String? {
+        #if canImport(PopcornKit)
+        let taste = ProfileTaste.shared
+        switch kind {
+        case .audio: return taste.preferredChoice(.audio).flatMap(isoCode(for:))
+        case .subtitle: return taste.preferredChoice(.subtitle).flatMap(isoCode(for:))
+        }
+        #else
+        return nil
+        #endif
+    }
+
+    private enum LearnedKind {
+        case audio
+        case subtitle
     }
 
     /// ISO 639-1 code for a language name ("Français", "French") or code

@@ -107,9 +107,16 @@ public extension HomeLocalHooks {
     }
 
     /// The hooks of whichever library `current` names when they are asked:
-    /// `HomeFeed.shared` follows the active profile's (`Library.shared`).
-    init(libraryOf current: @escaping () -> Library, resumeLimit: Int = 30, now: @escaping () -> Date = Date.init) {
+    /// `HomeFeed.shared` follows the active profile's (`Library.shared`),
+    /// and its taste (`tasteOf`: « For You »; nil, no such shelf).
+    init(libraryOf current: @escaping () -> Library, tasteOf: (() -> ProfileTaste)? = nil,
+         resumeLimit: Int = 30, now: @escaping () -> Date = Date.init) {
         self.init()
+        if let tasteOf {
+            // The movies watched before the taste was there are not offered
+            // either (it only knows the ones it saw).
+            taste = { tasteOf().snapshot(alsoExcluded: current().watchedTitleIDs()) }
+        }
         prepare = { current().preload() }
         continueWatching = {
             let library = current()
@@ -185,7 +192,17 @@ public extension HomeFeed {
         let profile = center.addObserver(forName: .activeProfileDidChange, object: nil, queue: .main) { [weak self] _ in
             self?.refreshLocal()
         }
-        return [library, profile]
+        // A taste reset (Settings › Profiles): « For You » goes. The other
+        // changes come with a library change, recomputed already.
+        let burst = Burst()
+        let taste = center.addObserver(forName: ProfileTaste.didChangeNotification, object: nil, queue: nil) { [weak self] _ in
+            guard burst.begin() else { return }
+            DispatchQueue.main.async {
+                burst.end()
+                self?.refreshLocal()
+            }
+        }
+        return [library, profile, taste]
     }
 
     /// Recomputes the local shelves whenever `library` changes — a title

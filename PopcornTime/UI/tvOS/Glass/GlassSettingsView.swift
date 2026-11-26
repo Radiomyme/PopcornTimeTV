@@ -143,6 +143,8 @@ struct GlassSettingsActions {
     var readProfile: (() -> GlassSettingsProfile)? = nil
     /// « Who's Watching? » over the app; true: in its Manage mode.
     var showProfiles: (Bool) -> Void = { _ in }
+    /// Your Preferences: what the active profile's taste learnt.
+    var showTaste: () -> Void = {}
 }
 
 /// The active profile as the Profiles section shows it.
@@ -150,6 +152,8 @@ struct GlassSettingsProfile: Equatable {
     var name: String
     var symbol: String
     var tint: Color
+    /// Its strongest genres ("Sci-Fi, Drama"); nil: nothing learnt yet.
+    var preferences: String? = nil
 }
 
 /// The page's state. Changes go through the methods, which call the actions.
@@ -483,7 +487,7 @@ enum GlassSettingsRowID: Hashable {
     case quality, autoPlayNext, upNextCard, audio, subtitles, themeSongs, clearCache, trakt, version
     case homeLanguages, homeShelves, homeLookup
     case tmdbKey, streamingRegion, streamingServices
-    case switchProfile, manageProfiles
+    case switchProfile, manageProfiles, profilePreferences
 }
 
 struct GlassSettingsView: View {
@@ -728,6 +732,11 @@ struct GlassSettingsView: View {
                                  value: nil) { model.actions.showProfiles(true) }
                     .focused($focusedRow, equals: .manageProfiles)
                     .accessibilityIdentifier("Settings.Row.manageProfiles")
+                GlassSettingsDivider()
+                GlassSettingsRow(symbol: "sparkles", tint: .pink, title: "Profiles.Taste",
+                                 value: profile.preferences ?? "Profiles.Taste.Nothing".localized) { model.actions.showTaste() }
+                    .focused($focusedRow, equals: .profilePreferences)
+                    .accessibilityIdentifier("Settings.Row.profilePreferences")
             }
         }
     }
