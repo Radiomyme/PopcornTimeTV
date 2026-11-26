@@ -67,6 +67,7 @@ open class WatchlistManager<N: Media> {
         // A watchlisted show is followed: its guide is what new episodes are
         // worked out from.
         if let show = media as? Show { Library.shared.noteGuide(of: show, always: true) }
+        if let title = TasteTitle(media: media) { ProfileTaste.shared.noteWatchlist(true, of: title) }
     }
     
     /**
@@ -87,6 +88,7 @@ open class WatchlistManager<N: Media> {
     open func remove(_ media: N) {
         TraktManager.shared.remove(media.id, fromWatchlistOfType: currentType)
         Library.shared.removeFromWatchlist(id: media.id, list: currentType)
+        if let title = TasteTitle(media: media) { ProfileTaste.shared.noteWatchlist(false, of: title) }
     }
     
     /**

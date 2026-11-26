@@ -617,6 +617,9 @@ class PCTPlayerViewController: UIViewController, VLCMediaPlayerDelegate, UIGestu
         selectedEmbeddedTrackId = trackId
         if let trackId = trackId, let track = mediaplayer.textTracks.first(where: { $0.trackId == trackId }) {
             track.isSelectedExclusively = true
+            PlaybackLanguagePreferences.noteChosenSubtitle(languageOrName: (track.language as String?).flatMap { $0.isEmpty ? nil : $0 } ?? track.trackName, isOff: false)
+        } else if trackId == nil {
+            PlaybackLanguagePreferences.noteChosenSubtitle(languageOrName: nil, isOff: true)
         }
     }
     
@@ -800,6 +803,8 @@ class PCTPlayerViewController: UIViewController, VLCMediaPlayerDelegate, UIGestu
         userChoseSubtitle = true
         selectedEmbeddedTrackId = nil
         currentSubtitle = subtitle
+        PlaybackLanguagePreferences.noteChosenSubtitle(languageOrName: subtitle.map { $0.ISO639.isEmpty ? $0.language : $0.ISO639 },
+                                                       isOff: subtitle == nil)
     }
     
     func didSelectAudioDelay(_ delay: Int) {
@@ -811,7 +816,9 @@ class PCTPlayerViewController: UIViewController, VLCMediaPlayerDelegate, UIGestu
         // options UI passes the *position* in `audioTracks` (see the adapters
         // in the tvOS presentOptionsViewController), so select that element.
         guard index >= 0, Int(index) < mediaplayer.audioTracks.count else { return }
-        mediaplayer.audioTracks[Int(index)].isSelectedExclusively = true
+        let track = mediaplayer.audioTracks[Int(index)]
+        track.isSelectedExclusively = true
+        PlaybackLanguagePreferences.noteChosenAudio(languageOrName: (track.language as String?).flatMap { $0.isEmpty ? nil : $0 } ?? track.trackName)
     }
 
     /// Whether we already tried to honour the "Audio Language" setting for

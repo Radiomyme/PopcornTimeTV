@@ -630,3 +630,25 @@
 "Profiles.Footer" = "Each profile has its own watch history, Continue Watching, watchlist, audio and subtitle languages, and Trakt account.";
 "Profiles.Primary.Note" = "The main profile holds the history from before profiles: it can be renamed, not deleted.";
 "Profiles.Current" = "Watching: %@";
+
+/* Profile preferences (ProfileTaste): the Home's « For You » shelf, Settings › Profiles › Your Preferences. */
+"For You" = "For You";
+"Profiles.Taste" = "Your Preferences";
+"Profiles.Taste.Footer" = "Learnt on this device from what this profile watches, adds to its list and picks while watching. Nothing is sent anywhere.";
+"Profiles.Taste.Empty" = "Nothing learnt yet. Watch a few titles and « For You » will appear on Home.";
+"Profiles.Taste.Nothing" = "Nothing yet";
+"Profiles.Taste.Genres" = "Genres";
+"Profiles.Taste.Kinds" = "Movies or Shows";
+"Profiles.Taste.Movies" = "Movies";
+"Profiles.Taste.Shows" = "Shows";
+"Profiles.Taste.Decades" = "Decades";
+"Profiles.Taste.Decade" = "%@s";
+"Profiles.Taste.People" = "People";
+"Profiles.Taste.Languages" = "Original Languages";
+"Profiles.Taste.Audio" = "Audio";
+"Profiles.Taste.Subtitles" = "Subtitles";
+"Profiles.Taste.Quality" = "Quality";
+"Profiles.Taste.Off" = "Off";
+"Profiles.Taste.Reset" = "Reset Preferences";
+"Profiles.Taste.ResetConfirm" = "Forget what was learnt about %@?";
+"Profiles.Taste.ResetMessage" = "« For You » goes away until this profile watches again. Its history and list are kept.";

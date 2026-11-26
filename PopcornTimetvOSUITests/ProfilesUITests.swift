@@ -50,8 +50,9 @@ final class ProfilesUITests: XCTestCase {
 
         // « Me »: the movie in progress.
         remote.press(.select)
-        XCTAssertTrue(element("Home.Section.continueWatching").waitForExistence(timeout: 30), "Me's Home has no Continue Watching")
+        let resumed = element("Home.Section.continueWatching").waitForExistence(timeout: 30)
         snap("2-me-home")
+        XCTAssertTrue(resumed, "Me's Home has no Continue Watching")
 
         // Settings › Switch Profile › Alex.
         try switchProfile(to: "Alex", moves: 1)
@@ -66,7 +67,72 @@ final class ProfilesUITests: XCTestCase {
         snap("5-me-again")
     }
 
+    /// A profile with a taste: « For You » on its Home; Settings › Profiles
+    /// › Your Preferences says what it likes, and Reset makes the shelf go.
+    func testForYouAndYourPreferences() throws {
+        launch(["-PTDebugTasteGenres", "Sci-Fi,Drama"])
+        XCTAssertTrue(element("Home.Section.forYou").waitForExistence(timeout: 30), "no « For You » on the Home")
+        pause(2)
+        snap("6-for-you")
+
+        try openSettingsRow("Settings.Row.profilePreferences")
+        remote.press(.select)
+        XCTAssertTrue(element("Profiles.Taste.Title").waitForExistence(timeout: 10), "Your Preferences never showed")
+        let genres = element("Profiles.Taste.Genres")
+        XCTAssertTrue(genres.exists, "no genres learnt")
+        XCTAssertTrue(genres.label.contains("Drama"), "the genres: \(genres.label)")
+        pause(1)
+        snap("7-your-preferences")
+
+        // Reset: right of Done, then confirm.
+        for _ in 0..<3 where focusedIdentifier != "Profiles.Taste.Reset" {
+            remote.press(.right)
+            pause(0.8)
+        }
+        XCTAssertEqual(focusedIdentifier, "Profiles.Taste.Reset", "Reset never got the focus")
+        remote.press(.select)
+        pause(1.5)
+        snap("8-reset-confirm")
+        // The alert's focus starts on Cancel; Reset is above it.
+        remote.press(.up)
+        pause(0.8)
+        remote.press(.select)
+        XCTAssertTrue(element("Profiles.Taste.Empty").waitForExistence(timeout: 10), "the preferences were not reset")
+        remote.press(.menu)
+        XCTAssertTrue(element("Profiles.Taste.Title").waitForNonExistence(timeout: 10), "Your Preferences stayed")
+    }
+
     // MARK: - Helpers
+
+    /// From the Home: the tab bar, Settings, then the focus on a row of the
+    /// right column (the Profiles section is its top).
+    private func openSettingsRow(_ identifier: String) throws {
+        pause(2)
+        for _ in 0..<4 where !tabBarHasFocus {
+            remote.press(.up)
+            pause(0.8)
+        }
+        XCTAssertTrue(tabBarHasFocus, "the tab bar never got the focus: \(focusedIdentifier)")
+        for _ in 0..<8 where selectedTab != "settings" {
+            remote.press(.right)
+            pause(1)
+        }
+        XCTAssertEqual(selectedTab, "settings", "Settings never got selected")
+        XCTAssertTrue(element(identifier).waitForExistence(timeout: 10), "Settings has no \(identifier)")
+        remote.press(.down)
+        pause(1)
+        for _ in 0..<10 where focusedIdentifier != identifier {
+            let row = element(identifier)
+            let focused = focusedElement
+            if !focusedIsInRightColumn {
+                remote.press(.right)
+            } else {
+                remote.press(focused.exists && focused.frame.minY > row.frame.minY ? .up : .down)
+            }
+            pause(0.8)
+        }
+        XCTAssertEqual(focusedIdentifier, identifier, "\(identifier) never got the focus")
+    }
 
     /// From the Home: the tab bar, Settings, « Switch Profile », then `moves`
     /// to the right in the picker and a press.

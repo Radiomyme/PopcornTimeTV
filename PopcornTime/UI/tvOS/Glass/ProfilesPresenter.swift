@@ -43,6 +43,16 @@ enum ProfilesPresenter {
         presenter.present(controller, animated: true)
     }
 
+    /// Settings › Profiles › Your Preferences, over the app.
+    static func presentTaste(from presenter: UIViewController) {
+        weak var host: UIViewController?
+        let controller = UIHostingController(rootView: ProfileTasteView(onClose: { host?.dismiss(animated: true) }))
+        controller.view.backgroundColor = .black
+        controller.modalPresentationStyle = .fullScreen
+        host = controller
+        presenter.present(controller, animated: true)
+    }
+
     /// The app's interface made again, from the storyboard, with a dissolve.
     static func rebuildInterface() {
         guard let window = AppDelegate.shared.window else { return }

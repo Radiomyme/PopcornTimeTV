@@ -313,6 +313,7 @@ public final class ProfileManager {
         lock.unlock()
         eraseExternal(profile)
         Library.forget(profileID: id)
+        ProfileTaste.forget(profileID: id)
         post(.profilesDidChange)
         if wasActive { post(.activeProfileDidChange) }
     }
