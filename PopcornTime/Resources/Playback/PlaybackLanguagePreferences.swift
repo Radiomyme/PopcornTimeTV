@@ -75,6 +75,17 @@ enum PlaybackLanguagePreferences {
                             learned: learnedCode(.subtitle), heard: heard)
     }
 
+    /// Lets PopcornKit read the setting: the torrent lists, pickers and
+    /// automatic picks favour the active profile's audio language
+    /// (`AudioLanguagePreference`: its setting, else its learnt language —
+    /// the rule of `preferredAudioLanguageCode`), stored as a name this
+    /// resolves. Each app calls it at launch, before any torrent list.
+    static func installReleaseLanguageResolver() {
+        #if canImport(PopcornKit)
+        AudioLanguagePreference.resolver = { isoCode(for: $0) }
+        #endif
+    }
+
     /// What the profile set in Settings (what the Settings screens show).
     static var explicitAudioLanguageCode: String? {
         return storedCode(forKey: audioLanguageDefaultsKey)

@@ -64,7 +64,7 @@ enum MacAppLaunch {
     static func prepare() {
         // The torrent lists favour releases in the preferred audio language:
         // PopcornKit reads the setting through the app's language names.
-        AudioLanguagePreference.resolver = { PlaybackLanguagePreferences.isoCode(for: $0) }
+        PlaybackLanguagePreferences.installReleaseLanguageResolver()
         // GCDWebServer (torrent streaming + remux HLS servers): quiet about
         // the players' cancelled requests. First: -PTDebugHTTPTrace replaces it.
         GCDWebServerLogging.configure()

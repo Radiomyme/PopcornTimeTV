@@ -21,6 +21,11 @@ struct PopcornTimeApp: App {
         // on tvOS for the full rationale).
         VLCLibrary.sharedEventsConfiguration = VLCEventsLegacyConfiguration()
 
+        // The torrent lists favour releases in the preferred audio language:
+        // PopcornKit reads the setting through the app's language names
+        // (as the tvOS and Mac apps do at launch).
+        PlaybackLanguagePreferences.installReleaseLanguageResolver()
+
         #if DEBUG
         IOSDebugHooks.applySourceSwitches()
         // The offline end-to-end runs (`-PTDebugPlayTorrent` with
