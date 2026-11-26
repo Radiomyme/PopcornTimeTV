@@ -96,6 +96,16 @@ final class ProfileManagerTests: CheckedTestCase {
         let set = storage5x()
         _ = manager(set)
         eq(set.object(forKey: "preferredAudioLanguage") as? String, "Français", "a language chosen stays")
+        // An iPhone or Mac install has no terms to accept: the notes version
+        // it last saw, or its recent searches, may be all it stored.
+        for (key, value) in [("lastWhatsNewVersion", "5.3.0" as Any), ("recentSearches", ["Dune"] as Any)] {
+            let used = MemoryLibraryStorage([key: value])
+            _ = manager(used)
+            eq(used.object(forKey: "preferredAudioLanguage") as? String, AudioLanguagePreference.noneValue,
+               "only \(key) stored: an update, « None » kept")
+            eq(used.object(forKey: "preferredSubtitleLanguage") as? String, AudioLanguagePreference.noneValue,
+               "only \(key) stored: the subtitles too")
+        }
     }
 
     func testTheMigrationRunsOnce() {

@@ -238,11 +238,14 @@ public final class ProfileManager {
     /// The primary profile's language settings (Settings' keys).
     static let languageKeys = [AudioLanguagePreference.defaultsKey, "preferredSubtitleLanguage"]
 
-    /// The storage holds what a used app writes (as `WhatsNewPolicy` tells
-    /// an update from a fresh install): the terms accepted, a setting,
-    /// watch progress, watched or watchlist entries.
+    /// The storage holds what a used app writes (the keys `WhatsNewPolicy`
+    /// tells an update from a fresh install by, and the recent searches):
+    /// the terms accepted, the notes version last seen — the only trace of
+    /// many iPhone and Mac installs, which have no terms to accept —, a
+    /// setting, watch progress, watched or watchlist entries.
     static func isUsedInstall(_ storage: ProfileStorage) -> Bool {
-        let settings: Set<String> = ["tosAccepted", "autoSelectQuality", "streamOnCellular", "themeSongVolume"]
+        let settings = Set(["tosAccepted", "lastWhatsNewVersion", "autoSelectQuality", "streamOnCellular",
+                            "themeSongVolume", RecentSearches.defaultsKey]).union(languageKeys)
         let usage = ["Progress", "Watchedlist", "Watchlist"]
         return storage.storedKeys.contains { key in settings.contains(key) || usage.contains { key.hasSuffix($0) } }
     }
