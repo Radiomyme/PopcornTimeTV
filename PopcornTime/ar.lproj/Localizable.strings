@@ -1041,3 +1041,4 @@
 "Downloads.Failure.File" = "تعذّرت كتابة الملف";
 "Downloads.Failure.NoEpisode" = "الحلقة غير موجودة في هذا الإصدار";
 "Downloads.Failure.Other" = "توقف التنزيل";
+"Downloads.Storage.Free" = "%@ متاحة على Apple TV هذا";

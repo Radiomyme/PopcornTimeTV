@@ -27,7 +27,10 @@ struct DownloadsEntry: Identifiable, Equatable {
     let id: String
     var kind: Kind
     var title: String
+    /// The poster (a show's, for an episode).
     var artworkURL: URL?
+    /// A landscape still: the movie's backdrop, the episode's still.
+    var stillURL: URL? = nil
     var phase: Phase
     /// 0…1.
     var progress: Double
@@ -66,6 +69,37 @@ struct DownloadsText {
         let code = String(format: localize("Downloads.Episode"), integer(season), integer(number))
         guard !show.isEmpty, !entry.title.isEmpty else { return code }
         return code + " · " + entry.title
+    }
+
+    /// « S1 E5 » of an episode; nil for a movie.
+    func episodeCode(of entry: DownloadsEntry) -> String? {
+        guard case .episode(_, let season, let number) = entry.kind else { return nil }
+        return String(format: localize("Downloads.Episode"), integer(season), integer(number))
+    }
+
+    /// The row's quiet line, the percentage left out (the row shows it on
+    /// its own, large): « 3.1 MB/s · about 7 min left · 1.01 GB of 2.41 GB »,
+    /// « Paused · 1.2 GB of 1.64 GB », « Looking for sources… », « Failed —
+    /// reason », the size once downloaded.
+    func detail(of entry: DownloadsEntry) -> String {
+        switch entry.phase {
+        case .waiting:
+            return localize("Downloads.Status.Waiting")
+        case .downloading:
+            var parts: [String] = []
+            if entry.bytesPerSecond > 0 {
+                parts.append(String(format: localize("Downloads.Status.Speed"), bytes(entry.bytesPerSecond)))
+                if let left = timeLeft(of: entry) {
+                    parts.append(String(format: localize("Downloads.Status.TimeLeft"), left))
+                }
+            }
+            if let amounts = amounts(of: entry) { parts.append(amounts) }
+            return join(parts)
+        case .paused:
+            return join([localize("Downloads.Status.Paused"), amounts(of: entry) ?? ""])
+        case .failed, .finished:
+            return status(of: entry)
+        }
     }
 
     /// One line that says where the download is, only with what is known:
@@ -143,8 +177,18 @@ struct DownloadsText {
 
     // MARK: Page
 
-    /// Under the title: « Downloads take 3.4 GB · 21 GB free » — the bytes
-    /// on disk of the downloads' folders (`DownloadsStore.measureStorage`).
+    /// Beside the storage capsule: « Downloads take 3.4 GB · 21 GB free »,
+    /// or the free space alone while the downloads take next to nothing
+    /// (never « 0 MB »).
+    func storageCaption(used: Int64, free: Int64?) -> String {
+        if used < 1_000_000, let free {
+            return String(format: localize("Downloads.Storage.Free"), bytes(free))
+        }
+        return storage(used: used, free: free)
+    }
+
+    /// « Downloads take 3.4 GB · 21 GB free » — the bytes on disk of the
+    /// downloads' folders (`DownloadsStore.measureStorage`).
     func storage(used: Int64, free: Int64?) -> String {
         guard let free else { return String(format: localize("Downloads.Storage.Used"), bytes(used)) }
         return String(format: localize("Downloads.Storage"), bytes(used), bytes(free))

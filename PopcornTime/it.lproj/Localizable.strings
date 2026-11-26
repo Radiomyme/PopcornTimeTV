@@ -1038,3 +1038,4 @@
 "Downloads.Failure.File" = "impossibile scrivere il file";
 "Downloads.Failure.NoEpisode" = "l’episodio non è in questa versione";
 "Downloads.Failure.Other" = "il download si è interrotto";
+"Downloads.Storage.Free" = "%@ liberi su questa Apple TV";

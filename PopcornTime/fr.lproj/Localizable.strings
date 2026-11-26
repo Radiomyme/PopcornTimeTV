@@ -738,3 +738,4 @@
 "Downloads.Failure.File" = "écriture du fichier impossible";
 "Downloads.Failure.NoEpisode" = "épisode absent de cette version";
 "Downloads.Failure.Other" = "le téléchargement s’est arrêté";
+"Downloads.Storage.Free" = "%@ libres sur cette Apple TV";

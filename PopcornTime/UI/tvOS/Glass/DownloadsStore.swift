@@ -142,8 +142,13 @@ final class DownloadsStore: NSObject, ObservableObject, PTTorrentDownloadManager
         } else {
             kind = .movie
         }
+        // The still: an episode's own picture, a movie's backdrop.
+        let still = [metadata[MPMediaItemPropertyBackgroundArtwork] as? String,
+                     metadata[MPMediaItemPropertyArtwork] as? String]
+            .compactMap { $0 }.first { !$0.isEmpty }
         var entry = DownloadsEntry(id: id, kind: kind, title: title,
                                    artworkURL: artwork.flatMap { $0.isEmpty ? nil : URL(string: $0) },
+                                   stillURL: still.flatMap(URL.init(string:)),
                                    phase: Self.phase(of: download.downloadStatus),
                                    progress: Double(download.torrentStatus.totalProgress),
                                    bytesPerSecond: Int64(max(download.torrentStatus.downloadSpeed, 0)),
@@ -305,8 +310,14 @@ final class DownloadsStore: NSObject, ObservableObject, PTTorrentDownloadManager
         let folders = Set((manager.activeDownloads + manager.completedDownloads).compactMap(\.savePath)
                           + failed.values.compactMap(\.folder))
             .filter(Self.isInsideDownloadDirectory)
+        #if DEBUG
+        // The fixtures' files are sparse: what they would take.
+        let simulated: Int64? = DownloadsDebug.isActive ? DownloadsDebug.simulatedUsedBytes : nil
+        #else
+        let simulated: Int64? = nil
+        #endif
         DispatchQueue.global(qos: .utility).async { [weak self] in
-            let used = folders.reduce(Int64(0)) { $0 + FileManager.default.allocatedSize(atPath: $1) }
+            let used = simulated ?? folders.reduce(Int64(0)) { $0 + FileManager.default.allocatedSize(atPath: $1) }
             let free = Self.freeSpace(at: directory)
             DispatchQueue.main.async {
                 if self?.usedBytes != used { self?.usedBytes = used }
@@ -503,7 +514,13 @@ final class DownloadsStore: NSObject, ObservableObject, PTTorrentDownloadManager
 /// never resumed. Pause, resume and try again only change their state
 /// here; Delete deletes their folders for real.
 enum DownloadsDebug {
-    static var isActive: Bool { UserDefaults.standard.bool(forKey: "PTDebugDownloadFixtures") }
+    /// `YES`: the fixtures; `empty`: none (the earlier ones removed), for
+    /// the empty page.
+    static var isActive: Bool {
+        guard let value = UserDefaults.standard.string(forKey: "PTDebugDownloadFixtures") else { return false }
+        return value != "NO" && value != "0"
+    }
+    private static var writesFixtures: Bool { UserDefaults.standard.string(forKey: "PTDebugDownloadFixtures") != "empty" }
 
     struct Simulation {
         var phase: DownloadsEntry.Phase
@@ -561,6 +578,7 @@ enum DownloadsDebug {
         for name in (try? fm.contentsOfDirectory(atPath: directory)) ?? [] where name.hasPrefix("Fixture ") {
             try? fm.removeItem(atPath: (directory as NSString).appendingPathComponent(name))
         }
+        guard writesFixtures else { return }
         for (index, fixture) in fixtures.enumerated() {
             let folder = (directory as NSString).appendingPathComponent("Fixture \(index) \(fixture.title)")
             try? fm.createDirectory(atPath: folder, withIntermediateDirectories: true)
@@ -615,6 +633,13 @@ enum DownloadsDebug {
         fixtureIDs = Set(fixtures.map(\.id))
         DownloadsStore.shared.noteFixturesUserPaused(Array(fixtureIDs))
         print("[Downloads] \(fixtures.count) fixtures written")
+    }
+
+    /// What the fixtures still listed would take on disk.
+    static var simulatedUsedBytes: Int64 {
+        let listed = Set(DownloadsStore.shared.entries.map(\.id))
+        return fixtures.filter { listed.contains($0.id) }
+            .reduce(Int64(0)) { $0 + Int64(Double($1.size) * (simulated[$1.id]?.progress ?? $1.progress)) }
     }
 
     static func apply(to entry: inout DownloadsEntry) {

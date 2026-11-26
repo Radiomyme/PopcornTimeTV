@@ -23,6 +23,7 @@ final class DownloadsCatalogTests: CheckedTestCase {
         "Downloads.Status.Failed": "Failed",
         "Downloads.Storage": "Downloads take %1$@ · %2$@ free",
         "Downloads.Storage.Used": "Downloads take %@",
+        "Downloads.Storage.Free": "%@ free on this Apple TV",
         "Downloads.Failure.NoSpace": "not enough space",
         "Downloads.Failure.NoSpaceAmount": "not enough space (%@ to free)",
         "Downloads.Failure.File": "the file could not be written",
@@ -114,6 +115,26 @@ final class DownloadsCatalogTests: CheckedTestCase {
         // The margin: a download that would leave less than 500 MB free does not fit.
         XCTAssertNotNil(text.spaceWarning(needed: 2_000_000_000, free: 2_300_000_000))
         XCTAssertTrue(DownloadsCatalog.fits(needed: 2_000_000_000, free: 2_500_000_000))
+    }
+
+    func testTheRowsQuietLineLeavesThePercentageOut() {
+        let entry = movie(phase: .downloading, progress: 0.42, speed: 3_100_000, total: 2_410_000_000)
+        XCTAssertEqual(text.detail(of: entry),
+                       "\(text.bytes(3_100_000))/s · about \(text.timeLeft(of: entry)!) left · \(text.bytes(Int64(2_410_000_000 * 0.42))) of \(text.bytes(2_410_000_000))")
+        XCTAssertFalse(text.detail(of: entry).contains("%"))
+        XCTAssertEqual(text.detail(of: movie(phase: .paused, progress: 0.5, total: 2_000_000_000)),
+                       "Paused · \(text.bytes(1_000_000_000)) of \(text.bytes(2_000_000_000))")
+        XCTAssertEqual(text.detail(of: movie(phase: .paused, progress: 0.5)), "Paused")
+        XCTAssertEqual(text.detail(of: movie(phase: .waiting, progress: 0.3)), "Looking for sources…")
+        XCTAssertEqual(text.detail(of: movie(phase: .failed("no space"))), "Failed — no space")
+        XCTAssertEqual(text.episodeCode(of: episode("e", show: "MobLand", season: 1, number: 5, title: "Pilot")), "S1 E5")
+        XCTAssertNil(text.episodeCode(of: movie(phase: .finished)))
+    }
+
+    func testTheStorageCaptionNeverSaysZero() {
+        XCTAssertEqual(text.storageCaption(used: 0, free: 21_000_000_000), "\(text.bytes(21_000_000_000)) free on this Apple TV")
+        XCTAssertEqual(text.storageCaption(used: 3_400_000_000, free: 21_000_000_000),
+                       "Downloads take \(text.bytes(3_400_000_000)) · \(text.bytes(21_000_000_000)) free")
     }
 
     func testAFailureIsSaidShortlyInTheUILanguage() {

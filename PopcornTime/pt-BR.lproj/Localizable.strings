@@ -1045,3 +1045,4 @@
 "Downloads.Failure.File" = "não foi possível gravar o arquivo";
 "Downloads.Failure.NoEpisode" = "o episódio não está nesta versão";
 "Downloads.Failure.Other" = "o download parou";
+"Downloads.Storage.Free" = "%@ livres nesta Apple TV";
