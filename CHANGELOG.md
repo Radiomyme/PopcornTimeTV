@@ -5,6 +5,31 @@ What changed in each version of this fork of PopcornTimeTV, newest first. The in
 (`PopcornTime/UI/Shared SwiftUI/WhatsNew.swift`). The technical reference (formats, Top Shelf,
 logs, tests) is in [docs/TECHNICAL.md](docs/TECHNICAL.md).
 
+## Unreleased
+
+**Choosing the source (Apple TV, iPhone / iPad, Mac)**
+([#14](https://github.com/Radiomyme/PopcornTimeTV/pull/14), by
+[RougeCiel](https://github.com/RougeCiel), rebuilt on 5.4.0)
+- **Floors that follow the bitrate**: the seeds a release needs before it starts quickly grow
+  with its estimated bitrate (up to four times its resolution's floor): a 73 Mb/s UHD remux
+  needs 132 seeds where a 27 Mb/s UHD encode needs 50. Without an estimate (size or runtime
+  unknown, a season pack) the resolution's floor, as before.
+- **Comfortable swarms first**: at a resolution, a release with three times its floor comes
+  before one just over it, whatever their picture (an HDR10 release with 800 seeds before a
+  Dolby Vision one with 46: announced counts are often days old). Peers count a third of a
+  seed, never more than the seeds themselves.
+- **Your language, with enough seeds**: a release in the preferred audio language needs half
+  its floor (at least 3) to come first; a French release with 3 seeds no longer beats a
+  healthy MULTi one. The 5.4.0 rules stay: never a CAM, a release the display can't show or
+  one too heavy for the connection because of its language, and never a dub in another
+  language.
+- **Settings**: Auto Select Quality offers Quick Start, Balanced, Best Picture, Highest,
+  Lowest and Always Ask, each with its sentence; Maximum Resolution (No Limit, 4K, 1080p,
+  720p) keeps the automatic choice at or under it, the other sources stay in the lists;
+  Prefer Your Language, under Audio Language, lets a higher resolution in another language
+  win. They are the same on every device and for every profile (they are about the screen
+  and the connection).
+
 ## 5.4.0
 
 Their short form is shown once in the app after the update (`WhatsNewRelease.v5_4_0` in
