@@ -3,7 +3,10 @@ import Foundation
 /// The searches the user ran last, most recent first, shown by the search
 /// screen before anything is typed. Stored as a plain string array in the
 /// defaults it is given (`.standard` in the apps, a throwaway domain in the
-/// tests).
+/// tests), under the active profile's key: the primary profile keeps the
+/// plain key of the searches from before profiles, the others
+/// "profile.<id>.recentSearches" (deleted with the profile). A child's
+/// profile is not shown what a parent searched.
 public struct RecentSearches {
 
     public static let defaultsKey = "recentSearches"
@@ -11,14 +14,24 @@ public struct RecentSearches {
     public static let limit = 8
 
     private let defaults: UserDefaults
+    private let profiles: ProfileManager?
 
-    public init(defaults: UserDefaults = .standard) {
+    /// - Parameter profiles: whose active profile the searches are; nil:
+    ///   the app's (`ProfileManager.shared`).
+    public init(defaults: UserDefaults = .standard, profiles: ProfileManager? = nil) {
         self.defaults = defaults
+        self.profiles = profiles
+    }
+
+    /// The active profile's key, read at each access: a screen kept across
+    /// a switch of profiles reads the new one's searches.
+    private var storageKey: String {
+        return (profiles ?? ProfileManager.shared).scopedKey(RecentSearches.defaultsKey)
     }
 
     /// Most recent first.
     public var queries: [String] {
-        defaults.stringArray(forKey: RecentSearches.defaultsKey) ?? []
+        defaults.stringArray(forKey: storageKey) ?? []
     }
 
     /// Remembers a search that was run (submitted, or a result of it opened).
@@ -32,14 +45,14 @@ public struct RecentSearches {
     }
 
     public func clear() {
-        defaults.removeObject(forKey: RecentSearches.defaultsKey)
+        defaults.removeObject(forKey: storageKey)
     }
 
     private func store(_ list: [String]) {
         if list.isEmpty {
-            defaults.removeObject(forKey: RecentSearches.defaultsKey)
+            defaults.removeObject(forKey: storageKey)
         } else {
-            defaults.set(list, forKey: RecentSearches.defaultsKey)
+            defaults.set(list, forKey: storageKey)
         }
     }
 

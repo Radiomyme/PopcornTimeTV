@@ -51,13 +51,17 @@ final class RecentSearchesTests: CheckedTestCase {
         let domain = testDomain("recent-searches")
         let defaults = throwawayDefaults(domain)
         defer { discardDefaults(defaults, domain) }
-        let recents = RecentSearches(defaults: defaults)
+        // The primary profile's searches: the plain key, as before profiles (each profile's are in
+        // ProfileManagerTests).
+        let profiles = ProfileManager(storage: MemoryLibraryStorage(), defaultName: "Me", center: NotificationCenter(),
+                                      eraseExternal: { _ in })
+        let recents = RecentSearches(defaults: defaults, profiles: profiles)
         eq(recents.queries, [], "empty at first")
         recents.add("Dune")
         recents.add("Severance")
         recents.add("DUNE")
         eq(recents.queries, ["DUNE", "Severance"], "stored most recent first, one per search")
-        eq(RecentSearches(defaults: defaults).queries, ["DUNE", "Severance"], "read back by another instance")
+        eq(RecentSearches(defaults: defaults, profiles: profiles).queries, ["DUNE", "Severance"], "read back by another instance")
         recents.remove("severance")
         eq(recents.queries, ["DUNE"], "removed whatever its case")
         recents.remove("DUNE")
