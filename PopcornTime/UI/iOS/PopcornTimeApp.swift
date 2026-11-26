@@ -44,6 +44,10 @@ struct PopcornTimeApp: App {
         // Known before the first Play: is the connection cellular data or a
         // personal hotspot (`CellularStreamingPolicy`)?
         NetworkPathObserver.shared.start()
+
+        // A profile picked (« Who's Watching? », Settings) gets its own
+        // Trakt account's lists.
+        TraktManager.shared.followActiveProfile()
     }
 
     var body: some Scene {

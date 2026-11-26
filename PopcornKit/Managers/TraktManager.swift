@@ -548,6 +548,20 @@ open class TraktManager: NetworkManager {
         }
     }
     
+    private var profileObserver: NSObjectProtocol?
+
+    /// Syncs the user data of each profile that becomes active (its own
+    /// Trakt account; nothing is asked for a profile without one), for the
+    /// app's life. Once is enough: later calls do nothing. The Apple TV app
+    /// starts it after « Who's Watching? » has been answered, with its
+    /// launch sync; the iPhone, iPad and Mac apps at launch.
+    public func followActiveProfile(center: NotificationCenter = .default) {
+        guard profileObserver == nil else { return }
+        profileObserver = center.addObserver(forName: .activeProfileDidChange, object: nil, queue: .main) { [weak self] _ in
+            self?.syncUserData()
+        }
+    }
+
     /// Downloads users latest watchlist and watchedlist from Trakt.
     open func syncUserData() {
         WatchedlistManager<Movie>.movie.getProgress()

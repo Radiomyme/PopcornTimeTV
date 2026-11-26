@@ -87,6 +87,9 @@ enum MacAppLaunch {
 
         // Pre-warm the provider chain (same as the iOS app).
         _ = MediaProviders.shared
+        // A profile picked (« Who's Watching? », the app menu) gets its own
+        // Trakt account's lists.
+        TraktManager.shared.followActiveProfile()
         // Reclaim torrent partials + orphaned remux output from previous
         // sessions/crashes.
         #if DEBUG

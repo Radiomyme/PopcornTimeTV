@@ -109,17 +109,9 @@ class AppDelegate: UIResponder, UIApplicationDelegate, UITabBarControllerDelegat
         // The Top Shelf follows the Home and the library.
         TopShelfReloader.shared.start()
 
-        // Defer Trakt's user-data sync (6 parallel HTTP requests for
-        // playback progress, watchlists, etc.) to *after* the first
-        // visible frame. Otherwise it competes with the Movies tab's
-        // initial YTS fetch over a small pool of HTTP/1.1 sockets and
-        // makes the grid feel sluggish to populate. The cached
-        // UserDefaults values are returned synchronously by each
-        // sub-call so the UI doesn't need the network results to
-        // render.
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-            TraktManager.shared.syncUserData()
-        }
+        // Trakt's user-data sync starts with the interface
+        // (`SceneDelegate.installInterface`): after « Who's Watching? »,
+        // with the account of the profile picked.
 
         // Window creation, the Terms-of-Service gate and launch-URL handling
         // now happen in `SceneDelegate` (they need the window, which only

@@ -87,6 +87,21 @@ class SceneDelegate: UIResponder, UIWindowSceneDelegate {
             AppDelegate.shared.open(debugLaunchURL, allowsAutoPlay: false)
         }
 
+        // Trakt's user data, with the account of the profile watching now
+        // (never before « Who's Watching? » is answered: the lists would go
+        // to the last profile while another one is picked), then each time
+        // another profile becomes active. Deferred until *after* the first
+        // visible frame (6 parallel HTTP requests for playback progress,
+        // watchlists, etc.): otherwise it competes with the Movies tab's
+        // initial YTS fetch over a small pool of HTTP/1.1 sockets and makes
+        // the grid feel sluggish to populate. The stored values are returned
+        // synchronously by each sub-call, so the UI doesn't need the network
+        // results to render.
+        TraktManager.shared.followActiveProfile()
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+            TraktManager.shared.syncUserData()
+        }
+
         #if DEBUG
         DebugLaunchHooks.run()
         // `-PTDebugNoDetailWarmUp YES`: the first title page pays SwiftUI's

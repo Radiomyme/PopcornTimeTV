@@ -110,10 +110,16 @@ open class WatchlistManager<N: Media> {
      - Returns: Locally stored watchlist (may be out of date if user has authenticated with trakt).
      */
     @discardableResult open func getWatchlist(_ completion: (([N]) -> Void)? = nil) -> [N] {
-        TraktManager.shared.getWatchlist(forMediaOfType: N.self) { [unowned self] (medias, error) in
+        // The list replaces the watchlist of the profile whose account was
+        // asked, not of whoever is watching when it arrives (the title
+        // lookups behind it can take seconds).
+        let list = currentType
+        let deliver = ProfileManager.shared.answerForActiveProfile(write: { (profileID, medias: [N]) in
+            Library.library(for: profileID).replaceWatchlist(Mapper<N>().toJSONArray(medias), list: list)
+        }, show: completion)
+        TraktManager.shared.getWatchlist(forMediaOfType: N.self) { (medias, error) in
             guard error == nil else {return}
-            Library.shared.replaceWatchlist(Mapper<N>().toJSONArray(medias), list: self.currentType)
-            completion?(medias)
+            deliver(medias)
         }
         
         return storedWatchlist()

@@ -97,14 +97,17 @@ open class WatchedlistManager<N: Media & Hashable> {
      - Returns: Locally stored watchedlist imdbId's (may be out of date if user has authenticated with trakt).
      */
     @discardableResult open func getWatched(completion: (([N]) -> Void)? = nil) -> [String] {
-        TraktManager.shared.getWatched(forMediaOfType: N.self) { [unowned self] (medias, error) in
-            guard error == nil else { return }
-            
+        // Into the marks of the profile whose account was asked, whoever is
+        // watching when the answer arrives.
+        let list = currentType
+        let deliver = ProfileManager.shared.answerForActiveProfile(write: { (profileID, medias: [N]) in
             // Added to the local marks, never in their place: Trakt names
             // an episode by its TVDB number, the app by "tt…-sXeY".
-            Library.shared.mergeFromTrakt(watched: medias.map({ $0.id }), list: self.currentType)
-            
-            completion?(medias)
+            Library.library(for: profileID).mergeFromTrakt(watched: medias.map({ $0.id }), list: list)
+        }, show: completion)
+        TraktManager.shared.getWatched(forMediaOfType: N.self) { (medias, error) in
+            guard error == nil else { return }
+            deliver(medias)
         }
         
         return storedWatched()
@@ -150,14 +153,18 @@ open class WatchedlistManager<N: Media & Hashable> {
      - Returns: Locally stored progress (may be out of date if user has authenticated with trakt).
      */
     @discardableResult open func getProgress(completion: (([N: Float]) -> Void)? = nil) -> [String: Float] {
-        TraktManager.shared.getPlaybackProgress(forMediaOfType: N.self) { (dict, error) in
-            guard error == nil else { return }
-            
+        // Into the positions of the profile whose account was asked, whoever
+        // is watching when the answer arrives (one title lookup per entry
+        // comes first: seconds).
+        let list = currentType
+        let deliver = ProfileManager.shared.answerForActiveProfile(write: { (profileID, dict: [N: Float]) in
             var progress: [String: Float] = [:]
             for (media, value) in dict { progress[media.id] = value }
-            Library.shared.mergeFromTrakt(progress: progress, list: self.currentType)
-            
-            completion?(dict)
+            Library.library(for: profileID).mergeFromTrakt(progress: progress, list: list)
+        }, show: completion)
+        TraktManager.shared.getPlaybackProgress(forMediaOfType: N.self) { (dict, error) in
+            guard error == nil else { return }
+            deliver(dict)
         }
         
         return Library.shared.state.allProgress(currentType)

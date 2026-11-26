@@ -253,6 +253,29 @@ public final class ProfileManager {
         return ProfileManager.traktCredentialIdentifier(of: activeID)
     }
 
+    /// For a request whose answer comes back later — Trakt's watchlist,
+    /// watched marks and positions, asked with the active profile's
+    /// credential: binds the answer to the profile active now. `write` gets
+    /// it with that profile's id whatever profile is active by then (a
+    /// profile picked while the answer was on its way must not get another
+    /// one's list in place of its own); `show`, the screen that asked, only
+    /// while that profile is still the active one. Nothing at all once that
+    /// profile was deleted: its keys would come back with no profile to
+    /// own them, and no deletion to remove them.
+    ///
+    /// Call it in the same main-thread step as the request, before
+    /// anything can switch profiles: the credential and the profile are
+    /// then the same one's.
+    public func answerForActiveProfile<Answer>(write: @escaping (_ profileID: String, Answer) -> Void,
+                                               show: ((Answer) -> Void)? = nil) -> (Answer) -> Void {
+        let asker = activeID
+        return { [weak self] answer in
+            guard let self = self, self.profile(withID: asker) != nil else { return }
+            write(asker, answer)
+            if self.activeID == asker { show?(answer) }
+        }
+    }
+
     // MARK: Writing
 
     /// Adds a profile (not made active).
