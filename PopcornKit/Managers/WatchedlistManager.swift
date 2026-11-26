@@ -50,32 +50,35 @@ open class WatchedlistManager<N: Media & Hashable> {
      Toggles a users watched status on the passed in media id and syncs with Trakt if available.
      
      - Parameter id: The imdbId for movie or tvdbId for episode.
+     - Parameter title: The movie, or the episode's show, when the caller has it: the profile's taste learns its features at once.
      */
-    open func toggle(_ id: String) {
-        isAdded(id) ? remove(id): add(id)
+    open func toggle(_ id: String, title: TasteTitle? = nil) {
+        isAdded(id) ? remove(id, title: title): add(id, title: title)
     }
     
     /**
      Adds movie or episode to watchedlist and syncs with Trakt if available.
      
      - Parameter id: The imdbId or tvdbId of the movie or episode.
+     - Parameter title: The movie, or the episode's show, when the caller has it (`toggle`).
      */
-    open func add(_ id: String) {
+    open func add(_ id: String, title: TasteTitle? = nil) {
         TraktManager.shared.add(id, toWatchedlistOfType: currentType)
         Library.shared.setWatched(true, id: id, list: currentType)
-        ProfileTaste.shared.noteWatched(true, mediaID: id, kind: currentType == .movies ? .movie : .show)
+        ProfileTaste.shared.noteWatched(true, mediaID: id, kind: currentType == .movies ? .movie : .show, title: title)
     }
     
     /**
      Removes movie or episode from a users watchedlist, sets its progress to 0.0 and syncs with Trakt if available.
      
      - Parameter id: The imdbId for movie or tvdbId for episode.
+     - Parameter title: The movie, or the episode's show, when the caller has it (`toggle`).
      */
-    open func remove(_ id: String) {
+    open func remove(_ id: String, title: TasteTitle? = nil) {
         TraktManager.shared.remove(id, fromWatchedlistOfType: currentType)
         TraktManager.shared.scrobble(id, progress: 0, type: currentType, status: .finished)
         Library.shared.setWatched(false, id: id, list: currentType)
-        ProfileTaste.shared.noteWatched(false, mediaID: id, kind: currentType == .movies ? .movie : .show)
+        ProfileTaste.shared.noteWatched(false, mediaID: id, kind: currentType == .movies ? .movie : .show, title: title)
     }
     
     /**

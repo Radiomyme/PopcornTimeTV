@@ -84,7 +84,9 @@ public struct Movie: Media, Equatable {
         get {
             return WatchedlistManager<Movie>.movie.isAdded(id)
         } set (add) {
-            add ? WatchedlistManager<Movie>.movie.add(id) : WatchedlistManager<Movie>.movie.remove(id)
+            // With the movie itself: the profile's taste learns its genres and people at once.
+            let title = TasteTitle(movie: self)
+            add ? WatchedlistManager<Movie>.movie.add(id, title: title) : WatchedlistManager<Movie>.movie.remove(id, title: title)
         }
     }
     

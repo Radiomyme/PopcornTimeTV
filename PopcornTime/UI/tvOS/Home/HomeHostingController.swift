@@ -232,9 +232,9 @@ final class HomeHostingController: UIHostingController<HomeView> {
         actions.toggleWatched = { item in
             guard let id = item.watchedID else { return }
             if item.kind == .movie {
-                WatchedlistManager<Movie>.movie.toggle(id)
+                WatchedlistManager<Movie>.movie.toggle(id, title: TasteTitle(item: item))
             } else {
-                WatchedlistManager<Episode>.episode.toggle(id)
+                WatchedlistManager<Episode>.episode.toggle(id, title: TasteTitle(item: item))
             }
         }
         actions.removeFromContinueWatching = { item in

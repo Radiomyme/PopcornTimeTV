@@ -393,13 +393,13 @@ final class MediaDetailViewModel: ObservableObject {
     }
 
     func toggleWatched(_ episode: Episode, of media: Media) {
-        WatchedlistManager<Episode>.episode.toggle(episode.id)
+        WatchedlistManager<Episode>.episode.toggle(episode.id, title: (enrichedShow ?? (media as? Show)).map(TasteTitle.init(show:)))
         refreshWatchState(of: media)
     }
 
     func toggleMovieWatched(of media: Media) {
         guard let movie = enrichedMovie ?? (media as? Movie) else { return }
-        WatchedlistManager<Movie>.movie.toggle(movie.id)
+        WatchedlistManager<Movie>.movie.toggle(movie.id, title: TasteTitle(movie: movie))
         refreshWatchState(of: media)
     }
 

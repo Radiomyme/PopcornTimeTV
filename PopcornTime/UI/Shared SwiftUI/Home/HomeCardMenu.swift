@@ -47,9 +47,9 @@ enum HomeLibraryActions {
     static func toggleWatched(_ item: HomeItem) {
         guard let id = watchedID(of: item) else { return }
         if item.episode != nil {
-            WatchedlistManager<Episode>.episode.toggle(id)
+            WatchedlistManager<Episode>.episode.toggle(id, title: TasteTitle(item: item))
         } else {
-            WatchedlistManager<Movie>.movie.toggle(id)
+            WatchedlistManager<Movie>.movie.toggle(id, title: TasteTitle(item: item))
         }
     }
 

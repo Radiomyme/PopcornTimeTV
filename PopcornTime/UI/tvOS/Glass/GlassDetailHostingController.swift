@@ -648,7 +648,7 @@ final class GlassDetailHostingController: UIHostingController<GlassDetailView>, 
     /// saved progress), then Play and up-next.
     private func toggleEpisodeWatched(_ id: String) {
         guard let show, let row = model.episodes.firstIndex(where: { $0.id == id }) else { return }
-        WatchedlistManager<Episode>.episode.toggle(id)
+        WatchedlistManager<Episode>.episode.toggle(id, title: TasteTitle(show: show))
         model.episodes[row] = GlassDetailAdapter.refreshed([model.episodes[row]])[0]
         refreshShowProgress(show)
     }

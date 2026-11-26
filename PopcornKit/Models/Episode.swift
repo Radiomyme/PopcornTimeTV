@@ -46,7 +46,9 @@ public struct Episode: Media, Equatable {
         get {
             return WatchedlistManager<Episode>.episode.isAdded(id)
         } set (add) {
-            add ? WatchedlistManager<Episode>.episode.add(id) : WatchedlistManager<Episode>.episode.remove(id)
+            // With its show, when known: the profile's taste learns the show's genres at once.
+            let title = show.map(TasteTitle.init(show:))
+            add ? WatchedlistManager<Episode>.episode.add(id, title: title) : WatchedlistManager<Episode>.episode.remove(id, title: title)
         }
     }
     
