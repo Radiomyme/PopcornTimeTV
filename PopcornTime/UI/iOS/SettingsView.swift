@@ -83,8 +83,7 @@ struct SettingsView: View {
             } header: {
                 Text("Languages")
             } footer: {
-                Text("Audio and subtitles in these languages are picked automatically when the file or OpenSubtitles offers them.")
-                    + Text(verbatim: " ") + Text("Settings.Language.Automatic.Footer")
+                Text(verbatim: "\(String(localized: "Audio and subtitles in these languages are picked automatically when the file or OpenSubtitles offers them.")) \(String(localized: "Settings.Language.Automatic.Footer"))")
             }
 
             homeSections
