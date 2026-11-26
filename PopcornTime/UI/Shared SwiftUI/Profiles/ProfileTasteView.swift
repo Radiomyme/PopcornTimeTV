@@ -38,9 +38,9 @@ final class ProfileTasteModel: ObservableObject {
     /// "Drama · Science Fiction" — the Settings row's value, joined as the
     /// panel's lines are; nil: nothing learnt.
     static func summary(of taste: ProfileTaste = .shared) -> String? {
-        let genres = taste.topAffinities(limit: 2)[.genre] ?? []
+        let genres = (taste.topAffinities(limit: 2)[.genre] ?? []).compactMap { genreName($0.value) }
         guard !genres.isEmpty else { return nil }
-        return genres.map { genreName($0.value) }.joined(separator: " · ")
+        return genres.joined(separator: " · ")
     }
 
     static func lines(of taste: ProfileTaste) -> [ProfileTasteLine] {
@@ -50,7 +50,7 @@ final class ProfileTasteModel: ObservableObject {
             guard !values.isEmpty else { return }
             lines.append(ProfileTasteLine(id: id, title: profilesLocalized("Profiles.Taste.\(id)"), values: values))
         }
-        add("Genres", (top[.genre] ?? []).map { genreName($0.value) })
+        add("Genres", (top[.genre] ?? []).compactMap { genreName($0.value) })
         add("Kinds", (top[.kind] ?? []).prefix(1).map { profilesLocalized($0.value == "show" ? "Profiles.Taste.Shows" : "Profiles.Taste.Movies") })
         add("Decades", (top[.decade] ?? []).map { String(format: profilesLocalized("Profiles.Taste.Decade"), $0.value) })
         add("People", (top[.person] ?? []).map(\.value))
@@ -64,15 +64,19 @@ final class ProfileTasteModel: ObservableObject {
         return lines
     }
 
-    /// The genre under the app's name for it, translated.
-    static func genreName(_ genre: String) -> String {
+    /// The genre under the app's name for it, translated; nil for one the
+    /// strings do not know (a catalog's odd genre, an older spelling): left
+    /// out rather than shown in English in every language.
+    static func genreName(_ genre: String) -> String? {
         let app: String
         switch genre {
         case "Sci-Fi": app = "Science Fiction"
         case "Sport": app = "Sports"
         default: app = genre
         }
-        return profilesLocalized(app)
+        let missing = "\u{1}"
+        let name = Bundle.main.localizedString(forKey: app, value: missing, table: nil)
+        return name == missing ? nil : name
     }
 
     static func languageName(_ code: String) -> String {

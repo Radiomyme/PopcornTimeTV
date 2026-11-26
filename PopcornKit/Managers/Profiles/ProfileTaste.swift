@@ -800,12 +800,23 @@ public final class ProfileTaste {
     }
 
     /// One spelling per genre: Cinemeta's ("Sci-Fi" for "Science Fiction"),
-    /// else the name capitalised. nil for an empty one.
+    /// else the catalogs' own for the genres Cinemeta lacks ("Reality-TV",
+    /// not `capitalized`'s "Reality-Tv": the strings' keys), else the name
+    /// capitalised. nil for an empty one.
     public static func genreKey(_ name: String) -> String? {
         let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return nil }
-        return HomeBuilder.cinemetaGenre(trimmed) ?? trimmed.capitalized
+        return HomeBuilder.cinemetaGenre(trimmed) ?? otherGenres[trimmed.lowercased()] ?? trimmed.capitalized
     }
+
+    /// YTS's, TVMaze's and IMDb's genres whose spelling `capitalized` breaks.
+    private static let otherGenres: [String: String] = [
+        "reality-tv": "Reality-TV", "reality tv": "Reality-TV", "reality": "Reality-TV",
+        "talk-show": "Talk-Show", "talk show": "Talk-Show",
+        "game-show": "Game-Show", "game show": "Game-Show",
+        "film-noir": "Film-Noir", "film noir": "Film-Noir",
+        "diy": "DIY",
+    ]
 
     /// Divided by the largest magnitude: −1…1.
     static func normalized<Key: Hashable>(_ values: [Key: Double]) -> [Key: Double] {

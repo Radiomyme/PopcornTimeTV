@@ -683,3 +683,21 @@
 "Settings.Language.Automatic.Footer" = "Automatic follows the language you pick most often in the player.";
 /* iPhone, iPad: Your Preferences with nothing learned, under « Nothing yet » (the Apple TV and the Mac keep Profiles.Taste.Empty). */
 "Profiles.Taste.EmptyHint" = "Watch a few titles and « For You » will appear on Home.";
+
+/* 5.4.0 round3 */
+/* Genres a catalog (YTS, TVMaze, IMDb) gives that Cinemeta lacks: Your Preferences' Genres line and the Settings row name them. */
+"Reality-TV" = "Reality TV";
+"Talk-Show" = "Talk Show";
+"Game-Show" = "Game Show";
+"Film-Noir" = "Film Noir";
+"Musical" = "Musical";
+"News" = "News";
+"Supernatural" = "Supernatural";
+"Anime" = "Anime";
+"Children" = "Children";
+"Espionage" = "Espionage";
+"Legal" = "Legal";
+"Medical" = "Medical";
+"Nature" = "Nature";
+"Travel" = "Travel";
+"DIY" = "DIY";

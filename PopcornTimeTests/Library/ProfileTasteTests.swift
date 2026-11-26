@@ -73,6 +73,15 @@ final class ProfileTasteTests: CheckedTestCase {
         check(people.contains("Christopher Nolan"), "the director is learnt", "\(people)")
     }
 
+    func testAGenreIsLearntUnderTheStringsSpelling() {
+        // The key names it in Your Preferences: "Reality-Tv" had no translation in any language.
+        eq(ProfileTaste.genreKey("Reality-TV"), "Reality-TV", "not capitalized's Reality-Tv")
+        eq(ProfileTaste.genreKey("talk show"), "Talk-Show", "one spelling for the catalogs' two")
+        eq(ProfileTaste.genreKey("Film-Noir"), "Film-Noir", "Film-Noir")
+        eq(ProfileTaste.genreKey("Science Fiction"), "Sci-Fi", "Cinemeta's still first")
+        eq(ProfileTaste.genreKey("supernatural"), "Supernatural", "otherwise capitalised")
+    }
+
     func testMarkedUnwatchedTakesItsWorthBack() {
         let clock = F.Clock("2026-11-25T12:00:00Z")
         let taste = taste(clock: clock)
