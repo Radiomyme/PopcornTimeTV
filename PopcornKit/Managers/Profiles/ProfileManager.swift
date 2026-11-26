@@ -7,13 +7,19 @@ import Foundation
 //   - the library (`Library.shared` is the active profile's): watched marks,
 //     playback positions and the Continue Watching entries (with the release
 //     to resume), the watchlist, the new episodes already seen;
-//   - the preferred audio and subtitle languages, the subtitle encoding
-//     (`ProfileManager.scopedKey`);
-//   - the Trakt account (`ProfileManager.traktCredentialIdentifier`).
+//   - the preferred audio and subtitle languages and the recent searches
+//     (iPhone, iPad; `ProfileManager.scopedKey`);
+//   - the taste (`ProfileTaste`: « For You », the languages it learns);
+//   - the Trakt account (`ProfileManager.traktCredentialIdentifier`): its
+//     lists are synced into the profile that asked for them
+//     (`answerForActiveProfile`), and again when another profile becomes
+//     active (`TraktManager.followActiveProfile`).
 // The device's: the Home's content languages and shelves, the streaming
-// services and the TMDB key, the quality and Up Next settings, the
-// downloads, the caches. The Top Shelf reads no user data (the extension
-// cannot read the app's defaults): nothing of it is a profile's.
+// services and the TMDB key, the quality and Up Next settings, the subtitle
+// appearance and encoding (`SubtitleSettings`: one archive with the size,
+// colour and font), the downloads, the caches. The Top Shelf reads no user
+// data (the extension cannot read the app's defaults): nothing of it is a
+// profile's.
 //
 // Storage. The profiles' list and the active one are in the standard
 // defaults (`profiles`, `activeProfile`). The primary profile — the one
@@ -54,10 +60,35 @@ public protocol ProfileStorage: LibraryStorage {
     var storedKeys: [String] { get }
 }
 
-extension UserDefaults: ProfileStorage {
+/// A defaults domain as the profiles' storage: the app's own in the apps
+/// (`.standard`), a suite in the tests — the domain is given rather than
+/// taken from `Bundle.main`, so the tests delete a profile from real
+/// defaults exactly as the apps do.
+public final class DefaultsProfileStorage: ProfileStorage {
+    public let defaults: UserDefaults
+    /// Where the stored keys are listed from.
+    private let domain: String?
+
+    public init(defaults: UserDefaults = .standard, domain: String? = Bundle.main.bundleIdentifier) {
+        self.defaults = defaults
+        self.domain = domain
+    }
+
+    public func object(forKey key: String) -> Any? {
+        return defaults.object(forKey: key)
+    }
+
+    public func set(_ value: Any?, forKey key: String) {
+        defaults.set(value, forKey: key)
+    }
+
     public var storedKeys: [String] {
-        // The persistent domain only: not the arguments nor the global domain.
-        return Array((persistentDomain(forName: Bundle.main.bundleIdentifier ?? "") ?? dictionaryRepresentation()).keys)
+        // The persistent domain only: not the arguments nor the global
+        // domain. Without it (no bundle identifier, nothing stored yet),
+        // every key the defaults see: a profile's keys are found among
+        // them, and nothing else is deleted (only its prefix is).
+        let stored = domain.flatMap { defaults.persistentDomain(forName: $0) }
+        return Array((stored ?? defaults.dictionaryRepresentation()).keys)
     }
 }
 
@@ -133,7 +164,7 @@ public final class ProfileManager {
             return manager
         }
         #endif
-        return ProfileManager(storage: UserDefaults.standard, defaultName: ProfileManager.localizedDefaultName)
+        return ProfileManager(storage: DefaultsProfileStorage(), defaultName: ProfileManager.localizedDefaultName)
     }()
 
     /// The primary profile's name when it is made: the app's text, else "Me".
