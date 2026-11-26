@@ -40,6 +40,35 @@ class OptionsStackViewController: UIViewController, UITableViewDelegate {
         view.addLayoutGuide(firstSecondGuide)
         view.addLayoutGuide(secondThirdGuide)
     }
+
+    /// The checked row of `tableView` (the language, the delay, the
+    /// encoding in use); nil when nothing is checked there.
+    func checkedIndexPath(in tableView: UITableView) -> IndexPath? {
+        return nil
+    }
+
+    /// The focus enters a list on its checked row, as in the system's own
+    /// player panel: the Delay list opened on -60 with the current 0 sixty
+    /// rows down, a long scroll to nudge it by one.
+    func indexPathForPreferredFocusedView(in tableView: UITableView) -> IndexPath? {
+        return checkedIndexPath(in: tableView)
+    }
+
+    override func viewWillAppear(_ animated: Bool) {
+        super.viewWillAppear(animated)
+
+        // The checked rows are in view before the panel shows (once, without
+        // animation: nothing scrolls under the focus as it arrives).
+        view.layoutIfNeeded()
+        for tableView in [firstTableView, secondTableView, thirdTableView] {
+            guard let tableView = tableView else { continue }
+            tableView.reloadData()
+            guard let checked = checkedIndexPath(in: tableView), checked.section < tableView.numberOfSections,
+                  checked.row < tableView.numberOfRows(inSection: checked.section) else { continue }
+            tableView.layoutIfNeeded()
+            tableView.scrollToRow(at: checked, at: .middle, animated: false)
+        }
+    }
     
     override func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)

@@ -48,6 +48,19 @@ class AudioViewController: OptionsStackViewController, UITableViewDataSource {
     }
 
 
+    override func checkedIndexPath(in tableView: UITableView) -> IndexPath? {
+        switch tableView {
+        case firstTableView:
+            return audioTrackIndexes.firstIndex(of: currentAudioTrackIndex).map { IndexPath(row: $0, section: 0) }
+        case secondTableView:
+            return delays.firstIndex(of: currentDelay).map { IndexPath(row: $0, section: 0) }
+        case thirdTableView:
+            return sounds.firstIndex(of: currentSound).map { IndexPath(row: $0, section: 0) }
+        default:
+            return nil
+        }
+    }
+
     // MARK: Table view data source
 
     func tableView(_ tableView: UITableView, cellForRowAt indexPath: IndexPath) -> UITableViewCell {
@@ -71,7 +84,12 @@ class AudioViewController: OptionsStackViewController, UITableViewDataSource {
             let speaker = manager.speakerRoutes[indexPath.row]
             cell.textLabel?.text = speaker.name
             cell.accessoryType = speaker.isSelected ? .checkmark : .none
-            cell.imageView?.image = UIImage(named: "Airplay TV")?.colored(cell.textLabel?.textColor)
+            // A template: the icon takes the cell's tint, which follows the
+            // focus as the checkmark's does (black on the focused white
+            // pill, white otherwise). Tinted with the label's colour, it
+            // took the colour a reused cell had before (black on the dark
+            // panel) and kept it when the focus moved.
+            cell.imageView?.image = UIImage(named: "Airplay TV")?.withRenderingMode(.alwaysTemplate)
         default:
             break
         }

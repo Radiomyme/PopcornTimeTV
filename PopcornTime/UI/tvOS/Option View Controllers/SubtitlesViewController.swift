@@ -30,6 +30,25 @@ class SubtitlesViewController: OptionsStackViewController, UITableViewDataSource
     }
     
 
+    override func checkedIndexPath(in tableView: UITableView) -> IndexPath? {
+        let row: Int?
+        switch tableView {
+        case firstTableView:
+            if let id = currentEmbeddedTrackId, let index = embeddedTracks.firstIndex(where: { $0.id == id }) {
+                row = index
+            } else {
+                row = currentSubtitle.flatMap { subtitles.firstIndex(of: $0) }.map { embeddedTracks.count + $0 }
+            }
+        case secondTableView:
+            row = delays.firstIndex(of: currentDelay)
+        case thirdTableView:
+            row = Array(encodings.values).firstIndex(of: currentEncoding)
+        default:
+            row = nil
+        }
+        return row.map { IndexPath(row: $0, section: 0) }
+    }
+
     // MARK: Table view data source
     
     func tableView(_ tableView: UITableView, cellForRowAt indexPath: IndexPath) -> UITableViewCell {
