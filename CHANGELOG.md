@@ -23,8 +23,10 @@ logs, tests) is in [docs/TECHNICAL.md](docs/TECHNICAL.md).
   healthy MULTi one. The 5.4.0 rules stay: never a CAM, a release the display can't show or
   one too heavy for the connection because of its language, and never a dub in another
   language.
-- **Settings**: Auto Select Quality offers Quick Start, Balanced, Best Picture, Highest,
-  Lowest and Always Ask, each with its sentence; Maximum Resolution (No Limit, 4K, 1080p,
+- **Settings**: Auto Select Quality offers Quick Start, Balanced, Best Picture and Always
+  Ask, each with its sentence. Highest and Lowest are gone: a device set to Highest now uses
+  Best Picture (the best picture among the sources shared widely enough), one set to Lowest
+  Quick Start (the most shared source), converted at launch. Maximum Resolution (No Limit, 4K, 1080p,
   720p) keeps the automatic choice at or under it, the other sources stay in the lists;
   Prefer Your Language, under Audio Language, lets a higher resolution in another language
   win. They are the same on every device and for every profile (they are about the screen
