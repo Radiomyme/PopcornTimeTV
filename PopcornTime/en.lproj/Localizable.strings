@@ -627,15 +627,14 @@
 "Profiles.DefaultName" = "Me";
 "Profiles" = "Profiles";
 "Profiles.Switch" = "Switch Profile";
-"Profiles.Footer" = "Each profile has its own watch history, Continue Watching, watchlist, audio and subtitle languages, and Trakt account.";
+"Profiles.Footer" = "Each profile keeps its own history, watchlist, languages and Trakt account.";
 "Profiles.Primary.Note" = "The main profile holds the history from before profiles: it can be renamed, not deleted.";
-"Profiles.Current" = "Watching: %@";
 
 /* Profile preferences (ProfileTaste): the Home's « For You » shelf, Settings › Profiles › Your Preferences. */
 "For You" = "For You";
 "Profiles.Taste" = "Your Preferences";
-"Profiles.Taste.Footer" = "Learnt on this device from what this profile watches, adds to its list and picks while watching. Nothing is sent anywhere.";
-"Profiles.Taste.Empty" = "Nothing learnt yet. Watch a few titles and « For You » will appear on Home.";
+"Profiles.Taste.Footer" = "Learned on this device from what this profile watches, adds to its list and picks while watching. Nothing is sent anywhere.";
+"Profiles.Taste.Empty" = "Nothing learned yet. Watch a few titles and « For You » will appear on Home.";
 "Profiles.Taste.Nothing" = "Nothing yet";
 "Profiles.Taste.Genres" = "Genres";
 "Profiles.Taste.Kinds" = "Movies or Shows";
@@ -649,7 +648,7 @@
 "Profiles.Taste.Quality" = "Quality";
 "Profiles.Taste.Off" = "Off";
 "Profiles.Taste.Reset" = "Reset Preferences";
-"Profiles.Taste.ResetConfirm" = "Forget what was learnt about %@?";
+"Profiles.Taste.ResetConfirm" = "Forget what was learned about %@?";
 "Profiles.Taste.ResetMessage" = "« For You » goes away until this profile watches again. Its history and list are kept.";
 
 /* 5.4.0 a-lang */
@@ -663,3 +662,15 @@
 /* 5.4.0 b-search */
 "Search.MoviesFailed" = "Movies couldn’t be loaded.";
 "Search.ShowsFailed" = "Shows couldn’t be loaded.";
+
+/* 5.4.0 d-profiles-ui */
+/* VoiceOver: the value of the profile in use, in « Who's Watching? » opened from Settings and in the Mac's Profiles pane. */
+"Profiles.CurrentValue" = "Current profile";
+/* VoiceOver, Manage mode: %@ = the profile's name. */
+"Profiles.EditNamed" = "Edit %@";
+/* Mac, Settings › Profiles: the button that makes a profile the one in use. */
+"Profiles.Use" = "Use";
+/* Mac, Settings › Profiles: the tooltip of Use while the player is up. */
+"Profiles.Use.Busy" = "Available once the player is closed.";
+/* The profile editor: the profile was deleted meanwhile (another window). */
+"Profiles.Error.Gone" = "This profile no longer exists.";

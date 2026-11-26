@@ -930,9 +930,8 @@
 "Profiles.DefaultName" = "أنا";
 "Profiles" = "الملفات الشخصية";
 "Profiles.Switch" = "تبديل الملف الشخصي";
-"Profiles.Footer" = "لكل ملف شخصي سجل مشاهدة ومتابعة مشاهدة وقائمة مشاهدة ولغات صوت وترجمة وحساب Trakt خاص به.";
+"Profiles.Footer" = "لكل ملف شخصي سجله وصف « متابعة المشاهدة » و« المفضلة » ولغاته وحساب Trakt الخاص به.";
 "Profiles.Primary.Note" = "يحتفظ الملف الشخصي الرئيسي بالسجل السابق للملفات الشخصية: يمكن إعادة تسميته وليس حذفه.";
-"Profiles.Current" = "الملف الشخصي: %@";
 
 /* Profile preferences (ProfileTaste): the Home's « For You » shelf, Settings › Profiles › Your Preferences. */
 "For You" = "مقترح لك";
@@ -966,3 +965,15 @@
 /* 5.4.0 b-search */
 "Search.MoviesFailed" = "تعذّر تحميل الأفلام.";
 "Search.ShowsFailed" = "تعذّر تحميل المسلسلات.";
+
+/* 5.4.0 d-profiles-ui */
+/* VoiceOver: the value of the profile in use, in « Who's Watching? » opened from Settings and in the Mac's Profiles pane. */
+"Profiles.CurrentValue" = "الملف الشخصي الحالي";
+/* VoiceOver, Manage mode: %@ = the profile's name. */
+"Profiles.EditNamed" = "تعديل %@";
+/* Mac, Settings › Profiles: the button that makes a profile the one in use. */
+"Profiles.Use" = "استخدام";
+/* Mac, Settings › Profiles: the tooltip of Use while the player is up. */
+"Profiles.Use.Busy" = "يتوفر بعد إغلاق المشغّل.";
+/* The profile editor: the profile was deleted meanwhile (another window). */
+"Profiles.Error.Gone" = "لم يعد هذا الملف الشخصي موجودًا.";

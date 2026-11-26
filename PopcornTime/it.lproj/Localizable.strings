@@ -927,9 +927,8 @@
 "Profiles.DefaultName" = "Io";
 "Profiles" = "Profili";
 "Profiles.Switch" = "Cambia profilo";
-"Profiles.Footer" = "Ogni profilo ha la propria cronologia, Continua a guardare, lista, lingue audio e sottotitoli e account Trakt.";
+"Profiles.Footer" = "Ogni profilo ha la sua cronologia, la fila « Continua a guardare », la sua Watchlist, le sue lingue e il suo account Trakt.";
 "Profiles.Primary.Note" = "Il profilo principale conserva la cronologia di prima dei profili: si può rinominare, non eliminare.";
-"Profiles.Current" = "Profilo: %@";
 
 /* Profile preferences (ProfileTaste): the Home's « For You » shelf, Settings › Profiles › Your Preferences. */
 "For You" = "Per te";
@@ -963,3 +962,15 @@
 /* 5.4.0 b-search */
 "Search.MoviesFailed" = "Impossibile caricare i film.";
 "Search.ShowsFailed" = "Impossibile caricare le serie.";
+
+/* 5.4.0 d-profiles-ui */
+/* VoiceOver: the value of the profile in use, in « Who's Watching? » opened from Settings and in the Mac's Profiles pane. */
+"Profiles.CurrentValue" = "Profilo attuale";
+/* VoiceOver, Manage mode: %@ = the profile's name. */
+"Profiles.EditNamed" = "Modifica %@";
+/* Mac, Settings › Profiles: the button that makes a profile the one in use. */
+"Profiles.Use" = "Usa";
+/* Mac, Settings › Profiles: the tooltip of Use while the player is up. */
+"Profiles.Use.Busy" = "Disponibile dopo la chiusura del lettore.";
+/* The profile editor: the profile was deleted meanwhile (another window). */
+"Profiles.Error.Gone" = "Questo profilo non esiste più.";
