@@ -1,5 +1,5 @@
 #!/bin/zsh
-# Every test of the project from one command (see README, "Tests").
+# Every test of the project from one command (see docs/TECHNICAL.md, "Tests").
 #
 #   tools/run-tests.sh [quick]  The unit tests, in parallel, in well under a minute:
 #                               - PopcornTimeTests (this repo, macOS): the extra sources, bandwidth,
