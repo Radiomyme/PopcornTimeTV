@@ -400,6 +400,51 @@ final class NavigationUITests: XCTestCase {
         expectMenuGoesHomeThenLeavesTheApp("Settings")
     }
 
+    /// Settings › Playback: Maximum Resolution takes a choice from its
+    /// sheet, Prefer Your Language turns off with Select (both written to
+    /// the source pick's settings, read back by the rows).
+    func testMaximumResolutionAndPreferYourLanguage() throws {
+        launch(["-PTDebugTab", "settings", "-PTDebugFocusContent", "YES", "-PTDebugSettingsRow", "maximumResolution",
+                "-sourceMaximumResolution", "0", "-sourceLanguageFirst", "YES"])
+        let row = element("Settings.Row.maximumResolution")
+        XCTAssertTrue(row.waitForExistence(timeout: 15), "the Maximum Resolution row never showed")
+        pause(2)
+        if !row.hasFocus {
+            remote.press(.down)
+            pause(1)
+        }
+        XCTAssertTrue(row.hasFocus, "the Maximum Resolution row never got the focus: \(focusedLabel)")
+        XCTAssertTrue(row.label.contains("No Limit"), "no limit at first: \(row.label)")
+        remote.press(.select)
+        XCTAssertTrue(element("Settings.Picker").waitForExistence(timeout: 5), "the resolutions did not open")
+        pause(1)
+        // No Limit (checked, focused), 2160p (4K), 1080p.
+        remote.press(.down)
+        pause(0.8)
+        remote.press(.down)
+        pause(0.8)
+        remote.press(.select)
+        pause(1.5)
+        XCTAssertFalse(element("Settings.Picker").exists, "the choice did not close the sheet")
+        XCTAssertTrue(row.label.contains("1080p"), "the row does not say 1080p: \(row.label)")
+        app.terminate()
+
+        launch(["-PTDebugTab", "settings", "-PTDebugFocusContent", "YES", "-PTDebugSettingsRow", "languageFirst",
+                "-sourceLanguageFirst", "YES"])
+        let toggle = element("Settings.Row.languageFirst")
+        XCTAssertTrue(toggle.waitForExistence(timeout: 15), "the Prefer Your Language row never showed")
+        pause(2)
+        for direction: XCUIRemote.Button in [.down, .down, .down, .down, .down, .down] where !toggle.hasFocus {
+            remote.press(direction)
+            pause(0.8)
+        }
+        XCTAssertTrue(toggle.hasFocus, "the Prefer Your Language row never got the focus: \(focusedLabel)")
+        XCTAssertTrue(toggle.label.contains("On"), "on at first: \(toggle.label)")
+        remote.press(.select)
+        pause(1)
+        XCTAssertTrue(toggle.label.contains("Off"), "Select did not turn it off: \(toggle.label)")
+    }
+
     /// Search: from the keyboard, Menu goes to Home, then leaves the app.
     func testMenuOnSearchGoesHome() throws {
         launch(["-PTDebugTab", "search"])
