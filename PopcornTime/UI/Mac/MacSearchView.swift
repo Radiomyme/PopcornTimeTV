@@ -15,7 +15,9 @@ final class MacSearchModel: ObservableObject {
     enum Kind: Hashable { case movies, shows }
 
     /// Searches one kind of title; calls back on any queue.
-    typealias Searcher<T> = (_ term: String, _ completion: @escaping ([T]?, NSError?) -> Void) -> Void
+    /// `incomplete`: a source of that catalogue was left out (the same
+    /// query may be sent again).
+    typealias Searcher<T> = (_ term: String, _ completion: @escaping ([T]?, NSError?, _ incomplete: Bool) -> Void) -> Void
 
     /// How long the typing must pause before a query is sent: each one
     /// costs six requests (three sources for movies, three for shows).
@@ -36,10 +38,10 @@ final class MacSearchModel: ObservableObject {
     private var shownToken = 0
 
     init(searchMovies: @escaping Searcher<Movie> = { term, completion in
-             PopcornKit.loadMovies(searchTerm: term, completion: completion)
+             PopcornKit.searchMovies(term, completion: completion)
          },
          searchShows: @escaping Searcher<Show> = { term, completion in
-             PopcornKit.loadShows(searchTerm: term, completion: completion)
+             PopcornKit.searchShows(term, completion: completion)
          }) {
         self.searchMovies = searchMovies
         self.searchShows = searchShows
@@ -79,15 +81,17 @@ final class MacSearchModel: ObservableObject {
     private func search(submitted: Bool = false) {
         guard let token = session.begin(text, submitted: submitted) else { return }
         let query = session.query
-        searchMovies(query) { [weak self] results, error in
+        searchMovies(query) { [weak self] results, error, incomplete in
             DispatchQueue.main.async {
-                guard let self = self, self.accept(.movies, count: results?.count ?? 0, error: error, token: token) else { return }
+                guard let self = self, self.accept(.movies, count: results?.count ?? 0, error: error,
+                                                   incomplete: incomplete, token: token) else { return }
                 self.movies = results ?? []
             }
         }
-        searchShows(query) { [weak self] results, error in
+        searchShows(query) { [weak self] results, error, incomplete in
             DispatchQueue.main.async {
-                guard let self = self, self.accept(.shows, count: results?.count ?? 0, error: error, token: token) else { return }
+                guard let self = self, self.accept(.shows, count: results?.count ?? 0, error: error,
+                                                   incomplete: incomplete, token: token) else { return }
                 self.shows = results ?? []
             }
         }
@@ -96,8 +100,9 @@ final class MacSearchModel: ObservableObject {
     /// One source's answer: true when it is the current query's (the
     /// caller then shows it). What the previous query found stays on screen
     /// until the first answer of this one; then nothing of it is left.
-    private func accept(_ kind: Kind, count: Int, error: NSError?, token: Int) -> Bool {
-        guard session.receive(kind, count: count, error: error?.localizedDescription, token: token) else { return false }
+    private func accept(_ kind: Kind, count: Int, error: NSError?, incomplete: Bool, token: Int) -> Bool {
+        guard session.receive(kind, count: count, error: error?.localizedDescription, incomplete: incomplete,
+                              token: token) else { return false }
         if shownToken != token {
             shownToken = token
             movies = []

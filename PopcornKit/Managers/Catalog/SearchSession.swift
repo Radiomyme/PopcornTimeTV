@@ -43,6 +43,10 @@ public struct SearchSession<Kind: Hashable> {
     /// when another one found something: the page says what is missing, and
     /// the same query may be sent again.
     public private(set) var failures: [Kind: String] = [:]
+    /// The sources of the current query that found nothing with a source of
+    /// their own left out (late or down): « No results » for now, but the
+    /// same query may be sent again.
+    private var incomplete: Set<Kind> = []
 
     /// - Parameter kinds: the sources every query is sent to.
     public init(kinds: [Kind]) {
@@ -68,10 +72,11 @@ public struct SearchSession<Kind: Hashable> {
             clear()
             return nil
         }
-        // The same query again: only one a source failed is worth another
-        // try (all its sources are asked again).
+        // The same query again: only one a source failed, or answered
+        // without all of its own, is worth another try (all its sources are
+        // asked again).
         if wanted.caseInsensitiveCompare(query) == .orderedSame {
-            guard !isSearching, !failures.isEmpty else { return nil }
+            guard !isSearching, !failures.isEmpty || !incomplete.isEmpty else { return nil }
         }
         token += 1
         query = wanted
@@ -79,6 +84,7 @@ public struct SearchSession<Kind: Hashable> {
         found = []
         errors = []
         failures = [:]
+        incomplete = []
         phase = .searching
         return token
     }
@@ -91,15 +97,19 @@ public struct SearchSession<Kind: Hashable> {
         found = []
         errors = []
         failures = [:]
+        incomplete = []
         phase = .idle
     }
 
     /// One source's answer. False when it is stale (another query since, or
     /// that source already answered): the caller must not show it.
+    /// `incomplete`: the answer left one of its own sources out.
     @discardableResult
-    public mutating func receive(_ kind: Kind, count: Int, error: String?, token answered: Int) -> Bool {
+    public mutating func receive(_ kind: Kind, count: Int, error: String?, incomplete partial: Bool = false,
+                                 token answered: Int) -> Bool {
         guard answered == token, pending.remove(kind) != nil else { return false }
         if count > 0 { found.insert(kind) }
+        if count == 0, partial { incomplete.insert(kind) }
         if let error, !error.isEmpty {
             errors.append(error)
             if count == 0 { failures[kind] = error }

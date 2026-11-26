@@ -180,8 +180,8 @@ enum MacDebugHooks {
         guard defaults.bool(forKey: "PTDebugSearchOffline") else { return nil }
         let offline = NSError(domain: NSURLErrorDomain, code: NSURLErrorNotConnectedToInternet,
                               userInfo: [NSLocalizedDescriptionKey: URLError(.notConnectedToInternet).localizedDescription])
-        return MacSearchModel(searchMovies: { _, completion in completion(nil, offline) },
-                              searchShows: { _, completion in completion(nil, offline) })
+        return MacSearchModel(searchMovies: { _, completion in completion(nil, offline, false) },
+                              searchShows: { _, completion in completion(nil, offline, false) })
     }
 
     /// `-PTDebugOpenRoute <movie|show>:<IMDb id>`.

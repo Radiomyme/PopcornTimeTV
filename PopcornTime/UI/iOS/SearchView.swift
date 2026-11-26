@@ -38,6 +38,9 @@ final class SearchViewModel: ObservableObject {
     private var pending: Task<Void, Never>?
     /// The text of the search that is running or answered.
     private var requestedText = ""
+    /// The answer found nothing with a source left out (late or down):
+    /// Return sends the same text again.
+    private var answerWasIncomplete = false
 
     init(recentSearches: RecentSearches = RecentSearches()) {
         self.recentSearches = recentSearches
@@ -58,11 +61,13 @@ final class SearchViewModel: ObservableObject {
 
     /// Return on the keyboard, a recent search picked, Try Again: search
     /// now — unless that text is already answered or on its way (a failed
-    /// search is run again).
+    /// search, or one that found nothing without all its sources, is run
+    /// again).
     func submit() {
         remember()
         var failed = false
         if case .failed = phase { failed = true }
+        if phase == .noResults, answerWasIncomplete { failed = true }
         guard failed || trimmedQuery != requestedText else { return }
         start(after: 0)
     }
@@ -111,16 +116,18 @@ final class SearchViewModel: ObservableObject {
         let answer = Answer()
 
         group.enter()
-        PopcornKit.loadMovies(searchTerm: text) { results, error in
+        PopcornKit.searchMovies(text) { results, error, incomplete in
             DispatchQueue.main.async {
+                answer.incomplete = answer.incomplete || incomplete
                 answer.movies = results ?? []
                 if results == nil, let error { answer.errors.append(error) }
                 group.leave()
             }
         }
         group.enter()
-        PopcornKit.loadShows(searchTerm: text) { results, error in
+        PopcornKit.searchShows(text) { results, error, incomplete in
             DispatchQueue.main.async {
+                answer.incomplete = answer.incomplete || incomplete
                 answer.shows = results ?? []
                 if results == nil, let error { answer.errors.append(error) }
                 group.leave()
@@ -132,6 +139,7 @@ final class SearchViewModel: ObservableObject {
             guard let self, self.token == token else { return }
             self.movies = answer.movies
             self.shows = answer.shows
+            self.answerWasIncomplete = answer.incomplete
             if !answer.movies.isEmpty || !answer.shows.isEmpty {
                 self.phase = .results
             } else if answer.errors.count == 2, let error = answer.errors.first {
@@ -147,6 +155,7 @@ final class SearchViewModel: ObservableObject {
         var movies: [Movie] = []
         var shows: [Show] = []
         var errors: [NSError] = []
+        var incomplete = false
     }
 }
 

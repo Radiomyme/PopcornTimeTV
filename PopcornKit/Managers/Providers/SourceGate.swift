@@ -11,10 +11,12 @@ import Foundation
 ///   content used to count: a search YTS has nothing for waited 8 s for a
 ///   mute Time4Popcorn with Cinemeta's results in hand.)
 /// - No source brought anything yet: the optional ones still out are all
-///   there is, they are waited for until the deadline — except in a search
-///   (`gracesEmptyAnswers`): once the required sources answered, even with
-///   nothing, the optional ones get the grace, so « No results » does not
-///   take the deadline to come.
+///   there is, they are waited for until the deadline — except the ones
+///   registered `gracedWhenEmpty` (a search's Time4Popcorn, often mute):
+///   once the required sources answered with nothing — not failed — and
+///   only those are still out, they get the grace, so « No results » does
+///   not take the deadline to come. Cinemeta's search is never cut that
+///   way: it finds the titles no catalog has.
 /// - `deadline` seconds after `start()`: whatever arrived.
 ///
 /// (The loads used to wait for the slowest source with no deadline: a mute
@@ -44,36 +46,50 @@ final class SourceGate {
     private var completion: ((_ complete: Bool) -> Void)?
     private var pendingRequired = 0
     private var pendingOptional = 0
+    /// Optional sources still out that are not `gracedWhenEmpty`.
+    private var pendingAwaited = 0
+    /// A required source failed (`failed()`): no grace on an empty list.
+    private var requiredFailed = false
     /// A source brought content.
     private var delivered = false
     private var started = false
     private var graceScheduled = false
-    private let gracesEmptyAnswers: Bool
 
     /// `completion(complete)`: `complete` false when a source was left out.
-    init(deadline: TimeInterval = SourceGate.deadline, grace: TimeInterval, gracesEmptyAnswers: Bool = false,
+    init(deadline: TimeInterval = SourceGate.deadline, grace: TimeInterval,
          schedule: @escaping Scheduler = SourceGate.mainQueue,
          completion: @escaping (_ complete: Bool) -> Void) {
         self.deadline = deadline
         self.grace = grace
-        self.gracesEmptyAnswers = gracesEmptyAnswers
         self.schedule = schedule
         self.completion = completion
     }
 
     /// Registers a source before `start()`. Call the closure it returns once,
     /// when the source has answered; `delivered` says whether it brought
-    /// content (a failure or an empty answer did not).
-    func source(required: Bool) -> (_ delivered: Bool) -> Void {
+    /// content (a failure or an empty answer did not). `gracedWhenEmpty`
+    /// (optional sources only): not waited for past the grace even when
+    /// nothing was delivered.
+    func source(required: Bool, gracedWhenEmpty: Bool = false) -> (_ delivered: Bool) -> Void {
+        let awaited = !required && !gracedWhenEmpty
         if required { pendingRequired += 1 } else { pendingOptional += 1 }
+        if awaited { pendingAwaited += 1 }
         var answered = false
         return { [self] delivered in
             guard !answered else { return }
             answered = true
             if required { pendingRequired -= 1 } else { pendingOptional -= 1 }
+            if awaited { pendingAwaited -= 1 }
             if delivered { self.delivered = true }
             evaluate()
         }
+    }
+
+    /// A required source failed (before its closure is called): an empty
+    /// list then waits for the optional sources, which may still bring
+    /// something, until the deadline.
+    func failed() {
+        requiredFailed = true
     }
 
     /// Every source is registered: the deadline starts now.
@@ -86,7 +102,8 @@ final class SourceGate {
     private func evaluate() {
         guard started, completion != nil else { return }
         if pendingRequired == 0 && pendingOptional == 0 { return fire(complete: true) }
-        guard pendingRequired == 0, delivered || gracesEmptyAnswers, !graceScheduled else { return }
+        guard pendingRequired == 0, !graceScheduled else { return }
+        guard delivered || (!requiredFailed && pendingAwaited == 0) else { return }
         graceScheduled = true
         schedule(grace) { [self] in fire(complete: false) }
     }

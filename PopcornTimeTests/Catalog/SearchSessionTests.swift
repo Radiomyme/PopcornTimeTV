@@ -91,6 +91,19 @@ final class SearchSessionTests: CheckedTestCase {
         check(s.begin("dune 3") != nil, "a failed query can be sent again")
     }
 
+    func testAnEmptyAnswerWithASourceLeftOutCanBeAskedAgain() {
+        var s = session()
+        let token = s.begin("qxzvbnwpl")!
+        s.receive(.movies, count: 0, error: nil, incomplete: true, token: token)
+        s.receive(.shows, count: 0, error: nil, token: token)
+        eq(s.phase, .empty, "« No results » for now")
+        check(s.begin("qxzvbnwpl") != nil, "but a source was left out: the same query can be sent again")
+        let complete = s.token
+        s.receive(.movies, count: 0, error: nil, token: complete)
+        s.receive(.shows, count: 0, error: nil, token: complete)
+        check(s.begin("qxzvbnwpl") == nil, "every source answered: not sent twice")
+    }
+
     func testOneCharacterIsAQueryWhenSubmitted() {
         var s = session()
         check(s.begin("X") == nil, "typed: one letter waits for a second")

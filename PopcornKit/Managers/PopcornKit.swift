@@ -43,6 +43,13 @@ public func loadShows(
 }
 
 /**
+ Search TV Shows: see `ShowManager.search(_:completion:)`. `incomplete`: a source was left out, so the same query is worth sending again.
+ */
+public func searchShows(_ term: String, completion: @escaping ([Show]?, NSError?, _ incomplete: Bool) -> Void) {
+    ShowManager.shared.search(term, completion: completion)
+}
+
+/**
  Load the first page of a TV Shows list, painted from its snapshot first: `snapshot` gets the list saved by an earlier load at once (when there is one and it is not recent enough to be the answer), then `completion` the up-to-date list. See `ShowManager.load(_:filterBy:genre:searchTerm:orderBy:snapshot:completion:)`.
  */
 public func loadShows(
@@ -117,6 +124,13 @@ public func loadMovies(
         searchTerm: searchTerm,
         orderBy: order,
         completion: completion)
+}
+
+/**
+ Search Movies: see `MovieManager.search(_:completion:)`. `incomplete`: a source was left out, so the same query is worth sending again.
+ */
+public func searchMovies(_ term: String, completion: @escaping ([Movie]?, NSError?, _ incomplete: Bool) -> Void) {
+    MovieManager.shared.search(term, completion: completion)
 }
 
 /**

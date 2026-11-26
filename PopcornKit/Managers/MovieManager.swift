@@ -60,6 +60,18 @@ open class MovieManager: NetworkManager {
     }
 
     /**
+     Search Movies (page 1 of `load` with `searchTerm`), on the main queue. `incomplete`: a source was left out of the answer (late or down), so an empty list is « nothing found yet », and the same query is worth sending again.
+     */
+    public func search(_ term: String, completion: @escaping ([Movie]?, NSError?, _ incomplete: Bool) -> Void) {
+        let provider = MediaProviders.shared
+        provider.loadMovies(page: 1, filter: .popularity, genre: .all, searchTerm: term, order: .descending) { movies, error in
+            // Read here, inside the completion, as `load` does.
+            let partial = (provider as? YTSEZTVProvider)?.lastListWasPartial ?? false
+            if Thread.isMainThread { completion(movies, error, partial) } else { DispatchQueue.main.async { completion(movies, error, partial) } }
+        }
+    }
+
+    /**
      Load Movies from API, the first page of a list through its snapshot on disk (`CatalogSnapshotStore`): a list loaded recently is answered without a request; an older one is handed to `snapshot` at once (a grid paints it), then `completion` gets the network's list. Without a `snapshot` handler the network's list is waited for, and the older one is the answer only when the network fails. Searches, later pages and the Top 100 (which keeps its own cache) go straight to the provider.
 
      - Parameter snapshot:   Called at most once, before `completion`, on the main queue, with the list saved by an earlier load.

@@ -425,18 +425,48 @@ final class SourceGateTests: CheckedTestCase {
         eq(nothing(), [false], "the deadline delivers")
     }
 
-    func testASearchWhoseRequiredSourceFoundNothingDoesNotWaitForTheDeadline() {
+    func testASearchWhoseRequiredSourceFoundNothingDoesNotWaitForAMuteSource() {
+        // YTS found nothing, only Time4Popcorn (often mute) is still out: the grace, not the deadline.
         let scheduler = ManualScheduler()
-        var fired: [Bool] = []
-        let gate = SourceGate(deadline: deadline, grace: grace, gracesEmptyAnswers: true, schedule: scheduler.schedule) { fired.append($0) }
-        let yts = gate.source(required: true), t4p = gate.source(required: false)
+        let (gate, fired) = gate(scheduler)
+        let yts = gate.source(required: true), t4p = gate.source(required: false, gracedWhenEmpty: true)
         gate.start()
         yts(false)
-        eq(scheduler.count(grace), 1, "a search: the mute optional source gets the grace only")
+        eq(scheduler.count(grace), 1, "the mute optional source gets the grace only")
         scheduler.fire(grace)
-        eq(fired, [false], "delivered after the grace, not the deadline")
+        eq(fired(), [false], "delivered after the grace, not the deadline")
         t4p(true)
-        eq(fired, [false], "once only")
+        eq(fired(), [false], "once only")
+    }
+
+    func testASearchWhoseRequiredSourceFoundNothingStillWaitsForCinemeta() {
+        // Cinemeta finds the titles no catalog has: never cut to the grace.
+        let scheduler = ManualScheduler()
+        let (gate, fired) = gate(scheduler)
+        let yts = gate.source(required: true), cinemeta = gate.source(required: false),
+            t4p = gate.source(required: false, gracedWhenEmpty: true)
+        gate.start()
+        yts(false)
+        eq(scheduler.count(grace), 0, "Cinemeta is still out: no grace")
+        cinemeta(true)
+        eq(scheduler.count(grace), 1, "Cinemeta found something: the mute source gets its grace")
+        scheduler.fire(grace)
+        eq(fired(), [false], "Cinemeta's answer is delivered")
+        t4p(false)
+        eq(fired(), [false], "once only")
+    }
+
+    func testAFailedRequiredSourceStartsNoEmptyGrace() {
+        // A YTS failure (DNS, an outage): the optional sources may be all there is.
+        let scheduler = ManualScheduler()
+        let (gate, fired) = gate(scheduler)
+        let yts = gate.source(required: true), t4p = gate.source(required: false, gracedWhenEmpty: true)
+        gate.start()
+        gate.failed()
+        yts(false)
+        eq(scheduler.count(grace), 0, "a failure: no grace on an empty list")
+        t4p(true)
+        eq(fired(), [true], "the optional source's answer, delivered")
     }
 
     func testAnEmptyAnswerIsNoResultsAndAFailureAnError() {

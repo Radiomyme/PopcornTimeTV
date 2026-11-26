@@ -78,11 +78,12 @@ class SearchViewController: MainViewController, UISearchBarDelegate {
         errors = [:]
         showSearching()
 
-        func receive(_ group: Group) -> ([AnyHashable]?, NSError?) -> Void {
-            return { [weak self] items, error in
+        func receive(_ group: Group) -> ([AnyHashable]?, NSError?, Bool) -> Void {
+            return { [weak self] items, error, incomplete in
                 DispatchQueue.main.async {
                     guard let self = self,
-                          self.session.receive(group, count: items?.count ?? 0, error: error?.localizedDescription, token: token) else { return }
+                          self.session.receive(group, count: items?.count ?? 0, error: error?.localizedDescription,
+                                               incomplete: incomplete, token: token) else { return }
                     self.answers[group] = items ?? []
                     if let error = error { self.errors[group] = error }
                     // Movies and shows together, once both have answered
@@ -97,15 +98,15 @@ class SearchViewController: MainViewController, UISearchBarDelegate {
 
         let query = session.query
         #if DEBUG
-        if let error = Self.debugFailure(of: .movies) { receive(.movies)(nil, error) } else {
-            PopcornKit.loadMovies(searchTerm: query) { results, error in receive(.movies)(results, error) }
+        if let error = Self.debugFailure(of: .movies) { receive(.movies)(nil, error, false) } else {
+            PopcornKit.searchMovies(query) { results, error, incomplete in receive(.movies)(results, error, incomplete) }
         }
-        if let error = Self.debugFailure(of: .shows) { receive(.shows)(nil, error) } else {
-            PopcornKit.loadShows(searchTerm: query) { results, error in receive(.shows)(results, error) }
+        if let error = Self.debugFailure(of: .shows) { receive(.shows)(nil, error, false) } else {
+            PopcornKit.searchShows(query) { results, error, incomplete in receive(.shows)(results, error, incomplete) }
         }
         #else
-        PopcornKit.loadMovies(searchTerm: query) { results, error in receive(.movies)(results, error) }
-        PopcornKit.loadShows(searchTerm: query) { results, error in receive(.shows)(results, error) }
+        PopcornKit.searchMovies(query) { results, error, incomplete in receive(.movies)(results, error, incomplete) }
+        PopcornKit.searchShows(query) { results, error, incomplete in receive(.shows)(results, error, incomplete) }
         #endif
     }
 

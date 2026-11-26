@@ -63,6 +63,18 @@ open class ShowManager: NetworkManager {
     }
 
     /**
+     Search Shows (page 1 of `load` with `searchTerm`), on the main queue. `incomplete`: a source was left out of the answer (late or down), so an empty list is « nothing found yet », and the same query is worth sending again.
+     */
+    public func search(_ term: String, completion: @escaping ([Show]?, NSError?, _ incomplete: Bool) -> Void) {
+        let provider = MediaProviders.shared
+        provider.loadShows(page: 1, filter: .popularity, genre: .all, searchTerm: term, order: .descending) { shows, error in
+            // Read here, inside the completion, as `load` does.
+            let partial = (provider as? YTSEZTVProvider)?.lastListWasPartial ?? false
+            if Thread.isMainThread { completion(shows, error, partial) } else { DispatchQueue.main.async { completion(shows, error, partial) } }
+        }
+    }
+
+    /**
      Load TV Shows from API, the first page of a list through its snapshot on disk: see `MovieManager.load(_:filterBy:genre:searchTerm:orderBy:snapshot:completion:)`.
 
      - Parameter snapshot:   Called at most once, before `completion`, on the main queue, with the list saved by an earlier load.

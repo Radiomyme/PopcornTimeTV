@@ -178,8 +178,7 @@ public final class YTSEZTVProvider: MediaProvider {
         /// not a failure, whatever optional source was left out.
         var ytsAnswered = false
 
-        let gate = SourceGate(grace: searching ? SourceGate.searchGrace : SourceGate.browseGrace,
-                              gracesEmptyAnswers: searching) { complete in
+        let gate = SourceGate(grace: searching ? SourceGate.searchGrace : SourceGate.browseGrace) { complete in
             var seen = Set<String>()
             var merged: [Movie] = []
             for movie in t4pMovies + ytsMovies + cinemetaMovies where seen.insert(movie.id).inserted {
@@ -231,6 +230,8 @@ public final class YTSEZTVProvider: MediaProvider {
             if movies != nil {
                 ytsError = nil
                 ytsAnswered = true
+            } else {
+                gate.failed()
             }
             ytsDone(!ytsMovies.isEmpty)
         }
@@ -257,7 +258,9 @@ public final class YTSEZTVProvider: MediaProvider {
         }
 
         if withT4P {
-            let t4pDone = gate.source(required: false)
+            // Often mute: a search that found nothing elsewhere does not
+            // wait the deadline for it.
+            let t4pDone = gate.source(required: false, gracedWhenEmpty: searching)
             Time4PopcornClient.shared.movies(page: t4pPage, searchTerm: searching ? term : nil) { movies in
                 guard var result = movies else {
                     t4pFailed = true
@@ -285,8 +288,8 @@ public final class YTSEZTVProvider: MediaProvider {
     /// required source's (YTS, the shows' base list) when it failed, a time
     /// out when it never answered. Nil when it answered with nothing: an
     /// empty list (« No results »), whatever optional source was left out —
-    /// the list is still partial then (`lastListWasPartial`), so a retry
-    /// asks again.
+    /// the list is still partial then (`lastListWasPartial`, a search's
+    /// `incomplete`), so the same query may be sent again.
     static func failure(listIsEmpty: Bool, error: NSError?, requiredAnswered: Bool) -> NSError? {
         guard listIsEmpty else { return nil }
         if let error = error { return error }
@@ -718,8 +721,7 @@ public final class YTSEZTVProvider: MediaProvider {
         /// search's later pages) answered, if only with nothing.
         var requiredAnswered = false
 
-        let gate = SourceGate(grace: searching ? SourceGate.searchGrace : SourceGate.browseGrace,
-                              gracesEmptyAnswers: searching) { complete in
+        let gate = SourceGate(grace: searching ? SourceGate.searchGrace : SourceGate.browseGrace) { complete in
             var seen = Set<String>()
             var merged: [Show] = []
             for show in t4pShows + baseShows + cinemetaShows where seen.insert(show.id).inserted {
@@ -746,7 +748,7 @@ public final class YTSEZTVProvider: MediaProvider {
             let deliver: ([Show]?, NSError?) -> Void = { shows, error in
                 baseShows = shows ?? []
                 baseError = shows == nil ? error : nil
-                if shows != nil { requiredAnswered = true }
+                if shows != nil { requiredAnswered = true } else { gate.failed() }
                 baseDone(!baseShows.isEmpty)
             }
             if searching {
@@ -774,7 +776,7 @@ public final class YTSEZTVProvider: MediaProvider {
 
         if withT4P {
             // The only source of a search's later pages: waited for.
-            let t4pDone = gate.source(required: !withBase)
+            let t4pDone = gate.source(required: !withBase, gracedWhenEmpty: searching)
             Time4PopcornClient.shared.shows(page: t4pPage, searchTerm: searching ? term : nil) { shows in
                 guard var result = shows else {
                     t4pFailed = true
