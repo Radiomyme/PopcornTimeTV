@@ -254,6 +254,9 @@ private struct ProfileCircleLift: ViewModifier {
             }
             .overlay(alignment: .bottomTrailing) { checkBadge }
             .scaleEffect(pressed ? 1.04 : (lit ? 1.10 : 1))
+            // One silhouette casts the shadow: the circle's, not the glyph's
+            // and the badge's on the circle.
+            .compositingGroup()
             .shadow(color: .black.opacity(lit ? 0.6 : 0), radius: 30, y: 16)
             .animation(reduceMotion ? nil : .easeOut(duration: 0.2), value: lit)
             .animation(reduceMotion ? nil : .easeOut(duration: 0.1), value: pressed)
@@ -270,6 +273,7 @@ private struct ProfileCircleLift: ViewModifier {
             .overlay(alignment: .bottomTrailing) { checkBadge }
             .opacity(pressed ? 0.85 : 1)
             .scaleEffect(reduceMotion ? 1 : (lit ? hoverScale : 1))
+            .compositingGroup()
             .shadow(color: .black.opacity(lit ? 0.55 : 0), radius: lit ? 12 : 0, y: lit ? 6 : 0)
             .animation(reduceMotion ? nil : .easeOut(duration: 0.16), value: lit)
             .animation(reduceMotion ? nil : .easeOut(duration: 0.08), value: pressed)
@@ -552,6 +556,11 @@ struct ProfilePickerView: View {
                     .padding(.top, 88)
             }
             .padding(.horizontal, 90)
+            // The editor's card floats over the backdrop alone: the big
+            // circles and the title showed through its glass and past its
+            // edges.
+            .opacity(draft == nil ? 1 : 0)
+            .animation(reduceMotion ? nil : .easeOut(duration: 0.2), value: draft != nil)
         }
         // The profile in use first, at launch as from Settings.
         .defaultFocus($focusedTile, model.activeID)
@@ -750,7 +759,8 @@ struct ProfilePickerView: View {
 // MARK: - Editor
 
 /// A profile's name and avatar; Delete for a profile other than the main
-/// one. Apple TV: a glass card over the dimmed picker, as Settings' sheets.
+/// one. Apple TV: a glass card, as Settings' sheets; the picker steps back
+/// while it is up (only its backdrop stays behind the glass).
 /// iPhone and iPad: a system form sheet. Mac: a sheet with its buttons at
 /// the bottom, as the Settings window's sheets.
 struct ProfileEditorView: View {
