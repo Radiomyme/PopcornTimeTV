@@ -1151,7 +1151,10 @@ final class MacPlayerController: ObservableObject {
                                   isAtmos: isAtmos)
         // DEFAULT audio / subtitle renditions follow the user's languages.
         remux.preferredAudioLanguages = PlaybackLanguagePreferences.preferredAudioLanguageCode.map { [$0] } ?? []
-        remux.preferredSubtitleLanguages = PlaybackLanguagePreferences.preferredSubtitleLanguageCode.map { [$0] } ?? []
+        // A learnt subtitle language only when the audio asked for is
+        // another (the subtitle controller decides on the audio heard).
+        remux.preferredSubtitleLanguages = PlaybackLanguagePreferences.preferredSubtitleLanguageCode(
+            whileHearing: PlaybackLanguagePreferences.preferredAudioLanguageCode).map { [$0] } ?? []
         remux.releaseHintsHDR = releaseHintsHDR
         // A late jump's wait asks the engine's own server (127.0.0.1) for its bytes (`RemuxWaitNudge`).
         remux.engineServerURL = directURL

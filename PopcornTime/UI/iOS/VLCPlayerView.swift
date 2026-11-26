@@ -608,14 +608,23 @@ final class VLCPlayerViewController: UIViewController, VLCMediaPlayerDelegate, U
         ) { [weak self] index in
             guard let self = self else { return }
             self.userChoseSubtitle = true
+            // The user's pick: the profile's taste learns it (not the
+            // automatic one, which goes through the same functions).
             if index < 0 || Int(index) >= rows.count {
                 self.turnSubtitlesOff()
+                PlaybackLanguagePreferences.noteChosenSubtitle(languageOrName: nil, isOff: true)
             } else {
                 switch rows[Int(index)].choice {
                 case .embedded(let trackId):
                     self.selectEmbeddedTextTrack(id: trackId)
+                    let track = self.player.textTracks.first { $0.trackId == trackId }
+                    PlaybackLanguagePreferences.noteChosenSubtitle(
+                        languageOrName: PlaybackLanguagePreferences.languageOrName(language: track?.language, name: track?.trackName),
+                        isOff: false)
                 case .external(let subtitle):
                     self.selectExternalSubtitle(subtitle)
+                    PlaybackLanguagePreferences.noteChosenSubtitle(languageOrName: subtitle.ISO639.isEmpty ? subtitle.language : subtitle.ISO639,
+                                                                   isOff: false)
                 }
             }
             self.scheduleHideControls()
@@ -632,7 +641,10 @@ final class VLCPlayerViewController: UIViewController, VLCMediaPlayerDelegate, U
         ) { [weak self] index in
             guard let self = self, index >= 0, Int(index) < self.player.audioTracks.count else { return }
             self.didAutoSelectAudio = true // the user's choice wins from now on
-            self.player.audioTracks[Int(index)].isSelectedExclusively = true
+            let track = self.player.audioTracks[Int(index)]
+            track.isSelectedExclusively = true
+            PlaybackLanguagePreferences.noteChosenAudio(
+                languageOrName: PlaybackLanguagePreferences.languageOrName(language: track.language, name: track.trackName))
             self.scheduleHideControls()
         }
     }
@@ -863,7 +875,9 @@ final class VLCPlayerViewController: UIViewController, VLCMediaPlayerDelegate, U
     /// tracks are known; waits for a running OpenSubtitles search.
     private func autoSelectSubtitleIfNeeded() {
         guard !didAutoSelectSubtitle, !userChoseSubtitle, isInputReady else { return }
-        guard let code = PlaybackLanguagePreferences.preferredSubtitleLanguageCode else {
+        let heard = player.audioTracks.first { $0.isSelected }
+        guard let code = PlaybackLanguagePreferences.preferredSubtitleLanguageCode(
+            whileHearing: PlaybackLanguagePreferences.languageOrName(language: heard?.language, name: heard?.trackName)) else {
             didAutoSelectSubtitle = true
             return
         }

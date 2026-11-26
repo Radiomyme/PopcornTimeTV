@@ -160,9 +160,10 @@ enum GlassSettingsStore {
     // MARK: Languages ("preferredAudioLanguage", "preferredSubtitleLanguage")
 
     /// Stored as the language name in the current UI language ("Français"),
-    /// the convention of the iOS / macOS settings; nil removes the preference.
+    /// the convention of the iOS / macOS settings; nil (« None ») as a
+    /// choice too, so a learnt language never takes its place.
     static func store(languageCode code: String?, forKey key: String) {
-        defaults.set(code.map(PlaybackLanguagePreferences.storedName(forCode:)), forKey: key)
+        defaults.set(code.map(PlaybackLanguagePreferences.storedName(forCode:)) ?? PlaybackLanguagePreferences.noneValue, forKey: key)
     }
 
     /// The picker languages, sorted by name, plus any current choice outside them.

@@ -455,7 +455,10 @@ final class RemuxAVPlayerViewController: AVPlayerViewController {
         let remux = RemuxPlayback(localFile: localFile, streamer: streamer, isAtmos: isAtmos)
         // DEFAULT audio / subtitle renditions follow the user's languages.
         remux.preferredAudioLanguages = PlaybackLanguagePreferences.preferredAudioLanguageCode.map { [$0] } ?? []
-        remux.preferredSubtitleLanguages = PlaybackLanguagePreferences.preferredSubtitleLanguageCode.map { [$0] } ?? []
+        // A learnt subtitle language only when the audio asked for is
+        // another (the subtitle controller decides on the audio heard).
+        remux.preferredSubtitleLanguages = PlaybackLanguagePreferences.preferredSubtitleLanguageCode(
+            whileHearing: PlaybackLanguagePreferences.preferredAudioLanguageCode).map { [$0] } ?? []
         remux.releaseHintsHDR = releaseHintsHDR
         // Native jumps (the hidden switch): a saved position is prepared now —
         // the remux says whether it can resume there natively

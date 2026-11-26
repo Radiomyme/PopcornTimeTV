@@ -1,5 +1,6 @@
 import Foundation
 import AVFoundation
+import Combine
 #if canImport(PopcornKit)
 import PopcornKit
 #endif
@@ -42,17 +43,36 @@ enum PlaybackLanguagePreferences {
         "sl", "da", "fi", "no", "sv", "ca", "hi", "th", "vi", "id", "ms", "fa",
     ]
 
+    /// What the Settings pickers store for « None »: a choice, unlike a key
+    /// never set. The language a profile picks itself (`ProfileTaste`)
+    /// stands in for a setting never made, never for « None ».
+    static let noneValue = "none"
+
     /// ISO 639-1 code of the preferred audio language, nil = none: the
     /// profile's setting, else the language it picks itself most often
     /// (`ProfileTaste`, learnt from the players' menus).
     static var preferredAudioLanguageCode: String? {
-        return explicitAudioLanguageCode ?? learnedCode(.audio)
+        return effectiveCode(stored: UserDefaults.standard.string(forKey: audioLanguageDefaultsKey),
+                             learned: learnedCode(.audio))
     }
 
     /// ISO 639-1 code of the preferred subtitle language, nil = none: the
     /// profile's setting, else the language it turns on itself most often.
+    /// A player that knows the audio it plays asks
+    /// `preferredSubtitleLanguageCode(whileHearing:)` instead.
     static var preferredSubtitleLanguageCode: String? {
-        return explicitSubtitleLanguageCode ?? learnedCode(.subtitle)
+        return effectiveCode(stored: UserDefaults.standard.string(forKey: subtitleLanguageDefaultsKey),
+                             learned: learnedCode(.subtitle))
+    }
+
+    /// The subtitle language to turn on by itself while the audio `heard`
+    /// (a track's language tag or name) plays: the profile's setting, else
+    /// the language it turns on most — but not the one it hears (French
+    /// subtitles picked for Korean films are no reason to subtitle a French
+    /// one), nor while what it hears is unknown (nil).
+    static func preferredSubtitleLanguageCode(whileHearing heard: String?) -> String? {
+        return subtitleCode(stored: UserDefaults.standard.string(forKey: subtitleLanguageDefaultsKey),
+                            learned: learnedCode(.subtitle), heard: heard)
     }
 
     /// What the profile set in Settings (what the Settings screens show).
@@ -64,22 +84,54 @@ enum PlaybackLanguagePreferences {
         return storedCode(forKey: subtitleLanguageDefaultsKey)
     }
 
+    /// A setting's code (`stored`: what Settings wrote), else the learnt
+    /// one — not in place of an explicit « None » (`noneValue`).
+    static func effectiveCode(stored: String?, learned: @autoclosure () -> String?) -> String? {
+        if stored == noneValue { return nil }
+        return stored.flatMap(isoCode(for:)) ?? learned()
+    }
+
+    /// `preferredSubtitleLanguageCode(whileHearing:)`'s rule.
+    static func subtitleCode(stored: String?, learned: @autoclosure () -> String?, heard: String?) -> String? {
+        if stored == noneValue { return nil }
+        if let code = stored.flatMap(isoCode(for:)) { return code }
+        guard let heard, !heard.isEmpty, !undeterminedCodes.contains(heard.lowercased()),
+              let code = learned(), !matches(heard, code: code) else { return nil }
+        return code
+    }
+
     /// The user picked an audio track in a player's menu: the profile's
     /// taste counts it (nothing for a track without a known language).
+    /// Only the user's picks: an automatic one would only teach the taste
+    /// what it already says.
     static func noteChosenAudio(languageOrName: String?) {
         #if canImport(PopcornKit)
         guard let value = languageOrName, let code = isoCode(for: value) ?? code(inTrackName: value) else { return }
-        ProfileTaste.shared.note(.audio(code))
+        choiceTaste().note(.audio(code))
         #endif
     }
 
     /// The user picked subtitles in a player's menu (nil: turned them off).
     static func noteChosenSubtitle(languageOrName: String?, isOff: Bool) {
         #if canImport(PopcornKit)
-        if isOff { return ProfileTaste.shared.note(.subtitle(nil)) }
+        if isOff { return choiceTaste().note(.subtitle(nil)) }
         guard let value = languageOrName, let code = isoCode(for: value) ?? code(inTrackName: value) else { return }
-        ProfileTaste.shared.note(.subtitle(code))
+        choiceTaste().note(.subtitle(code))
         #endif
+    }
+
+    #if canImport(PopcornKit)
+    /// The taste the players' choices teach and are read from: the active
+    /// profile's (tests: their own).
+    nonisolated(unsafe) static var choiceTaste: () -> ProfileTaste = { ProfileTaste.shared }
+    #endif
+
+    /// The language of a VLC track: its code, else its name ("Track 1 -
+    /// [French]"); nil when it has neither.
+    static func languageOrName(language: String?, name: String?) -> String? {
+        if let language, !language.isEmpty { return language }
+        if let name, !name.isEmpty { return name }
+        return nil
     }
 
     /// The first picker language a free-form track name speaks of
@@ -90,7 +142,7 @@ enum PlaybackLanguagePreferences {
 
     private static func learnedCode(_ kind: LearnedKind) -> String? {
         #if canImport(PopcornKit)
-        let taste = ProfileTaste.shared
+        let taste = choiceTaste()
         switch kind {
         case .audio: return taste.preferredChoice(.audio).flatMap(isoCode(for:))
         case .subtitle: return taste.preferredChoice(.subtitle).flatMap(isoCode(for:))
@@ -155,8 +207,15 @@ enum PlaybackLanguagePreferences {
     /// preferred subtitle language is set — the matching legible option
     /// (unless the item's subtitles are managed by an overlay, see
     /// `setLegibleSelectionManagedExternally(for:)`).
-    /// No-op for groups without a match. Safe to call right after creating the item.
+    /// A learnt subtitle language is not turned on in the language of the
+    /// audio selected (`preferredSubtitleLanguageCode(whileHearing:)`).
+    /// No-op for groups without a match. Safe to call right after creating
+    /// the item. The user's own picks in AVKit's menus are learnt from
+    /// (`learnChoices(on:)`).
     static func applyPreferredMediaSelection(to item: AVPlayerItem) {
+        Task { @MainActor [weak item] in
+            if let item { learnChoices(on: item) }
+        }
         let audioCode = preferredAudioLanguageCode
         let subtitleCode = preferredSubtitleLanguageCode
         guard audioCode != nil || subtitleCode != nil else { return }
@@ -166,9 +225,7 @@ enum PlaybackLanguagePreferences {
             // group: `try?` + nil checks make this a no-op, never a crash.
             var audible: AVMediaSelectionGroup?
             var legible: AVMediaSelectionGroup?
-            if audioCode != nil {
-                audible = try? await asset.loadMediaSelectionGroup(for: .audible)
-            }
+            audible = try? await asset.loadMediaSelectionGroup(for: .audible)
             if subtitleCode != nil {
                 legible = try? await asset.loadMediaSelectionGroup(for: .legible)
             }
@@ -179,7 +236,9 @@ enum PlaybackLanguagePreferences {
                     select(option, in: group, item: item, kind: "audio", name: names[option])
                 }
             }
-            if let code = subtitleCode, let group = legible, !externallyManagedLegibleItems.contains(item) {
+            let heard = await heardLanguage(of: asset, audible: audible, selection: item.currentMediaSelection)
+            if subtitleCode != nil, let code = preferredSubtitleLanguageCode(whileHearing: heard),
+               let group = legible, !externallyManagedLegibleItems.contains(item) {
                 let names = await loadNames(of: group.options)
                 // The remux master's DEFAULT subtitle is the remuxer's own
                 // pick for the preferred language (see preferredLegibleOption).
@@ -279,7 +338,7 @@ enum PlaybackLanguagePreferences {
     @MainActor
     private static func select(_ option: AVMediaSelectionOption, in group: AVMediaSelectionGroup,
                                item: AVPlayerItem, kind: String, name: String?) {
-        item.select(option, in: group)
+        select(option, in: group, of: item)
         print("[Playback] preferred \(kind) → '\(name ?? option.displayName)' (\(option.extendedLanguageTag ?? "?"))")
     }
 
@@ -474,6 +533,69 @@ enum PlaybackLanguagePreferences {
         return score
     }
 
+    // MARK: - The user's picks in AVKit's menus
+
+    /// Selects `option` (nil: none) in `group` as the app's own choice: a
+    /// selection the app makes is never taken for the user's
+    /// (`learnChoices(on:)`). Every automatic selection goes through it.
+    @MainActor
+    static func select(_ option: AVMediaSelectionOption?, in group: AVMediaSelectionGroup, of item: AVPlayerItem) {
+        item.select(option, in: group)
+        MediaSelectionLearner.learner(of: item)?.noteOwnSelection(option, in: group)
+    }
+
+    /// Learns the audio and subtitle languages the user picks for `item` in
+    /// AVKit's own menus (the Apple TV's transport bar, the iPhone's and the
+    /// Mac's player controls), which the app is not told about otherwise.
+    /// Once per item; it lives as long as the item.
+    @MainActor
+    static func learnChoices(on item: AVPlayerItem) {
+        MediaSelectionLearner.attach(to: item)
+    }
+
+    /// The language of the audio `asset` plays: the option of its audio
+    /// group `selection` selects (else the group's default), else its first
+    /// audio track's; nil when nothing says.
+    @MainActor
+    static func heardLanguage(of asset: AVAsset, audible: AVMediaSelectionGroup?,
+                              selection: AVMediaSelection?) async -> String? {
+        if let audible, let option = selection?.selectedMediaOption(in: audible) ?? audible.defaultOption {
+            return languageTag(of: option)
+        }
+        guard let track = (try? await asset.loadTracks(withMediaType: .audio))?.first else { return nil }
+        let tag = (try? await track.load(.extendedLanguageTag)) ?? nil
+        let code = (try? await track.load(.languageCode)) ?? nil
+        return tag ?? code
+    }
+
+    /// A language tag for an option: its extended tag, else its locale's.
+    static func languageTag(of option: AVMediaSelectionOption) -> String? {
+        return option.extendedLanguageTag ?? option.locale?.identifier
+    }
+
+    /// What a change of an item's selection in a group was.
+    enum SelectionChange: Equatable {
+        /// The selection is the one last seen.
+        case none
+        /// The item settling (AVPlayer's automatic pick, the app's
+        /// selections before it plays), or the app's own selection.
+        case notTheUser
+        /// The user picked it: the taste learns it.
+        case user
+    }
+
+    /// The rule `learnChoices(on:)` follows. `current`: the selection now
+    /// (a forced-only subtitle counts as none); `known`: the one last seen;
+    /// `own`: the app's last selection in the group (`.none`: none since
+    /// the user's last pick); `settled`: the item has played a moment.
+    static func selectionChange<Option: Equatable>(current: Option?, known: Option?, own: Option??,
+                                                   settled: Bool) -> SelectionChange {
+        if current == known { return .none }
+        if !settled { return .notTheUser }
+        if case .some(let mine) = own, mine == current { return .notTheUser }
+        return .user
+    }
+
     // MARK: - Code / name normalization
 
     private static func storedCode(forKey key: String) -> String? {
@@ -636,5 +758,147 @@ enum PlaybackLanguagePreferences {
             return true
         }
         return false
+    }
+}
+
+// MARK: - Learning the user's picks in AVKit's menus
+
+/// Watches one item's audio and subtitle selection
+/// (`PlaybackLanguagePreferences.learnChoices(on:)`) and tells the profile's
+/// taste the user's picks: a change the app did not make
+/// (`PlaybackLanguagePreferences.select(_:in:of:)`) that still holds a
+/// moment later, once the item has settled — AVPlayer's own pick when it
+/// becomes ready, and the app's selections around it, are no one's choice.
+/// The app's own menus (the overlay's subtitles, the VLC players) note
+/// their picks themselves.
+@MainActor
+final class MediaSelectionLearner {
+
+    /// Ready, then this long: the item has settled.
+    private static let settleDelay: TimeInterval = 1.5
+    /// A change is judged once it held this long (AVPlayer flips the
+    /// selection for an instant at readiness).
+    private static let holdDelay: TimeInterval = 0.5
+
+    private static var key = 0
+
+    static func learner(of item: AVPlayerItem) -> MediaSelectionLearner? {
+        return objc_getAssociatedObject(item, &key) as? MediaSelectionLearner
+    }
+
+    static func attach(to item: AVPlayerItem) {
+        guard learner(of: item) == nil else { return }
+        let learner = MediaSelectionLearner(item: item)
+        objc_setAssociatedObject(item, &key, learner, .OBJC_ASSOCIATION_RETAIN_NONATOMIC)
+    }
+
+    private struct Track {
+        let group: AVMediaSelectionGroup
+        var known: AVMediaSelectionOption?
+    }
+
+    private weak var item: AVPlayerItem?
+    private var tracks: [AVMediaCharacteristic: Track] = [:]
+    /// The app's last selection per characteristic (`.none`: none since the
+    /// user's last pick there).
+    private var own: [AVMediaCharacteristic: AVMediaSelectionOption?] = [:]
+    private var isSettled = false
+    private var pendingCheck: DispatchWorkItem?
+    private var selectionSubscription: AnyCancellable?
+    private var statusObservation: NSKeyValueObservation?
+
+    private init(item: AVPlayerItem) {
+        self.item = item
+        selectionSubscription = NotificationCenter.default
+            .publisher(for: AVPlayerItem.mediaSelectionDidChangeNotification, object: item)
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in
+                MainActor.assumeIsolated { self?.selectionDidChange() }
+            }
+        let settleDelay = MediaSelectionLearner.settleDelay
+        statusObservation = item.observe(\.status, options: [.initial, .new]) { [weak self] observed, _ in
+            guard observed.status == .readyToPlay else { return }
+            DispatchQueue.main.asyncAfter(deadline: .now() + settleDelay) {
+                MainActor.assumeIsolated { self?.settle() }
+            }
+        }
+        Task { [weak self, weak item] in
+            guard let asset = item?.asset else { return }
+            let audible = try? await asset.loadMediaSelectionGroup(for: .audible)
+            let legible = try? await asset.loadMediaSelectionGroup(for: .legible)
+            self?.groupsDidLoad(audible: audible, legible: legible)
+        }
+    }
+
+    func noteOwnSelection(_ option: AVMediaSelectionOption?, in group: AVMediaSelectionGroup) {
+        let characteristic = tracks.first { $0.value.group == group }?.key
+            ?? (group.options.contains { $0.hasMediaCharacteristic(.audible) } ? .audible : .legible)
+        own[characteristic] = .some(normalized(option, characteristic))
+    }
+
+    private func groupsDidLoad(audible: AVMediaSelectionGroup?, legible: AVMediaSelectionGroup?) {
+        guard let item else { return }
+        for (characteristic, group) in [(AVMediaCharacteristic.audible, audible), (.legible, legible)] {
+            guard let group else { continue }
+            tracks[characteristic] = Track(group: group, known: selected(in: group, characteristic, of: item))
+        }
+    }
+
+    /// What plays once the item settled is no one's pick.
+    private func settle() {
+        guard let item, !isSettled else { return }
+        for (characteristic, track) in tracks {
+            tracks[characteristic]?.known = selected(in: track.group, characteristic, of: item)
+        }
+        isSettled = true
+    }
+
+    private func selectionDidChange() {
+        pendingCheck?.cancel()
+        let check = DispatchWorkItem { [weak self] in
+            MainActor.assumeIsolated { self?.check() }
+        }
+        pendingCheck = check
+        DispatchQueue.main.asyncAfter(deadline: .now() + MediaSelectionLearner.holdDelay, execute: check)
+    }
+
+    private func check() {
+        pendingCheck = nil
+        guard let item else { return }
+        for (characteristic, track) in tracks {
+            let current = selected(in: track.group, characteristic, of: item)
+            switch PlaybackLanguagePreferences.selectionChange(current: current, known: track.known, own: own[characteristic],
+                                                               settled: isSettled) {
+            case .none:
+                break
+            case .notTheUser:
+                tracks[characteristic]?.known = current
+            case .user:
+                tracks[characteristic]?.known = current
+                own[characteristic] = nil
+                let language = current.flatMap(PlaybackLanguagePreferences.languageTag(of:)) ?? current?.displayName
+                if characteristic == .audible {
+                    print("[Playback] audio picked in the player's menu: \(language ?? "?")")
+                    PlaybackLanguagePreferences.noteChosenAudio(languageOrName: language)
+                } else {
+                    print("[Playback] subtitles picked in the player's menu: \(language ?? "off")")
+                    PlaybackLanguagePreferences.noteChosenSubtitle(languageOrName: language, isOff: current == nil)
+                }
+            }
+        }
+    }
+
+    /// The selection in `group`; forced-only subtitles count as none (what
+    /// « Off » keeps on for the language being heard).
+    private func selected(in group: AVMediaSelectionGroup, _ characteristic: AVMediaCharacteristic,
+                          of item: AVPlayerItem) -> AVMediaSelectionOption? {
+        return normalized(item.currentMediaSelection.selectedMediaOption(in: group), characteristic)
+    }
+
+    private func normalized(_ option: AVMediaSelectionOption?, _ characteristic: AVMediaCharacteristic) -> AVMediaSelectionOption? {
+        guard let option, characteristic == .legible else { return option }
+        let forced = option.hasMediaCharacteristic(.containsOnlyForcedSubtitles)
+            || PlaybackLanguagePreferences.isForcedSubtitle(option.displayName)
+        return forced ? nil : option
     }
 }

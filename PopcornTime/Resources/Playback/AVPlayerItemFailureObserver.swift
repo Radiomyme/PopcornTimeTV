@@ -545,6 +545,8 @@ struct MediaSelectionSnapshot {
     @MainActor
     @discardableResult
     func apply(to item: AVPlayerItem, picksSubtitlesAnew: Bool = false) async -> [String] {
+        // The rebuilt item's own picks in AVKit's menus are learnt too.
+        PlaybackLanguagePreferences.learnChoices(on: item)
         var applied: [String] = []
         for entry in entries {
             guard let group = try? await item.asset.loadMediaSelectionGroup(for: entry.characteristic) else { continue }
@@ -552,21 +554,21 @@ struct MediaSelectionSnapshot {
             if entry.isAutomatic {
                 if picksSubtitlesAnew, entry.characteristic == .legible,
                    let option = await Self.rankedLegibleOption(in: group, languageTag: nil, of: item) {
-                    item.select(option, in: group)
+                    PlaybackLanguagePreferences.select(option, in: group, of: item)
                     applied.append("\(kind) \(option.displayName) (classement)")
                 } else {
                     item.selectMediaOptionAutomatically(in: group)
                     applied.append("\(kind) auto")
                 }
             } else if entry.propertyList == nil && entry.displayName == nil {
-                item.select(nil, in: group)
+                PlaybackLanguagePreferences.select(nil, in: group, of: item)
                 applied.append("\(kind) off")
             } else if let option = entry.matchingOption(in: group) {
-                item.select(option, in: group)
+                PlaybackLanguagePreferences.select(option, in: group, of: item)
                 applied.append("\(kind) \(option.displayName)")
             } else if entry.characteristic == .legible,
                       let option = await Self.rankedLegibleOption(in: group, languageTag: entry.languageTag, of: item) {
-                item.select(option, in: group)
+                PlaybackLanguagePreferences.select(option, in: group, of: item)
                 applied.append("\(kind) \(option.displayName) (classement)")
             } else {
                 applied.append("\(kind) introuvable")
@@ -585,7 +587,9 @@ struct MediaSelectionSnapshot {
                                             of item: AVPlayerItem) async -> AVMediaSelectionOption? {
         var codes: [String] = []
         if let tag = languageTag, let code = PlaybackLanguagePreferences.isoCode(for: tag) { codes.append(code) }
-        if let preferred = PlaybackLanguagePreferences.preferredSubtitleLanguageCode, !codes.contains(preferred) {
+        let audible = try? await item.asset.loadMediaSelectionGroup(for: .audible)
+        let heard = await PlaybackLanguagePreferences.heardLanguage(of: item.asset, audible: audible, selection: item.currentMediaSelection)
+        if let preferred = PlaybackLanguagePreferences.preferredSubtitleLanguageCode(whileHearing: heard), !codes.contains(preferred) {
             codes.append(preferred)
         }
         guard !codes.isEmpty else { return nil }

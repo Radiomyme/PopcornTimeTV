@@ -971,12 +971,19 @@ final class MacVLCController: NSObject, ObservableObject, VLCMediaPlayerDelegate
 
     // MARK: - Tracks
 
+    /// The user's pick (menu, sheet): the automatic one sets the track
+    /// itself. The profile's taste learns it.
     func selectAudioTrack(id: String) {
         didAutoSelectAudio = true // the user's choice wins from now on
-        player.audioTracks.first(where: { $0.trackId == id })?.isSelectedExclusively = true
+        if let track = player.audioTracks.first(where: { $0.trackId == id }) {
+            track.isSelectedExclusively = true
+            PlaybackLanguagePreferences.noteChosenAudio(
+                languageOrName: PlaybackLanguagePreferences.languageOrName(language: track.language, name: track.trackName))
+        }
         refreshTrackLists()
     }
 
+    /// The user's pick, as `selectAudioTrack(id:)`.
     func selectSubtitle(_ choice: SubtitleChoice) {
         userChoseSubtitle = true
         switch choice {
@@ -985,14 +992,22 @@ final class MacVLCController: NSObject, ObservableObject, VLCMediaPlayerDelegate
             selectedEmbeddedTrackId = nil
             pendingSubtitleLink = nil
             player.deselectAllTextTracks()
+            PlaybackLanguagePreferences.noteChosenSubtitle(languageOrName: nil, isOff: true)
         case .embedded(let id):
             selectedExternalLink = nil
             selectedEmbeddedTrackId = id
             pendingSubtitleLink = nil
-            player.textTracks.first(where: { $0.trackId == id })?.isSelectedExclusively = true
+            if let track = player.textTracks.first(where: { $0.trackId == id }) {
+                track.isSelectedExclusively = true
+                PlaybackLanguagePreferences.noteChosenSubtitle(
+                    languageOrName: PlaybackLanguagePreferences.languageOrName(language: track.language, name: track.trackName),
+                    isOff: false)
+            }
         case .external(let link):
             if let subtitle = externalSubtitles.first(where: { $0.link == link }) {
                 selectExternalSubtitle(subtitle)
+                PlaybackLanguagePreferences.noteChosenSubtitle(languageOrName: subtitle.ISO639.isEmpty ? subtitle.language : subtitle.ISO639,
+                                                               isOff: false)
             }
         }
         refreshTrackLists()
@@ -1186,7 +1201,9 @@ final class MacVLCController: NSObject, ObservableObject, VLCMediaPlayerDelegate
     /// Runs only once the input is ready, so the file's tracks are known.
     private func autoSelectSubtitleIfNeeded() {
         guard !didAutoSelectSubtitle, !userChoseSubtitle, isInputReady else { return }
-        guard let code = PlaybackLanguagePreferences.preferredSubtitleLanguageCode else {
+        let heard = player.audioTracks.first { $0.isSelected }
+        guard let code = PlaybackLanguagePreferences.preferredSubtitleLanguageCode(
+            whileHearing: PlaybackLanguagePreferences.languageOrName(language: heard?.language, name: heard?.trackName)) else {
             didAutoSelectSubtitle = true
             return
         }

@@ -126,6 +126,8 @@ final class SubtitleCueController: ObservableObject {
     /// The item's audio options: which forced subtitles « Désactivés » keeps
     /// depends on the language being heard.
     private var nativeAudibleGroup: AVMediaSelectionGroup?
+    /// The language of the audio the item plays (its tag), once inspected.
+    private var nativeHeardLanguage: String?
     /// The item's playable, non-forced option in the preferred subtitle
     /// language — when set, AVPlayer shows it and the overlay stays off.
     /// Never a machine translation (see `nativeTranslationOption`).
@@ -237,6 +239,16 @@ final class SubtitleCueController: ObservableObject {
         userWantsSubtitlesOff = subtitle == nil
         apply(subtitle)
         if subtitle == nil { selectNativeSubtitlesOff() }
+        // Only the user's picks come here: the profile's taste learns them
+        // (the ones made in AVKit's own menu: `learnChoices(on:)`).
+        PlaybackLanguagePreferences.noteChosenSubtitle(languageOrName: subtitle.map { $0.ISO639.isEmpty ? $0.language : $0.ISO639 },
+                                                       isOff: subtitle == nil)
+    }
+
+    /// The preferred subtitle language for this item: a learnt one only
+    /// when it is not the language heard (`nativeHeardLanguage`).
+    private var preferredCode: String? {
+        return PlaybackLanguagePreferences.preferredSubtitleLanguageCode(whileHearing: nativeHeardLanguage)
     }
 
     /// Select the subtitle matching the preferred subtitle language, if any:
@@ -249,12 +261,14 @@ final class SubtitleCueController: ObservableObject {
     /// Waits — and decides later by itself — while the item's tracks or the
     /// search results are unknown.
     func autoSelectPreferred() {
-        guard !userHasChosen, selected == nil,
-              let code = PlaybackLanguagePreferences.preferredSubtitleLanguageCode else { return }
+        guard !userHasChosen, selected == nil else { return }
         guard nativeSubtitlesKnown else {
-            wantsPreferredSelection = true   // decided once the item is attached and inspected
+            // Decided once the item is attached and inspected (the language
+            // heard is known then).
+            if PlaybackLanguagePreferences.preferredSubtitleLanguageCode != nil { wantsPreferredSelection = true }
             return
         }
+        guard let code = preferredCode else { return }
         if nativePreferredOption != nil || nativeAutoSelection != nil {
             // The file's own track (selected when inspected), or its machine
             // translation selected already.
@@ -326,8 +340,10 @@ final class SubtitleCueController: ObservableObject {
             return
         }
         nativeItem = item
-        // From now on the item's legible selection is ours alone.
+        // From now on the item's legible selection is ours alone — and the
+        // user's, in AVKit's menu: the taste learns that pick.
         PlaybackLanguagePreferences.setLegibleSelectionManagedExternally(for: item)
+        PlaybackLanguagePreferences.learnChoices(on: item)
         nativeFrameRateTask = Task { [weak item] in
             guard let asset = item?.asset else { return nil }
             return await ExternalSubtitleLoader.videoFrameRate(of: asset)
@@ -346,24 +362,27 @@ final class SubtitleCueController: ObservableObject {
         }
         nativeInspectionGeneration += 1
         let generation = nativeInspectionGeneration
-        let code = PlaybackLanguagePreferences.preferredSubtitleLanguageCode
         Task { @MainActor [weak self, weak item] in
             guard let asset = item?.asset else { return }
             // Progressive files without subtitle tracks have no legible
             // group; a failed load counts as "none" too.
             let group = try? await asset.loadMediaSelectionGroup(for: .legible)
+            // The language being heard picks the forced subtitles « Désactivés »
+            // keeps, and whether a learnt subtitle language is turned on.
+            let audible = try? await asset.loadMediaSelectionGroup(for: .audible)
+            let heard = await PlaybackLanguagePreferences.heardLanguage(of: asset, audible: audible,
+                                                                        selection: item?.currentMediaSelection)
+            let code = PlaybackLanguagePreferences.preferredSubtitleLanguageCode(whileHearing: heard)
             var names: [AVMediaSelectionOption: String] = [:]
             var preferred: AVMediaSelectionOption?
-            var audible: AVMediaSelectionGroup?
             if let group {
                 names = await PlaybackLanguagePreferences.loadNames(of: group.options)
                 if let code {
                     preferred = PlaybackLanguagePreferences.preferredLegibleOption(in: group, code: code, names: names)
                 }
-                // The language being heard picks the forced subtitles « Désactivés » keeps.
-                audible = try? await asset.loadMediaSelectionGroup(for: .audible)
             }
             guard let self, let item, generation == self.nativeInspectionGeneration, item === self.nativeItem else { return }
+            self.nativeHeardLanguage = heard
             // The rule returns a machine translation only when the file has
             // no track of its own in that language: it waits for OpenSubtitles.
             let isTranslation = preferred.map(PlaybackLanguagePreferences.isMachineGenerated) ?? false
@@ -391,6 +410,7 @@ final class SubtitleCueController: ObservableObject {
         nativeItem = nil
         nativeLegibleGroup = nil
         nativeAudibleGroup = nil
+        nativeHeardLanguage = nil
         nativePreferredOption = nil
         nativeTranslationOption = nil
         nativeOptionNames = [:]
@@ -419,8 +439,7 @@ final class SubtitleCueController: ObservableObject {
             // best choice left replaces it (`applyPreferredChoice(code:)`:
             // typically this item's machine translation, for tracks inspected
             // after the failure or a rebuilt item) — never the failed entry.
-            if !userHasChosen, let code = PlaybackLanguagePreferences.preferredSubtitleLanguageCode,
-               applyPreferredChoice(code: code) {
+            if !userHasChosen, let code = preferredCode, applyPreferredChoice(code: code) {
                 wantsPreferredSelection = false
             } else {
                 selectNativeSubtitlesOff()
@@ -479,7 +498,7 @@ final class SubtitleCueController: ObservableObject {
     /// (system-language) choice for good.
     private func selectNativeSubtitles(_ option: AVMediaSelectionOption) {
         guard let item = nativeItem, let group = nativeLegibleGroup else { return }
-        item.select(option, in: group)
+        PlaybackLanguagePreferences.select(option, in: group, of: item)
         setNativeSubtitleShown(!isForcedOnly(option))
         print("[Subtitles] the file's own '\(nativeName(of: option))' subtitles (\(option.extendedLanguageTag ?? "?")) are shown — overlay off")
     }
@@ -497,7 +516,7 @@ final class SubtitleCueController: ObservableObject {
             return
         }
         let current = item.currentMediaSelection.selectedMediaOption(in: group)
-        item.select(nil, in: group)
+        PlaybackLanguagePreferences.select(nil, in: group, of: item)
         setNativeSubtitleShown(false)
         if let current { print("[Subtitles] \(reason): the file's own '\(nativeName(of: current))' subtitles turned off") }
     }
@@ -516,7 +535,7 @@ final class SubtitleCueController: ObservableObject {
             return
         }
         let current = item.currentMediaSelection.selectedMediaOption(in: group)
-        item.select(forced, in: group)
+        PlaybackLanguagePreferences.select(forced, in: group, of: item)
         setNativeSubtitleShown(false)
         if current != forced {
             print("[Subtitles] subtitles off: the file's own forced subtitles '\(nativeName(of: forced))' (\(forced.extendedLanguageTag ?? "?")) stay on")
@@ -673,8 +692,7 @@ final class SubtitleCueController: ObservableObject {
         selected = nil
         if !userHasChosen {
             failedAutomaticLinks.insert(subtitle.link)
-            if nativeSubtitlesKnown, let code = PlaybackLanguagePreferences.preferredSubtitleLanguageCode,
-               applyPreferredChoice(code: code) {
+            if nativeSubtitlesKnown, let code = preferredCode, applyPreferredChoice(code: code) {
                 return
             }
         }

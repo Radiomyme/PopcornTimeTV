@@ -276,7 +276,8 @@ struct MacSettingsView: View {
     private func languagePicker(_ title: LocalizedStringKey, storage: Binding<String?>) -> some View {
         let selection = Binding<String>(
             get: { storage.wrappedValue.flatMap(PlaybackLanguagePreferences.isoCode(for:)) ?? "" },
-            set: { storage.wrappedValue = $0.isEmpty ? nil : PlaybackLanguagePreferences.storedName(forCode: $0) }
+            // « None » is stored as a choice: a learnt language never takes its place.
+            set: { storage.wrappedValue = $0.isEmpty ? PlaybackLanguagePreferences.noneValue : PlaybackLanguagePreferences.storedName(forCode: $0) }
         )
         var codes = PlaybackLanguagePreferences.sortedPickerLanguageCodes
         if !selection.wrappedValue.isEmpty, !codes.contains(selection.wrappedValue) {

@@ -591,7 +591,7 @@ class PCTPlayerViewController: UIViewController, VLCMediaPlayerDelegate, UIGestu
         // without a codec — libavformat's demuxer — is left out).
         let listed = mediaplayer.textTracks.filter { !ExternalSubtitleLoader.isVLCSlaveTrackId($0.trackId) }
         print("[Player] text tracks: \(listed.count) listed, \(embeddedTextTracks().count) shown \(listed.map { "'\($0.trackName)'" })")
-        guard let code = PlaybackLanguagePreferences.preferredSubtitleLanguageCode else { return }
+        guard let code = PlaybackLanguagePreferences.preferredSubtitleLanguageCode(whileHearing: heardLanguage) else { return }
         let embedded = embeddedTextTracks().filter {
             (PlaybackLanguagePreferences.matches($0.language, code: code)
                 || PlaybackLanguagePreferences.matches($0.trackName, code: code))
@@ -607,6 +607,13 @@ class PCTPlayerViewController: UIViewController, VLCMediaPlayerDelegate, UIGestu
             print("[Player] auto-selecting OpenSubtitles '\(subtitle.language)' for '\(code)'")
             currentSubtitle = subtitle
         }
+    }
+
+    /// The language of the audio track playing (its code, else its name):
+    /// a learnt subtitle language is not turned on in it.
+    private var heardLanguage: String? {
+        let track = mediaplayer.audioTracks.first { $0.isSelected }
+        return PlaybackLanguagePreferences.languageOrName(language: track?.language, name: track?.trackName)
     }
 
     /// The user picked one of the file's own text tracks in the options
@@ -791,7 +798,7 @@ class PCTPlayerViewController: UIViewController, VLCMediaPlayerDelegate, UIGestu
         subtitleSwitcherButton?.isHidden = false
         subtitleSwitcherButtonWidthConstraint?.constant = 24
         guard didAutoSelectSubtitle, !userChoseSubtitle, currentSubtitle == nil, selectedEmbeddedTrackId == nil,
-              let code = PlaybackLanguagePreferences.preferredSubtitleLanguageCode,
+              let code = PlaybackLanguagePreferences.preferredSubtitleLanguageCode(whileHearing: heardLanguage),
               let subtitle = ExternalSubtitleLoader.preferredSubtitle(in: found, code: code) else { return }
         print("[Player] auto-selecting OpenSubtitles '\(subtitle.language)' for '\(code)'")
         currentSubtitle = subtitle
