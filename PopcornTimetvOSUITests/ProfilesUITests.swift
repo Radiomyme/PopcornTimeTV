@@ -3,7 +3,8 @@ import XCTest
 /// Profiles on the Apple TV: « Who's Watching? » at launch when the device
 /// has more than one profile, a pick opening the Home of that profile, and
 /// Settings › Switch Profile changing it — each profile with its own
-/// Continue Watching.
+/// Continue Watching; Menu on each of these screens; the editor's focus; a
+/// link that comes while the question is up; Your Preferences.
 ///
 /// Runs like `HomeUITests`: a DEBUG build, the Home fed from recorded
 /// answers (`-PTDebugHomeFixtures`), the library and the profiles in memory
@@ -46,7 +47,7 @@ final class ProfilesUITests: XCTestCase {
         XCTAssertFalse(element("Profiles.Cancel").exists, "the launch picker can be dismissed without a pick")
         pause(1.5)
         snap("1-who-is-watching")
-        XCTAssertEqual(focusedIdentifier, "Profiles.Profile.Me", "the focus does not start on the first profile")
+        XCTAssertEqual(focusedIdentifier, "Profiles.Profile.Me", "the focus does not start on the profile in use")
 
         // « Me »: the movie in progress.
         remote.press(.select)
@@ -61,14 +62,16 @@ final class ProfilesUITests: XCTestCase {
         snap("4-alex-home")
         XCTAssertFalse(element("Home.Section.continueWatching").exists, "Alex sees Me's Continue Watching")
 
-        // Back to « Me ».
-        try switchProfile(to: "Me", moves: 0)
+        // Back to « Me »: the picker's focus starts on Alex, the profile in use.
+        try switchProfile(to: "Me", moves: -1)
         XCTAssertTrue(element("Home.Section.continueWatching").waitForExistence(timeout: 30), "Me's Continue Watching is gone")
         snap("5-me-again")
     }
 
     /// A profile with a taste: « For You » on its Home; Settings › Profiles
-    /// › Your Preferences says what it likes, and Reset makes the shelf go.
+    /// › Your Preferences, a sheet over Settings, says what it likes; its one
+    /// focus is Reset Preferences, which empties it in place; Menu closes it
+    /// and the row then reads « Nothing yet ».
     func testForYouAndYourPreferences() throws {
         launch(["-PTDebugTasteGenres", "Sci-Fi,Drama"])
         XCTAssertTrue(element("Home.Section.forYou").waitForExistence(timeout: 30), "no « For You » on the Home")
@@ -79,17 +82,13 @@ final class ProfilesUITests: XCTestCase {
         remote.press(.select)
         XCTAssertTrue(element("Profiles.Taste.Title").waitForExistence(timeout: 10), "Your Preferences never showed")
         let genres = element("Profiles.Taste.Genres")
-        XCTAssertTrue(genres.exists, "no genres learnt")
+        XCTAssertTrue(genres.exists, "no genres learned")
         XCTAssertTrue(genres.label.contains("Drama"), "the genres: \(genres.label)")
+        XCTAssertTrue(element("Settings.Row.profilePreferences").exists, "the sheet is not over Settings")
         pause(1)
         snap("7-your-preferences")
+        XCTAssertEqual(focusedIdentifier, "Profiles.Taste.Reset", "the focus does not start on Reset")
 
-        // Reset: right of Done, then confirm.
-        for _ in 0..<3 where focusedIdentifier != "Profiles.Taste.Reset" {
-            remote.press(.right)
-            pause(0.8)
-        }
-        XCTAssertEqual(focusedIdentifier, "Profiles.Taste.Reset", "Reset never got the focus")
         remote.press(.select)
         pause(1.5)
         snap("8-reset-confirm")
@@ -98,8 +97,119 @@ final class ProfilesUITests: XCTestCase {
         pause(0.8)
         remote.press(.select)
         XCTAssertTrue(element("Profiles.Taste.Empty").waitForExistence(timeout: 10), "the preferences were not reset")
+        XCTAssertFalse(element("Profiles.Taste.Reset").exists, "Reset is offered with nothing to reset")
+        snap("9-your-preferences-empty")
         remote.press(.menu)
         XCTAssertTrue(element("Profiles.Taste.Title").waitForNonExistence(timeout: 10), "Your Preferences stayed")
+        let row = element("Settings.Row.profilePreferences")
+        XCTAssertTrue(row.label.contains("Nothing yet"), "the row still says what was learned: \(row.label)")
+        XCTAssertEqual(focusedIdentifier, "Settings.Row.profilePreferences", "the focus left the row")
+    }
+
+    /// Menu on the launch question is the system's: it leaves the app for
+    /// the Home Screen, as on any app's first screen.
+    func testMenuOnTheLaunchPickerLeavesTheApp() throws {
+        launch(["-PTDebugProfiles", "Alex"])
+        XCTAssertTrue(element("Profiles.Title").waitForExistence(timeout: 20), "« Who's Watching? » never showed")
+        pause(1.5)
+        // In Manage mode, Menu leaves it first.
+        remote.press(.down)
+        pause(0.8)
+        XCTAssertEqual(focusedIdentifier, "Profiles.Manage", "Down did not reach Manage Profiles")
+        remote.press(.select)
+        pause(1)
+        XCTAssertEqual(element("Profiles.Title").label, "Manage Profiles", "Manage mode did not start")
+        remote.press(.menu)
+        pause(1)
+        XCTAssertEqual(element("Profiles.Title").label, "Who’s Watching?", "Menu did not leave Manage mode")
+        XCTAssertEqual(app.state, .runningForeground, "Menu in Manage mode left the app")
+        remote.press(.menu)
+        XCTAssertTrue(waitUntilLeft(), "Menu on « Who's Watching? » did not go to the Home Screen")
+    }
+
+    /// From Settings: no Cancel button (Menu is the way back), the focus on
+    /// the profile in use, Menu back to Settings as it was — the same row
+    /// focused; in Manage mode, a first Menu leaves it, a second closes.
+    func testThePickerFromSettingsClosesWithMenu() throws {
+        launch(["-PTDebugProfiles", "Alex"])
+        XCTAssertTrue(element("Profiles.Title").waitForExistence(timeout: 20), "« Who's Watching? » never showed")
+        pause(1.5)
+        remote.press(.select)
+        XCTAssertTrue(element("Home.Hero").waitForExistence(timeout: 30), "Me's Home never showed")
+
+        try openSettingsRow("Settings.Row.switchProfile")
+        remote.press(.select)
+        XCTAssertTrue(element("Profiles.Title").waitForExistence(timeout: 10), "the picker from Settings never showed")
+        pause(1.5)
+        snap("10-picker-from-settings")
+        XCTAssertFalse(element("Profiles.Cancel").exists, "a Cancel button beside Manage Profiles")
+        XCTAssertEqual(focusedIdentifier, "Profiles.Profile.Me", "the focus is not on the profile in use")
+        XCTAssertEqual(element("Profiles.Profile.Me").value as? String, "Current profile", "VoiceOver does not say which profile is in use")
+        remote.press(.menu)
+        XCTAssertTrue(element("Profiles.Title").waitForNonExistence(timeout: 10), "Menu did not close the picker")
+        pause(1)
+        XCTAssertEqual(focusedIdentifier, "Settings.Row.switchProfile", "Settings did not come back as it was")
+
+        // Manage mode: Menu leaves it, then closes.
+        remote.press(.select)
+        XCTAssertTrue(element("Profiles.Title").waitForExistence(timeout: 10), "the picker did not show again")
+        pause(1.5)
+        remote.press(.down)
+        pause(0.8)
+        remote.press(.select)
+        pause(1)
+        XCTAssertEqual(element("Profiles.Title").label, "Manage Profiles", "Manage mode did not start")
+        XCTAssertEqual(element("Profiles.Profile.Alex").label, "Edit Alex", "VoiceOver does not say a press edits")
+        remote.press(.menu)
+        pause(1)
+        XCTAssertEqual(element("Profiles.Title").label, "Who’s Watching?", "Menu did not leave Manage mode")
+        remote.press(.menu)
+        XCTAssertTrue(element("Profiles.Title").waitForNonExistence(timeout: 10), "a second Menu did not close the picker")
+    }
+
+    /// The editor of a new profile starts on its name; Menu cancels it.
+    func testTheEditorStartsOnTheName() throws {
+        launch(["-PTDebugProfiles", "Alex"])
+        XCTAssertTrue(element("Profiles.Title").waitForExistence(timeout: 20), "« Who's Watching? » never showed")
+        pause(1.5)
+        for _ in 0..<4 where focusedIdentifier != "Profiles.Add" {
+            remote.press(.right)
+            pause(0.8)
+        }
+        XCTAssertEqual(focusedIdentifier, "Profiles.Add", "Add Profile never got the focus")
+        remote.press(.select)
+        XCTAssertTrue(element("Profiles.Editor.Name").waitForExistence(timeout: 10), "the editor never showed")
+        pause(1.5)
+        snap("11-editor-new")
+        XCTAssertEqual(focusedIdentifier, "Profiles.Editor.Name", "the editor does not start on the name")
+        // Down to the avatars, from the field; Up from the last column back to it.
+        remote.press(.down)
+        pause(0.8)
+        for _ in 0..<6 { remote.press(.right); pause(0.4) }
+        XCTAssertEqual(focusedIdentifier, "Profiles.Editor.Avatar.5", "the first row's last avatar is not reachable")
+        remote.press(.up)
+        pause(0.8)
+        XCTAssertEqual(focusedIdentifier, "Profiles.Editor.Name", "Up from the last column did not reach the name")
+        remote.press(.menu)
+        XCTAssertTrue(element("Profiles.Editor.Name").waitForNonExistence(timeout: 10), "Menu did not close the editor")
+        XCTAssertTrue(element("Profiles.Title").exists, "Menu left the picker too")
+    }
+
+    /// A link that comes while « Who's Watching? » asks (the Top Shelf) is
+    /// opened once a profile is picked.
+    func testALinkDuringTheLaunchQuestionOpensAfterThePick() throws {
+        launch(["-PTDebugProfiles", "Alex", "-PTDebugActivationURL", "popcorntime://show/tt0903747"])
+        XCTAssertTrue(element("Profiles.Title").waitForExistence(timeout: 20), "« Who's Watching? » never showed")
+        pause(1.5)
+        remote.press(.home)
+        XCTAssertTrue(waitUntilLeft(), "the TV button did not go to the Home Screen")
+        pause(2)
+        app.activate()
+        XCTAssertTrue(element("Profiles.Title").waitForExistence(timeout: 10), "the question is gone")
+        pause(2)
+        XCTAssertFalse(element("Detail.Title").exists, "the page opened before a profile was picked")
+        remote.press(.select)
+        XCTAssertTrue(element("Detail.Title").waitForExistence(timeout: 60), "the link was not opened after the pick")
     }
 
     // MARK: - Helpers
@@ -135,7 +245,8 @@ final class ProfilesUITests: XCTestCase {
     }
 
     /// From the Home: the tab bar, Settings, « Switch Profile », then `moves`
-    /// to the right in the picker and a press.
+    /// to the right (to the left when negative) from the profile in use, and
+    /// a press.
     private func switchProfile(to name: String, moves: Int) throws {
         pause(2)
         for _ in 0..<4 where !tabBarHasFocus {
@@ -160,15 +271,20 @@ final class ProfilesUITests: XCTestCase {
         XCTAssertEqual(focusedIdentifier, "Settings.Row.switchProfile", "« Switch Profile » never got the focus")
         snap("3-settings-\(name)")
         remote.press(.select)
-        XCTAssertTrue(element("Profiles.Cancel").waitForExistence(timeout: 10), "the picker from Settings never showed (or has no Cancel)")
+        XCTAssertTrue(element("Profiles.Title").waitForExistence(timeout: 10), "the picker from Settings never showed")
         pause(1.5)
-        for _ in 0..<moves {
-            remote.press(.right)
+        for _ in 0..<abs(moves) {
+            remote.press(moves > 0 ? .right : .left)
             pause(0.8)
         }
         XCTAssertEqual(focusedIdentifier, "Profiles.Profile.\(name)", "the focus is not on \(name)")
         remote.press(.select)
         XCTAssertTrue(element("Profiles.Title").waitForNonExistence(timeout: 10), "the picker stayed")
+    }
+
+    private func waitUntilLeft(timeout: TimeInterval = 8) -> Bool {
+        if app.wait(for: .runningBackground, timeout: timeout) { return true }
+        return [.runningBackgroundSuspended, .notRunning].contains(app.state)
     }
 
     private var focusedIsInRightColumn: Bool {
