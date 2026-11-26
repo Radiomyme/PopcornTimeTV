@@ -10,6 +10,7 @@
 //  No UserDefaults, no network, no real clock.
 //
 
+import AVFoundation
 import Foundation
 import XCTest
 @testable import PopcornKit
@@ -490,6 +491,8 @@ final class ProfileTasteTests: CheckedTestCase {
         eq(P.subtitleCode(stored: nil, learned: "fr", heard: "Track 1 - [Français]"), nil, "a VLC track's name says it too")
         eq(P.subtitleCode(stored: nil, learned: "fr", heard: nil), nil, "audio unknown: nothing turned on by itself")
         eq(P.subtitleCode(stored: nil, learned: "fr", heard: "und"), nil, "undetermined: unknown")
+        eq(P.subtitleCode(stored: nil, learned: "fr", heard: "Track 1"), nil, "a VLC track without a language: unknown")
+        eq(P.subtitleCode(stored: nil, learned: "fr", heard: "Track 2 - [Korean]"), "fr", "a VLC track's name in another language")
         eq(P.subtitleCode(stored: "Français", learned: "en", heard: "fr"), "fr", "a setting applies whatever is heard")
     }
 
@@ -509,6 +512,24 @@ final class ProfileTasteTests: CheckedTestCase {
         eq(taste.choices(.audio).count, 0, "a track of no known language teaches nothing")
         PlaybackLanguagePreferences.noteChosenAudio(languageOrName: PlaybackLanguagePreferences.languageOrName(language: "", name: "Japanese"))
         eq(taste.choices(.audio).first?.value, "ja", "a VLC track without a code: its name")
+    }
+
+    /// The learner lives as long as its item, never longer: its own
+    /// subscription must not keep the item (a cycle leaked every item played).
+    @MainActor
+    func testTheLearnerOfAnItemDoesNotKeepItAlive() async {
+        weak var released: AVPlayerItem?
+        autoreleasepool {
+            let item = AVPlayerItem(url: URL(fileURLWithPath: "/nonexistent/clip.mp4"))
+            PlaybackLanguagePreferences.learnChoices(on: item)
+            check(MediaSelectionLearner.learner(of: item) != nil, "the item keeps its learner")
+            released = item
+        }
+        // The learner's first task holds the asset a moment, never the item.
+        for _ in 0..<40 where released != nil {
+            try? await Task.sleep(nanoseconds: 25_000_000)
+        }
+        check(released == nil, "nothing else keeps the item once the player lets it go")
     }
 
     func testOnlyTheUsersOwnPicksInAVKitsMenusAreLearnt() {

@@ -102,11 +102,13 @@ enum PlaybackLanguagePreferences {
         return stored.flatMap(isoCode(for:)) ?? learned()
     }
 
-    /// `preferredSubtitleLanguageCode(whileHearing:)`'s rule.
+    /// `preferredSubtitleLanguageCode(whileHearing:)`'s rule. What is heard
+    /// counts only when it names a language: a VLC track without a tag is
+    /// called "Track 1", which is no other language than the learnt one.
     static func subtitleCode(stored: String?, learned: @autoclosure () -> String?, heard: String?) -> String? {
         if stored == noneValue { return nil }
         if let code = stored.flatMap(isoCode(for:)) { return code }
-        guard let heard, !heard.isEmpty, !undeterminedCodes.contains(heard.lowercased()),
+        guard let heard, (isoCode(for: heard) ?? code(inTrackName: heard)) != nil,
               let code = learned(), !matches(heard, code: code) else { return nil }
         return code
     }
@@ -820,11 +822,17 @@ final class MediaSelectionLearner {
 
     private init(item: AVPlayerItem) {
         self.item = item
+        // Every item's changes, filtered here: a publisher for `object:
+        // item` keeps the item, which keeps this learner (its associated
+        // object) — a cycle that leaked every item played, asset included.
         selectionSubscription = NotificationCenter.default
-            .publisher(for: AVPlayerItem.mediaSelectionDidChangeNotification, object: item)
+            .publisher(for: AVPlayerItem.mediaSelectionDidChangeNotification, object: nil)
             .receive(on: DispatchQueue.main)
-            .sink { [weak self] _ in
-                MainActor.assumeIsolated { self?.selectionDidChange() }
+            .sink { [weak self] note in
+                MainActor.assumeIsolated {
+                    guard let self, let item = self.item, note.object as AnyObject? === item else { return }
+                    self.selectionDidChange()
+                }
             }
         let settleDelay = MediaSelectionLearner.settleDelay
         statusObservation = item.observe(\.status, options: [.initial, .new]) { [weak self] observed, _ in
