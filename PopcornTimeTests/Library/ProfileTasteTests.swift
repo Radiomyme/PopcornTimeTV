@@ -4,8 +4,10 @@
 //
 //  A profile's taste (PopcornKit, ProfileTaste): what each event is worth, counted once; the
 //  decay of old events; titles given up on; the learnt audio / subtitle / quality choices; two
-//  profiles kept apart; a reset; and the Home's « For You » shelf ranked by it. No UserDefaults,
-//  no network, no real clock.
+//  profiles kept apart; a reset; and the Home's « For You » shelf ranked by it. Also: titles
+//  marked by their id only, features learnt late, how seldom and how small the model is written,
+//  the players' choices (an explicit « None », the language heard, the picks in AVKit's menus).
+//  No UserDefaults, no network, no real clock.
 //
 
 import Foundation
@@ -30,6 +32,18 @@ final class ProfileTasteTests: CheckedTestCase {
 
     private func card(_ id: String, _ genres: [String], kind: HomeItem.Kind = .movie, year: Int = 2015, rating: Double = 7) -> HomeItem {
         return HomeItem(imdbId: id, kind: kind, title: id, year: year, rating: rating, genres: genres)
+    }
+
+    /// A storage that counts the taste's writes.
+    private final class CountingStorage: LibraryStorage {
+        let base = MemoryLibraryStorage()
+        private(set) var writes = 0
+        func object(forKey key: String) -> Any? { base.object(forKey: key) }
+        func set(_ value: Any?, forKey key: String) {
+            if key == ProfileTaste.storageKey { writes += 1 }
+            base.set(value, forKey: key)
+        }
+        var storedBytes: Int { (base.object(forKey: ProfileTaste.storageKey) as? Data)?.count ?? 0 }
     }
 
     // MARK: - Events
@@ -244,5 +258,266 @@ final class ProfileTasteTests: CheckedTestCase {
         local.taste?.signal = 0.5
         hidden = HomeBuilder.shelves(HomeFixture.inputs(HomeFixture.allLists(), local: local), facts: HomeTitleFacts())
         check(hidden.shelf(HomeShelfID.forYou) == nil, "too little learnt: none")
+    }
+
+    // MARK: - Titles known by their id, features learnt late
+
+    func testAMarkByIdOnlyCountsOnceItsFeaturesAreKnown() {
+        let clock = F.Clock("2026-11-25T12:00:00Z")
+        let taste = taste(clock: clock)
+        taste.noteWatched(true, mediaID: arrival.imdbID, kind: .movie)
+        eq(taste.snapshot().signal, 0, "marked from a card, features unknown: nothing learnt yet")
+        check(taste.snapshot().excluded.contains(arrival.imdbID), "but it is not offered")
+        taste.notePlayback(of: arrival, progress: 1, isFinished: true)
+        eq(round(taste.snapshot().signal * 100), 100, "played from its page: its whole worth, once")
+        check((taste.snapshot().genres["Sci-Fi"] ?? 0) > 0, "on its genres")
+
+        // A movie marked from its page: the movie itself comes along.
+        taste.noteWatched(true, mediaID: notebook.imdbID, kind: .movie, title: notebook)
+        check((taste.snapshot().genres["Romance"] ?? 0) > 0, "marked with its features: learnt at once")
+    }
+
+    func testEpisodesMarkedByIdCountForTheirShowOncePlayed() {
+        let clock = F.Clock("2026-11-25T12:00:00Z")
+        let taste = taste(clock: clock)
+        let episode = { (season: Int, n: Int) in LibraryID.episodeID(showID: self.breakingBad.imdbID, EpisodeNumber(season: season, episode: n)) }
+        for n in 1...10 { taste.noteWatched(true, mediaID: episode(1, n), kind: .show) }
+        eq(taste.snapshot().signal, 0, "a season marked by its ids: nothing learnt yet")
+        taste.notePlayback(of: breakingBad, progress: 1, isFinished: true, episodeID: episode(2, 1))
+        check((taste.snapshot().genres["Crime"] ?? 0) > 0, "the next episode played: the show's genres are learnt")
+        eq(round(taste.snapshot().signal * 100), 140, "at the show's ceiling, counted once")
+    }
+
+    func testMarksByIdDoNotMakeTheTasteConfident() {
+        let clock = F.Clock("2026-11-25T12:00:00Z")
+        let taste = taste(clock: clock)
+        taste.noteWatched(true, mediaID: "tt0000001", kind: .movie)
+        taste.noteWatched(true, mediaID: "tt0000002", kind: .movie)
+        taste.noteWatchlist(true, of: arrival)
+        eq(round(taste.snapshot().signal * 100), 40, "only the listed title counts")
+        check(!taste.snapshot().isConfident, "one listed title is not enough to rank with")
+    }
+
+    func testPeopleLearntLaterTakeOverWhatTheListCredited() {
+        let clock = F.Clock("2026-11-25T12:00:00Z")
+        let taste = taste(clock: clock)
+        var listed = interstellar
+        listed.people = []
+        taste.noteWatchlist(true, of: listed)
+        check(taste.topAffinities()[.person] == nil, "listed: no people known")
+        taste.notePlayback(of: interstellar, progress: 0.5, isFinished: false)
+        let people = taste.topAffinities()[.person]?.map(\.value) ?? []
+        check(people.contains("Christopher Nolan"), "played from its page: its people are learnt", "\(people)")
+        eq(round(taste.snapshot().signal * 100), 70, "listed then started: 0.4 + 0.3, the move not counted again")
+
+        // The same as learning it all at once.
+        let direct = self.taste(clock: clock)
+        direct.noteWatchlist(true, of: interstellar)
+        direct.notePlayback(of: interstellar, progress: 0.5, isFinished: false)
+        eq(taste.snapshot().genres, direct.snapshot().genres, "the genres weigh what they would have")
+        eq(taste.topAffinities(), direct.topAffinities(), "and so do the people")
+    }
+
+    // MARK: - Writes
+
+    func testAPositionSavedAgainIsWrittenSeldomAndNotAnnounced() {
+        let clock = F.Clock("2026-11-25T12:00:00Z")
+        let storage = CountingStorage()
+        let center = NotificationCenter()
+        var posts = 0
+        let token = center.addObserver(forName: ProfileTaste.didChangeNotification, object: nil, queue: nil) { _ in posts += 1 }
+        defer { center.removeObserver(token) }
+        let taste = ProfileTaste(storage: storage, center: center, now: { clock.now })
+
+        taste.notePlayback(of: interstellar, progress: 0.3, isFinished: false)
+        eq(storage.writes, 1, "started: written")
+        eq(posts, 1, "and announced")
+        for _ in 0..<10 {
+            clock.advance(30)
+            taste.notePlayback(of: interstellar, progress: 0.35, isFinished: false)
+        }
+        eq(storage.writes, 1, "the 30 s checkpoints change nothing the taste says: not written")
+        eq(posts, 1, "nor announced (no second Home rebuild)")
+        taste.flush()
+        eq(storage.writes, 2, "the pause writes what is left")
+        taste.flush()
+        eq(storage.writes, 2, "once")
+
+        clock.advance(30)
+        taste.notePlayback(of: interstellar, progress: 0.36, isFinished: false)
+        clock.advance(31 * 60)
+        taste.notePlayback(of: interstellar, progress: 0.4, isFinished: false)
+        eq(storage.writes, 3, "half an hour later a quiet change is written anyway")
+
+        taste.notePlayback(of: interstellar, progress: 0.9, isFinished: true)
+        eq(storage.writes, 4, "finished: written at once")
+        eq(posts, 2, "and announced")
+
+        // A movie crossing the « given up on » fraction matters: the sweep reads it.
+        taste.notePlayback(of: notebook, progress: 0.1, isFinished: false)
+        let before = storage.writes
+        taste.notePlayback(of: notebook, progress: 0.3, isFinished: false)
+        eq(storage.writes, before + 1, "past a quarter: written")
+        let stored = self.taste(storage, clock: clock)
+        eq(stored.snapshot(), taste.snapshot(), "what is stored is what is learnt")
+    }
+
+    func testTheWatchlistSeedIsWrittenOnce() {
+        let clock = F.Clock("2026-11-25T12:00:00Z")
+        let entries: [[String: Any]] = (0..<300).map {
+            ["imdb_id": String(format: "tt%07d", 1_000_000 + $0), "title": "Movie \($0)", "year": "1994", "genres": ["drama", "crime"]]
+        }
+        let library = Library(storage: MemoryLibraryStorage(["moviesWatchlist": entries]), guideDirectory: nil, remote: .offline,
+                              center: NotificationCenter(), now: { clock.now })
+        let storage = CountingStorage()
+        let taste = taste(storage, clock: clock)
+        taste.seed(from: library)
+        eq(storage.writes, 1, "300 listed titles: one write")
+        check((taste.snapshot().genres["Crime"] ?? 0) > 0, "and they are learnt")
+        check(storage.storedBytes <= taste.policy.maxStoredBytes, "within the size", "\(storage.storedBytes)")
+    }
+
+    func testAFullModelStaysSmall() {
+        let clock = F.Clock("2026-11-25T12:00:00Z")
+        let storage = CountingStorage()
+        let taste = taste(storage, clock: clock)
+        let names = ["Christopher Nolan", "Matthew McConaughey", "Anne Hathaway", "Jessica Chastain", "Michael Caine"]
+        for index in 0..<300 {
+            clock.advance(3600)
+            let isShow = index % 2 == 1
+            let title = TasteTitle(imdbID: String(format: "tt%07d", 2_000_000 + index), kind: isShow ? .show : .movie,
+                                   genres: ["Science Fiction", "Adventure", "Drama"], year: 1950 + index % 70,
+                                   people: names.map { "\($0) \(index)" })
+            if isShow {
+                for n in 1...40 {
+                    taste.notePlayback(of: title, progress: 1, isFinished: true,
+                                       episodeID: LibraryID.episodeID(showID: title.imdbID, EpisodeNumber(season: n / 10 + 1, episode: n)))
+                }
+            } else {
+                taste.notePlayback(of: title, progress: 1, isFinished: true)
+            }
+        }
+        check(storage.storedBytes > 0 && storage.storedBytes <= taste.policy.maxStoredBytes,
+              "300 heavy titles stored in at most \(taste.policy.maxStoredBytes) bytes", "\(storage.storedBytes)")
+        check(5 * storage.storedBytes < 400_000, "five such profiles stay well under the 1 MB tvOS allows", "\(storage.storedBytes)")
+
+        // A show keeps a few finished episodes only, and its full worth.
+        let binge = self.taste(clock: clock)
+        let episode = { (n: Int) in LibraryID.episodeID(showID: self.breakingBad.imdbID, EpisodeNumber(season: 1, episode: n)) }
+        for n in 1...20 { binge.noteWatched(true, of: breakingBad, episodeID: episode(n)) }
+        eq(round(binge.snapshot().signal * 100), 140, "twenty episodes: the ceiling")
+        binge.noteWatched(false, of: breakingBad, episodeID: episode(20))
+        binge.noteWatched(false, of: breakingBad, episodeID: episode(1))
+        eq(round(binge.snapshot().signal * 100), 140, "one unmarked: still at the ceiling")
+    }
+
+    // MARK: - Shows given up on
+
+    func testAShowLeftPastAQuarterIsNotGivenUpOn() {
+        let clock = F.Clock("2026-11-01T12:00:00Z")
+        let taste = taste(clock: clock)
+        let pilot = LibraryID.episodeID(showID: breakingBad.imdbID, EpisodeNumber(season: 1, episode: 1))
+        taste.notePlayback(of: breakingBad, progress: 0.75, isFinished: false, episodeID: pilot)
+        let lost = TasteTitle(imdbID: "tt0411008", kind: .show, genres: ["Mystery", "Adventure"], year: 2004)
+        taste.notePlayback(of: lost, progress: 0.1, isFinished: false,
+                           episodeID: LibraryID.episodeID(showID: lost.imdbID, EpisodeNumber(season: 1, episode: 1)))
+        clock.advance(15 * day)
+        let genres = taste.snapshot().genres
+        check((genres["Crime"] ?? 0) > 0, "a pilot left at 75 % three weeks ago: still liked", "\(genres)")
+        check((genres["Mystery"] ?? 0) < 0, "one left at 10 %: given up on", "\(genres)")
+    }
+
+    // MARK: - « For You »: hidden shelves, genres it likes
+
+    func testForYouLeavesOutHiddenShelves() {
+        let snapshot = TasteSnapshot(genres: ["Sci-Fi": 1, "Drama": 0.8, "Action": 0.6, "Thriller": 0.5, "Crime": 0.5],
+                                     decades: [2020: 1], kinds: ["movie": 1, "show": 0.5], signal: 5)
+        var local = HomeLocal()
+        local.taste = snapshot
+        let shelves = HomeBuilder.shelves(HomeFixture.inputs(HomeFixture.allLists(), local: local), facts: HomeTitleFacts())
+        guard let forYou = shelves.shelf(HomeShelfID.forYou) else { return check(false, "a « For You » shelf", "\(shelves.map(\.id))") }
+        let offered = Set(forYou.items.map(\.imdbId))
+        let others = shelves.filter { $0.id != HomeShelfID.forYou && $0.id != HomeShelfID.hero }
+        // A shelf some of whose own titles (on no other shelf) are offered.
+        let source = others.first { shelf in
+            let rest = Set(others.filter { $0.id != shelf.id }.flatMap { $0.items.map(\.imdbId) })
+            return !offered.intersection(Set(shelf.items.map(\.imdbId)).subtracting(rest)).isEmpty
+        }
+        guard let source else { return check(false, "« For You » takes titles of its own from a shelf") }
+        let only = Set(source.items.map(\.imdbId)).subtracting(Set(others.filter { $0.id != source.id }.flatMap { $0.items.map(\.imdbId) }))
+
+        let hidden = HomeBuilder.shelves(HomeFixture.inputs(HomeFixture.allLists(), local: local, hidden: [source.id]), facts: HomeTitleFacts())
+        check(hidden.shelf(source.id) == nil, "\(source.id) hidden")
+        let stillOffered = Set(hidden.shelf(HomeShelfID.forYou)?.items.map(\.imdbId) ?? [])
+        check(stillOffered.isDisjoint(with: only), "none of the hidden \(source.id)'s titles in « For You »",
+              "\(stillOffered.intersection(only))")
+    }
+
+    func testForYouRequiresGenresTheProfileLikes() {
+        let snapshot = TasteSnapshot(genres: ["Sci-Fi": 1], decades: [2020: 1], kinds: ["movie": 1], signal: 5)
+        let comedy = card("a", ["Comedy"], year: 2024, rating: 7.5)
+        check(snapshot.score(comedy) >= 0.12, "a recent, well-rated comedy scores on decade, kind and rating alone")
+        eq(snapshot.genreScore(comedy.genres), 0, "but it shares no genre the profile likes")
+        check(snapshot.genreScore(["Drama", "Sci-Fi"]) >= 0.2, "a liked second genre is enough")
+
+        var local = HomeLocal()
+        local.taste = snapshot
+        let shelves = HomeBuilder.shelves(HomeFixture.inputs(HomeFixture.allLists(), local: local), facts: HomeTitleFacts())
+        if let forYou = shelves.shelf(HomeShelfID.forYou) {
+            check(forYou.items.allSatisfy { snapshot.genreScore($0.genres) >= 0.2 }, "only titles of genres it likes",
+                  "\(forYou.items.map { "\($0.title) \($0.genres)" })")
+        }
+        local.taste = TasteSnapshot(genres: ["Western": 1], decades: [2020: 1], kinds: ["movie": 1], signal: 5)
+        let westerns = HomeBuilder.shelves(HomeFixture.inputs(HomeFixture.allLists(), local: local), facts: HomeTitleFacts())
+        check(westerns.shelf(HomeShelfID.forYou) == nil, "too few titles of its genres on the page: no shelf, not a padded one")
+    }
+
+    // MARK: - The players' choices
+
+    func testAnExplicitNoneIsNeverReplacedByALearntLanguage() {
+        typealias P = PlaybackLanguagePreferences
+        eq(P.effectiveCode(stored: nil, learned: "fr"), "fr", "never set: the learnt language")
+        eq(P.effectiveCode(stored: P.noneValue, learned: "fr"), nil, "« None » chosen: none")
+        eq(P.effectiveCode(stored: "Français", learned: "en"), "fr", "a setting wins")
+        eq(P.isoCode(for: P.noneValue), nil, "« None » reads as no language in Settings")
+        eq(P.subtitleCode(stored: P.noneValue, learned: "fr", heard: "kor"), nil, "subtitles: « None » holds")
+    }
+
+    func testALearntSubtitleLanguageIsNotTurnedOnForAudioInIt() {
+        typealias P = PlaybackLanguagePreferences
+        eq(P.subtitleCode(stored: nil, learned: "fr", heard: "ko"), "fr", "Korean heard: the French subtitles it picks")
+        eq(P.subtitleCode(stored: nil, learned: "fr", heard: "fre"), nil, "French heard: no French subtitles")
+        eq(P.subtitleCode(stored: nil, learned: "fr", heard: "Track 1 - [Français]"), nil, "a VLC track's name says it too")
+        eq(P.subtitleCode(stored: nil, learned: "fr", heard: nil), nil, "audio unknown: nothing turned on by itself")
+        eq(P.subtitleCode(stored: nil, learned: "fr", heard: "und"), nil, "undetermined: unknown")
+        eq(P.subtitleCode(stored: "Français", learned: "en", heard: "fr"), "fr", "a setting applies whatever is heard")
+    }
+
+    func testThePlayersPicksTeachTheProfilesTaste() {
+        let clock = F.Clock("2026-11-25T12:00:00Z")
+        let taste = taste(clock: clock)
+        let previous = PlaybackLanguagePreferences.choiceTaste
+        PlaybackLanguagePreferences.choiceTaste = { taste }
+        defer { PlaybackLanguagePreferences.choiceTaste = previous }
+
+        for name in ["Track 2 - [French]", "fre", "fr-FR"] {
+            clock.advance(day)
+            PlaybackLanguagePreferences.noteChosenSubtitle(languageOrName: name, isOff: false)
+        }
+        eq(taste.preferredChoice(.subtitle), "fr", "three picks a day apart (decayed, a little under 3): learnt")
+        PlaybackLanguagePreferences.noteChosenAudio(languageOrName: "Commentary")
+        eq(taste.choices(.audio).count, 0, "a track of no known language teaches nothing")
+        PlaybackLanguagePreferences.noteChosenAudio(languageOrName: PlaybackLanguagePreferences.languageOrName(language: "", name: "Japanese"))
+        eq(taste.choices(.audio).first?.value, "ja", "a VLC track without a code: its name")
+    }
+
+    func testOnlyTheUsersOwnPicksInAVKitsMenusAreLearnt() {
+        typealias P = PlaybackLanguagePreferences
+        eq(P.selectionChange(current: "fr", known: "fr", own: nil, settled: true), .none, "nothing changed")
+        eq(P.selectionChange(current: "fr", known: "en", own: nil, settled: false), .notTheUser, "AVPlayer settling the item")
+        eq(P.selectionChange(current: "fr", known: "en", own: .some("fr"), settled: true), .notTheUser, "the app's own selection")
+        eq(P.selectionChange(current: nil, known: "en", own: .some(nil), settled: true), .notTheUser, "the app turning them off")
+        eq(P.selectionChange(current: "fr", known: "en", own: .some("en"), settled: true), .user, "anything else: the user's pick")
+        eq(P.selectionChange(current: nil as String?, known: "en", own: nil, settled: true), .user, "turned off by the user")
     }
 }
