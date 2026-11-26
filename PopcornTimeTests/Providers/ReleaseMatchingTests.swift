@@ -820,6 +820,11 @@ final class ReleaseLanguageTests: CheckedTestCase {
         eq(AudioLanguagePreference.current, "fr", "Sam's learnt French")
         storage.set("Deutsch", forKey: profiles.scopedKey(AudioLanguagePreference.defaultsKey))
         eq(AudioLanguagePreference.current, "de", "Sam's setting wins over the learnt language")
+        storage.set(PlaybackLanguagePreferences.noneValue, forKey: profiles.scopedKey(AudioLanguagePreference.defaultsKey))
+        eq(AudioLanguagePreference.current, nil, "Sam's « None »: the learnt French does not replace it")
+        eq(PlaybackLanguagePreferences.effectiveCode(stored: PlaybackLanguagePreferences.noneValue, learned: "fr"), nil,
+           "the players' rule agrees")
+        storage.set("Deutsch", forKey: profiles.scopedKey(AudioLanguagePreference.defaultsKey))
 
         // The lists follow: Alex's VF release is kept and ranked first.
         if let alex = alex { profiles.activate(alex.id) }

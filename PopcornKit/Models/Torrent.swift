@@ -1948,7 +1948,8 @@ public struct ReleaseLanguages: Equatable, CustomStringConvertible {
 /// apps store under the profile's key, `ProfileManager.prefix(of:)` +
 /// `defaultsKey`: a localized name such as "Français", or a code), else the
 /// language that profile picks itself most often in the players
-/// (`ProfileTaste`): the rule of the players' own track choice
+/// (`ProfileTaste`) — but never in place of « None » (`noneValue`): the
+/// rule of the players' own track choice
 /// (`PlaybackLanguagePreferences.preferredAudioLanguageCode`), so the
 /// release chosen and the track chosen agree. The apps install `resolver`,
 /// which turns their language names into codes.
@@ -1961,6 +1962,11 @@ public enum AudioLanguagePreference {
     /// The setting's key: the primary profile's; the other profiles' carry
     /// their prefix ("profile.<id>.preferredAudioLanguage").
     public static let defaultsKey = "preferredAudioLanguage"
+
+    /// What Settings stores for « None » (`PlaybackLanguagePreferences.noneValue`):
+    /// a choice, so the learnt language does not stand in for it as it does
+    /// for a setting never made.
+    public static let noneValue = "none"
 
     /// The stored setting → ISO 639-1 code. Without one, a stored
     /// 2-letter code is taken as is.
@@ -2020,8 +2026,9 @@ public enum AudioLanguagePreference {
             guard let value = value, !value.isEmpty else { return nil }
             return resolver?(value) ?? (value.count == 2 ? value.lowercased() : nil)
         }
-        var code = resolve(raw)
-        let isLearnt = code == nil
+        let isNone = raw?.lowercased() == noneValue
+        var code = isNone ? nil : resolve(raw)
+        let isLearnt = code == nil && !isNone
         if isLearnt { code = resolve(source.learnt(profileID)) }
         lock.lock()
         cache = Cache(profileID: profileID, raw: raw, code: code, isLearnt: isLearnt, time: now)
