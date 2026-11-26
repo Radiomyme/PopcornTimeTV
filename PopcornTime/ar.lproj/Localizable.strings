@@ -71,7 +71,7 @@
 "Choose a default language for the player subtitles." = "اختر اللغة الافتراضية للترجمة";
 
 /* (No Commment) */
-"Choose a default quality. If said quality is available, it will be automatically selected." = "اختر الدقة الافتراضية لتشغيل الفيلم في حال توفرها";
+"Choose a default quality. If said quality is available, it will be automatically selected." = "كيف يختار Popcorn Time المصدر عند الضغط على تشغيل.";
 
 /* (No Commment) */
 "Choose a font size for the player subtitles." = "اختر الحجم الافتراضي للترجمة";

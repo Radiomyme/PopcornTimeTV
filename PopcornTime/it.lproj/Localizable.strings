@@ -71,7 +71,7 @@
 "Choose a default language for the player subtitles." = "Scegli una lingua predefinita per i sottotitoli.";
 
 /* (No Commment) */
-"Choose a default quality. If said quality is available, it will be automatically selected." = "Scegli la qualità di riproduzione predefinita. Se disponibile, verrà selezionata automaticamente.";
+"Choose a default quality. If said quality is available, it will be automatically selected." = "Come Popcorn Time sceglie la fonte quando premi Riproduci.";
 
 /* (No Commment) */
 "Choose a font size for the player subtitles." = "Scegli una grandezza dei font per i sottotitoli.";

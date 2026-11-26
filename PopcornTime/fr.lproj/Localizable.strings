@@ -78,7 +78,7 @@
 "Choose a volume for the TV Show and Movie theme songs." = "Choisissez le volume de la musique jouée sur les fiches des films et des séries.";
 
 "Auto Select Quality" = "Qualité automatique";
-"Choose a default quality. If said quality is available, it will be automatically selected." = "Choisissez une qualité par défaut. Si elle est disponible, elle sera sélectionnée automatiquement.";
+"Choose a default quality. If said quality is available, it will be automatically selected." = "Comment Popcorn Time choisit la source quand vous lancez la lecture.";
 
 "Remove from on deck" = "Retirer de « À suivre »";
 "Are you sure you want to remove this item?" = "Voulez-vous vraiment retirer cet élément ?";

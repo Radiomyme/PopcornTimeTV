@@ -71,7 +71,7 @@
 "Choose a default language for the player subtitles." = "Escolha o idioma padrão para as legendas do player";
 
 /* (No Commment) */
-"Choose a default quality. If said quality is available, it will be automatically selected." = "Escolha a qualidade padrão. Se a referida qualidade estiver disponível, ela será automaticamente selecionada";
+"Choose a default quality. If said quality is available, it will be automatically selected." = "Como o Popcorn Time escolhe a fonte quando você toca em Reproduzir.";
 
 /* (No Commment) */
 "Choose a font size for the player subtitles." = "Escolha o tamanho de fonte para as legendas do player";
