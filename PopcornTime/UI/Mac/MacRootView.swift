@@ -129,6 +129,9 @@ struct MacRootView: View {
         // profile is made active once the sheet has gone: the window is
         // then made again for it (`ProfileGate`).
         .sheet(isPresented: $navigator.showsProfilePicker, onDismiss: {
+            // Last: a switch made in the sheet (the profile in use deleted)
+            // waits for it to go, as the pick does (`ProfileGate`).
+            defer { ProfileLaunchQuestion.shared.pickerClosed() }
             guard let id = profilePicked else { return }
             profilePicked = nil
             if id != ProfileManager.shared.activeID { ProfileManager.shared.activate(id) }
@@ -137,6 +140,7 @@ struct MacRootView: View {
                 profilePicked = picked
                 navigator.showsProfilePicker = false
             }
+            .onAppear { ProfileLaunchQuestion.shared.pickerOpened() }
         }
         #if DEBUG
         .sheet(item: $debugPlayback) { item in

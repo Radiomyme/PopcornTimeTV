@@ -167,6 +167,12 @@ final class ProfileLaunchQuestion: ObservableObject {
     @Published private(set) var isAsking: Bool
     /// The link that arrived while it asked.
     private(set) var heldLink: URL?
+    /// « Who's Watching? » is up over the content (Settings › Switch
+    /// Profile, the Mac's ⇧⌘P): a switch made meanwhile — the profile in
+    /// use deleted from its editor — waits until it closes, as on the
+    /// Apple TV. Made again under them, the content took the picker, the
+    /// editor and its alert down mid-action.
+    @Published private(set) var isPickerUp = false
 
     init(asks: Bool) {
         isAsking = asks
@@ -175,6 +181,15 @@ final class ProfileLaunchQuestion: ObservableObject {
     /// A profile was picked: every window shows the content.
     func answer() {
         isAsking = false
+    }
+
+    func pickerOpened() { isPickerUp = true }
+    func pickerClosed() { isPickerUp = false }
+
+    /// The profile the content is made for after a switch: `active`, or
+    /// still `shown` while a picker is up (`isPickerUp`).
+    func profileToShow(shown: String, active: String) -> String {
+        return isPickerUp ? shown : active
     }
 
     /// A link arrived (`onOpenURL`). True when it is held for after the

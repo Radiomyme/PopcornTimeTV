@@ -729,9 +729,10 @@ struct ProfilePickerView: View {
             Text(profilesLocalized(managing ? "Profiles.Done" : "Profiles.Manage"))
                 .lineLimit(1)
         }
-        #if !os(tvOS)
+        #if os(iOS)
         // Neutral glass, white words: the app's red tint is kept for what
-        // deletes.
+        // deletes. (Not on the Mac: its glass button fills its capsule with
+        // the tint, a white pill brighter than the title.)
         .tint(.primary)
         #endif
         .accessibilityIdentifier("Profiles.Manage")
@@ -779,6 +780,9 @@ struct ProfileEditorView: View {
     #else
     @FocusState private var nameFocused: Bool
     #endif
+    #if os(iOS)
+    @Environment(\.layoutDirection) private var layoutDirection
+    #endif
     #if os(macOS)
     /// The window the editor is on, its own sheet.
     @State private var hostWindow: NSWindow?
@@ -812,19 +816,27 @@ struct ProfileEditorView: View {
             .onChange(of: model.profiles) { _, profiles in
                 if let id = draft.id, !profiles.contains(where: { $0.id == id }) { onClose() }
             }
-            .alert(profilesLocalized("Profiles.Delete"), isPresented: $confirmDelete) {
-                SwiftUI.Button(profilesLocalized("Profiles.Delete"), role: .destructive) {
-                    #if os(macOS)
-                    // A player may have started while the alert was up.
-                    refreshDeleteWaits()
-                    guard !deleteWaits else { return NSSound.beep() }
+            // On a host of its own: the neutral tint reaches the alert only.
+            .background {
+                Color.clear
+                    .alert(profilesLocalized("Profiles.Delete"), isPresented: $confirmDelete) {
+                        SwiftUI.Button(profilesLocalized("Profiles.Delete"), role: .destructive) {
+                            #if os(macOS)
+                            // A player may have started while the alert was up.
+                            refreshDeleteWaits()
+                            guard !deleteWaits else { return NSSound.beep() }
+                            #endif
+                            if let id = draft.id { model.delete(id) }
+                            onClose()
+                        }
+                        SwiftUI.Button(profilesLocalized("Profiles.Cancel"), role: .cancel) {}
+                    } message: {
+                        Text(verbatim: String(format: profilesLocalized("Profiles.Delete.Message"), draft.name))
+                    }
+                    #if os(iOS)
+                    // Cancel neutral, Delete the system's red: not both red.
+                    .tint(.primary)
                     #endif
-                    if let id = draft.id { model.delete(id) }
-                    onClose()
-                }
-                SwiftUI.Button(profilesLocalized("Profiles.Cancel"), role: .cancel) {}
-            } message: {
-                Text(verbatim: String(format: profilesLocalized("Profiles.Delete.Message"), draft.name))
             }
     }
 
@@ -983,7 +995,9 @@ struct ProfileEditorView: View {
                     ProfileAvatarView(avatar: draft.avatar, size: 72)
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 6)
-                    TextField(text: $draft.name, prompt: Text(verbatim: profilesLocalized("Profiles.Name"))) {
+                    // The label only: as in System Settings' forms, an empty
+                    // field beside it (the same word as a prompt read twice).
+                    TextField(text: $draft.name, prompt: nil) {
                         Text(verbatim: profilesLocalized("Profiles.Name"))
                     }
                     .autocorrectionDisabled()
@@ -1024,8 +1038,21 @@ struct ProfileEditorView: View {
             .padding(.horizontal, 20)
             .padding(.vertical, 12)
         }
-        .frame(width: 480)
-        .background(MacHostWindowReader { hostWindow = $0; refreshDeleteWaits() })
+        // Narrower than the Settings window's panes (480 pt): over them the
+        // sheet sits inset, as the Home's lists do.
+        .frame(width: 420)
+        .background(MacHostWindowReader { window in
+            hostWindow = window
+            refreshDeleteWaits()
+            // An edit opens on the avatars, not on a selected name: AppKit
+            // makes the field first responder on its own, as the sheet
+            // becomes key (after this): undone once it has settled.
+            if draft.id != nil {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                    if window.firstResponder is NSText { window.makeFirstResponder(nil) }
+                }
+            }
+        })
         .onAppear { if draft.id == nil { nameFocused = true } }
         // A sheet put on or taken off any window (the player's): looked
         // again once it has settled.
@@ -1050,6 +1077,13 @@ struct ProfileEditorView: View {
                         .submitLabel(.done)
                         .focused($nameFocused)
                         .accessibilityIdentifier("Profiles.Editor.Name")
+                        // On the form's leading edge in a right-to-left UI,
+                        // whatever the name's script: the field's natural
+                        // alignment put a Latin « Alex » on the left in
+                        // Arabic. Its trailing edge in a left-to-right field
+                        // is the right one.
+                        .multilineTextAlignment(layoutDirection == .rightToLeft ? .trailing : .leading)
+                        .environment(\.layoutDirection, layoutDirection == .rightToLeft ? .leftToRight : layoutDirection)
                 } header: {
                     // The preview over the name's card, not a clear first
                     // row of it: the name is a whole rounded card.
@@ -1189,7 +1223,11 @@ struct ProfileGate<Content: View>: View {
             }
         }
         .onReceive(NotificationCenter.default.publisher(for: .activeProfileDidChange)) { _ in
-            activeID = ProfileManager.shared.activeID
+            activeID = question.profileToShow(shown: activeID, active: ProfileManager.shared.activeID)
+        }
+        // A switch made under a picker, applied once it has closed.
+        .onChange(of: question.isPickerUp) { _, isUp in
+            if !isUp { activeID = ProfileManager.shared.activeID }
         }
         // A link while the question is up has no screen to open in: held,
         // and opened by the content once a profile is picked
@@ -1225,7 +1263,7 @@ struct ProfileScoped<Content: View>: View {
 /// Manage Profiles is the picker's own button.
 struct ProfilesSettingsSection: View {
     @StateObject private var model = ProfilesModel()
-    @State private var tasteSummary = ProfileTasteModel.summary()
+    @State private var tasteGenres = ProfileTasteModel.summaryGenres()
     @State private var showsPicker = false
     /// Another profile picked: made active once the cover has gone. The
     /// app's content is then made again for it, which closes Settings.
@@ -1255,9 +1293,16 @@ struct ProfilesSettingsSection: View {
                     Text(verbatim: profilesLocalized("Profiles.Taste"))
                         .layoutPriority(1)
                     Spacer(minLength: 8)
-                    Text(verbatim: tasteSummary ?? profilesLocalized("Profiles.Taste.Nothing"))
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
+                    // Both genres when they fit, else the strongest: never
+                    // « Drama · Scie… » (an iPhone, a long translation).
+                    ViewThatFits(in: .horizontal) {
+                        Text(verbatim: tasteGenres.isEmpty ? profilesLocalized("Profiles.Taste.Nothing")
+                                                           : tasteGenres.joined(separator: " · "))
+                            .lineLimit(1)
+                        Text(verbatim: tasteGenres.first ?? profilesLocalized("Profiles.Taste.Nothing"))
+                            .lineLimit(1)
+                    }
+                    .foregroundStyle(.secondary)
                 }
                 .accessibilityElement(children: .combine)
             }
@@ -1274,9 +1319,9 @@ struct ProfilesSettingsSection: View {
             }
             #endif
             // Back from the page, after a reset, or learned meanwhile.
-            .onAppear { tasteSummary = ProfileTasteModel.summary() }
+            .onAppear { tasteGenres = ProfileTasteModel.summaryGenres() }
             .onReceive(NotificationCenter.default.publisher(for: ProfileTaste.didChangeNotification).receive(on: RunLoop.main)) { _ in
-                tasteSummary = ProfileTasteModel.summary()
+                tasteGenres = ProfileTasteModel.summaryGenres()
             }
         } header: {
             Text(verbatim: profilesLocalized("Profiles"))
@@ -1323,10 +1368,14 @@ struct ProfilesSettingsSection: View {
                 .toolbarBackground(.hidden, for: .navigationBar)
                 .navigationBarTitleDisplayMode(.inline)
             }
+            .onAppear { ProfileLaunchQuestion.shared.pickerOpened() }
         }
     }
 
     private func switchToPicked() {
+        // Last: a switch made in the cover (the profile in use deleted)
+        // and the pick are applied once it has gone (`ProfileGate`).
+        defer { ProfileLaunchQuestion.shared.pickerClosed() }
         guard let id = picked else { return }
         picked = nil
         ProfileManager.shared.activate(id)
@@ -1357,13 +1406,15 @@ struct MacProfilesSettingsPane: View {
                     row(profile)
                 }
                 if model.canAdd {
-                    Button(profilesLocalized("Profiles.Add") + "…") {
+                    Button {
                         editing = ProfileDraft(id: nil, name: "", avatar: ProfileAvatar.firstUnused(by: model.profiles))
+                    } label: {
+                        Label(profilesLocalized("Profiles.Add") + "…", systemImage: "plus.circle.fill")
                     }
                     .buttonStyle(.borderless)
-                    // White as the rows' names: a borderless button's grey
-                    // read as disabled.
-                    .foregroundStyle(.primary)
+                    // The link look of System Settings' actions: a plain
+                    // label read as one more profile's name.
+                    .foregroundStyle(.tint)
                     .accessibilityIdentifier("Profiles.Add")
                 }
             } header: {

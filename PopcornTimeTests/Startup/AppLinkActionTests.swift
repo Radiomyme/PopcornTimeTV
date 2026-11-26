@@ -133,6 +133,19 @@ final class AppLinkActionTests: CheckedTestCase {
         check(!question.isAsking, "answered stays answered")
     }
 
+    /// The profile in use deleted from the picker opened over the content (Settings, ⇧⌘P): the
+    /// content is made again for the main profile once the picker has closed, not under it.
+    @MainActor
+    func testASwitchUnderThePickerWaitsForItToClose() {
+        let question = ProfileLaunchQuestion(asks: false)
+        eq(question.profileToShow(shown: "alex", active: Profile.primaryID), Profile.primaryID, "no picker: at once")
+        question.pickerOpened()
+        eq(question.profileToShow(shown: "alex", active: Profile.primaryID), "alex", "a picker up: the content stays")
+        question.pickerClosed()
+        check(!question.isPickerUp, "closed")
+        eq(question.profileToShow(shown: "alex", active: Profile.primaryID), Profile.primaryID, "closed: the switch applies")
+    }
+
     /// A link that arrives while the question is up has no screen to open in: held (the latest
     /// only), handed once to the first window that shows the content — never while it still asks.
     @MainActor

@@ -38,9 +38,13 @@ final class ProfileTasteModel: ObservableObject {
     /// "Drama · Science Fiction" — the Settings row's value, joined as the
     /// panel's lines are; nil: nothing learnt.
     static func summary(of taste: ProfileTaste = .shared) -> String? {
-        let genres = (taste.topAffinities(limit: 2)[.genre] ?? []).compactMap { genreName($0.value) }
-        guard !genres.isEmpty else { return nil }
-        return genres.joined(separator: " · ")
+        let genres = summaryGenres(of: taste)
+        return genres.isEmpty ? nil : genres.joined(separator: " · ")
+    }
+
+    /// The summary's genres, strongest first (a narrow row shows the first).
+    static func summaryGenres(of taste: ProfileTaste = .shared) -> [String] {
+        return (taste.topAffinities(limit: 2)[.genre] ?? []).compactMap { genreName($0.value) }
     }
 
     static func lines(of taste: ProfileTaste) -> [ProfileTasteLine] {
@@ -191,11 +195,22 @@ private struct ProfileTasteReset: ViewModifier {
 
     func body(content: Content) -> some View {
         content
-            .alert(String(format: profilesLocalized("Profiles.Taste.ResetConfirm"), model.profileName), isPresented: $isPresented) {
-                SwiftUI.Button(profilesLocalized("Profiles.Taste.Reset"), role: .destructive) { model.reset() }
-                SwiftUI.Button(profilesLocalized("Profiles.Cancel"), role: .cancel) {}
-            } message: {
-                Text(verbatim: profilesLocalized("Profiles.Taste.ResetMessage"))
+            // On a host of its own: the neutral tint reaches the alert only,
+            // not the page's red Reset row.
+            .background {
+                Color.clear
+                    .alert(String(format: profilesLocalized("Profiles.Taste.ResetConfirm"), model.profileName), isPresented: $isPresented) {
+                        SwiftUI.Button(profilesLocalized("Profiles.Taste.Reset"), role: .destructive) { model.reset() }
+                        SwiftUI.Button(profilesLocalized("Profiles.Cancel"), role: .cancel) {}
+                    } message: {
+                        Text(verbatim: profilesLocalized("Profiles.Taste.ResetMessage"))
+                    }
+                    #if os(iOS)
+                    // Cancel in the system's neutral colour: the app's red
+                    // made it look as dangerous as Reset (the Mac's alert
+                    // draws Cancel neutral already).
+                    .tint(.primary)
+                    #endif
             }
             .onReceive(NotificationCenter.default.publisher(for: ProfileTaste.didChangeNotification).receive(on: RunLoop.main)) { _ in
                 model.reload()
