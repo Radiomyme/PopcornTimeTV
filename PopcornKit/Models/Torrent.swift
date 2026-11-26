@@ -2061,6 +2061,90 @@ public enum AudioLanguagePreference {
     private static var cache: Cache?
 }
 
+// MARK: - Source preferences
+
+/// What the automatic source pick favours when swarm size and picture
+/// quality disagree: the Settings' « Quick Start », « Balanced » and « Best
+/// Picture » automatic choices (`SourcePreferences.priority`).
+public enum SourcePriority: String, CaseIterable {
+    /// Swarm first: seed floors doubled, and among healthy releases of a
+    /// resolution the biggest swarm wins over the best playability.
+    case quickStart
+    /// A comfortable swarm (`Torrent.comfortableSwarmFactor` × its floor)
+    /// first, then the best playability, then the swarm (the default).
+    case balanced
+    /// Picture first: the resolution's floor without scaling for the
+    /// bitrate, and the best playability among healthy releases whatever
+    /// their swarm.
+    case picture
+}
+
+public extension VideoQuality {
+    /// « 2160p (4K) », « 1080p »: a resolution in the Settings screens.
+    var settingsLabel: String {
+        return self == .uhd2160 ? "2160p (4K)" : "\(rawValue)p"
+    }
+}
+
+/// The settings that steer the automatic source pick (`Torrent.balancedPick`,
+/// `Torrent.preferredLanguagePool`), stored in UserDefaults by the three
+/// apps' Settings screens. Device-wide, like « autoSelectQuality »: they are
+/// about the screen and the connection, which every profile shares.
+public enum SourcePreferences {
+
+    /// `SourcePriority` raw value; absent = balanced. Written with the
+    /// automatic choice (« autoSelectQuality » Balanced), reset to balanced
+    /// by the other choices: it never lingers unseen behind « Highest ».
+    public static let priorityKey = "sourcePriority"
+    /// Highest resolution picked automatically, in lines (2160, 1080, 720,
+    /// 480); absent or 0 = no limit. Releases above it stay in the lists.
+    public static let maximumResolutionKey = "sourceMaximumResolution"
+    /// Bool, absent = true: a release in the preferred audio language wins
+    /// over a higher resolution in another one (`balancedPick`'s language
+    /// pools). Off, the language only orders releases inside a resolution.
+    public static let languageFirstKey = "sourceLanguageFirst"
+
+    /// The resolutions offered as a limit, highest first.
+    public static let maximumResolutionChoices: [VideoQuality] = [.uhd2160, .hd1080, .hd720]
+
+    /// Tests: fixed values, bypassing the defaults.
+    public struct Values: Equatable {
+        public var priority: SourcePriority
+        public var maximumResolution: VideoQuality?
+        public var languageFirst: Bool
+        public init(priority: SourcePriority = .balanced, maximumResolution: VideoQuality? = nil, languageFirst: Bool = true) {
+            self.priority = priority
+            self.maximumResolution = maximumResolution
+            self.languageFirst = languageFirst
+        }
+    }
+    public static var override: Values?
+
+    public static var priority: SourcePriority {
+        if let forced = override { return forced.priority }
+        return UserDefaults.standard.string(forKey: priorityKey).flatMap(SourcePriority.init(rawValue:)) ?? .balanced
+    }
+
+    public static var maximumResolution: VideoQuality? {
+        if let forced = override { return forced.maximumResolution }
+        let lines = UserDefaults.standard.integer(forKey: maximumResolutionKey)
+        return VideoQuality(rawValue: lines).flatMap { $0 >= .sd480 ? $0 : nil }
+    }
+
+    public static var languageFirst: Bool {
+        if let forced = override { return forced.languageFirst }
+        return UserDefaults.standard.object(forKey: languageFirstKey) as? Bool ?? true
+    }
+
+    /// The releases at or under `maximumResolution` (unknown resolutions
+    /// kept); all of them when none is, or without a limit.
+    public static func withinMaximumResolution(_ torrents: [Torrent]) -> [Torrent] {
+        guard let cap = maximumResolution else { return torrents }
+        let kept = torrents.filter { $0.qualityValue <= cap }
+        return kept.isEmpty ? torrents : kept
+    }
+}
+
 // MARK: - Torrent
 
 public struct Torrent: Mappable, Equatable, Comparable {
@@ -2396,6 +2480,71 @@ public extension Torrent {
         }
     }
 
+    /// Typical average bitrate (bytes/s) of a release of `quality` — a
+    /// WEB-DL / encode, not a remux — for which `minimumSeedsForQuickStart`
+    /// is calibrated. Nil = no scaling.
+    static func referenceBitrate(_ quality: VideoQuality) -> Double? {
+        switch quality {
+        case .uhd2160: return 25_000_000 / 8
+        case .hd1080:  return 10_000_000 / 8
+        case .hd720:   return 5_000_000 / 8
+        case .sd480:   return 2_000_000 / 8
+        case .threeD, .unknown: return nil
+        }
+    }
+
+    /// Largest factor `quickStartSeedFloor` scales the resolution's floor by.
+    static let maximumSeedFloorScale = 4.0
+
+    /// Seeds this release needs before its stream starts quickly: its
+    /// resolution's floor (`minimumSeedsForQuickStart`) scaled by how much
+    /// heavier its estimated bitrate is than the resolution's typical one
+    /// (`referenceBitrate`), at most ×`maximumSeedFloorScale`. A 70 Mbit/s
+    /// UHD remux needs ~126 seeds where a 15 Mbit/s UHD WEB-DL needs 45:
+    /// every seed only uploads so fast, a heavier file needs more of them.
+    /// Without a bitrate estimate, the resolution's floor.
+    /// `SourcePriority.quickStart` doubles it; `.picture` leaves it unscaled.
+    var quickStartSeedFloor: Int {
+        let priority = SourcePreferences.priority
+        let base = Torrent.minimumSeedsForQuickStart(qualityValue) * (priority == .quickStart ? 2 : 1)
+        guard priority != .picture,
+              let bitrate = estimatedBitrate, let reference = Torrent.referenceBitrate(qualityValue) else { return base }
+        let scale = min(max(bitrate / reference, 1), Torrent.maximumSeedFloorScale)
+        return Int((Double(base) * scale).rounded(.up))
+    }
+
+    /// True when the swarm clears `quickStartSeedFloor`.
+    var hasQuickStartSwarm: Bool {
+        return seeds >= quickStartSeedFloor
+    }
+
+    /// Multiple of `quickStartSeedFloor` from which a swarm is comfortable:
+    /// the announced counts are often days old, a swarm just over its floor
+    /// may well be under it by now.
+    static let comfortableSwarmFactor = 3
+
+    /// True when the swarm is well over its floor (`comfortableSwarmFactor`).
+    /// Among healthy releases of a resolution, a comfortable one ranks above
+    /// a merely healthy one, whatever their playability: a Dolby Vision
+    /// release with 46 seeds no longer wins over an HDR10 one with 800.
+    var hasComfortableSwarm: Bool {
+        return effectiveSeeds >= quickStartSeedFloor * Torrent.comfortableSwarmFactor
+    }
+
+    /// Seeds plus a third of the peers (leechers upload the pieces they
+    /// already have), the peers' share at most the seeds' own — leechers
+    /// alone cannot finish a file: the swarm size the rankings compare.
+    var effectiveSeeds: Int {
+        return seeds + min(max(peers, 0) / 3, max(seeds, 0))
+    }
+
+    /// Fewest seeders of a release in the preferred audio language picked
+    /// over a healthier one in another language: half its
+    /// `quickStartSeedFloor`, at least `minimumLanguageSeeds`.
+    var languageSeedFloor: Int {
+        return max(Torrent.minimumLanguageSeeds, (quickStartSeedFloor + 1) / 2)
+    }
+
     /// Pick the highest resolution whose swarm is large enough to start
     /// streaming quickly, and whose bitrate the connection can carry, rather
     /// than the absolute highest.
@@ -2405,9 +2554,10 @@ public extension Torrent {
     /// take many minutes to buffer, whereas a well-seeded 1080p (roughly a
     /// third of the size) starts almost immediately. This walks resolutions
     /// high → low and takes the first that has a torrent clearing the
-    /// resolution's seed floor (`minimumSeedsForQuickStart`); among those it
-    /// picks the best `playabilityScore` (then seeds), consistent with the
-    /// list order.
+    /// release's seed floor (`quickStartSeedFloor`: the resolution's floor
+    /// scaled up for heavy bitrates); among those it prefers a comfortable
+    /// swarm (`hasComfortableSwarm`), then the best `playabilityScore`, then
+    /// the swarm size (`effectiveSeeds`), consistent with the list order.
     ///
     /// A release too heavy for the connection (`bandwidthFit`: its estimated
     /// bitrate above 85 % of the measured `connection`, or above 40 Mbit/s
@@ -2428,22 +2578,30 @@ public extension Torrent {
     /// dub before another region's —, then those likely in it (a bare MULTi
     /// for French): the first of them that clears its seed floor wins — a
     /// French 720p over an English 2160p —, else the best seeded of them
-    /// when it has `minimumLanguageSeeds`; then any release but a dub in
-    /// another language; only then the whole list. The preference never
-    /// overrides the rules above: those pools hold only releases without a
-    /// playback penalty that the connection carries, so a French CAM or a
-    /// French remux too heavy for the connection is left to the whole list,
-    /// where a clean, light release beats it.
+    /// when it has `languageSeedFloor` (half its floor, at least
+    /// `minimumLanguageSeeds`); then any release but a dub in another
+    /// language; only then the whole list. The preference never overrides
+    /// the rules above: those pools hold only releases without a playback
+    /// penalty that the connection carries, so a French CAM or a French
+    /// remux too heavy for the connection is left to the whole list, where
+    /// a clean, light release beats it.
+    ///
+    /// The settings (`SourcePreferences`) apply: releases above the maximum
+    /// resolution are left out (unless nothing else is left), the language
+    /// pools are skipped when the language does not come first (a dub in
+    /// another language is still avoided), and the priority sets the floors
+    /// and the order inside a resolution.
     static func balancedPick(from torrents: [Torrent],
                              capabilities: PlaybackCapabilities.Snapshot = PlaybackCapabilities.current,
                              connection: Double? = StreamBandwidth.connectionEstimate,
                              language: String? = AudioLanguagePreference.current) -> Torrent? {
+        let torrents = SourcePreferences.withinMaximumResolution(torrents)
         if language != nil {
             let fitting = torrents.filter {
                 !$0.playability(for: capabilities).isPenalized && !$0.bandwidthFit(connection: connection).isTooHeavy
             }
             let variant = ReleaseLanguages.variant(of: language, region: AudioLanguagePreference.region)
-            for match in [ReleaseLanguages.Match.confirmed, .likely] {
+            for match in SourcePreferences.languageFirst ? [ReleaseLanguages.Match.confirmed, .likely] : [] {
                 let pool = fitting.filter { $0.audioLanguages.match(language) == match }
                 let ownRegion = pool.filter { $0.audioLanguages.regionFit(variant) > 0 }
                 for candidates in [ownRegion, pool] {
@@ -2452,7 +2610,7 @@ public extension Torrent {
                     }
                 }
                 if let pick = balancedPick(in: pool, capabilities: capabilities, connection: connection, healthyOnly: false),
-                   pick.seeds >= minimumLanguageSeeds {
+                   pick.seeds >= pick.languageSeedFloor {
                     return pick
                 }
             }
@@ -2464,32 +2622,36 @@ public extension Torrent {
         return balancedPick(in: torrents, capabilities: capabilities, connection: connection, healthyOnly: false)
     }
 
-    /// Fewest seeders of a release in the preferred audio language picked
-    /// or ranked over a healthier one in another language (`languageRank`).
+    /// Lower bound of `languageSeedFloor`: the fewest seeders of a release
+    /// in the preferred audio language picked or ranked over a healthier
+    /// one in another language (`languageRank`).
     static let minimumLanguageSeeds = 3
 
     /// A release's place in the preferred audio language for the rankings:
     /// its `ReleaseLanguages.match`, except that a release in the language,
     /// or likely in it, counts as neutral until its swarm has
-    /// `minimumLanguageSeeds` — a 1-seed VF never outranks a well-seeded
+    /// `languageSeedFloor` — a 1-seed VF never outranks a well-seeded
     /// original (the picker lists, Up Next's choice).
     func languageRank(_ language: String?) -> ReleaseLanguages.Match {
         let match = audioLanguages.match(language)
-        return match > .neutral && seeds < Torrent.minimumLanguageSeeds ? .neutral : match
+        return match > .neutral && seeds < languageSeedFloor ? .neutral : match
     }
 
     /// The releases an automatic pick ("Highest", "Lowest") chooses among:
-    /// those in the preferred audio language with `minimumLanguageSeeds`
-    /// and no playback penalty, else such releases likely in it (MULTi),
-    /// else all of them but the dubs in another language, else all of them.
-    /// Order kept.
+    /// those in the preferred audio language with `languageSeedFloor`
+    /// seeders (half the release's floor) and no playback penalty, else
+    /// such releases likely in it (MULTi) — both skipped when the language
+    /// does not come first (`SourcePreferences.languageFirst`) —, else all
+    /// of them but the dubs in another language, else all of them, at or
+    /// under the maximum resolution. Order kept.
     static func preferredLanguagePool(_ torrents: [Torrent],
                                       capabilities: PlaybackCapabilities.Snapshot = PlaybackCapabilities.current,
                                       language: String? = AudioLanguagePreference.current) -> [Torrent] {
+        let torrents = SourcePreferences.withinMaximumResolution(torrents)
         guard language != nil else { return torrents }
         let clean = torrents.filter { !$0.playability(for: capabilities).isPenalized }
-        for match in [ReleaseLanguages.Match.confirmed, .likely] {
-            let pool = clean.filter { $0.audioLanguages.match(language) == match && $0.seeds >= minimumLanguageSeeds }
+        for match in SourcePreferences.languageFirst ? [ReleaseLanguages.Match.confirmed, .likely] : [] {
+            let pool = clean.filter { $0.audioLanguages.match(language) == match && $0.seeds >= $0.languageSeedFloor }
             if !pool.isEmpty { return pool }
         }
         let undubbed = torrents.filter { $0.audioLanguages.match(language) >= .neutral }
@@ -2514,21 +2676,29 @@ public extension Torrent {
 
         func better(_ a: Assessed, _ b: Assessed) -> Bool {
             if a.playability.score != b.playability.score { return a.playability.score < b.playability.score }
-            if a.torrent.seeds != b.torrent.seeds { return a.torrent.seeds < b.torrent.seeds }
+            if a.torrent.effectiveSeeds != b.torrent.effectiveSeeds { return a.torrent.effectiveSeeds < b.torrent.effectiveSeeds }
             return a.torrent.url < b.torrent.url
+        }
+        let priority = SourcePreferences.priority
+        func healthier(_ a: Assessed, _ b: Assessed) -> Bool {
+            if priority == .picture { return better(a, b) }
+            if a.torrent.hasComfortableSwarm != b.torrent.hasComfortableSwarm { return b.torrent.hasComfortableSwarm }
+            if priority == .quickStart, a.torrent.effectiveSeeds != b.torrent.effectiveSeeds {
+                return a.torrent.effectiveSeeds < b.torrent.effectiveSeeds
+            }
+            return better(a, b)
         }
 
         for pool in pools {
             for quality in [VideoQuality.uhd2160, .hd1080, .hd720, .sd480] {
-                let floor = minimumSeedsForQuickStart(quality)
-                let healthy = pool.filter { $0.torrent.qualityValue == quality && $0.torrent.seeds >= floor }
-                if let best = healthy.max(by: better) { return best.torrent }
+                let healthy = pool.filter { $0.torrent.qualityValue == quality && $0.torrent.hasQuickStartSwarm }
+                if let best = healthy.max(by: healthier) { return best.torrent }
             }
         }
         if healthyOnly { return nil }
         let fallback = clean.isEmpty ? assessed : clean
         return fallback.max(by: { a, b in
-            if a.torrent.seeds != b.torrent.seeds { return a.torrent.seeds < b.torrent.seeds }
+            if a.torrent.effectiveSeeds != b.torrent.effectiveSeeds { return a.torrent.effectiveSeeds < b.torrent.effectiveSeeds }
             if a.tooHeavy != b.tooHeavy { return a.tooHeavy }
             return better(a, b)
         })?.torrent
@@ -2538,24 +2708,28 @@ public extension Torrent {
     /// aggregated list (`TorrentioClient.merge`, after its fast-start slot
     /// for the best-seeded clean release): releases without a playback
     /// penalty first; among them, those whose swarm clears
-    /// `minimumSeedsForQuickStart` and whose bitrate the connection carries
-    /// (`bandwidthFit`, as in `balancedPick`), then the other healthy ones,
-    /// by playability score (best experience first), the rest by seeds (the
-    /// swarm is the bottleneck there); then seeds, then url. Returns true
+    /// `quickStartSeedFloor` and whose bitrate the connection carries
+    /// (`bandwidthFit`, as in `balancedPick`), then the other healthy ones;
+    /// healthy ones with a comfortable swarm first, then by playability
+    /// score (best experience first), the rest by swarm size (the swarm is
+    /// the bottleneck there); then `effectiveSeeds`, then url. Returns true
     /// when `a` should come before `b`.
     static func precedesInListing(_ a: Torrent, _ b: Torrent,
                                   capabilities: PlaybackCapabilities.Snapshot = PlaybackCapabilities.current,
                                   connection: Double? = StreamBandwidth.connectionEstimate) -> Bool {
         let pa = a.playability(for: capabilities), pb = b.playability(for: capabilities)
         if pa.isPenalized != pb.isPenalized { return !pa.isPenalized }
-        let healthyA = a.seeds >= minimumSeedsForQuickStart(a.qualityValue)
-        let healthyB = b.seeds >= minimumSeedsForQuickStart(b.qualityValue)
+        let healthyA = a.hasQuickStartSwarm
+        let healthyB = b.hasQuickStartSwarm
         let fastA = healthyA && !a.bandwidthFit(connection: connection).isTooHeavy
         let fastB = healthyB && !b.bandwidthFit(connection: connection).isTooHeavy
         if fastA != fastB { return fastA }
         if healthyA != healthyB { return healthyA }
+        let priority = SourcePreferences.priority
+        if healthyA && priority != .picture && a.hasComfortableSwarm != b.hasComfortableSwarm { return a.hasComfortableSwarm }
+        if healthyA && priority == .quickStart && a.effectiveSeeds != b.effectiveSeeds { return a.effectiveSeeds > b.effectiveSeeds }
         if healthyA && pa.score != pb.score { return pa.score > pb.score }
-        if a.seeds != b.seeds { return a.seeds > b.seeds }
+        if a.effectiveSeeds != b.effectiveSeeds { return a.effectiveSeeds > b.effectiveSeeds }
         if pa.score != pb.score { return pa.score > pb.score }
         return a.url < b.url
     }

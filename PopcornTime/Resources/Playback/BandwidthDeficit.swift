@@ -334,7 +334,7 @@ struct BandwidthDeficitWatch {
     /// A release worth switching to: clearly lighter than `bitrate` (≤ 80 %
     /// of it, its bitrate known), within what the download sustains
     /// (`StreamBandwidth.fit` against `downloadRate`: ≤ 85 % of it) and with
-    /// a healthy swarm (`Torrent.minimumSeedsForQuickStart`) — not a lighter
+    /// a healthy swarm (`Torrent.quickStartSeedFloor`) — not a lighter
     /// release that would stall too, nor a gamble on a few seeds. The best
     /// of them by `Torrent.balancedPick` (highest resolution, then the best
     /// playability); nil when none: the offer then has « Continue » only.
@@ -343,7 +343,7 @@ struct BandwidthDeficitWatch {
         let playing = MagnetLink.sourceKey(of: url)
         let lighter = sources.filter { candidate in
             guard candidate.url != url, MagnetLink.sourceKey(of: candidate.url) != playing,
-                  candidate.seeds >= Torrent.minimumSeedsForQuickStart(candidate.qualityValue),
+                  candidate.hasQuickStartSwarm,
                   let candidateBitrate = bitrateOf(candidate) else { return false }
             return candidateBitrate <= bitrate * 0.8
                 && !StreamBandwidth.fit(bitrate: candidateBitrate, connection: downloadRate).isTooHeavy
