@@ -79,7 +79,8 @@ enum HomeDebug {
                                                delay: defaults.double(forKey: "PTDebugHomeDelay"),
                                                isOffline: { offline })
         let feed = HomeFeed(store: HomeStore(directory: directory, now: { now }), transport: transport,
-                            hooks: HomeLocalHooks(libraryOf: { Library.shared }, now: { now }), options: options, now: { now })
+                            hooks: HomeLocalHooks(libraryOf: { Library.shared }, tasteOf: { ProfileTaste.shared }, now: { now }),
+                            options: options, now: { now })
         feed.followActiveProfile()
         print("[Home] hub fed from \(folder)\(offline ? ", offline" : "")")
         return HomeState(feed: feed)

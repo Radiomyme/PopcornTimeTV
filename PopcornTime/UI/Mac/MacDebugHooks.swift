@@ -267,8 +267,11 @@ enum MacDebugHooks {
         // The placeholders stay as long as the snapshot needs them.
         let options = HomeFeed.Options(requestDeadline: mode == "skeleton" || mode == "tmdbsilent" ? 600 : 15)
         let feed = HomeFeed(store: HomeStore(directory: cache, now: { recordedAt }), transport: recorded.transport,
-                            hooks: HomeLocalHooks(library: .shared), options: options, now: { recordedAt })
-        feed.followChanges(of: .shared)
+                            hooks: HomeLocalHooks(libraryOf: { Library.shared }, tasteOf: { ProfileTaste.shared }),
+                            options: options, now: { recordedAt })
+        // As the app's hub: the active profile's library and taste (« For
+        // You », with `-PTDebugTasteGenres`), followed across profile switches.
+        feed.followActiveProfile()
         // `-PTDebugHomeService <id>`: the page starts filtered on that
         // service (the made-up key of `-popcornkit.tmdb.apiKey <text>`
         // makes the row; the recorded answers are its lists).
