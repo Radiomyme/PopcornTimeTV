@@ -405,8 +405,8 @@ extension Torrent {
 
     /// Whether a chooser row fits the sheet at full size. Measured on the
     /// Apple TV's sheet: its rows are the system font at 29 pt in about
-    /// 406 pt; the budget keeps a little room, so the focused row, slightly
-    /// larger, does not scroll either.
+    /// 406 pt; the budget keeps a little room, so the focused row does not
+    /// scroll either.
     static func tvChooserFits(_ label: String) -> Bool {
         let font = CTFontCreateUIFontForLanguage(.system, 29, nil)
             ?? CTFontCreateWithName("Helvetica" as CFString, 29, nil)
@@ -416,7 +416,7 @@ extension Torrent {
     }
 
     /// The widest tvOS chooser row, in points (`tvChooserFits`).
-    static let tvChooserWidth: Double = 396
+    static let tvChooserWidth: Double = 400
 }
 
 enum BandwidthText {

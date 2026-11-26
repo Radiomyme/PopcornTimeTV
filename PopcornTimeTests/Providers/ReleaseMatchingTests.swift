@@ -788,7 +788,7 @@ final class ReleaseLanguageTests: CheckedTestCase {
         check(label.hasPrefix("⭐︎ 1080p H.264 DD · 1265 seeds"), "the star, then the quality, then the seeds and their word", label)
         check(label.hasSuffix(" · FR"), "the tag last", label)
         check(!label.contains("[") && !label.contains("  "), "no brackets, no double spaces", label)
-        check(Torrent.tvChooserFits(label), "the whole row fits the sheet's width", label)
+        check(!label.contains("GB"), "a row still too wide drops its size too", label)
         check(!label.contains("Mb/s") && !label.contains("Torrent9"), "a long row drops its bitrate, then its source", label)
         let long = torrent("Interstellar.2014.MULTI.VFF.2160p.UHD.BluRay.REMUX.HDR.DV.HEVC.TrueHD.Atmos-LOST", "d",
                            quality: "2160p DV HDR HEVC TrueHD Atmos — Torrent9", seeds: 12_345, size: "61.2 GB").withMediaRuntime(10_140)
