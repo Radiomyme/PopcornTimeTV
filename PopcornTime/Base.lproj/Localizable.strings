@@ -719,8 +719,8 @@
 "Downloads.Footer" = "Downloads stay on this Apple TV until you delete them. When it runs out of space, tvOS may remove some.";
 "Downloads.PauseAll" = "Pause All";
 "Downloads.ResumeAll" = "Resume All";
-"Downloads.Storage" = "Downloads use %1$@ · %2$@ free";
-"Downloads.Storage.Used" = "Downloads use %@";
+"Downloads.Storage" = "Downloads take %1$@ · %2$@ free";
+"Downloads.Storage.Used" = "Downloads take %@";
 "Downloads.Episode" = "S%1$@ E%2$@";
 "Downloads.Status.Waiting" = "Looking for sources…";
 "Downloads.Status.Speed" = "%@/s";
@@ -733,3 +733,8 @@
 "Downloads.Action.Show" = "Show in Downloads";
 "Downloads.NoSpace.Title" = "Not Enough Space";
 "Downloads.NoSpace.Message" = "This download needs %1$@, and %2$@ is free on this Apple TV. Delete a download or clear the cache in Settings, then try again.";
+"Downloads.Failure.NoSpace" = "not enough space";
+"Downloads.Failure.NoSpaceAmount" = "not enough space (%@ to free)";
+"Downloads.Failure.File" = "the file could not be written";
+"Downloads.Failure.NoEpisode" = "this episode is not in the release";
+"Downloads.Failure.Other" = "the download stopped";

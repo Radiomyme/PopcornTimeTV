@@ -1019,8 +1019,8 @@
 "Downloads.Footer" = "I download restano su questa Apple TV finché non li elimini. Se lo spazio finisce, tvOS può rimuoverne alcuni.";
 "Downloads.PauseAll" = "Metti tutto in pausa";
 "Downloads.ResumeAll" = "Riprendi tutto";
-"Downloads.Storage" = "Download: %1$@ · %2$@ liberi";
-"Downloads.Storage.Used" = "Download: %@";
+"Downloads.Storage" = "I download occupano %1$@ · %2$@ liberi";
+"Downloads.Storage.Used" = "I download occupano %@";
 "Downloads.Episode" = "S%1$@ E%2$@";
 "Downloads.Status.Waiting" = "Ricerca delle fonti…";
 "Downloads.Status.Speed" = "%@/s";
@@ -1033,3 +1033,8 @@
 "Downloads.Action.Show" = "Mostra in Download";
 "Downloads.NoSpace.Title" = "Spazio insufficiente";
 "Downloads.NoSpace.Message" = "Questo download richiede %1$@ e su questa Apple TV restano %2$@ liberi. Elimina un download o svuota la cache in Impostazioni, poi riprova.";
+"Downloads.Failure.NoSpace" = "spazio insufficiente";
+"Downloads.Failure.NoSpaceAmount" = "spazio insufficiente (%@ da liberare)";
+"Downloads.Failure.File" = "impossibile scrivere il file";
+"Downloads.Failure.NoEpisode" = "l’episodio non è in questa versione";
+"Downloads.Failure.Other" = "il download si è interrotto";

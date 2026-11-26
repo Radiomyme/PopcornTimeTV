@@ -21,8 +21,13 @@ final class DownloadsCatalogTests: CheckedTestCase {
         "Downloads.Status.Of": "%1$@ of %2$@",
         "Downloads.Status.Paused": "Paused",
         "Downloads.Status.Failed": "Failed",
-        "Downloads.Storage": "Downloads use %1$@ · %2$@ free",
-        "Downloads.Storage.Used": "Downloads use %@",
+        "Downloads.Storage": "Downloads take %1$@ · %2$@ free",
+        "Downloads.Storage.Used": "Downloads take %@",
+        "Downloads.Failure.NoSpace": "not enough space",
+        "Downloads.Failure.NoSpaceAmount": "not enough space (%@ to free)",
+        "Downloads.Failure.File": "the file could not be written",
+        "Downloads.Failure.NoEpisode": "this episode is not in the release",
+        "Downloads.Failure.Other": "the download stopped",
         "Downloads.NoSpace.Message": "This download needs %1$@, and %2$@ is free on this Apple TV.",
     ]
 
@@ -102,13 +107,30 @@ final class DownloadsCatalogTests: CheckedTestCase {
 
     func testStorageAndSpace() {
         XCTAssertEqual(text.storage(used: 3_400_000_000, free: 21_000_000_000),
-                       "Downloads use \(text.bytes(3_400_000_000)) · \(text.bytes(21_000_000_000)) free")
-        XCTAssertEqual(text.storage(used: 0, free: nil), "Downloads use \(text.bytes(0))")
+                       "Downloads take \(text.bytes(3_400_000_000)) · \(text.bytes(21_000_000_000)) free")
+        XCTAssertEqual(text.storage(used: 0, free: nil), "Downloads take \(text.bytes(0))")
         XCTAssertNil(text.spaceWarning(needed: 2_000_000_000, free: 10_000_000_000))
         XCTAssertNil(text.spaceWarning(needed: nil, free: 1), "an unknown size never blocks")
         // The margin: a download that would leave less than 500 MB free does not fit.
         XCTAssertNotNil(text.spaceWarning(needed: 2_000_000_000, free: 2_300_000_000))
         XCTAssertTrue(DownloadsCatalog.fits(needed: 2_000_000_000, free: 2_500_000_000))
+    }
+
+    func testAFailureIsSaidShortlyInTheUILanguage() {
+        XCTAssertEqual(text.failureReason(.notEnoughSpace(bytesToFree: 1_900_000_000)),
+                       "not enough space (\(text.bytes(1_900_000_000)) to free)")
+        XCTAssertEqual(text.failureReason(.notEnoughSpace(bytesToFree: nil)), "not enough space")
+        XCTAssertEqual(text.failureReason(.fileError), "the file could not be written")
+        XCTAssertEqual(text.failureReason(.episodeNotInTorrent), "this episode is not in the release")
+        XCTAssertEqual(text.failureReason(.other(nil)), "the download stopped", "the engine's English sentence is never shown")
+        XCTAssertEqual(text.failureReason(.other("La connexion Internet semble interrompue.")), "La connexion Internet semble interrompue.")
+        XCTAssertEqual(text.failureSentence(.fileError), "The file could not be written")
+        XCTAssertEqual(text.status(of: movie(phase: .failed(text.failureReason(.notEnoughSpace(bytesToFree: nil))))),
+                       "Failed — not enough space")
+        // What to free: the file, plus the margin, less what is free; nothing when it fits.
+        XCTAssertEqual(DownloadsFailure.bytesToFree(fileSize: 2_000_000_000, free: 1_000_000_000), 1_500_000_000)
+        XCTAssertNil(DownloadsFailure.bytesToFree(fileSize: 2_000_000_000, free: 9_000_000_000))
+        XCTAssertNil(DownloadsFailure.bytesToFree(fileSize: nil, free: 1))
     }
 
     // MARK: Sections

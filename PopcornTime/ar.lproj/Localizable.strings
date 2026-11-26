@@ -1022,8 +1022,8 @@
 "Downloads.Footer" = "تبقى التنزيلات على Apple TV هذا حتى تحذفها. عند نفاد المساحة قد يحذف tvOS بعضها.";
 "Downloads.PauseAll" = "إيقاف الكل مؤقتًا";
 "Downloads.ResumeAll" = "استئناف الكل";
-"Downloads.Storage" = "التنزيلات: %1$@ · %2$@ متاحة";
-"Downloads.Storage.Used" = "التنزيلات: %@";
+"Downloads.Storage" = "تشغل التنزيلات %1$@ · %2$@ متاحة";
+"Downloads.Storage.Used" = "تشغل التنزيلات %@";
 "Downloads.Episode" = "م%1$@ ح%2$@";
 "Downloads.Status.Waiting" = "جارٍ البحث عن مصادر…";
 "Downloads.Status.Speed" = "%@/ث";
@@ -1036,3 +1036,8 @@
 "Downloads.Action.Show" = "عرض في التنزيلات";
 "Downloads.NoSpace.Title" = "المساحة غير كافية";
 "Downloads.NoSpace.Message" = "يحتاج هذا التنزيل إلى %1$@ والمتاح %2$@ على Apple TV هذا. احذف تنزيلًا أو امسح ذاكرة التخزين المؤقت في الإعدادات، ثم أعد المحاولة.";
+"Downloads.Failure.NoSpace" = "المساحة غير كافية";
+"Downloads.Failure.NoSpaceAmount" = "المساحة غير كافية (حرّر %@)";
+"Downloads.Failure.File" = "تعذّرت كتابة الملف";
+"Downloads.Failure.NoEpisode" = "الحلقة غير موجودة في هذا الإصدار";
+"Downloads.Failure.Other" = "توقف التنزيل";

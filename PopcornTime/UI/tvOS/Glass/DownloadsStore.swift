@@ -296,12 +296,17 @@ final class DownloadsStore: NSObject, ObservableObject, PTTorrentDownloadManager
 
     // MARK: - Space
 
-    /// Measures the downloads' size and the free space, off the main thread.
+    /// Measures the downloads' size and the free space, off the main thread:
+    /// the bytes on disk of each download's folder (allocated, not the
+    /// files' nominal size: a download in progress takes what it has).
     func measureStorage() {
         lastMeasure = Date()
         guard let directory = PTTorrentDownload.downloadDirectory() else { return }
+        let folders = Set((manager.activeDownloads + manager.completedDownloads).compactMap(\.savePath)
+                          + failed.values.compactMap(\.folder))
+            .filter(Self.isInsideDownloadDirectory)
         DispatchQueue.global(qos: .utility).async { [weak self] in
-            let used = FileManager.default.allocatedSize(atPath: directory)
+            let used = folders.reduce(Int64(0)) { $0 + FileManager.default.allocatedSize(atPath: $1) }
             let free = Self.freeSpace(at: directory)
             DispatchQueue.main.async {
                 if self?.usedBytes != used { self?.usedBytes = used }
@@ -453,9 +458,34 @@ final class DownloadsStore: NSObject, ObservableObject, PTTorrentDownloadManager
         onMain { [weak self] in
             guard let self, let id = Self.mediaID(of: download), !self.deleting.contains(id) else { return }
             print("[Downloads] \(id) failed: \(error.localizedDescription)")
-            self.failed[id] = (download, error.localizedDescription, download.savePath)
+            // In the UI's language and short: the engine's own sentence is
+            // English.
+            let failure = Self.failure(of: error, download: download)
+            let text = DownloadsText()
+            self.failed[id] = (download, text.failureReason(failure), download.savePath)
             self.refreshNow()
-            AppDelegate.shared.download(download, failedWith: error)
+            let alert = UIAlertController(title: "Download Failed".localized, message: text.failureSentence(failure) + ".",
+                                          preferredStyle: .alert)
+            alert.addAction(UIAlertAction(title: "OK".localized, style: .default, handler: nil))
+            alert.show(animated: true)
+        }
+    }
+
+    /// The failure in the app's terms, as streaming reads it (`StreamFailure`).
+    static func failure(of error: Error, download: PTTorrentDownload) -> DownloadsFailure {
+        switch StreamFailure(error, streamer: download) {
+        case .notEnoughSpace:
+            let free = PTTorrentDownload.downloadDirectory().flatMap(freeSpace(at:))
+            return .notEnoughSpace(bytesToFree: DownloadsFailure.bytesToFree(fileSize: fileSize(of: download), free: free))
+        case .notEnoughSpaceForBoundedStorage(let bytes):
+            return .notEnoughSpace(bytesToFree: bytes > 0 ? bytes : nil)
+        case .fileError:
+            return .fileError
+        case .episodeNotInTorrent:
+            return .episodeNotInTorrent
+        case .other:
+            let isEngines = (error as NSError).domain == PTTorrentStreamerError.errorDomain
+            return .other(isEngines ? nil : error.localizedDescription)
         }
     }
 
@@ -513,7 +543,7 @@ enum DownloadsDebug {
                     size: 18_400_000_000, progress: 0.08, finished: false, simulation: nil),
             Fixture(id: "tt38515310", title: "A Dog's Perfect Christmas", poster: poster("tt38515310"), show: nil, season: 0, episode: 0,
                     size: 1_900_000_000, progress: 0.17, finished: false,
-                    simulation: Simulation(phase: .failed("There is not enough space to download the torrent. Please clear at least 1.9 GB and try again."),
+                    simulation: Simulation(phase: .failed(DownloadsText().failureReason(.notEnoughSpace(bytesToFree: 1_900_000_000))),
                                            progress: 0.17, bytesPerSecond: 0)),
             Fixture(id: "tt27995113-1-3", title: "Hunted", poster: "",
                     show: ("tt27995113", "Black Doves", poster("tt27995113")), season: 1, episode: 3,

@@ -143,7 +143,8 @@ struct DownloadsText {
 
     // MARK: Page
 
-    /// Under the title: « Downloads use 3.4 GB · 21 GB free ».
+    /// Under the title: « Downloads take 3.4 GB · 21 GB free » — the bytes
+    /// on disk of the downloads' folders (`DownloadsStore.measureStorage`).
     func storage(used: Int64, free: Int64?) -> String {
         guard let free else { return String(format: localize("Downloads.Storage.Used"), bytes(used)) }
         return String(format: localize("Downloads.Storage"), bytes(used), bytes(free))
@@ -156,6 +157,28 @@ struct DownloadsText {
         return String(format: localize("Downloads.NoSpace.Message"), bytes(needed), bytes(free))
     }
 
+    /// Why a download stopped, short, in the UI's language (the engine's
+    /// own sentences are English and long): « not enough space (1.9 GB to
+    /// free) », « this episode is not in the release »…
+    func failureReason(_ failure: DownloadsFailure) -> String {
+        switch failure {
+        case .notEnoughSpace(let bytesToFree):
+            guard let bytesToFree, bytesToFree > 0 else { return localize("Downloads.Failure.NoSpace") }
+            return String(format: localize("Downloads.Failure.NoSpaceAmount"), bytes(bytesToFree))
+        case .fileError: return localize("Downloads.Failure.File")
+        case .episodeNotInTorrent: return localize("Downloads.Failure.NoEpisode")
+        case .other(let description):
+            // A system error is already in the UI's language; the engine's are not.
+            return description ?? localize("Downloads.Failure.Other")
+        }
+    }
+
+    /// The failure as one sentence, for the alert: the reason with a capital.
+    func failureSentence(_ failure: DownloadsFailure) -> String {
+        let reason = failureReason(failure)
+        return reason.prefix(1).uppercased(with: locale) + reason.dropFirst()
+    }
+
     private func integer(_ value: Int) -> String {
         let formatter = NumberFormatter()
         formatter.locale = locale
@@ -165,6 +188,27 @@ struct DownloadsText {
 
     private func join(_ parts: [String]) -> String {
         parts.filter { !$0.isEmpty }.joined(separator: " · ")
+    }
+}
+
+/// Why a download failed (from PopcornTorrent's error codes, through the
+/// app's `StreamFailure`).
+enum DownloadsFailure: Equatable {
+    /// The file does not fit; what to free, when known.
+    case notEnoughSpace(bytesToFree: Int64?)
+    case fileError
+    /// A season pack without the episode asked for.
+    case episodeNotInTorrent
+    /// Anything else: a system error's own (localized) description, nil for
+    /// the engine's (English).
+    case other(String?)
+
+    /// What to free for `fileSize` bytes to fit in `free`, with the margin
+    /// `DownloadsCatalog.fits` keeps; nil when unknown.
+    static func bytesToFree(fileSize: Int64?, free: Int64?) -> Int64? {
+        guard let fileSize, let free, fileSize > 0 else { return nil }
+        let missing = fileSize + DownloadsCatalog.spaceMargin - free
+        return missing > 0 ? missing : nil
     }
 }
 
