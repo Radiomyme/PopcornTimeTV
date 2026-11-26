@@ -10,6 +10,7 @@
 
 import Foundation
 import XCTest
+@testable import PopcornKit
 
 enum Checks {
     /// Assertions made so far by `check`, `expect` and `eq` (tests run one at a time).
@@ -39,6 +40,9 @@ func eq<T: Equatable>(_ a: T, _ b: T, _ label: @autoclosure () -> String, file: 
 /// The bundle's principal class (NSPrincipalClass), made before any test runs: the tests
 /// compare English texts and en_US numbers whatever the Mac's language. (xcodebuild also
 /// sets the language from the scheme; this covers `xctest` run directly, see tools/run-tests.sh.)
+/// No preferred audio language either: every sort of torrents reads it, and the app's source
+/// (the active profile in the standard defaults, its taste) would make the shared profiles —
+/// the language tests set their own and put this one back.
 @objc(PopcornTimeTestsPrincipal)
 final class TestsPrincipal: NSObject {
     override init() {
@@ -46,6 +50,8 @@ final class TestsPrincipal: NSObject {
         arguments["AppleLanguages"] = ["en"]
         arguments["AppleLocale"] = "en_US"
         UserDefaults.standard.setVolatileDomain(arguments, forName: UserDefaults.argumentDomain)
+        AudioLanguagePreference.source = .nothing
+        AudioLanguagePreference.region = nil
         super.init()
     }
 }

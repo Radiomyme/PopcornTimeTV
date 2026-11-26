@@ -125,6 +125,21 @@ final class UpNextPlannerTests: CheckedTestCase {
         eq(plan(playing, [e03]).rule, .none, "only another episode: none")
     }
 
+    func testThePreferredLanguageNeedsASwarm() {
+        // A French viewer: a 1-seed VF of the same class never wins over a
+        // well-seeded original; a VF with a few seeders does.
+        AudioLanguagePreference.override = "fr"
+        defer { AudioLanguagePreference.override = nil }
+        let playing = makeRelease("Show.S01E01.1080p.WEB.H264-GRP.mkv")
+        let english = makeRelease("Show.S01E02.1080p.WEB.H264-BBB.mkv", seeds: 350)
+        let thin = makeRelease("Show.S01E02.FRENCH.1080p.WEB.H264-AAA.mkv", seeds: 1)
+        let thinChoice = plan(playing, [thin, english])
+        eq(thinChoice.rule, .sameClass, "the same class")
+        eq(thinChoice.torrent?.url, english.url, "1 seed: the original")
+        let seeded = makeRelease("Show.S01E02.FRENCH.1080p.WEB.H264-AAA.mkv", seeds: 5)
+        eq(plan(playing, [seeded, english]).torrent?.url, seeded.url, "5 seeds: the VF")
+    }
+
     func testADeadReleaseGivesWayToTheNextRule() {
         // The same group listed with no seeder, a healthy release of the same class: the latter.
         let playing = makeRelease("Show.S01E01.1080p.WEB.H264-NTb.mkv")

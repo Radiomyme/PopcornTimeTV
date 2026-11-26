@@ -22,7 +22,8 @@ import Alamofire
 /// at all (disc images, archives, full Blu-ray / DVD structures) are
 /// dropped, and so are multi-episode packs of episode results where the
 /// whole pack would end up on a small disk (iOS / tvOS, see
-/// `dropsEpisodePacks`).
+/// `dropsEpisodePacks`; `keepsLanguagePacks` is the exception, off there
+/// until it has been tried on an Apple TV).
 public final class TorrentioClient {
 
     public static let shared = TorrentioClient()
@@ -137,14 +138,26 @@ public final class TorrentioClient {
     public static var dropsEpisodePacks = true
     #endif
 
+    /// Whether `dropsEpisodePacks` spares the packs in the preferred audio
+    /// language (`keepsPack`). Off on iOS / tvOS like the pack filter itself,
+    /// until such a pack has been streamed on an Apple TV with bounded
+    /// storage; the Mac keeps every pack anyway.
+    #if os(macOS)
+    public static var keepsLanguagePacks = true
+    #else
+    public static var keepsLanguagePacks = false
+    #endif
+
     /// A pack in the preferred audio language stays among the episode's
     /// releases when Torrentio names the episode's file in it (`fileIdx`,
-    /// the magnet's `so=`): the streamer then wants that file's pieces
-    /// only. Dubbed series are mostly released as season packs ("Saison 1
-    /// FRENCH", "iNTEGRALE MULTi"), so dropping every pack dropped every
-    /// dubbed release.
+    /// the magnet's `so=`) and `keepsLanguagePacks` allows it: the streamer
+    /// then wants that file's pieces only. Dubbed series are mostly released
+    /// as season packs ("Saison 1 FRENCH", "iNTEGRALE MULTi" + 🇫🇷), so
+    /// dropping every pack drops every dubbed release. Only a pack that
+    /// names the language (in its name or Torrentio's flag) is kept: a bare
+    /// MULTi pack may not hold it.
     static func keepsPack(_ stream: [String: Any], language: String?) -> Bool {
-        guard language != nil, fileIndex(ofStream: stream) != nil else { return false }
+        guard keepsLanguagePacks, language != nil, fileIndex(ofStream: stream) != nil else { return false }
         return audioLanguages(ofStream: stream).match(language) == .confirmed
     }
 
@@ -192,7 +205,8 @@ public final class TorrentioClient {
     public static var maxPerQuality = 3
 
     /// Releases in the preferred audio language each resolution bucket
-    /// keeps beside the others (see `merge`).
+    /// keeps beside the others (see `merge`): with a preferred language a
+    /// bucket lists up to `maxPerQuality` + `languageSlots` releases.
     public static var languageSlots = 2
 
     /// Merge aggregator results into an existing torrent list, deduplicating
@@ -211,10 +225,11 @@ public final class TorrentioClient {
     ///    disappears behind better-scored but thinly seeded releases;
     /// 2. language slots — with a preferred audio language
     ///    (`AudioLanguagePreference`), up to `languageSlots` releases of each
-    ///    bucket in that language (listed ones count), else one MULTi
-    ///    release whose languages are not named, granted even when the
-    ///    bucket is full: they are fewer seeded than the English releases
-    ///    and would never claim a slot of their own;
+    ///    bucket in that language without a playback penalty (listed ones
+    ///    count), else one release likely in it (a bare MULTi for French),
+    ///    beside the regular slots: they don't use them up, and they are
+    ///    granted even when the bucket is full — fewer seeded than the
+    ///    English releases, they would never claim a slot of their own;
     /// 3. the remaining slots in `Torrent.precedesInListing` order (clean
     ///    first; healthy swarms by playability score, then the best-seeded).
     public static func merge(_ existing: [Torrent], with aggregated: [Torrent],
@@ -239,10 +254,14 @@ public final class TorrentioClient {
         }
 
         var merged = existing.map(withSelection)
-        func admit(_ torrent: Torrent) {
-            guard let hash = infoHash(fromMagnet: torrent.url), seen.insert(hash).inserted else { return }
+        /// `countsInBucket`: false for a language slot, which sits beside
+        /// the bucket's regular slots. True when the torrent was added.
+        @discardableResult
+        func admit(_ torrent: Torrent, countsInBucket: Bool = true) -> Bool {
+            guard let hash = infoHash(fromMagnet: torrent.url), seen.insert(hash).inserted else { return false }
             merged.append(withSelection(torrent))
-            perBucket[torrent.qualityValue, default: 0] += 1
+            if countsInBucket { perBucket[torrent.qualityValue, default: 0] += 1 }
+            return true
         }
 
         // Seeded candidates within the size cap, in listing order.
@@ -275,11 +294,9 @@ public final class TorrentioClient {
             for quality in Set(candidates.map { $0.qualityValue }) {
                 for (match, slots) in [(ReleaseLanguages.Match.confirmed, languageSlots), (.likely, 1)] {
                     var listed = merged.filter { $0.qualityValue == quality && $0.audioLanguages.match(language) >= match }.count
-                    for torrent in candidates where listed < slots
-                        && torrent.qualityValue == quality && torrent.audioLanguages.match(language) == match {
-                        let before = merged.count
-                        admit(torrent)
-                        if merged.count > before { listed += 1 }
+                    for torrent in candidates where listed < slots && torrent.qualityValue == quality
+                        && isClean(torrent) && torrent.audioLanguages.match(language) == match {
+                        if admit(torrent, countsInBucket: false) { listed += 1 }
                     }
                     if listed > 0 { break }
                 }
@@ -433,27 +450,32 @@ public final class TorrentioClient {
     }
 
     /// The audio languages of a stream: its torrent and file names, and the
-    /// flags line after "👤 seeds 💾 size ⚙️ indexer" ("Multi Audio / 🇫🇷").
+    /// flags line after "👤 seeds 💾 size ⚙️ indexer" when it names audio
+    /// tracks: "Multi Audio / 🇫🇷", "Dual Audio / 🇬🇧 / 🇵🇹", or a single
+    /// flag. Several flags without "Multi/Dual Audio" are the subtitles
+    /// (Torrentio lists up to two dozen of them for some encodes): their
+    /// languages come from the names only.
     static func audioLanguages(ofStream dict: [String: Any]) -> ReleaseLanguages {
-        var languages = ReleaseLanguages.empty
-        for line in releaseLines(ofStream: dict) {
-            languages = languages.union(ReleaseLanguages.parse(line))
-        }
+        var names = releaseLines(ofStream: dict)
         if let filename = (dict["behaviorHints"] as? [String: Any])?["filename"] as? String {
-            languages = languages.union(ReleaseLanguages.parse(filename))
+            names.append(filename)
         }
+        let languages = names.reduce(ReleaseLanguages.empty) { $0.union(ReleaseLanguages.parse($1)) }
         let lines = ((dict["title"] as? String) ?? "").components(separatedBy: "\n")
         guard let stats = lines.firstIndex(where: { $0.contains("👤") || $0.contains("💾") }) else { return languages }
-        var flags = ReleaseLanguages.empty
-        for line in lines[(stats + 1)...] {
-            flags = flags.union(ReleaseLanguages.parse(flags: line))
+        let flagLines = lines[(stats + 1)...]
+        var flags = flagLines.reduce(ReleaseLanguages.empty) { $0.union(ReleaseLanguages.parse(flags: $1)) }
+        let flagCount = flagLines.reduce(0) { $0 + ReleaseLanguages.flagCountries(in: $1).count }
+        if flagCount > 1 && !flags.isMulti {
+            flags.codes = []
+            flags.regions = []
         }
         // Torrentio flags a subtitled release with its subtitles' language
-        // ("Breaking.Bad.S01E01.vostfr.720p" → 🇫🇷): a flag the name only
-        // gives as subtitles is not an audio language.
-        let names = (releaseLines(ofStream: dict)
-            + [((dict["behaviorHints"] as? [String: Any])?["filename"] as? String) ?? ""]).joined(separator: " ")
-        flags.codes.subtract(ReleaseLanguages.subtitleOnlyCodes(of: names).subtracting(languages.codes))
+        // ("Breaking.Bad.S01E01.vostfr.720p", "…ENG.Sub.ITA" → one flag): a
+        // flag the names only give as subtitles is not an audio language.
+        let subtitles = names.reduce(Set<String>()) { $0.union(ReleaseLanguages.subtitleOnlyCodes(of: $1)) }
+        flags.codes.subtract(subtitles.subtracting(languages.codes))
+        flags.regions = flags.regions.filter { flags.codes.contains(String($0.prefix(2))) }
         return languages.union(flags)
     }
 

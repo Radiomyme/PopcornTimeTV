@@ -606,12 +606,19 @@ final class ReleaseMatchingTests: CheckedTestCase {
 
 /// `ReleaseLanguages` (PopcornKit/Models/Torrent.swift) and how the torrent
 /// lists favour the preferred audio language (`AudioLanguagePreference`):
-/// the ranking, `balancedPick`, `preferredLanguagePool`, the language slots
-/// of `TorrentioClient.merge` and the dubbed season packs Torrentio keeps.
-final class ReleaseLanguageTests: XCTestCase {
+/// the active profile's setting or learnt language, the parser (titles,
+/// episode titles, subtitles, 3-letter codes, regional dubs, Torrentio's
+/// flags), the match tiers, the ranking, `balancedPick`,
+/// `preferredLanguagePool`, the language slots of `TorrentioClient.merge`,
+/// the dubbed season packs Torrentio keeps, the pickers' tag and the tvOS
+/// chooser rows.
+final class ReleaseLanguageTests: CheckedTestCase {
 
     override func tearDown() {
         AudioLanguagePreference.override = nil
+        AudioLanguagePreference.source = .nothing
+        AudioLanguagePreference.resolver = nil
+        AudioLanguagePreference.region = nil
         super.tearDown()
     }
 
@@ -624,36 +631,191 @@ final class ReleaseLanguageTests: XCTestCase {
         return Torrent(url: magnet(name, hash), quality: quality, seeds: seeds, size: size)
     }
 
-    func testNamesGiveAudioLanguages() {
-        func parse(_ name: String) -> ReleaseLanguages { ReleaseLanguages.parse(name) }
-        XCTAssertEqual(parse("Interstellar.2014.MULTi.1080p.BluRay.x264-LOST"), ReleaseLanguages(isMulti: true))
-        XCTAssertEqual(parse("Interstellar.2014.MULTI.VFF.1080p.BluRay.REMUX-Asgardia").codes, ["fr"])
-        XCTAssertEqual(parse("Interstellar.2014.TRUEFRENCH.BRRip.XviD-Slay3R").codes, ["fr"])
-        XCTAssertEqual(parse("Breaking Bad Saison 1 FRENCH HDTV").codes, ["fr"])
-        XCTAssertEqual(parse("Breaking Bad (Integrale) VOSTFR + FRENCH 720p HDTV").codes, ["fr"])
-        XCTAssertEqual(parse("Dune.2021.iTALiAN.1080p.WEB-DL").codes, ["it"])
-        XCTAssertEqual(parse("Coco.2017.1080p.CASTELLANO.BluRay").codes, ["es"])
-        // Titles, subtitles and untagged names name no audio language.
-        XCTAssertTrue(parse("The.French.Dispatch.2021.1080p.WEB-DL.x264").isEmpty)
-        XCTAssertTrue(parse("The.Italian.Job.2003.720p.BluRay").isEmpty)
-        XCTAssertTrue(parse("Interstellar.2014.FANSUB.VOSTFR.BDRIP.XVID").isEmpty)
-        XCTAssertTrue(parse("Interstellar - Sci-Fi 2014 Eng Ita Multi-Subs 1080p").isEmpty)
-        XCTAssertTrue(parse("Interstellar.2014.1080p.BluRay.x264-SPARKS").isEmpty)
+    private func stream(_ title: String, hash: Character = "a") -> [String: Any] {
+        return ["infoHash": String(repeating: hash, count: 40), "title": title, "fileIdx": 0]
     }
 
-    func testTorrentioFlagsAndSubtitledReleases() {
-        XCTAssertEqual(ReleaseLanguages.parse(flags: "Multi Audio / 🇫🇷 / 🇮🇹"), ReleaseLanguages(codes: ["fr", "it"], isMulti: true))
-        func stream(_ title: String) -> [String: Any] {
-            return ["infoHash": String(repeating: "a", count: 40), "title": title, "fileIdx": 0]
-        }
-        let dubbed = stream("Interstellar.2014.MULTi.1080p.BluRay.x264-LOST\n👤 27 💾 13.12 GB ⚙️ Torrent9\nMulti Audio / 🇫🇷")
-        XCTAssertEqual(TorrentioClient.torrent(fromStream: dubbed)?.audioLanguages, ReleaseLanguages(codes: ["fr"], isMulti: true))
-        // Torrentio flags a VOSTFR release 🇫🇷: its audio is the original.
-        let subtitled = stream("Breaking.Bad 1-6\nbreaking bad season 1/Breaking.Bad.S01E01.vostfr.720p.mkv\n👤 3 💾 1.09 GB ⚙️ MagnetDL\n🇫🇷")
-        XCTAssertEqual(TorrentioClient.audioLanguages(ofStream: subtitled).codes, [])
-        let both = stream("Breaking Bad (Integrale) VOSTFR + FRENCH 720p HDTV\n👤 9 💾 1 GB ⚙️ Torrent9\n🇫🇷")
-        XCTAssertEqual(TorrentioClient.audioLanguages(ofStream: both).codes, ["fr"])
+    private func parse(_ name: String) -> ReleaseLanguages { ReleaseLanguages.parse(name) }
+
+    // MARK: Parser
+
+    func testNamesGiveAudioLanguages() {
+        eq(parse("Interstellar.2014.MULTi.1080p.BluRay.x264-LOST"), ReleaseLanguages(isMulti: true, likelyCodes: ["fr"]), "bare MULTi")
+        eq(parse("Interstellar.2014.MULTI.VFF.1080p.BluRay.REMUX-Asgardia").codes, ["fr"], "MULTI VFF")
+        eq(parse("Interstellar.2014.TRUEFRENCH.BRRip.XviD-Slay3R").codes, ["fr"], "TRUEFRENCH")
+        eq(parse("Breaking Bad Saison 1 FRENCH HDTV").codes, ["fr"], "after Saison")
+        eq(parse("Breaking Bad (Integrale) VOSTFR + FRENCH 720p HDTV").codes, ["fr"], "VOSTFR + FRENCH")
+        eq(parse("Dune.2021.iTALiAN.1080p.WEB-DL").codes, ["it"], "iTALiAN")
+        eq(parse("Coco.2017.1080p.CASTELLANO.BluRay").codes, ["es"], "CASTELLANO")
+        // Titles, subtitles and untagged names name no audio language.
+        check(parse("The.French.Dispatch.2021.1080p.WEB-DL.x264").isEmpty, "a title before the year")
+        check(parse("The.Italian.Job.2003.720p.BluRay").isEmpty, "a title before the year (2)")
+        check(parse("Interstellar.2014.FANSUB.VOSTFR.BDRIP.XVID").isEmpty, "VOSTFR")
+        check(parse("Interstellar - Sci-Fi 2014 Eng Ita Multi-Subs 1080p").isEmpty, "Multi-Subs")
+        check(parse("Interstellar.2014.1080p.BluRay.x264-SPARKS").isEmpty, "untagged")
     }
+
+    func testThreeLetterCodesAndEveryPickerLanguage() {
+        let multi = parse("Interstellar.2014.MULTi.FRE.ENG.1080p")
+        eq(multi.codes, ["fr", "en"], "MULTi.FRE.ENG")
+        eq(multi.match("fr"), .confirmed, "MULTi.FRE.ENG is French")
+        eq(parse("Interstellar.2014.FRA.1080p").codes, ["fr"], "FRA")
+        eq(parse("Interstellar.2014.Eng.Fre.Ger.Ita.Por.Spa.Cze.Pol.Rus.Jpn.2160p.BluRay").codes,
+           ["en", "fr", "de", "it", "es", "cs", "ru", "ja"], "a run of ISO 639-2 codes (not Por, Pol: words)")
+        check(parse("La.Vie.En.Rose.2007.1080p").isEmpty, "La Vie en Rose is not Vietnamese")
+        check(parse("Movie.2019.1080p.BluRay.x264-FiN").isEmpty, "the FiN group is not Finnish")
+        eq(parse("Movie.2019.1080p.WEB-DL.Lektor.PL").codes, ["pl"], "Lektor: the Polish voice-over")
+        // Every language the Settings offer (but English, the original) can be named.
+        let pickerCodes = ["fr", "de", "es", "it", "pt", "nl", "ru", "ja", "ko", "zh", "ar", "he", "tr", "pl", "cs", "sk", "hu", "ro",
+                           "bg", "el", "uk", "hr", "sr", "sl", "da", "fi", "no", "sv", "ca", "hi", "th", "vi", "id", "ms", "fa"]
+        let named = Set(ReleaseLanguages.words.values)
+        eq(pickerCodes.filter { !named.contains($0) }, [], "a release word for every Settings language")
+        eq(ReleaseLanguages.parse(flags: "🇧🇬 / 🇭🇷 / 🇷🇸 / 🇸🇰 / 🇸🇮 / 🇮🇩 / 🇲🇾 / 🇮🇷").codes,
+           ["bg", "hr", "sr", "sk", "sl", "id", "ms", "fa"], "the flags of those languages")
+    }
+
+    func testTitlesAndEpisodeTitlesAreNotLanguages() {
+        check(parse("The French Dispatch BluRay x264").isEmpty, "no year: the source ends the title")
+        check(parse("The.Italian.Job.BDRip.x264.mkv").isEmpty, "no year: The Italian Job")
+        check(parse("Seinfeld.S02E11.The.Chinese.Restaurant.1080p.WEB-DL").isEmpty, "an episode title")
+        check(parse("Show.S02E11.The.Chinese.1080p.WEB-DL").isEmpty, "an episode title ending right before the resolution")
+        check(parse("The.Italian.2005.DVDRip").isEmpty, "a language word before a year is the title")
+        // …while the tags around them still count.
+        eq(parse("Breaking.Bad.S01E01.FRENCH.720p.HDTV").codes, ["fr"], "right after the episode marker")
+        eq(parse("Amelie FRENCH DVDRIP").codes, ["fr"], "right before a source")
+        eq(parse("Amelie FRENCH 720p").codes, ["fr"], "right before a resolution")
+        check(parse("Show.S01E05.MULTi.1080p").isMulti, "MULTi after the marker")
+        eq(parse("Show.S03E02.Episode.Title.VFF.1080p").codes, ["fr"], "a scene tag after an episode title")
+        check(parse("Interstellar MULTi").isMulti, "a bare label is read whole")
+        eq(parse("Show.S01.Complete.FRENCH.720p").codes, ["fr"], "after Complete")
+    }
+
+    func testSubtitleRunsAreNotAudio() {
+        eq(ReleaseLanguages.subtitleOnlyCodes(of: "Interstellar.2014.1080p.ENG.Sub.ITA"), ["en", "it"], "Sub ITA")
+        eq(ReleaseLanguages.subtitleOnlyCodes(of: "Show.S01E01.1080p.Subs.FRENCH"), ["fr"], "Subs FRENCH")
+        eq(ReleaseLanguages.subtitleOnlyCodes(of: "Breaking.Bad.S01E01.vostfr.720p"), ["fr"], "vostfr")
+        // Torrentio flags a subtitled release with its subtitles' language: not audio.
+        let subItalian = stream("Interstellar.2014.1080p.ENG.Sub.ITA\n👤 12 💾 2 GB ⚙️ ilCorSaRoNeRo\n🇮🇹")
+        check(TorrentioClient.audioLanguages(ofStream: subItalian).match("it") != .confirmed, "ENG Sub ITA + 🇮🇹 is not Italian")
+        let subFrench = stream("Show.S01E01.1080p.Subs.FRENCH\n👤 3 💾 1 GB ⚙️ MagnetDL\n🇫🇷")
+        check(TorrentioClient.audioLanguages(ofStream: subFrench).match("fr") != .confirmed, "Subs FRENCH + 🇫🇷 is not French")
+        let subtitled = stream("Breaking.Bad 1-6\nbreaking bad season 1/Breaking.Bad.S01E01.vostfr.720p.mkv\n👤 3 💾 1.09 GB ⚙️ MagnetDL\n🇫🇷")
+        eq(TorrentioClient.audioLanguages(ofStream: subtitled).codes, [], "vostfr + 🇫🇷")
+        let both = stream("Breaking Bad (Integrale) VOSTFR + FRENCH 720p HDTV\n👤 9 💾 1 GB ⚙️ Torrent9\n🇫🇷")
+        eq(TorrentioClient.audioLanguages(ofStream: both).codes, ["fr"], "VOSTFR + FRENCH + 🇫🇷: French")
+    }
+
+    func testTorrentioFlagsNameAudioOnlyAlone() {
+        eq(ReleaseLanguages.parse(flags: "Multi Audio / 🇫🇷 / 🇮🇹"), ReleaseLanguages(codes: ["fr", "it"], isMulti: true, likelyCodes: ["fr"]),
+           "the flags line")
+        let dubbed = stream("Interstellar.2014.MULTi.1080p.BluRay.x264-LOST\n👤 27 💾 13.12 GB ⚙️ Torrent9\nMulti Audio / 🇫🇷")
+        let languages = TorrentioClient.torrent(fromStream: dubbed)?.audioLanguages
+        eq(languages?.codes, ["fr"], "Multi Audio / 🇫🇷")
+        eq(languages?.isMulti, true, "…several tracks")
+        let single = stream("Juego De Tronos - Temporada 1 [BluRay Rip 1080p]\n👤 8 💾 9 GB ⚙️ MejorTorrent\n🇪🇸")
+        eq(TorrentioClient.audioLanguages(ofStream: single).codes, ["es"], "a single flag")
+        // Several flags without "Multi Audio" are the subtitles: the name decides.
+        let pair = stream("Interstellar.2014.1080p.BluRay.x264\n👤 50 💾 9 GB ⚙️ Rutor\n🇬🇧 / 🇷🇺")
+        eq(TorrentioClient.audioLanguages(ofStream: pair).codes, [], "🇬🇧 / 🇷🇺 alone")
+        let named = stream("Il.Trono.Di.Spade.S01E01-10.BDMux.1080p.AC3.ITA.ENG.HEVC\n👤 40 💾 9 GB ⚙️ ilCorSaRoNeRo\n🇬🇧 / 🇮🇹")
+        eq(TorrentioClient.audioLanguages(ofStream: named).codes, ["it", "en"], "the name's ITA ENG")
+        // The recorded encode with 21 flags (Fixtures/Torrentio/interstellar.json).
+        let root = try? JSONSerialization.jsonObject(with: Fixtures.data("Torrentio/interstellar.json")) as? [String: Any]
+        let streams = root?["streams"] as? [[String: Any]] ?? []
+        let flagged = streams.first { ($0["infoHash"] as? String) == "cc0aab92efefff11714a53acbb1dec714c4271f9" }
+        check(flagged != nil, "the 21-flag stream is recorded")
+        if let flagged = flagged {
+            let audio = TorrentioClient.audioLanguages(ofStream: flagged)
+            check(audio.match("fr") != .confirmed && audio.match("ar") != .confirmed, "its flags are subtitles", "\(audio)")
+            eq(audio.badge(preferred: "fr"), nil, "no badge for a French viewer")
+        }
+    }
+
+    // MARK: Match, badge
+
+    func testMatchTiers() {
+        let bareMulti = parse("Interstellar.2014.MULTi.1080p.BluRay.x264-LOST")
+        eq(bareMulti.match("fr"), .likely, "bare MULTi: likely French")
+        for code in ["de", "it", "es"] { eq(bareMulti.match(code), .neutral, "bare MULTi: nothing for \(code)") }
+        let dual = parse("Game.Of.Thrones.S01.1080p.Bluray.x265.DUAL")
+        eq(dual.match("es"), .likely, "DUAL: likely Spanish")
+        eq(dual.match("pt"), .likely, "DUAL: likely Portuguese")
+        eq(dual.match("fr"), .neutral, "DUAL: nothing for French")
+        let italian = parse("Interstellar.2014.iTALiAN.1080p.WEB-DL")
+        eq(italian.match("it"), .confirmed, "ITA for an Italian viewer")
+        eq(italian.match("fr"), .other, "ITA for a French viewer: another dub")
+        eq(italian.match("en"), .other, "ITA for an English viewer: another dub")
+        eq(italian.match(nil), .neutral, "no preference: neutral")
+        let untagged = parse("Interstellar.2014.1080p.BluRay.x264-SPARKS")
+        eq(untagged.match("en"), .neutral, "untagged, English viewer")
+        eq(untagged.match("fr"), .neutral, "untagged, French viewer")
+        eq(parse("Interstellar.2014.ENG.1080p").match("en"), .neutral, "ENG is worth no more than nothing")
+        eq(parse("Interstellar.2014.MULTi.iTALiAN.1080p").match("en"), .neutral, "a multi-track ITA keeps the original")
+    }
+
+    func testBadgeIsOneTokenOnlyWhenItHelps() {
+        eq(ReleaseLanguages(codes: ["fr", "ar"]).badge(preferred: "fr"), .language("fr"), "fr + {fr, ar} → FR")
+        eq(ReleaseLanguages(isMulti: true, likelyCodes: ["fr"]).badge(preferred: "fr"), .multi, "fr + MULTi → MULTI")
+        eq(ReleaseLanguages(codes: ["pl"]).badge(preferred: nil), nil, "no preference → nothing")
+        eq(ReleaseLanguages(codes: ["cs", "en"]).badge(preferred: "en"), .language("en"), "en + {cs, en} → EN")
+        eq(ReleaseLanguages(codes: ["it"]).badge(preferred: "fr"), nil, "another language → nothing")
+        eq(ReleaseLanguages(isMulti: true, likelyCodes: ["fr"]).badge(preferred: "de"), nil, "MULTi for a German viewer → nothing")
+
+        AudioLanguagePreference.override = "fr"
+        let french = torrent("Interstellar.2014.MULTI.VFF.1080p.BluRay.x264-LOST", "b", quality: "1080p", seeds: 27)
+        eq(french.languageTag?.token, "FR", "the token")
+        check(!(french.languageTag?.spoken ?? "").isEmpty && french.languageTag?.spoken != "FR", "a spoken form, not the letters",
+              french.languageTag?.spoken ?? "nil")
+        let multi = torrent("Interstellar.2014.MULTi.1080p.BluRay.x264-LOST", "c", quality: "1080p", seeds: 27)
+        eq(multi.languageTag?.token, "MULTI", "MULTI, all caps")
+        AudioLanguagePreference.override = .some(nil)
+        check(french.languageTag == nil, "no preference, no tag")
+    }
+
+    // MARK: The active profile's language
+
+    func testTheActiveProfilesLanguage() {
+        let storage = MemoryLibraryStorage()
+        let profiles = ProfileManager(storage: storage, defaultName: "Me", center: NotificationCenter())
+        let alex = try? profiles.create(name: "Alex", avatar: 1)
+        let sam = try? profiles.create(name: "Sam", avatar: 2)
+        let tastes = [sam?.id ?? "": ProfileTaste(storage: MemoryLibraryStorage(), center: NotificationCenter())]
+        AudioLanguagePreference.source = .init(activeProfileID: { profiles.activeID },
+                                              stored: { storage.object(forKey: ProfileManager.prefix(of: $0) + AudioLanguagePreference.defaultsKey) as? String },
+                                              learnt: { tastes[$0]?.preferredChoice(.audio) })
+        // What the Settings screens write: a name under the active profile's key.
+        storage.set("Italiano", forKey: profiles.scopedKey(AudioLanguagePreference.defaultsKey))
+        if let alex = alex { profiles.activate(alex.id) }
+        storage.set("Français", forKey: profiles.scopedKey(AudioLanguagePreference.defaultsKey))
+
+        eq(AudioLanguagePreference.current, nil, "a name, no resolver: nothing (the iOS app before 5.4)")
+        PlaybackLanguagePreferences.installReleaseLanguageResolver()
+        eq(AudioLanguagePreference.current, "fr", "Alex: Français, the resolver installed")
+        profiles.activate(Profile.primaryID)
+        eq(AudioLanguagePreference.current, "it", "the primary profile: Italiano, never Alex's")
+        storage.set("English", forKey: profiles.scopedKey(AudioLanguagePreference.defaultsKey))
+        eq(AudioLanguagePreference.current, "en", "a new value is read at once; English is a preference")
+
+        // Sam set nothing: the language Sam picks in the players.
+        if let sam = sam { profiles.activate(sam.id) }
+        eq(AudioLanguagePreference.current, nil, "nothing set, nothing learnt")
+        for _ in 0..<3 { tastes[sam?.id ?? ""]?.note(.audio("fr")) }
+        AudioLanguagePreference.invalidate()
+        eq(AudioLanguagePreference.current, "fr", "Sam's learnt French")
+        storage.set("Deutsch", forKey: profiles.scopedKey(AudioLanguagePreference.defaultsKey))
+        eq(AudioLanguagePreference.current, "de", "Sam's setting wins over the learnt language")
+
+        // The lists follow: Alex's VF release is kept and ranked first.
+        if let alex = alex { profiles.activate(alex.id) }
+        let english = (0..<4).map { torrent("Interstellar.2014.1080p.BluRay.x264-G\($0)", Character("\($0)"), quality: "1080p", seeds: 500 - $0) }
+        let french = torrent("Interstellar.2014.MULTI.VFF.1080p.BluRay.x264-LOST", "f", quality: "1080p", seeds: 27)
+        check(TorrentioClient.merge([], with: english + [french]).contains { $0.url == french.url }, "Alex: the VF release is listed")
+        eq(Torrent.balancedPick(from: english + [french], connection: nil)?.url, french.url, "Alex: the VF release is picked")
+        profiles.activate(Profile.primaryID)
+        check(!TorrentioClient.merge([], with: english + [french]).contains { $0.url == french.url }, "the primary profile (English): not")
+    }
+
+    // MARK: Ranking and picks
 
     func testRankingAndPicksFavourThePreferredLanguage() {
         let english = torrent("Interstellar.2014.1080p.BluRay.x264-SPARKS", "a", quality: "1080p", seeds: 400)
@@ -662,28 +824,117 @@ final class ReleaseLanguageTests: XCTestCase {
         let all = [english, french, uhd]
 
         AudioLanguagePreference.override = .some(nil)
-        XCTAssertEqual(all.sorted(by: <).map(\.url), [french, english, uhd].map(\.url))
-        XCTAssertEqual(Torrent.preferredLanguagePool(all).count, 3)
+        eq(all.sorted(by: <).map(\.url), [french, english, uhd].map(\.url), "no preference: seeds")
+        eq(Torrent.preferredLanguagePool(all).count, 3, "no preference: every release")
 
         AudioLanguagePreference.override = "fr"
-        XCTAssertEqual(all.sorted(by: <).map(\.url), [english, french, uhd].map(\.url), "VF first inside 1080p")
-        XCTAssertEqual(Torrent.balancedPick(from: all, connection: nil)?.url, french.url, "a healthy VF beats an English UHD")
-        XCTAssertEqual(Torrent.preferredLanguagePool(all).map(\.url), [french.url])
+        eq(all.sorted(by: <).map(\.url), [english, french, uhd].map(\.url), "VF first inside 1080p")
+        eq(Torrent.balancedPick(from: all, connection: nil)?.url, french.url, "a healthy VF beats an English UHD")
+        eq(Torrent.preferredLanguagePool(all).map(\.url), [french.url], "Highest / Lowest: the VF")
 
-        // English preference: nothing is favoured.
+        // English is a preference: a dub in another language goes below the originals.
+        let italian = torrent("Interstellar.2014.iTALiAN.1080p.WEB-DL", "d", quality: "1080p", seeds: 900)
+        let original = torrent("Interstellar.2014.1080p.BluRay.x264", "e", quality: "1080p", seeds: 50)
         AudioLanguagePreference.override = "en"
-        XCTAssertNil(AudioLanguagePreference.current)
+        eq(AudioLanguagePreference.current, "en", "English is kept")
+        eq([italian, original].sorted(by: <).map(\.url), [italian.url, original.url], "English: the ITA dub below the original")
+        eq(Torrent.balancedPick(from: [italian, original], connection: nil)?.url, original.url, "English: the original is picked")
+        eq(Torrent.preferredLanguagePool([italian, original]).map(\.url), [original.url], "English: no dub for Highest")
+        AudioLanguagePreference.override = "fr"
+        eq([italian, original].sorted(by: <).map(\.url), [italian.url, original.url], "French: the ITA dub below the original too")
+        AudioLanguagePreference.override = .some(nil)
+        eq([italian, original].sorted(by: <).map(\.url), [original.url, italian.url], "no preference: seeds decide")
+
+        // A bare MULTi is French: nothing for a German viewer.
+        let multi = torrent("Interstellar.2014.MULTi.1080p.BluRay.x264-LOST", "m", quality: "1080p", seeds: 60)
+        let clean = torrent("Interstellar.2014.1080p.BluRay.x264-SPARKS", "n", quality: "1080p", seeds: 400)
+        AudioLanguagePreference.override = "de"
+        eq(Torrent.balancedPick(from: [multi, clean], connection: nil)?.url, clean.url, "German: not the bare MULTi")
+        check(!TorrentioClient.merge([], with: (0..<4).map { torrent("Interstellar.2014.1080p.BluRay.x264-G\($0)", Character("\($0)"),
+                                                                           quality: "1080p", seeds: 500 - $0) } + [multi])
+                .contains { $0.url == multi.url }, "German: no slot for the bare MULTi")
+        AudioLanguagePreference.override = "fr"
+        eq(Torrent.balancedPick(from: [multi, clean], connection: nil)?.url, multi.url, "French: the bare MULTi")
     }
+
+    func testPenaltiesBandwidthAndSeedsBeatTheLanguage() {
+        AudioLanguagePreference.override = "fr"
+        // A French CAM next to a clean English WEB-DL.
+        let cam = torrent("Film.2026.FRENCH.HDCAM.1080p", "a", quality: "Film.2026.FRENCH.HDCAM.1080p", seeds: 60)
+        let web = torrent("Film.2026.1080p.WEB-DL.x264", "b", quality: "Film.2026.1080p.WEB-DL.x264", seeds: 400)
+        eq(Torrent.balancedPick(from: [cam, web], connection: nil)?.url, web.url, "Balanced: never the CAM")
+        eq([cam, web].sorted(by: <).map(\.url), [cam.url, web.url], "the WEB-DL above the CAM")
+        eq(Torrent.preferredLanguagePool([cam, web].sorted(by: >)).first?.url, web.url, "Highest: the WEB-DL, never the CAM")
+        // A French Dolby Vision release a display without DV can't show.
+        let noDV = PlaybackCapabilities.Snapshot(av1HardwareDecode: false, hevcHardwareDecode: true, dolbyVision: false, hdr: false)
+        let dvOnly = torrent("Film.2026.FRENCH.2160p.DV.HEVC", "c", quality: "Film.2026.FRENCH.2160p.DV.HEVC", seeds: 80, size: "9 GB")
+        let sdr = torrent("Film.2026.2160p.WEB-DL.HEVC", "d", quality: "Film.2026.2160p.WEB-DL.HEVC", seeds: 80, size: "9 GB")
+        eq(Torrent.balancedPick(from: [dvOnly, sdr], capabilities: noDV, connection: nil)?.url, sdr.url, "Balanced: never DV-only on SDR")
+        check(Torrent.ranksBelow(dvOnly, sdr, capabilities: noDV), "the clean 2160p above the DV-only one")
+        let best = [dvOnly, sdr].sorted { Torrent.ranksBelow($1, $0, capabilities: noDV) }
+        eq(Torrent.preferredLanguagePool(best, capabilities: noDV).first?.url, sdr.url, "Highest: never DV-only on SDR")
+        // The only French release is too heavy for a 27 Mb/s connection.
+        let connection = 27e6 / 8
+        let heavy = torrent("Film.2026.FRENCH.2160p.REMUX", "e", quality: "Film.2026.FRENCH.2160p.REMUX", seeds: 90, size: "40 GB")
+        let light = torrent("Film.2026.1080p.BluRay.x264", "f", quality: "Film.2026.1080p.BluRay.x264", seeds: 200, size: "8 GB")
+        let timed = [heavy, light].withMediaRuntime(7200)
+        eq(Torrent.balancedPick(from: timed, connection: connection)?.url, light.url, "Balanced: the light English release plays")
+        eq(Torrent.balancedPick(from: timed, connection: 200e6 / 8)?.url, heavy.url, "a fast connection carries the French remux")
+        // A 1-seed VF is no better than a well-seeded original.
+        let thin = torrent("Film.2026.FRENCH.1080p.WEB", "g", quality: "1080p", seeds: 1)
+        let seeded = torrent("Film.2026.1080p.WEB", "h", quality: "1080p", seeds: 350)
+        eq([thin, seeded].sorted(by: <).map(\.url), [thin.url, seeded.url], "the 1-seed VF below")
+        let five = torrent("Film.2026.FRENCH.1080p.WEB", "i", quality: "1080p", seeds: 5)
+        eq([five, seeded].sorted(by: <).map(\.url), [seeded.url, five.url], "a 5-seed VF above")
+    }
+
+    func testRegionalDubs() {
+        let latino = parse("Interstellar.2014.1080p.LATINO.BluRay")
+        let castellano = parse("Interstellar.2014.1080p.CASTELLANO.BluRay")
+        eq(latino.codes, ["es"], "Latino is Spanish")
+        eq(latino.regions, ["es-419"], "…from Latin America")
+        eq(castellano.regions, ["es-ES"], "Castellano: from Spain")
+        eq(parse("Movie.2014.VFQ.1080p").regions, ["fr-CA"], "VFQ: Quebec")
+        eq(parse("Movie.2014.TRUEFRENCH.1080p").regions, ["fr-FR"], "TRUEFRENCH: France")
+        eq(ReleaseLanguages.parse(flags: "🇲🇽").regions, ["es-419"], "the Mexican flag")
+        eq(ReleaseLanguages.variant(of: "es", region: "ES"), "es-ES", "Spain")
+        eq(ReleaseLanguages.variant(of: "es", region: "MX"), "es-419", "Mexico")
+        eq(ReleaseLanguages.variant(of: "fr", region: "BE"), "fr-FR", "Belgium")
+        eq(ReleaseLanguages.variant(of: "pt", region: "BR"), "pt-BR", "Brazil")
+        eq(ReleaseLanguages.variant(of: "de", region: "DE"), nil, "no regional dubs for German")
+        eq(latino.match("es"), .confirmed, "both stay Spanish")
+
+        AudioLanguagePreference.override = "es"
+        let lat = torrent("Interstellar.2014.1080p.LATINO.BluRay.x264", "a", quality: "1080p", seeds: 300)
+        let cas = torrent("Interstellar.2014.1080p.CASTELLANO.BluRay.x264", "b", quality: "1080p", seeds: 40)
+        AudioLanguagePreference.region = "ES"
+        eq([lat, cas].sorted(by: <).last?.url, cas.url, "in Spain: Castellano first")
+        eq(Torrent.balancedPick(from: [lat, cas], connection: nil)?.url, cas.url, "in Spain: Castellano picked")
+        AudioLanguagePreference.region = "MX"
+        eq([lat, cas].sorted(by: <).last?.url, lat.url, "in Mexico: Latino first")
+        AudioLanguagePreference.region = nil
+        eq(Torrent.balancedPick(from: [lat, cas], connection: nil)?.url, lat.url, "region unknown: the better seeded")
+    }
+
+    // MARK: Torrentio
 
     func testMergeKeepsSlotsForThePreferredLanguage() {
         let english = (0..<6).map { torrent("Interstellar.2014.1080p.BluRay.x264-G\($0)", Character("\($0)"), quality: "1080p", seeds: 500 - $0) }
         let french = torrent("Interstellar.2014.MULTI.VFF.1080p.BluRay.x264-LOST", "f", quality: "1080p", seeds: 27)
-        let aggregated = english + [french]
+        let truefrench = torrent("Interstellar.2014.TRUEFRENCH.1080p.BluRay.x264-ZZZ", "t", quality: "1080p", seeds: 15)
+        let frenchCam = torrent("Interstellar.2014.FRENCH.HDCAM.1080p", "c", quality: "1080p HDCAM", seeds: 90)
+        let aggregated = english + [french, truefrench, frenchCam]
 
         AudioLanguagePreference.override = .some(nil)
-        XCTAssertFalse(TorrentioClient.merge([], with: aggregated).contains { $0.url == french.url })
+        let plain = TorrentioClient.merge([], with: aggregated)
+        check(!plain.contains { $0.url == french.url }, "no preference: no VF")
         AudioLanguagePreference.override = "fr"
-        XCTAssertTrue(TorrentioClient.merge([], with: aggregated).contains { $0.url == french.url })
+        let merged = TorrentioClient.merge([], with: aggregated)
+        eq(Set(merged.filter { $0.audioLanguages.codes.isEmpty }.map(\.url)), Set(plain.map(\.url)),
+           "the regular slots are those of the merge without a preference")
+        eq(merged.filter { $0.audioLanguages.codes.isEmpty }.count, TorrentioClient.maxPerQuality, "3 regular releases")
+        check(merged.contains { $0.url == french.url } && merged.contains { $0.url == truefrench.url }, "beside both VF releases")
+        check(!merged.contains { $0.url == frenchCam.url }, "never a CAM in a language slot")
     }
 
     func testDubbedSeasonPacksStayForTheirLanguage() {
@@ -692,11 +943,18 @@ final class ReleaseLanguageTests: XCTestCase {
             "title": "Breaking Bad Saison 1 FRENCH HDTV\nBreaking.Bad.S01E01.FRENCH.DVDRip.XviD-JMT.avi\n👤 64 💾 548.16 MB ⚙️ Torrent9\n🇫🇷",
             "behaviorHints": ["filename": "Breaking.Bad.S01E01.FRENCH.DVDRip.XviD-JMT.avi"],
         ]
-        XCTAssertTrue(TorrentioClient.keepsPack(pack, language: "fr"))
-        XCTAssertFalse(TorrentioClient.keepsPack(pack, language: nil))
-        XCTAssertFalse(TorrentioClient.keepsPack(pack, language: "it"))
+        let gate = TorrentioClient.keepsLanguagePacks
+        defer { TorrentioClient.keepsLanguagePacks = gate }
+        TorrentioClient.keepsLanguagePacks = true
+        check(TorrentioClient.keepsPack(pack, language: "fr"), "French: kept")
+        check(!TorrentioClient.keepsPack(pack, language: nil), "no preference: dropped")
+        check(!TorrentioClient.keepsPack(pack, language: "it"), "Italian: dropped")
+        check(!TorrentioClient.keepsPack(pack, language: "en"), "English: never a pack")
         var unselected = pack
         unselected["fileIdx"] = nil
-        XCTAssertFalse(TorrentioClient.keepsPack(unselected, language: "fr"))
+        check(!TorrentioClient.keepsPack(unselected, language: "fr"), "no file named: dropped")
+        // Until a pack has played on an Apple TV, iOS / tvOS keep the pack filter whole.
+        TorrentioClient.keepsLanguagePacks = false
+        check(!TorrentioClient.keepsPack(pack, language: "fr"), "the gate closed: dropped")
     }
 }
