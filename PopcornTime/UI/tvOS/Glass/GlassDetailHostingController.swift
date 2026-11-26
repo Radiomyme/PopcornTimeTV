@@ -656,7 +656,9 @@ final class GlassDetailHostingController: UIHostingController<GlassDetailView>, 
     // MARK: Downloads
 
     /// Download control pressed: start (choose a quality first) when there is
-    /// no download, else pause / resume / Play-or-Delete like DownloadButton.
+    /// no download; downloaded, Play or Delete; else the Downloads page's
+    /// menu (Pause or Resume, Delete, Show in Downloads) — a press used to
+    /// pause or resume without a word, and nothing said how to delete.
     private func pressDownload(of media: Media) {
         let state = currentDownloadState(of: media)
         guard state != .idle, let download = media.associatedDownload else {
@@ -674,6 +676,13 @@ final class GlassDetailHostingController: UIHostingController<GlassDetailView>, 
                     return
                 }
                 AppDelegate.shared.chooseQuality(self.view, media: media) { [weak self] torrent in
+                    // Too big for the space left: said now, not as a failure later.
+                    if let warning = DownloadsStore.shared.spaceWarning(for: torrent) {
+                        let alert = UIAlertController(title: "Downloads.NoSpace.Title".localized, message: warning, preferredStyle: .alert)
+                        alert.addAction(UIAlertAction(title: "OK".localized, style: .default, handler: nil))
+                        self?.present(alert, animated: true)
+                        return
+                    }
                     PTTorrentDownloadManager.shared().startDownloading(fromFileOrMagnetLink: torrent.url, mediaMetadata: media.mediaItemDictionary,
                                                                        selectFileTDownload: PTTorrentStreamer.fileSelection(for: torrent.url, media: media, torrent: torrent))
                     self?.setDownloadState(.pending, of: media.id)
@@ -681,26 +690,55 @@ final class GlassDetailHostingController: UIHostingController<GlassDetailView>, 
             }
             return
         }
-        AppDelegate.shared.downloadControl(wasPressedIn: GlassDetailAdapter.buttonState(state),
-                                           with: download,
-                                           sourceView: view) { [weak self] newState in
-            let progress = download.torrentStatus.totalProgress
-            self?.setDownloadState(GlassDetailAdapter.downloadState(newState, progress: progress), of: media.id)
+        if state == .downloaded {
+            AppDelegate.shared.downloadControl(wasPressedIn: GlassDetailAdapter.buttonState(state),
+                                               with: download,
+                                               sourceView: view) { [weak self] newState in
+                let progress = download.torrentStatus.totalProgress
+                self?.setDownloadState(GlassDetailAdapter.downloadState(newState, progress: progress), of: media.id)
+            }
+            return
+        }
+        let store = DownloadsStore.shared
+        store.refreshNow()
+        guard let entry = store.entries.first(where: { $0.id == media.id }) else { return }
+        DownloadsActionSheet.present(entry, showsGoToDownloads: true, from: self) { [weak self] action in
+            switch action {
+            case .pause: store.pause(media.id)
+            case .resume: store.resume(media.id)
+            case .retry: store.retry(media.id)
+            case .play: store.play(media.id)
+            case .delete:
+                store.delete(media.id)
+                self?.setDownloadState(.idle, of: media.id)
+            case .showDownloads:
+                let tabs = self?.tabBarController as? TVTabBarController
+                    ?? AppDelegate.shared.window?.rootViewController as? TVTabBarController
+                tabs?.select(.downloads)
+            }
+            if action == .pause || action == .resume {
+                let progress = download.torrentStatus.totalProgress
+                self?.setDownloadState(action == .pause ? .paused(progress: Double(progress)) : .downloading(progress: Double(progress)),
+                                       of: media.id)
+            }
         }
     }
 
-    /// Long-press "Stop Download": the old confirmation alert.
+    /// Long-press "Stop Download": asked in the Downloads page's sheet, then
+    /// stopped and its files deleted (`DownloadsStore.delete`).
     private func stopDownload(of media: Media) {
-        guard let download = media.associatedDownload else { return }
-        AppDelegate.shared.downloadButton(nil, wantsToStop: download) { [weak self] in
+        let store = DownloadsStore.shared
+        store.refreshNow()
+        guard let entry = store.entries.first(where: { $0.id == media.id }) else { return }
+        DownloadsActionSheet.confirmDelete(entry, from: self) { [weak self] in
+            store.delete(media.id)
             self?.setDownloadState(.idle, of: media.id)
         }
     }
 
     /// Long-press "Delete Download" on a finished download.
     private func deleteDownload(of media: Media) {
-        guard let download = media.associatedDownload else { return }
-        PTTorrentDownloadManager.shared().delete(download)
+        DownloadsStore.shared.delete(media.id)
         setDownloadState(.idle, of: media.id)
     }
 
@@ -752,7 +790,9 @@ final class GlassDetailHostingController: UIHostingController<GlassDetailView>, 
         onMain { [weak self] in
             guard let self, let id = GlassDetailAdapter.mediaID(of: download),
                   self.movie?.id == id || self.model.episodes.contains(where: { $0.id == id }) else { return }
-            AppDelegate.shared.download(download, failedWith: error)
+            // The alert is `DownloadsStore`'s, wherever the user is: the button
+            // goes back to Download.
+            self.setDownloadState(.idle, of: id)
         }
     }
 
