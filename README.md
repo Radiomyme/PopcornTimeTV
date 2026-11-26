@@ -91,8 +91,11 @@ against TMDB). Not yet on a real Apple TV, iPhone, iPad or Mac.
   the downloads and the caches stay the device's. The Top Shelf reads no user data (the extension
   cannot read the app's), so nothing changes there.
 - **Where**: « Who's Watching? » at launch once the device has two profiles (not for a link
-  opened from the Top Shelf: the last profile watches it); Settings › Profiles › Switch Profile /
-  Manage Profiles to add, rename, change the avatar or delete one.
+  opened from the Top Shelf: the last profile watches it; a link that comes while it asks opens
+  after the pick); Settings › Profiles › Switch Profile, whose Manage Profiles adds, renames,
+  changes the avatar of or deletes one. On the Mac: the window asks once per run, Settings ›
+  Profiles lists the profiles (Use, ⓘ to edit) and Popcorn Time › Switch Profile… (⇧⌘P) asks
+  over the window in front.
 - **Nothing to migrate by hand**: the history from before profiles becomes the main profile's,
   under the very keys it was stored with (nothing is copied, an older build still reads it). The
   main profile can be renamed, not deleted; the others keep their keys behind their own prefix
