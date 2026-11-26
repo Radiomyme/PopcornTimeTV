@@ -99,20 +99,9 @@ enum MacAutoQuality {
     static func pick(from torrents: [Torrent], defaults: UserDefaults = .standard) -> Torrent? {
         let setting = defaults.string(forKey: "autoSelectQuality") ?? "Balanced"
         guard !setting.isEmpty else { return nil }
-        let sorted = torrents.sorted(by: >)   // best quality first
-        // Highest / Lowest choose among the releases in the preferred audio
-        // language when there are seeded ones; Balanced does it itself.
-        let pool = Torrent.preferredLanguagePool(sorted)
-        switch setting {
-        case "Highest":
-            return pool.first
-        case "Lowest":
-            // Smallest resolution bucket, best-playing release inside it.
-            let lowestBucket = pool.last?.qualityValue
-            return pool.first { $0.qualityValue == lowestBucket }
-        default:
-            return Torrent.balancedPick(from: sorted)
-        }
+        // Balanced, with its priority (Quick Start / Balanced / Best
+        // Picture: `SourcePreferences`).
+        return Torrent.balancedPick(from: torrents.sorted(by: >))
     }
 }
 

@@ -511,12 +511,13 @@ final class GlassDetailHostingController: UIHostingController<GlassDetailView>, 
 
     // MARK: A press before the sources
 
-    /// "autoSelectQuality" is Highest, Balanced or Lowest: a release is
-    /// played without asking (`AppDelegate.chooseQuality`), so a press
-    /// waits for every source that may still bring a better one.
+    /// "autoSelectQuality" is Balanced (Quick Start and Best Picture too,
+    /// with their priority): a release is played without asking
+    /// (`AppDelegate.chooseQuality`), so a press waits for every source that
+    /// may still bring a better one.
     private static var picksQualityAlone: Bool {
         let preference = UserDefaults.standard.string(forKey: "autoSelectQuality") ?? "Off".localized
-        return ["Highest", "Balanced", "Lowest"].contains { preference == $0.localized }
+        return preference == "Balanced".localized
     }
 
     /// Runs `action` once the page's sources are in — at once when they

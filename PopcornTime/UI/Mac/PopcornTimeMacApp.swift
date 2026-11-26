@@ -65,6 +65,9 @@ enum MacAppLaunch {
         // The torrent lists favour releases in the preferred audio language:
         // PopcornKit reads the setting through the app's language names.
         PlaybackLanguagePreferences.installReleaseLanguageResolver()
+        // A retired « Highest » / « Lowest » quality setting becomes Best
+        // Picture / Quick Start before Settings or a page reads it.
+        AutomaticQualityChoice.migrateRetiredChoices()
         // The profiles' tastes keep a position saved again in memory a
         // while: written when the app goes behind another and when it quits.
         ProfileTaste.flushes(on: [NSApplication.didResignActiveNotification, NSApplication.willTerminateNotification])

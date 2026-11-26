@@ -2086,15 +2086,15 @@ public extension VideoQuality {
     }
 }
 
-/// The settings that steer the automatic source pick (`Torrent.balancedPick`,
-/// `Torrent.preferredLanguagePool`), stored in UserDefaults by the three
+/// The settings that steer the automatic source pick (`Torrent.balancedPick`),
+/// stored in UserDefaults by the three
 /// apps' Settings screens. Device-wide, like « autoSelectQuality »: they are
 /// about the screen and the connection, which every profile shares.
 public enum SourcePreferences {
 
     /// `SourcePriority` raw value; absent = balanced. Written with the
     /// automatic choice (« autoSelectQuality » Balanced), reset to balanced
-    /// by the other choices: it never lingers unseen behind « Highest ».
+    /// by Always Ask: it never lingers unseen behind it.
     public static let priorityKey = "sourcePriority"
     /// Highest resolution picked automatically, in lines (2160, 1080, 720,
     /// 480); absent or 0 = no limit. Releases above it stay in the lists.
@@ -2148,11 +2148,11 @@ public enum SourcePreferences {
 /// « Auto Select Quality » as the iPhone, iPad and Mac Settings offer it:
 /// Quick Start, Balanced and Best Picture are the balanced pick with their
 /// `SourcePriority`, stored as "autoSelectQuality" Balanced (what the
-/// players and Up Next read) plus `SourcePreferences.priorityKey`; Highest,
-/// Lowest and Always Ask ("") as before. The Apple TV stores the same two
-/// keys (its quality value localized: `GlassSettingsStore`).
+/// players and Up Next read) plus `SourcePreferences.priorityKey`; Always
+/// Ask is "". The Apple TV stores the same two keys (its quality value
+/// localized: `GlassSettingsStore`).
 public enum AutomaticQualityChoice: String, CaseIterable, Identifiable {
-    case quickStart, balanced, bestPicture, highest, lowest, alwaysAsk
+    case quickStart, balanced, bestPicture, alwaysAsk
 
     public var id: String { rawValue }
 
@@ -2162,8 +2162,6 @@ public enum AutomaticQualityChoice: String, CaseIterable, Identifiable {
     public static func stored(in defaults: UserDefaults = .standard) -> AutomaticQualityChoice {
         switch defaults.string(forKey: defaultsKey) ?? "Balanced" {
         case "": return .alwaysAsk
-        case "Highest": return .highest
-        case "Lowest": return .lowest
         default:
             switch defaults.string(forKey: SourcePreferences.priorityKey).flatMap(SourcePriority.init(rawValue:)) ?? .balanced {
             case .quickStart: return .quickStart
@@ -2173,8 +2171,8 @@ public enum AutomaticQualityChoice: String, CaseIterable, Identifiable {
         }
     }
 
-    /// Writes both keys; a choice other than the three balanced ones resets
-    /// the priority, so it never lingers unseen.
+    /// Writes both keys; Always Ask resets the priority, so it never
+    /// lingers unseen.
     public func store(in defaults: UserDefaults = .standard) {
         let value: String
         let priority: SourcePriority
@@ -2182,8 +2180,6 @@ public enum AutomaticQualityChoice: String, CaseIterable, Identifiable {
         case .quickStart: (value, priority) = ("Balanced", .quickStart)
         case .balanced: (value, priority) = ("Balanced", .balanced)
         case .bestPicture: (value, priority) = ("Balanced", .picture)
-        case .highest: (value, priority) = ("Highest", .balanced)
-        case .lowest: (value, priority) = ("Lowest", .balanced)
         case .alwaysAsk: (value, priority) = ("", .balanced)
         }
         defaults.set(value, forKey: Self.defaultsKey)
@@ -2197,8 +2193,6 @@ public enum AutomaticQualityChoice: String, CaseIterable, Identifiable {
         case .quickStart: return "Quick Start"
         case .balanced: return "Balanced"
         case .bestPicture: return "Best Picture"
-        case .highest: return "Highest"
-        case .lowest: return "Lowest"
         case .alwaysAsk: return "Always Ask"
         }
     }
@@ -2208,10 +2202,39 @@ public enum AutomaticQualityChoice: String, CaseIterable, Identifiable {
         case .quickStart: return "The most shared source first, even with a lesser picture."
         case .balanced: return "The best quality that starts quickly."
         case .bestPicture: return "The best picture among the sources shared widely enough."
-        case .highest: return "Always the best picture, even if it takes longer to start."
-        case .lowest: return "The smallest file, for the quickest start."
         case .alwaysAsk: return "Choose the source every time; the recommended one is starred."
         }
+    }
+
+    // MARK: Highest and Lowest, retired
+
+    /// « Highest » and « Lowest », as each app stored them: the English
+    /// keys (iPhone, iPad, Mac) and their translations (the Apple TV stores
+    /// the localized title, in the UI language of the day it was chosen).
+    static let retiredHighest: Set<String> = ["Highest", "La plus haute", "La más alta", "La più Alta", "Mais alta", "الأعلى"]
+    static let retiredLowest: Set<String> = ["Lowest", "La plus basse", "La más baja", "La Più Bassa", "Mais baixo", "الأقل"]
+
+    /// « Highest » and « Lowest » left the setting after 5.4.0: Best
+    /// Picture is the best picture among sources shared widely enough (the
+    /// highest resolution with a starved swarm started too slowly), Quick
+    /// Start the most shared source (the smallest file often had the
+    /// fewest seeds). A stored retired choice becomes the nearest of those,
+    /// so no app ever reads a value it no longer offers. At launch, on
+    /// every platform, before the settings or the players read the key; a
+    /// no-op once done. Returns the choice it wrote, if any.
+    @discardableResult
+    public static func migrateRetiredChoices(in defaults: UserDefaults = .standard) -> AutomaticQualityChoice? {
+        guard let stored = defaults.string(forKey: defaultsKey) else { return nil }
+        let choice: AutomaticQualityChoice
+        if retiredHighest.contains(stored) {
+            choice = .bestPicture
+        } else if retiredLowest.contains(stored) {
+            choice = .quickStart
+        } else {
+            return nil
+        }
+        choice.store(in: defaults)
+        return choice
     }
 }
 
@@ -2705,27 +2728,6 @@ public extension Torrent {
     func languageRank(_ language: String?) -> ReleaseLanguages.Match {
         let match = audioLanguages.match(language)
         return match > .neutral && seeds < languageSeedFloor ? .neutral : match
-    }
-
-    /// The releases an automatic pick ("Highest", "Lowest") chooses among:
-    /// those in the preferred audio language with `languageSeedFloor`
-    /// seeders (half the release's floor) and no playback penalty, else
-    /// such releases likely in it (MULTi) — both skipped when the language
-    /// does not come first (`SourcePreferences.languageFirst`) —, else all
-    /// of them but the dubs in another language, else all of them, at or
-    /// under the maximum resolution. Order kept.
-    static func preferredLanguagePool(_ torrents: [Torrent],
-                                      capabilities: PlaybackCapabilities.Snapshot = PlaybackCapabilities.current,
-                                      language: String? = AudioLanguagePreference.current) -> [Torrent] {
-        let torrents = SourcePreferences.withinMaximumResolution(torrents)
-        guard language != nil else { return torrents }
-        let clean = torrents.filter { !$0.playability(for: capabilities).isPenalized }
-        for match in SourcePreferences.languageFirst ? [ReleaseLanguages.Match.confirmed, .likely] : [] {
-            let pool = clean.filter { $0.audioLanguages.match(language) == match && $0.seeds >= $0.languageSeedFloor }
-            if !pool.isEmpty { return pool }
-        }
-        let undubbed = torrents.filter { $0.audioLanguages.match(language) >= .neutral }
-        return undubbed.isEmpty ? torrents : undubbed
     }
 
     /// `balancedPick` within one pool; `healthyOnly`: nil unless a release

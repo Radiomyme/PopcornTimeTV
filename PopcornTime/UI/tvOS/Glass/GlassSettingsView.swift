@@ -15,14 +15,14 @@ import SwiftUI
 
 // MARK: - Model
 
-/// "Auto Select Quality" choices. For balanced / highest / lowest, `titleKey`
-/// is both the Localizable.strings key and, localized, the value the quality
-/// chooser compares the stored preference to (`AppDelegate.presentQualityChoice`);
+/// "Auto Select Quality" choices. For balanced, `titleKey` is both the
+/// Localizable.strings key and, localized, the value the quality chooser
+/// compares the stored preference to (`AppDelegate.presentQualityChoice`);
 /// off is stored as no value (the chooser then always asks).
 enum GlassSettingsAutoQuality: String, CaseIterable, Identifiable {
     /// Quick Start, Balanced and Best Picture are the balanced pick
     /// (`Torrent.balancedPick`) with its three priorities (`SourcePriority`).
-    case quickStart, balanced, bestPicture, highest, lowest, off
+    case quickStart, balanced, bestPicture, off
 
     var id: String { rawValue }
 
@@ -31,8 +31,6 @@ enum GlassSettingsAutoQuality: String, CaseIterable, Identifiable {
         case .quickStart: return "Quick Start"
         case .balanced: return "Balanced"
         case .bestPicture: return "Best Picture"
-        case .highest: return "Highest"
-        case .lowest: return "Lowest"
         case .off: return "Always Ask"
         }
     }
@@ -42,8 +40,6 @@ enum GlassSettingsAutoQuality: String, CaseIterable, Identifiable {
         case .quickStart: return "The most shared source first, even with a lesser picture."
         case .balanced: return "The best quality that starts quickly."
         case .bestPicture: return "The best picture among the sources shared widely enough."
-        case .highest: return "Always the best picture, even if it takes longer to start."
-        case .lowest: return "The smallest file, for the quickest start."
         case .off: return "Choose the source every time; the recommended one is starred."
         }
     }

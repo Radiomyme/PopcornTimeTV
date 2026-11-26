@@ -608,8 +608,8 @@ final class ReleaseMatchingTests: CheckedTestCase {
 /// lists favour the preferred audio language (`AudioLanguagePreference`):
 /// the active profile's setting or learnt language, the parser (titles,
 /// episode titles, subtitles, 3-letter codes, regional dubs, Torrentio's
-/// flags), the match tiers, the ranking, `balancedPick`,
-/// `preferredLanguagePool`, the language slots of `TorrentioClient.merge`,
+/// flags), the match tiers, the ranking, `balancedPick`, the automatic
+/// quality setting, the language slots of `TorrentioClient.merge`,
 /// the dubbed season packs Torrentio keeps, the pickers' tag and the tvOS
 /// chooser rows.
 final class ReleaseLanguageTests: CheckedTestCase {
@@ -875,12 +875,10 @@ final class ReleaseLanguageTests: CheckedTestCase {
 
         AudioLanguagePreference.override = .some(nil)
         eq(all.sorted(by: <).map(\.url), [french, english, uhd].map(\.url), "no preference: seeds")
-        eq(Torrent.preferredLanguagePool(all).count, 3, "no preference: every release")
 
         AudioLanguagePreference.override = "fr"
         eq(all.sorted(by: <).map(\.url), [english, french, uhd].map(\.url), "VF first inside 1080p")
         eq(Torrent.balancedPick(from: all, connection: nil)?.url, french.url, "a healthy VF beats an English UHD")
-        eq(Torrent.preferredLanguagePool(all).map(\.url), [french.url], "Highest / Lowest: the VF")
 
         // A nearly dead VF (under half its floor: 4 of 10) no longer wins over
         // a healthy release in another language; at half its floor it does.
@@ -898,7 +896,6 @@ final class ReleaseLanguageTests: CheckedTestCase {
         eq(AudioLanguagePreference.current, "en", "English is kept")
         eq([italian, original].sorted(by: <).map(\.url), [italian.url, original.url], "English: the ITA dub below the original")
         eq(Torrent.balancedPick(from: [italian, original], connection: nil)?.url, original.url, "English: the original is picked")
-        eq(Torrent.preferredLanguagePool([italian, original]).map(\.url), [original.url], "English: no dub for Highest")
         AudioLanguagePreference.override = "fr"
         eq([italian, original].sorted(by: <).map(\.url), [italian.url, original.url], "French: the ITA dub below the original too")
         AudioLanguagePreference.override = .some(nil)
@@ -941,15 +938,12 @@ final class ReleaseLanguageTests: CheckedTestCase {
         let web = torrent("Film.2026.1080p.WEB-DL.x264", "b", quality: "Film.2026.1080p.WEB-DL.x264", seeds: 400)
         eq(Torrent.balancedPick(from: [cam, web], connection: nil)?.url, web.url, "Balanced: never the CAM")
         eq([cam, web].sorted(by: <).map(\.url), [cam.url, web.url], "the WEB-DL above the CAM")
-        eq(Torrent.preferredLanguagePool([cam, web].sorted(by: >)).first?.url, web.url, "Highest: the WEB-DL, never the CAM")
         // A French Dolby Vision release a display without DV can't show.
         let noDV = PlaybackCapabilities.Snapshot(av1HardwareDecode: false, hevcHardwareDecode: true, dolbyVision: false, hdr: false)
         let dvOnly = torrent("Film.2026.FRENCH.2160p.DV.HEVC", "c", quality: "Film.2026.FRENCH.2160p.DV.HEVC", seeds: 80, size: "9 GB")
         let sdr = torrent("Film.2026.2160p.WEB-DL.HEVC", "d", quality: "Film.2026.2160p.WEB-DL.HEVC", seeds: 80, size: "9 GB")
         eq(Torrent.balancedPick(from: [dvOnly, sdr], capabilities: noDV, connection: nil)?.url, sdr.url, "Balanced: never DV-only on SDR")
         check(Torrent.ranksBelow(dvOnly, sdr, capabilities: noDV), "the clean 2160p above the DV-only one")
-        let best = [dvOnly, sdr].sorted { Torrent.ranksBelow($1, $0, capabilities: noDV) }
-        eq(Torrent.preferredLanguagePool(best, capabilities: noDV).first?.url, sdr.url, "Highest: never DV-only on SDR")
         // The only French release is too heavy for a 27 Mb/s connection.
         let connection = 27e6 / 8
         let heavy = torrent("Film.2026.FRENCH.2160p.REMUX", "e", quality: "Film.2026.FRENCH.2160p.REMUX", seeds: 90, size: "40 GB")
@@ -1020,10 +1014,6 @@ final class ReleaseLanguageTests: CheckedTestCase {
         let french720 = torrent("Movie.2020.FRENCH.720p.WEB.x264-D", "d", quality: "720p", seeds: 40)
         XCTAssertEqual(pick([fullHD, french720], .init()), french720.url)
         XCTAssertEqual(pick([fullHD, french720], .init(languageFirst: false)), fullHD.url)
-        SourcePreferences.override = .init(languageFirst: false)
-        XCTAssertEqual(Torrent.preferredLanguagePool([fullHD, french720]).count, 2)
-        SourcePreferences.override = .init(maximumResolution: .hd720)
-        XCTAssertEqual(Torrent.preferredLanguagePool([fullHD, french720]).map(\.url), [french720.url])
 
         // A French release with 3 seeds no longer beats a healthy MULTi one.
         let thinVF = torrent("Movie.2020.FRENCH.1080p.WEB.x264-E", "e", quality: "1080p", seeds: 3)
@@ -1039,6 +1029,44 @@ final class ReleaseLanguageTests: CheckedTestCase {
         for priority in SourcePriority.allCases {
             XCTAssertEqual(pick([cam, fullHD], .init(priority: priority)), fullHD.url, "\(priority): never the CAM")
         }
+    }
+
+    /// « Highest » and « Lowest » are gone: a stored one becomes Best
+    /// Picture or Quick Start, in English (iPhone, iPad, Mac) or in the
+    /// language the Apple TV stored it in; anything else is left alone.
+    func testRetiredQualityChoicesMigrate() {
+        let defaults = UserDefaults(suiteName: "ReleaseLanguageTests.retiredChoices")!
+        defer { defaults.removePersistentDomain(forName: "ReleaseLanguageTests.retiredChoices") }
+        let key = AutomaticQualityChoice.defaultsKey
+        func migrate(_ stored: String?, priority: String? = nil) -> AutomaticQualityChoice? {
+            defaults.removePersistentDomain(forName: "ReleaseLanguageTests.retiredChoices")
+            defaults.set(stored, forKey: key)
+            defaults.set(priority, forKey: SourcePreferences.priorityKey)
+            return AutomaticQualityChoice.migrateRetiredChoices(in: defaults)
+        }
+        for highest in ["Highest", "La plus haute", "La más alta", "La più Alta", "Mais alta", "الأعلى"] {
+            eq(migrate(highest), .bestPicture, "\(highest): Best Picture")
+            eq(defaults.string(forKey: key), "Balanced", "\(highest): stored as Balanced")
+            eq(defaults.string(forKey: SourcePreferences.priorityKey), SourcePriority.picture.rawValue, "\(highest): with the picture priority")
+            eq(AutomaticQualityChoice.stored(in: defaults), .bestPicture, "\(highest): read back")
+        }
+        for lowest in ["Lowest", "La plus basse", "La más baja", "La Più Bassa", "Mais baixo", "الأقل"] {
+            eq(migrate(lowest), .quickStart, "\(lowest): Quick Start")
+            eq(AutomaticQualityChoice.stored(in: defaults), .quickStart, "\(lowest): read back")
+        }
+        // Nothing to do: absent, Always Ask, Balanced (in any language) with its priority.
+        eq(migrate(nil), nil, "absent")
+        eq(defaults.string(forKey: key), nil, "absent stays absent")
+        eq(migrate(""), nil, "Always Ask")
+        eq(defaults.string(forKey: key), "", "Always Ask stays")
+        eq(migrate("Équilibré", priority: SourcePriority.quickStart.rawValue), nil, "a localized Balanced")
+        eq(defaults.string(forKey: key), "Équilibré", "kept as stored")
+        eq(defaults.string(forKey: SourcePreferences.priorityKey), SourcePriority.quickStart.rawValue, "its priority kept")
+        // Twice: nothing more.
+        eq(migrate("Highest"), .bestPicture, "first launch")
+        eq(AutomaticQualityChoice.migrateRetiredChoices(in: defaults), nil, "second launch: nothing")
+        // The offered choices.
+        eq(AutomaticQualityChoice.allCases, [.quickStart, .balanced, .bestPicture, .alwaysAsk], "four choices")
     }
 
     // MARK: Torrentio

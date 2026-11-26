@@ -25,6 +25,9 @@ struct PopcornTimeApp: App {
         // PopcornKit reads the setting through the app's language names
         // (as the tvOS and Mac apps do at launch).
         PlaybackLanguagePreferences.installReleaseLanguageResolver()
+        // A retired « Highest » / « Lowest » quality setting becomes Best
+        // Picture / Quick Start before Settings or a page reads it.
+        AutomaticQualityChoice.migrateRetiredChoices()
         // The profiles' tastes keep a position saved again in memory a
         // while: written before the app may be killed.
         ProfileTaste.flushes(on: [UIApplication.didEnterBackgroundNotification, UIApplication.willTerminateNotification])

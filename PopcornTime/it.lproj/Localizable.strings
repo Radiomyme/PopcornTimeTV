@@ -191,9 +191,6 @@
 "Hi-Speed" = "Alta Velocità";
 
 /* (No Commment) */
-"Highest" = "La più Alta";
-
-/* (No Commment) */
 "History" = "Storico";
 
 /* (No Commment) */
@@ -222,9 +219,6 @@
 
 /* (No Commment) */
 "Light Gray" = "Grigio Chiaro";
-
-/* (No Commment) */
-"Lowest" = "La Più Bassa";
 
 /* (No Commment) */
 "Magenta" = "Magenta";
@@ -577,8 +571,6 @@
 "Audio and subtitles in these languages are picked automatically when the file or OpenSubtitles offers them." = "L'audio e i sottotitoli in queste lingue vengono scelti automaticamente quando il file o OpenSubtitles li offrono.";
 "Choose the source every time; the recommended one is starred." = "Scegli la fonte ogni volta; quella consigliata è contrassegnata da una stella.";
 "The best quality that starts quickly." = "La qualità migliore con un avvio rapido.";
-"Always the best picture, even if it takes longer to start." = "Sempre la migliore immagine, anche se ci vuole più tempo per partire.";
-"The smallest file, for the quickest start." = "Il file più leggero, per partire il prima possibile.";
 "Detail Pages" = "Schede dei titoli";
 "Plays the soundtrack of the movie or the theme of the show on its page." = "Riproduce la colonna sonora del film o la sigla della serie nella sua scheda.";
 "Theme Songs" = "Temi musicali";

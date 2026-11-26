@@ -195,7 +195,7 @@ public final class TorrentioClient {
     /// Ceiling for aggregated torrents. The Apple TV app sandbox only has
     /// ~7-10 GB of usable cache, so a 55 GB UHD REMUX can never finish
     /// buffering there — surfacing it in the quality picker (or worse,
-    /// auto-picking it as "Highest") just produces disk-full errors.
+    /// auto-picking it) just produces disk-full errors.
     public static var maxSizeBytes: Int64 = 15 * 1024 * 1024 * 1024
 
     /// How many torrents a merged list keeps per resolution bucket (existing

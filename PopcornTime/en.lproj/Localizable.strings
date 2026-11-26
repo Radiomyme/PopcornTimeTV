@@ -1,9 +1,5 @@
 
 
-/* Automatically select the Highest quality */
-"Highest" = "Highest";
-/* Automatically select the Lowest quality */
-"Lowest" = "Lowest";
 
 /* Fastest scrubbing rate */
 "Hi-Speed" = "Hi-Speed";
@@ -349,8 +345,6 @@
 "Audio and subtitles in these languages are picked automatically when the file or OpenSubtitles offers them." = "Audio and subtitles in these languages are picked automatically when the file or OpenSubtitles offers them.";
 "Choose the source every time; the recommended one is starred." = "Choose the source every time; the recommended one is starred.";
 "The best quality that starts quickly." = "The best quality that starts quickly.";
-"Always the best picture, even if it takes longer to start." = "Always the best picture, even if it takes longer to start.";
-"The smallest file, for the quickest start." = "The smallest file, for the quickest start.";
 "Detail Pages" = "Detail Pages";
 "Plays the soundtrack of the movie or the theme of the show on its page." = "Plays the soundtrack of the movie or the theme of the show on its page.";
 "Theme Songs" = "Theme Songs";

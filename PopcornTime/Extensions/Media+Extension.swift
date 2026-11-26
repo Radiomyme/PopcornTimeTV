@@ -83,7 +83,7 @@ extension Media {
         // app crashes, or user-aborted previews leave orphan folders that
         // each weigh several GB. Apple TV's per-app sandbox tops out around
         // 7-12 GB of usable space, so two abandoned 4K attempts are enough
-        // to make the next "Highest" pick fail with "not enough space".
+        // to make the next 4K pick fail with "not enough space".
         //
         // NOTE: we intentionally do NOT try to keep a movie's partial for
         // fast-resume. The CocoaPods PopcornTorrent (libtorrent 1.2.1) crashed

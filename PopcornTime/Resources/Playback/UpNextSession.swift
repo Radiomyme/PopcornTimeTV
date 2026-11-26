@@ -89,13 +89,14 @@ enum UpNextPreferences {
     }
 
     /// The quality setting is « Always Ask ». Apple TV: "autoSelectQuality"
-    /// absent or not one of Highest / Balanced / Lowest (stored localized,
-    /// `GlassSettingsStore`); iPhone / iPad and Mac: "" (absent = Balanced).
+    /// absent or not Balanced (stored localized, `GlassSettingsStore`; Quick
+    /// Start and Best Picture are Balanced with their priority); iPhone /
+    /// iPad and Mac: "" (absent = Balanced).
     static var qualityAlwaysAsks: Bool {
         let stored = UserDefaults.standard.string(forKey: "autoSelectQuality")
         #if os(tvOS)
         guard let stored = stored, !stored.isEmpty else { return true }
-        return !["Highest", "Balanced", "Lowest"].contains { stored == $0 || stored == $0.localized }
+        return stored != "Balanced" && stored != "Balanced".localized
         #else
         return stored?.isEmpty ?? false
         #endif

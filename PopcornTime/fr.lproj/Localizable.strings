@@ -1,9 +1,5 @@
 
 
-/* Automatically select the Highest quality */
-"Highest" = "La plus haute";
-/* Automatically select the Lowest quality */
-"Lowest" = "La plus basse";
 
 /* Fastest scrubbing rate */
 "Hi-Speed" = "Rapide";
@@ -349,8 +345,6 @@
 "Audio and subtitles in these languages are picked automatically when the file or OpenSubtitles offers them." = "L’audio et les sous-titres dans ces langues sont choisis automatiquement quand le fichier ou OpenSubtitles les proposent.";
 "Choose the source every time; the recommended one is starred." = "Vous choisissez la source à chaque fois ; la source recommandée est marquée d’une étoile.";
 "The best quality that starts quickly." = "La meilleure qualité qui démarre rapidement.";
-"Always the best picture, even if it takes longer to start." = "Toujours la meilleure image, même si le démarrage est plus long.";
-"The smallest file, for the quickest start." = "Le fichier le plus léger, pour démarrer au plus vite.";
 "Detail Pages" = "Fiches";
 "Plays the soundtrack of the movie or the theme of the show on its page." = "Diffuse la bande originale du film ou le générique de la série sur sa fiche.";
 "Theme Songs" = "Musique des fiches";

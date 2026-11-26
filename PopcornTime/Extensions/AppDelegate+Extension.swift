@@ -213,29 +213,30 @@ extension AppDelegate {
         presentQualityChoice(sender, media: media, completion: completion)
     }
 
-    /// "autoSelectQuality" is Highest, Balanced or Lowest: a release is
-    /// played without asking (`presentQualityChoice`).
+    /// "autoSelectQuality" is Balanced (Quick Start and Best Picture too,
+    /// with their priority): a release is played without asking
+    /// (`presentQualityChoice`).
     private static var picksQualityAlone: Bool {
         let preference = UserDefaults.standard.string(forKey: "autoSelectQuality") ?? "Off".localized
-        return ["Highest", "Balanced", "Lowest"].contains { preference == $0.localized }
+        return preference == "Balanced".localized
     }
 
     private func presentQualityChoice(_ sender: UIView?, media: Media, completion: @escaping (Torrent) -> Void) {
         // Auto-pick behaviour is controlled by the "autoSelectQuality" setting:
-        //   Highest (default on the Apple TV) — always the top resolution
-        //     (2160p + HDR/DV/Atmos) for the best picture on a 4K TV, accepting
-        //     that a lightly-seeded 4K release takes longer to buffer;
         //   Balanced — highest resolution the swarm can stream fast and the
         //     connection can carry (skips a lightly-seeded 4K for a
         //     well-seeded 1080p, and a 4K remux heavier than the measured
-        //     connection: `Torrent.balancedPick`);
-        //   Lowest   — smallest/fastest;
+        //     connection: `Torrent.balancedPick`), steered by its priority
+        //     (Quick Start / Balanced / Best Picture: `SourcePreferences`);
         //   Off      — always ask.
+        // (« Highest » and « Lowest » were retired after 5.4.0: launch turns
+        // them into Best Picture and Quick Start,
+        // `AutomaticQualityChoice.migrateRetiredChoices`.)
         // Default to "Off" (always show the picker) so the user can weigh
         // quality vs seeds themselves — the rich chooser below stars the
         // recommended pick and pre-focuses it, so accepting the smart default
-        // is still one click. Set Highest/Balanced/Lowest in Settings to
-        // auto-pick instead.
+        // is still one click. Choose Quick Start, Balanced or Best Picture
+        // in Settings to auto-pick instead.
         let preference = UserDefaults.standard.string(forKey: "autoSelectQuality") ?? "Off".localized
         // Runtime attached so each release has an estimated bitrate (size /
         // runtime) for the recommendation and the labels; the connection is
@@ -258,27 +259,10 @@ extension AppDelegate {
         let connection = StreamBandwidth.connectionEstimate
         print("[chooseQuality] media=\(media.title) preference=\(preference) connection=\(connection.map { String(format: "%.1f Mb/s", StreamBandwidth.megabitsPerSecond($0)) } ?? "unknown") candidates=\(sorted.map { "\($0.quality ?? "?")(\($0.qualityValue)) s\($0.seeds)\($0.estimatedBitrate.map { String(format: " %.0fMb/s", StreamBandwidth.megabitsPerSecond($0)) } ?? "")" })")
 
-        // Highest / Lowest choose among the releases in the preferred audio
-        // language when there are seeded ones; Balanced does it itself.
-        let languagePool = Torrent.preferredLanguagePool(sorted)
-        if preference == "Highest".localized, let best = languagePool.last {
-            print("[chooseQuality] picked HIGHEST: quality=\(best.quality ?? "?") seeds=\(best.seeds) url=\(best.url.prefix(120))")
-            return completion(best)
-        }
         if preference == "Balanced".localized, let best = Torrent.balancedPick(from: sorted, connection: connection) {
             print("[chooseQuality] picked BALANCED: quality=\(best.quality ?? "?") seeds=\(best.seeds) fit=\(best.bandwidthFit(connection: connection))")
             return completion(best)
         }
-        // Lowest = the smallest resolution bucket, but the BEST-playing
-        // release inside it (the comparator puts penalized AVI / CAM / AV1-
-        // without-hardware releases first within a bucket).
-        if preference == "Lowest".localized,
-           let lowestBucket = languagePool.first?.qualityValue,
-           let worst = languagePool.last(where: { $0.qualityValue == lowestBucket }) {
-            print("[chooseQuality] picked LOWEST: quality=\(worst.quality ?? "?")")
-            return completion(worst)
-        }
-
         guard media.torrents.count > 1 else {
             if let torrent = media.torrents.first {
                 completion(torrent)

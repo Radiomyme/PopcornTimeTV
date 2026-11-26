@@ -128,8 +128,8 @@ enum GlassSettingsStore {
     private static let autoQualityKey = "autoSelectQuality"
 
     /// The quality chooser (`AppDelegate.presentQualityChoice`) compares the
-    /// stored value to the *localized* title ("Highest".localized), so that is
-    /// what is stored; nil means Off (always ask).
+    /// stored value to the *localized* title ("Balanced".localized), so that
+    /// is what is stored; nil means Off (always ask).
     /// Quick Start and Best Picture are stored as Balanced (what the
     /// quality chooser and Up Next read) with their `SourcePriority`.
     static var autoQuality: GlassSettingsAutoQuality {
@@ -157,11 +157,11 @@ enum GlassSettingsStore {
 
     /// Recognizes a stored value written in any language the app ships (or
     /// the raw English key), so a change of UI language keeps the setting.
-    /// Only the four stored values (Quick Start and Best Picture are
-    /// Balanced there).
+    /// Only Balanced is stored (Quick Start and Best Picture are Balanced
+    /// with their priority); anything else is Off.
     static func autoQuality(fromStored value: String?) -> GlassSettingsAutoQuality {
         guard let value, !value.isEmpty else { return .off }
-        return [GlassSettingsAutoQuality.balanced, .highest, .lowest].first { spellings(of: $0.titleKey).contains(value) } ?? .off
+        return spellings(of: GlassSettingsAutoQuality.balanced.titleKey).contains(value) ? .balanced : .off
     }
 
     /// 0 removes the limit.
@@ -170,9 +170,13 @@ enum GlassSettingsStore {
     }
 
     /// Launch: rewrites a value stored under another UI language (e.g. English
-    /// "Highest" before the app had a French localization) in the current one,
-    /// so the quality chooser still matches it.
+    /// "Balanced" before the app had a French localization) in the current one,
+    /// so the quality chooser still matches it. A retired « Highest » or
+    /// « Lowest » first becomes Best Picture or Quick Start
+    /// (`AutomaticQualityChoice.migrateRetiredChoices`): read as Off here,
+    /// it would have turned into Always Ask.
     static func normalizeStoredAutoQuality() {
+        AutomaticQualityChoice.migrateRetiredChoices(in: defaults)
         guard let stored = defaults.string(forKey: autoQualityKey) else { return }
         let quality = autoQuality(fromStored: stored)
         let canonical: String? = quality == .off ? nil : quality.titleKey.localized

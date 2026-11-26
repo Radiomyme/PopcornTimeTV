@@ -191,9 +191,6 @@
 "Hi-Speed" = "سرعة عالية";
 
 /* (No Commment) */
-"Highest" = "الأعلى";
-
-/* (No Commment) */
 "History" = "تاريخي";
 
 /* (No Commment) */
@@ -222,9 +219,6 @@
 
 /* (No Commment) */
 "Light Gray" = "رمادي خفيف";
-
-/* (No Commment) */
-"Lowest" = "الأقل";
 
 /* (No Commment) */
 "Magenta" = "أرجواني";
@@ -578,8 +572,6 @@
 "Audio and subtitles in these languages are picked automatically when the file or OpenSubtitles offers them." = "يتم اختيار الصوت والترجمة بهذه اللغات تلقائياً عندما يوفرها الملف أو OpenSubtitles.";
 "Choose the source every time; the recommended one is starred." = "اختر المصدر في كل مرة؛ المصدر الموصى به مميز بنجمة.";
 "The best quality that starts quickly." = "أفضل جودة مع بدء تشغيل سريع.";
-"Always the best picture, even if it takes longer to start." = "أفضل صورة دائماً، حتى لو استغرق بدء التشغيل وقتاً أطول.";
-"The smallest file, for the quickest start." = "أصغر ملف، لبدء التشغيل بأسرع ما يمكن.";
 "Detail Pages" = "صفحات التفاصيل";
 "Plays the soundtrack of the movie or the theme of the show on its page." = "يشغّل موسيقى الفيلم أو شارة المسلسل في صفحته.";
 "Theme Songs" = "موسيقى الشارة";
