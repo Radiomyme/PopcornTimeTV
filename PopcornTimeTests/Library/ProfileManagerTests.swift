@@ -80,6 +80,24 @@ final class ProfileManagerTests: CheckedTestCase {
         eq(profiles.scopedKey("preferredAudioLanguage"), "preferredAudioLanguage", "…and the language preferences, under their keys")
     }
 
+    func testAnUpdateKeepsTheLanguagesNoneItHad() {
+        // 5.3.0's « None »: no key. Since 5.4 a missing key is « Automatic ».
+        let updated = MemoryLibraryStorage(["tosAccepted": true, "moviesProgress": ["tt0816692": Float(0.55)] as [String: Any]])
+        _ = manager(updated)
+        eq(updated.object(forKey: "preferredAudioLanguage") as? String, AudioLanguagePreference.noneValue, "the audio stays « None »")
+        eq(updated.object(forKey: "preferredSubtitleLanguage") as? String, AudioLanguagePreference.noneValue, "the subtitles too")
+        updated.set(nil, forKey: "preferredSubtitleLanguage")
+        _ = manager(updated)
+        check(updated.object(forKey: "preferredSubtitleLanguage") == nil, "« Automatic » chosen later stays chosen")
+
+        let fresh = MemoryLibraryStorage()
+        _ = manager(fresh)
+        check(fresh.object(forKey: "preferredAudioLanguage") == nil, "a fresh install starts « Automatic »")
+        let set = storage5x()
+        _ = manager(set)
+        eq(set.object(forKey: "preferredAudioLanguage") as? String, "Français", "a language chosen stays")
+    }
+
     func testTheMigrationRunsOnce() {
         let storage = storage5x()
         let first = manager(storage)

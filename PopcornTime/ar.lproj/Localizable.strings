@@ -977,3 +977,10 @@
 "Profiles.Use.Busy" = "يتوفر بعد إغلاق المشغّل.";
 /* The profile editor: the profile was deleted meanwhile (another window). */
 "Profiles.Error.Gone" = "لم يعد هذا الملف الشخصي موجودًا.";
+/* 5.4.0 review-fixes-2 */
+/* Settings › Audio / Subtitle Language: the choice that follows the language the profile picks itself (the key never set). */
+"Settings.Language.Automatic" = "تلقائي";
+/* The same, naming what it stands for now: « Automatic (French) », « Automatic (Off) ». */
+"Settings.Language.AutomaticNamed" = "تلقائي (%@)";
+/* Settings › Languages: what Automatic does (after the section's footer; under the row on the Apple TV). */
+"Settings.Language.Automatic.Footer" = "يتّبع الخيار التلقائي اللغة التي تختارها غالبًا في المشغّل.";

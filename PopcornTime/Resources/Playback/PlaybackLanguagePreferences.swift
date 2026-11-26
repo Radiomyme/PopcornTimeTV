@@ -86,15 +86,6 @@ enum PlaybackLanguagePreferences {
         #endif
     }
 
-    /// What the profile set in Settings (what the Settings screens show).
-    static var explicitAudioLanguageCode: String? {
-        return storedCode(forKey: audioLanguageDefaultsKey)
-    }
-
-    static var explicitSubtitleLanguageCode: String? {
-        return storedCode(forKey: subtitleLanguageDefaultsKey)
-    }
-
     /// A setting's code (`stored`: what Settings wrote), else the learnt
     /// one — not in place of an explicit « None » (`noneValue`).
     static func effectiveCode(stored: String?, learned: @autoclosure () -> String?) -> String? {
@@ -302,6 +293,104 @@ enum PlaybackLanguagePreferences {
         return pickerLanguageCodes.sorted {
             displayName(forCode: $0).localizedStandardCompare(displayName(forCode: $1)) == .orderedAscending
         }
+    }
+
+    /// What a Settings language row holds. Three states, so the row says
+    /// what the players do: `automatic` (the key never set — the language
+    /// the profile picks itself, once it has one), `none` (« None »
+    /// chosen: nothing, ever) or a language (its ISO code).
+    enum SettingValue: Equatable {
+        case automatic
+        case none
+        case language(String)
+
+        /// What Settings stored (`stored`: the raw value of the key). A
+        /// value no language reads as is what the players treat as never
+        /// set: automatic.
+        init(stored: String?) {
+            if stored == PlaybackLanguagePreferences.noneValue {
+                self = .none
+            } else if let code = stored.flatMap(PlaybackLanguagePreferences.isoCode(for:)) {
+                self = .language(code)
+            } else {
+                self = .automatic
+            }
+        }
+
+        /// The pickers' tag: "auto", "" for « None », else the code.
+        init(tag: String) {
+            switch tag {
+            case PlaybackLanguagePreferences.automaticTag: self = .automatic
+            case "": self = .none
+            default: self = .language(tag)
+            }
+        }
+
+        var tag: String {
+            switch self {
+            case .automatic: return PlaybackLanguagePreferences.automaticTag
+            case .none: return ""
+            case .language(let code): return code
+            }
+        }
+
+        /// What Settings writes (nil: the key removed).
+        var stored: String? {
+            switch self {
+            case .automatic: return nil
+            case .none: return PlaybackLanguagePreferences.noneValue
+            case .language(let code): return PlaybackLanguagePreferences.storedName(forCode: code)
+            }
+        }
+
+        var code: String? {
+            if case .language(let code) = self { return code }
+            return nil
+        }
+    }
+
+    /// The pickers' tag for `SettingValue.automatic`.
+    static let automaticTag = "auto"
+
+    static var audioSetting: SettingValue {
+        return SettingValue(stored: UserDefaults.standard.string(forKey: audioLanguageDefaultsKey))
+    }
+
+    static var subtitleSetting: SettingValue {
+        return SettingValue(stored: UserDefaults.standard.string(forKey: subtitleLanguageDefaultsKey))
+    }
+
+    /// Writes a Settings choice under the active profile's key.
+    static func store(_ value: SettingValue, subtitles: Bool) {
+        let key = subtitles ? subtitleLanguageDefaultsKey : audioLanguageDefaultsKey
+        if let stored = value.stored {
+            UserDefaults.standard.set(stored, forKey: key)
+        } else {
+            UserDefaults.standard.removeObject(forKey: key)
+        }
+        // The release ranking reads the key again: its cache keeps the
+        // value it was made from.
+    }
+
+    /// « Automatic (French) »: the row's name for `automatic`, with the
+    /// language it stands for now — the one the profile picks most, « Off »
+    /// for subtitles it mostly turns off — or plain « Automatic ».
+    static func automaticName(subtitles: Bool) -> String {
+        let bundle = Bundle.main
+        let plain = bundle.localizedString(forKey: "Settings.Language.Automatic", value: "Automatic", table: nil)
+        let learnt: String?
+        #if canImport(PopcornKit)
+        if subtitles, choiceTaste().prefersSubtitlesOff {
+            learnt = bundle.localizedString(forKey: "Off", value: "Off", table: nil)
+        } else {
+            learnt = learnedCode(subtitles ? .subtitle : .audio).map(displayName(forCode:))
+        }
+        #else
+        learnt = nil
+        #endif
+        guard let learnt else { return plain }
+        let format = bundle.localizedString(forKey: "Settings.Language.AutomaticNamed", value: "Automatic (%@)", table: nil)
+        return String(format: format, learnt)
     }
 
     // MARK: - Track-name heuristics (shared by the VLC and AVPlayer paths)
@@ -610,11 +699,6 @@ enum PlaybackLanguagePreferences {
     }
 
     // MARK: - Code / name normalization
-
-    private static func storedCode(forKey key: String) -> String? {
-        guard let value = UserDefaults.standard.string(forKey: key) else { return nil }
-        return isoCode(for: value)
-    }
 
     /// Lowercased, diacritics folded, whitespace collapsed ("Français " → "francais").
     static func normalizedName(_ value: String) -> String {

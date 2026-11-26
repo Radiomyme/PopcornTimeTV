@@ -674,3 +674,10 @@
 "Profiles.Use.Busy" = "Disponible une fois le lecteur fermé.";
 /* The profile editor: the profile was deleted meanwhile (another window). */
 "Profiles.Error.Gone" = "Ce profil n’existe plus.";
+/* 5.4.0 review-fixes-2 */
+/* Settings › Audio / Subtitle Language: the choice that follows the language the profile picks itself (the key never set). */
+"Settings.Language.Automatic" = "Automatique";
+/* The same, naming what it stands for now: « Automatic (French) », « Automatic (Off) ». */
+"Settings.Language.AutomaticNamed" = "Automatique (%@)";
+/* Settings › Languages: what Automatic does (after the section's footer; under the row on the Apple TV). */
+"Settings.Language.Automatic.Footer" = "Automatique suit la langue que vous choisissez le plus souvent dans le lecteur.";

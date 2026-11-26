@@ -86,9 +86,13 @@ struct GlassSettingsHome: Equatable {
 /// What the page does, provided by its host.
 struct GlassSettingsActions {
     var setAutoQuality: (GlassSettingsAutoQuality) -> Void = { _ in }
-    /// nil = no preference.
-    var setAudioLanguage: (String?) -> Void = { _ in }
-    var setSubtitleLanguage: (String?) -> Void = { _ in }
+    /// A language row's choice, as a tag: "auto" (never set: the language
+    /// the profile picks itself), "" (« None »), else an ISO code.
+    var setAudioLanguage: (String) -> Void = { _ in }
+    var setSubtitleLanguage: (String) -> Void = { _ in }
+    /// The "auto" choice's name: « Automatic (French) » with the language
+    /// it stands for now (true: subtitles).
+    var automaticLanguageName: (Bool) -> String = { _ in glassSettingsLocalized("Settings.Language.Automatic") }
     var setThemeSongs: (Bool) -> Void = { _ in }
     /// The stored Theme Songs state, re-read by `refresh()` (a fresh install
     /// turns theme songs on after this page was created). nil: never re-read.
@@ -170,8 +174,9 @@ struct GlassSettingsTasteLine: Identifiable, Equatable {
 /// The page's state. Changes go through the methods, which call the actions.
 final class GlassSettingsModel: ObservableObject {
     @Published private(set) var autoQuality: GlassSettingsAutoQuality
-    @Published private(set) var audioLanguage: String?
-    @Published private(set) var subtitleLanguage: String?
+    /// The language rows' tags (`GlassSettingsActions.setAudioLanguage`).
+    @Published private(set) var audioLanguage: String
+    @Published private(set) var subtitleLanguage: String
     @Published private(set) var themeSongs: Bool
     /// Episode chaining: the next episode starts on its own at the end of
     /// a countdown (off: the card stays, nothing starts by itself).
@@ -199,7 +204,7 @@ final class GlassSettingsModel: ObservableObject {
     let languages: [GlassSettingsLanguage]
     let actions: GlassSettingsActions
 
-    init(autoQuality: GlassSettingsAutoQuality, audioLanguage: String?, subtitleLanguage: String?,
+    init(autoQuality: GlassSettingsAutoQuality, audioLanguage: String, subtitleLanguage: String,
          themeSongs: Bool, version: String, languages: [GlassSettingsLanguage],
          actions: GlassSettingsActions) {
         self.autoQuality = autoQuality
@@ -372,14 +377,14 @@ final class GlassSettingsModel: ObservableObject {
         actions.setAutoQuality(autoQuality)
     }
 
-    func select(audioLanguage code: String?) {
-        audioLanguage = code
-        actions.setAudioLanguage(code)
+    func select(audioLanguage tag: String) {
+        audioLanguage = tag
+        actions.setAudioLanguage(tag)
     }
 
-    func select(subtitleLanguage code: String?) {
-        subtitleLanguage = code
-        actions.setSubtitleLanguage(code)
+    func select(subtitleLanguage tag: String) {
+        subtitleLanguage = tag
+        actions.setSubtitleLanguage(tag)
     }
 
     func toggleThemeSongs() {
@@ -458,10 +463,15 @@ final class GlassSettingsModel: ObservableObject {
         if let stored = actions.readProfile?(), stored != profile { profile = stored }
     }
 
-    func languageName(_ code: String?) -> String {
-        guard let code else { return glassSettingsLocalized("None") }
-        return languages.first { $0.code == code }?.name ?? code
+    /// A language row's value: « Automatic (French) », « None » or the language.
+    func languageName(_ tag: String, subtitles: Bool) -> String {
+        if tag == GlassSettingsModel.automaticTag { return actions.automaticLanguageName(subtitles) }
+        if tag.isEmpty { return glassSettingsLocalized("None") }
+        return languages.first { $0.code == tag }?.name ?? tag
     }
+
+    /// The tag of the language rows' automatic choice.
+    static let automaticTag = "auto"
 }
 
 /// Localizable.strings lookup in the app bundle (English key when missing).
@@ -679,11 +689,11 @@ struct GlassSettingsView: View {
                 .accessibilityIdentifier("Settings.Row.upNextCard")
             GlassSettingsDivider()
             GlassSettingsRow(symbol: "speaker.wave.2.fill", tint: .blue, title: "Audio Language",
-                             value: model.languageName(model.audioLanguage)) { picker = .audio }
+                             value: model.languageName(model.audioLanguage, subtitles: false)) { picker = .audio }
                 .focused($focusedRow, equals: .audio)
             GlassSettingsDivider()
             GlassSettingsRow(symbol: "captions.bubble.fill", tint: .teal, title: "Subtitle Language",
-                             value: model.languageName(model.subtitleLanguage)) { picker = .subtitles }
+                             value: model.languageName(model.subtitleLanguage, subtitles: true)) { picker = .subtitles }
                 .focused($focusedRow, equals: .subtitles)
         }
     }
@@ -844,10 +854,10 @@ struct GlassSettingsView: View {
             GlassSettingsPickerSheet(
                 title: "Audio Language",
                 message: "Choose a preferred audio language. When the file carries a matching audio track, it will be selected automatically.",
-                options: languageOptions,
-                selectedID: model.audioLanguage ?? "",
+                options: languageOptions(subtitles: false),
+                selectedID: model.audioLanguage,
                 onSelect: { id in
-                    model.select(audioLanguage: id.isEmpty ? nil : id)
+                    model.select(audioLanguage: id)
                     self.picker = nil
                 },
                 onCancel: { self.picker = nil })
@@ -855,10 +865,10 @@ struct GlassSettingsView: View {
             GlassSettingsPickerSheet(
                 title: "Subtitle Language",
                 message: "Choose a default language for the player subtitles.",
-                options: languageOptions,
-                selectedID: model.subtitleLanguage ?? "",
+                options: languageOptions(subtitles: true),
+                selectedID: model.subtitleLanguage,
                 onSelect: { id in
-                    model.select(subtitleLanguage: id.isEmpty ? nil : id)
+                    model.select(subtitleLanguage: id)
                     self.picker = nil
                 },
                 onCancel: { self.picker = nil })
@@ -936,9 +946,12 @@ struct GlassSettingsView: View {
         }
     }
 
-    /// "None" (id "") then every language.
-    private var languageOptions: [GlassSettingsPickerSheet.Option] {
-        [.init(id: "", title: glassSettingsLocalized("None"), detail: nil)]
+    /// « Automatic (French) » (what it does, under it), "None" (id "")
+    /// then every language.
+    private func languageOptions(subtitles: Bool) -> [GlassSettingsPickerSheet.Option] {
+        [.init(id: GlassSettingsModel.automaticTag, title: model.languageName(GlassSettingsModel.automaticTag, subtitles: subtitles),
+               detail: glassSettingsLocalized("Settings.Language.Automatic.Footer")),
+         .init(id: "", title: glassSettingsLocalized("None"), detail: nil)]
             + model.languages.map { .init(id: $0.code, title: $0.name, detail: nil) }
     }
 }

@@ -14,8 +14,9 @@ final class GlassSettingsHostingController: UIHostingController<GlassSettingsVie
     init() {
         let actions = GlassSettingsActions(
             setAutoQuality: { GlassSettingsStore.store(autoQuality: $0) },
-            setAudioLanguage: { GlassSettingsStore.store(languageCode: $0, forKey: PlaybackLanguagePreferences.audioLanguageDefaultsKey) },
-            setSubtitleLanguage: { GlassSettingsStore.store(languageCode: $0, forKey: PlaybackLanguagePreferences.subtitleLanguageDefaultsKey) },
+            setAudioLanguage: { PlaybackLanguagePreferences.store(.init(tag: $0), subtitles: false) },
+            setSubtitleLanguage: { PlaybackLanguagePreferences.store(.init(tag: $0), subtitles: true) },
+            automaticLanguageName: { PlaybackLanguagePreferences.automaticName(subtitles: $0) },
             setThemeSongs: { GlassSettingsStore.themeSongs = $0 },
             readThemeSongs: { GlassSettingsStore.themeSongs },
             setAutoPlayNext: { UpNextPreferences.autoPlayNext = $0 },
@@ -60,14 +61,15 @@ final class GlassSettingsHostingController: UIHostingController<GlassSettingsVie
             },
             resetTaste: { ProfileTaste.shared.reset() })
 
-        let audio = PlaybackLanguagePreferences.explicitAudioLanguageCode
-        let subtitles = PlaybackLanguagePreferences.explicitSubtitleLanguageCode
+        // Never set, « None » or a language: three states the rows tell apart.
+        let audio = PlaybackLanguagePreferences.audioSetting
+        let subtitles = PlaybackLanguagePreferences.subtitleSetting
         model = GlassSettingsModel(autoQuality: GlassSettingsStore.autoQuality,
-                                   audioLanguage: audio,
-                                   subtitleLanguage: subtitles,
+                                   audioLanguage: audio.tag,
+                                   subtitleLanguage: subtitles.tag,
                                    themeSongs: GlassSettingsStore.themeSongs,
                                    version: Bundle.main.displayVersion,
-                                   languages: GlassSettingsStore.languages(including: [audio, subtitles]),
+                                   languages: GlassSettingsStore.languages(including: [audio.code, subtitles.code]),
                                    actions: actions)
         #if DEBUG
         // `-PTDebugSettingsRow <row>` (homeLanguages, homeShelves, homeLookup,
@@ -159,13 +161,8 @@ enum GlassSettingsStore {
     }
 
     // MARK: Languages ("preferredAudioLanguage", "preferredSubtitleLanguage")
-
-    /// Stored as the language name in the current UI language ("Français"),
-    /// the convention of the iOS / macOS settings; nil (« None ») as a
-    /// choice too, so a learnt language never takes its place.
-    static func store(languageCode code: String?, forKey key: String) {
-        defaults.set(code.map(PlaybackLanguagePreferences.storedName(forCode:)) ?? PlaybackLanguagePreferences.noneValue, forKey: key)
-    }
+    // Written by `PlaybackLanguagePreferences.store(_:subtitles:)`, as on
+    // the iPhone and the Mac.
 
     /// The picker languages, sorted by name, plus any current choice outside them.
     static func languages(including current: [String?]) -> [GlassSettingsLanguage] {

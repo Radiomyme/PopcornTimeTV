@@ -981,3 +981,10 @@
 "Profiles.Use.Busy" = "Disponível depois que o player for fechado.";
 /* The profile editor: the profile was deleted meanwhile (another window). */
 "Profiles.Error.Gone" = "Este perfil não existe mais.";
+/* 5.4.0 review-fixes-2 */
+/* Settings › Audio / Subtitle Language: the choice that follows the language the profile picks itself (the key never set). */
+"Settings.Language.Automatic" = "Automático";
+/* The same, naming what it stands for now: « Automatic (French) », « Automatic (Off) ». */
+"Settings.Language.AutomaticNamed" = "Automático (%@)";
+/* Settings › Languages: what Automatic does (after the section's footer; under the row on the Apple TV). */
+"Settings.Language.Automatic.Footer" = "Automático segue o idioma que você mais escolhe no player.";

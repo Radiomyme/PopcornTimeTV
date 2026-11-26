@@ -109,10 +109,14 @@ against TMDB). Not yet on a real Apple TV, iPhone, iPad or Mac.
 - **What it does with it**: « For You » on the Home ranks the page's own titles (the catalogues,
   the Top 100s, the genres; not the shelves hidden in Settings › Home) for the profile, in the
   genres it likes, leaving out what it watched, began or listed; it appears once enough is
-  learnt and can be hidden in Settings › Home. A profile that never set an audio or subtitle
-  language gets the one it picks most (four times out of six, say), in every player (VLC, the
-  native player and its own menus); « None » chosen in Settings stays none, and a learnt
-  subtitle language is not turned on for audio already in that language.
+  learnt and can be hidden in Settings › Home. A language row set to « Automatic » (Settings
+  names what it stands for, « Automatic (French) ») gets the language the profile picks most
+  (four times out of six, say), in every player (VLC, the native player and its own menus);
+  « None » chosen in Settings stays none, and a learnt subtitle language is not turned on for
+  audio already in that language, nor for audio of no known language. New profiles and fresh
+  installs start on « Automatic »; an update from 5.3.0 keeps its « None » until « Automatic »
+  is chosen. A learnt English changes no ranking: English chosen in Settings only puts the
+  dubs in other languages below the originals.
   Settings › Profiles › Your Preferences shows what was learnt and resets it; deleting a
   profile deletes it. (`ProfileTaste` in PopcornKit.)
 

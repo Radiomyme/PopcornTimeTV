@@ -78,12 +78,13 @@ struct SettingsView: View {
             }
 
             Section {
-                languagePicker("Audio Language", storage: $preferredAudioLanguage)
-                languagePicker("Subtitle Language", storage: $preferredSubtitleLanguage)
+                languagePicker("Audio Language", storage: $preferredAudioLanguage, subtitles: false)
+                languagePicker("Subtitle Language", storage: $preferredSubtitleLanguage, subtitles: true)
             } header: {
                 Text("Languages")
             } footer: {
                 Text("Audio and subtitles in these languages are picked automatically when the file or OpenSubtitles offers them.")
+                    + Text(verbatim: " ") + Text("Settings.Language.Automatic.Footer")
             }
 
             homeSections
@@ -207,20 +208,24 @@ struct SettingsView: View {
         sendsFollowedShows = Library.shared.isBulkEpisodeLookupEnabled
     }
 
-    /// "None" + common languages (localized names). The selection is the
-    /// ISO code, the stored value the localized name (tvOS convention), so a
-    /// name saved under another UI language still shows up selected.
-    private func languagePicker(_ title: LocalizedStringKey, storage: Binding<String?>) -> some View {
+    /// « Automatic (French) », "None", then common languages (localized
+    /// names). The selection is the ISO code, the stored value the localized
+    /// name (tvOS convention), so a name saved under another UI language
+    /// still shows up selected. Automatic removes the key: the language the
+    /// profile picks itself; « None » is stored as a choice, which a learnt
+    /// language never takes the place of.
+    private func languagePicker(_ title: LocalizedStringKey, storage: Binding<String?>, subtitles: Bool) -> some View {
+        typealias Setting = PlaybackLanguagePreferences.SettingValue
         let selection = Binding<String>(
-            get: { storage.wrappedValue.flatMap(PlaybackLanguagePreferences.isoCode(for:)) ?? "" },
-            // « None » is stored as a choice: a learnt language never takes its place.
-            set: { storage.wrappedValue = $0.isEmpty ? PlaybackLanguagePreferences.noneValue : PlaybackLanguagePreferences.storedName(forCode: $0) }
+            get: { Setting(stored: storage.wrappedValue).tag },
+            set: { storage.wrappedValue = Setting(tag: $0).stored }
         )
         var codes = PlaybackLanguagePreferences.sortedPickerLanguageCodes
-        if !selection.wrappedValue.isEmpty, !codes.contains(selection.wrappedValue) {
-            codes.insert(selection.wrappedValue, at: 0)
+        if let code = Setting(stored: storage.wrappedValue).code, !codes.contains(code) {
+            codes.insert(code, at: 0)
         }
         return Picker(title, selection: selection) {
+            Text(verbatim: PlaybackLanguagePreferences.automaticName(subtitles: subtitles)).tag(PlaybackLanguagePreferences.automaticTag)
             Text("None").tag("")
             ForEach(codes, id: \.self) { code in
                 Text(verbatim: PlaybackLanguagePreferences.displayName(forCode: code)).tag(code)

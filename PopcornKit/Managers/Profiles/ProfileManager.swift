@@ -200,6 +200,7 @@ public final class ProfileManager {
             try? OAuthCredential.delete(withIdentifier: ProfileManager.traktCredentialIdentifier(of: profile.id))
         }
 
+        let isFirstLaunchWithProfiles = storage.object(forKey: ProfileManager.profilesKey) == nil
         var stored: [Profile] = []
         if let data = storage.object(forKey: ProfileManager.profilesKey) as? Data,
            let decoded = try? ProfileManager.decoder.decode([Profile].self, from: data) {
@@ -220,6 +221,30 @@ public final class ProfileManager {
         activeProfileID = active.flatMap { id in stored.contains { $0.id == id } ? id : nil } ?? Profile.primaryID
         if migrated { save() }
         if active != activeProfileID { storage.set(activeProfileID, forKey: ProfileManager.activeKey) }
+        if isFirstLaunchWithProfiles, ProfileManager.isUsedInstall(storage) { keepEarlierNone() }
+    }
+
+    /// Before 5.4, « None » in Settings removed the language keys; since,
+    /// a key never set means « Automatic » (the language the profile picks
+    /// itself) and « None » is stored. An update keeps the meaning a 5.3.0
+    /// install had — nothing, as a « None » chosen — until « Automatic » is
+    /// picked. (A setting never opened can't be told from a « None ».)
+    private func keepEarlierNone() {
+        for key in ProfileManager.languageKeys where storage.object(forKey: key) == nil {
+            storage.set(AudioLanguagePreference.noneValue, forKey: key)
+        }
+    }
+
+    /// The primary profile's language settings (Settings' keys).
+    static let languageKeys = [AudioLanguagePreference.defaultsKey, "preferredSubtitleLanguage"]
+
+    /// The storage holds what a used app writes (as `WhatsNewPolicy` tells
+    /// an update from a fresh install): the terms accepted, a setting,
+    /// watch progress, watched or watchlist entries.
+    static func isUsedInstall(_ storage: ProfileStorage) -> Bool {
+        let settings: Set<String> = ["tosAccepted", "autoSelectQuality", "streamOnCellular", "themeSongVolume"]
+        let usage = ["Progress", "Watchedlist", "Watchlist"]
+        return storage.storedKeys.contains { key in settings.contains(key) || usage.contains { key.hasSuffix($0) } }
     }
 
     // MARK: Reading
