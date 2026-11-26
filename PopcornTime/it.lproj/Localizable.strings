@@ -908,3 +908,26 @@
 "Grid.Service.Refused.Mac" = "TMDB ha rifiutato la tua chiave. Controllala in Impostazioni › Streaming.";
 "Home.Unavailable.Service" = "Impossibile caricare il catalogo di %@";
 "Movies, shows, people" = "Film, serie, persone";
+
+/* Profiles: « Who’s Watching? », the profile editor, Settings */
+"Profiles.WhoIsWatching" = "Chi guarda?";
+"Profiles.Manage" = "Gestisci profili";
+"Profiles.Done" = "Fine";
+"Profiles.Add" = "Aggiungi profilo";
+"Profiles.Edit" = "Modifica profilo";
+"Profiles.New" = "Nuovo profilo";
+"Profiles.Name" = "Nome";
+"Profiles.Avatar" = "Avatar";
+"Profiles.Save" = "Salva";
+"Profiles.Cancel" = "Annulla";
+"Profiles.Delete" = "Elimina profilo";
+"Profiles.Delete.Message" = "La cronologia, Continua a guardare, la lista e le preferenze di %@ verranno eliminate da questo dispositivo.";
+"Profiles.Error.EmptyName" = "Inserisci un nome.";
+"Profiles.Error.DuplicateName" = "Un altro profilo ha già questo nome.";
+"Profiles.Error.TooMany" = "Questo dispositivo ha già il numero massimo di profili.";
+"Profiles.DefaultName" = "Io";
+"Profiles" = "Profili";
+"Profiles.Switch" = "Cambia profilo";
+"Profiles.Footer" = "Ogni profilo ha la propria cronologia, Continua a guardare, lista, lingue audio e sottotitoli e account Trakt.";
+"Profiles.Primary.Note" = "Il profilo principale conserva la cronologia di prima dei profili: si può rinominare, non eliminare.";
+"Profiles.Current" = "Profilo: %@";

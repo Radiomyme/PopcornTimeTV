@@ -39,6 +39,8 @@ struct SettingsView: View {
 
     var body: some View {
         Form {
+            ProfilesSettingsSection()
+
             Section {
                 // Labels only: the stored tags stay "Balanced" / "Highest" /
                 // "Lowest" / "" (the tvOS / macOS settings).

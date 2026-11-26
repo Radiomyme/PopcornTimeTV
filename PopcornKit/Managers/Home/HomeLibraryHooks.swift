@@ -103,25 +103,35 @@ public extension HomeLocalHooks {
     ///   - resumeLimit: Continue Watching cards asked (a shelf shows 30).
     ///   - now: the clock of the "New Episode" / "Upcoming" badges.
     init(library: Library, resumeLimit: Int = 30, now: @escaping () -> Date = Date.init) {
+        self.init(libraryOf: { library }, resumeLimit: resumeLimit, now: now)
+    }
+
+    /// The hooks of whichever library `current` names when they are asked:
+    /// `HomeFeed.shared` follows the active profile's (`Library.shared`).
+    init(libraryOf current: @escaping () -> Library, resumeLimit: Int = 30, now: @escaping () -> Date = Date.init) {
         self.init()
-        prepare = { library.preload() }
+        prepare = { current().preload() }
         continueWatching = {
-            HomeLocalHooks.described(library.continueWatching(limit: resumeLimit).compactMap(HomeItem.init(resuming:)), by: library)
+            let library = current()
+            return HomeLocalHooks.described(library.continueWatching(limit: resumeLimit).compactMap(HomeItem.init(resuming:)), by: library)
         }
         watchlist = {
-            HomeLocalHooks.alternating(library.watchlist(.movie).compactMap(HomeItem.init(watchlisted:)),
+            let library = current()
+            return HomeLocalHooks.alternating(library.watchlist(.movie).compactMap(HomeItem.init(watchlisted:)),
                                        library.watchlist(.show).compactMap(HomeItem.init(watchlisted:)))
         }
         newEpisodes = {
+            let library = current()
             let date = now()
             return HomeLocalHooks.described(library.newEpisodes().compactMap { HomeItem(newEpisodesOf: $0, now: date) }, by: library)
         }
         isWatched = { imdbId, season, episode in
-            library.isWatched(LibraryID.episodeID(showID: imdbId, EpisodeNumber(season: season, episode: episode)))
+            current().isWatched(LibraryID.episodeID(showID: imdbId, EpisodeNumber(season: season, episode: episode)))
         }
         willRefresh = {
             // Only what is older than 6 h is asked; a title is asked until
             // Cinemeta has answered about it.
+            let library = current()
             library.refreshNewEpisodes()
             library.hydrateMissingTitles()
         }
@@ -166,16 +176,27 @@ public extension HomeLocalHooks {
 
 public extension HomeFeed {
 
+    /// Follows whichever library is the active profile's (any library
+    /// posting a change) and recomputes the local shelves when another
+    /// profile becomes active: `HomeFeed.shared`, for the app's life.
+    @discardableResult
+    func followActiveProfile(center: NotificationCenter = .default) -> [NSObjectProtocol] {
+        let library = followChanges(of: nil, center: center)
+        let profile = center.addObserver(forName: .activeProfileDidChange, object: nil, queue: .main) { [weak self] _ in
+            self?.refreshLocal()
+        }
+        return [library, profile]
+    }
+
     /// Recomputes the local shelves whenever `library` changes — a title
     /// played, marked, added to the watchlist or named, airings refreshed
     /// (`.libraryDidChange`) — without any request (`refreshLocal`). A burst
     /// of changes (a season marked watched) recomputes them once.
     ///
     /// The hub does not keep the observation: remove the returned token
-    /// from `center` to stop (`HomeFeed.shared` follows `Library.shared`
-    /// for the app's life).
+    /// from `center` to stop. nil: every library (`followActiveProfile`).
     @discardableResult
-    func followChanges(of library: Library, center: NotificationCenter = .default) -> NSObjectProtocol {
+    func followChanges(of library: Library?, center: NotificationCenter = .default) -> NSObjectProtocol {
         let burst = Burst()
         // No queue: the library posts on the main thread, and a change is
         // only noted here.

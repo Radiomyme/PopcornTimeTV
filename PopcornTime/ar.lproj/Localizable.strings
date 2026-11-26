@@ -911,3 +911,26 @@
 "Grid.Service.Refused.Mac" = "رفض TMDB مفتاحك. تحقق منه في الإعدادات › البث.";
 "Home.Unavailable.Service" = "تعذّر تحميل كتالوج %@";
 "Movies, shows, people" = "أفلام، مسلسلات، أشخاص";
+
+/* Profiles: « Who’s Watching? », the profile editor, Settings */
+"Profiles.WhoIsWatching" = "من يشاهد؟";
+"Profiles.Manage" = "إدارة الملفات الشخصية";
+"Profiles.Done" = "تم";
+"Profiles.Add" = "إضافة ملف شخصي";
+"Profiles.Edit" = "تعديل الملف الشخصي";
+"Profiles.New" = "ملف شخصي جديد";
+"Profiles.Name" = "الاسم";
+"Profiles.Avatar" = "الصورة الرمزية";
+"Profiles.Save" = "حفظ";
+"Profiles.Cancel" = "إلغاء";
+"Profiles.Delete" = "حذف الملف الشخصي";
+"Profiles.Delete.Message" = "سيتم حذف سجل المشاهدة ومتابعة المشاهدة وقائمة المشاهدة وتفضيلات %@ من هذا الجهاز.";
+"Profiles.Error.EmptyName" = "أدخل اسمًا.";
+"Profiles.Error.DuplicateName" = "يحمل ملف شخصي آخر هذا الاسم بالفعل.";
+"Profiles.Error.TooMany" = "يحتوي هذا الجهاز بالفعل على الحد الأقصى من الملفات الشخصية.";
+"Profiles.DefaultName" = "أنا";
+"Profiles" = "الملفات الشخصية";
+"Profiles.Switch" = "تبديل الملف الشخصي";
+"Profiles.Footer" = "لكل ملف شخصي سجل مشاهدة ومتابعة مشاهدة وقائمة مشاهدة ولغات صوت وترجمة وحساب Trakt خاص به.";
+"Profiles.Primary.Note" = "يحتفظ الملف الشخصي الرئيسي بالسجل السابق للملفات الشخصية: يمكن إعادة تسميته وليس حذفه.";
+"Profiles.Current" = "الملف الشخصي: %@";

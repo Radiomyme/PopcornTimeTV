@@ -173,8 +173,34 @@ enum ContinueWatchingBuilder {
 /// on the main thread.
 public final class Library {
 
-    /// The app's library: UserDefaults, the Caches folder, the live hosts.
-    public static let shared: Library = {
+    /// The active profile's library (`ProfileManager`): its keys of the
+    /// standard defaults, the Caches folder (the episode guides are the
+    /// same for every profile), the live hosts. One library per profile,
+    /// made the first time it is asked and kept: switching profiles back and
+    /// forth reads nothing again.
+    public static var shared: Library {
+        return library(for: ProfileManager.shared.activeID)
+    }
+
+    private static let librariesLock = NSLock()
+    private static var libraries: [String: Library] = [:]
+
+    /// A profile's library (kept once made).
+    public static func library(for profileID: String) -> Library {
+        librariesLock.lock(); defer { librariesLock.unlock() }
+        if let library = libraries[profileID] { return library }
+        let library = make(for: profileID)
+        libraries[profileID] = library
+        return library
+    }
+
+    /// Drops a deleted profile's library.
+    static func forget(profileID: String) {
+        librariesLock.lock(); defer { librariesLock.unlock() }
+        libraries[profileID] = nil
+    }
+
+    private static func make(for profileID: String) -> Library {
         #if DEBUG
         // `-PTDebugLibraryInMemory YES` (the tvOS UI tests): the six lists as
         // the launch arguments give them (`-episodesProgress '{ "tt…-s1e2" =
@@ -188,7 +214,8 @@ public final class Library {
         if debug.bool(forKey: "PTDebugLibraryInMemory") || debug.string(forKey: "PTDebugMovieProgress") != nil
             || debug.string(forKey: "PTDebugEpisodeProgress") != nil {
             var lists: [String: Any] = [:]
-            for list in [WatchStateStore.List.movies, .episodes, .shows] {
+            // Only the primary profile gets the launch arguments' lists.
+            for list in [WatchStateStore.List.movies, .episodes, .shows] where profileID == Profile.primaryID {
                 for key in [WatchStateStore.watchedKey(list), WatchStateStore.progressKey(list), WatchStateStore.watchlistKey(list)] {
                     lists[key] = UserDefaults.standard.object(forKey: key)
                 }
@@ -196,8 +223,9 @@ public final class Library {
             return Library(storage: MemoryLibraryStorage(lists), guideDirectory: nil, remote: .live, now: Date.init)
         }
         #endif
-        return Library(storage: UserDefaults.standard, guideDirectory: Library.defaultGuideDirectory, remote: .live, now: Date.init)
-    }()
+        return Library(storage: ProfileManager.shared.storage(for: profileID), deviceStorage: UserDefaults.standard,
+                       guideDirectory: Library.defaultGuideDirectory, remote: .live, now: Date.init)
+    }
 
     public let policy: LibraryPolicy
 
@@ -207,6 +235,9 @@ public final class Library {
     let acknowledgements: NewEpisodesAcknowledgements
 
     private let storage: LibraryStorage
+    /// The device's settings (`isBulkEpisodeLookupEnabled`, a privacy
+    /// choice the Home reads too): the same for every profile.
+    private let deviceStorage: LibraryStorage
     private let remote: LibraryRemote
     private let now: () -> Date
     private let center: NotificationCenter
@@ -227,9 +258,11 @@ public final class Library {
     ///   - guideDirectory: where episode guides are cached; nil = memory only.
     ///   - remote: the network, as closures.
     ///   - now: the clock.
-    public init(storage: LibraryStorage, guideDirectory: URL?, remote: LibraryRemote, policy: LibraryPolicy = .standard,
-                center: NotificationCenter = .default, now: @escaping () -> Date) {
+    ///   - deviceStorage: the device's settings; nil = `storage`.
+    public init(storage: LibraryStorage, deviceStorage: LibraryStorage? = nil, guideDirectory: URL?, remote: LibraryRemote,
+                policy: LibraryPolicy = .standard, center: NotificationCenter = .default, now: @escaping () -> Date) {
         self.storage = storage
+        self.deviceStorage = deviceStorage ?? storage
         self.remote = remote
         self.policy = policy
         self.center = center
@@ -587,8 +620,8 @@ public final class Library {
     public static let bulkEpisodeLookupKey = "libraryBulkEpisodeLookup"
 
     public var isBulkEpisodeLookupEnabled: Bool {
-        get { return (storage.object(forKey: Library.bulkEpisodeLookupKey) as? NSNumber)?.boolValue ?? true }
-        set { storage.set(newValue, forKey: Library.bulkEpisodeLookupKey) }
+        get { return (deviceStorage.object(forKey: Library.bulkEpisodeLookupKey) as? NSNumber)?.boolValue ?? true }
+        set { deviceStorage.set(newValue, forKey: Library.bulkEpisodeLookupKey) }
     }
 
     /// The followed shows with new or upcoming episodes, from what is cached

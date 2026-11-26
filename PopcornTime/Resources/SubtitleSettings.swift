@@ -92,7 +92,8 @@ class SubtitleSettings: NSObject, NSCoding {
     static func migrateLegacyLanguage(defaults: UserDefaults = .standard) {
         guard let data = defaults.data(forKey: "subtitleSettings") else { return }
         defaults.removeObject(forKey: "subtitleSettings")
-        let key = PlaybackLanguagePreferences.subtitleLanguageDefaultsKey
+        // The archive is from before profiles: the primary profile's (plain) key.
+        let key = "preferredSubtitleLanguage"
         guard defaults.object(forKey: key) == nil,
               let unarchiver = try? NSKeyedUnarchiver(forReadingFrom: data) else { return }
         unarchiver.requiresSecureCoding = false

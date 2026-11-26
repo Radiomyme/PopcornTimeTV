@@ -608,3 +608,26 @@
 "Grid.Service.Refused.Mac" = "TMDB refused your key. Check it in Settings › Streaming.";
 "Home.Unavailable.Service" = "The %@ Catalog Can't Load";
 "Movies, shows, people" = "Movies, shows, people";
+
+/* Profiles: « Who’s Watching? », the profile editor, Settings */
+"Profiles.WhoIsWatching" = "Who’s Watching?";
+"Profiles.Manage" = "Manage Profiles";
+"Profiles.Done" = "Done";
+"Profiles.Add" = "Add Profile";
+"Profiles.Edit" = "Edit Profile";
+"Profiles.New" = "New Profile";
+"Profiles.Name" = "Name";
+"Profiles.Avatar" = "Avatar";
+"Profiles.Save" = "Save";
+"Profiles.Cancel" = "Cancel";
+"Profiles.Delete" = "Delete Profile";
+"Profiles.Delete.Message" = "%@’s watch history, Continue Watching, watchlist and preferences will be deleted from this device.";
+"Profiles.Error.EmptyName" = "Enter a name.";
+"Profiles.Error.DuplicateName" = "Another profile already has this name.";
+"Profiles.Error.TooMany" = "This device already has the most profiles it can have.";
+"Profiles.DefaultName" = "Me";
+"Profiles" = "Profiles";
+"Profiles.Switch" = "Switch Profile";
+"Profiles.Footer" = "Each profile has its own watch history, Continue Watching, watchlist, audio and subtitle languages, and Trakt account.";
+"Profiles.Primary.Note" = "The main profile holds the history from before profiles: it can be renamed, not deleted.";
+"Profiles.Current" = "Watching: %@";

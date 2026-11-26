@@ -139,6 +139,17 @@ struct GlassSettingsActions {
     var loadStreamingRegions: (@escaping ([GlassSettingsChoice]) -> Void) -> Void = { done in done([]) }
     /// "France" for "FR".
     var regionName: (String) -> String = { $0 }
+    /// The active profile, re-read by `refresh()`. nil: no Profiles section.
+    var readProfile: (() -> GlassSettingsProfile)? = nil
+    /// « Who's Watching? » over the app; true: in its Manage mode.
+    var showProfiles: (Bool) -> Void = { _ in }
+}
+
+/// The active profile as the Profiles section shows it.
+struct GlassSettingsProfile: Equatable {
+    var name: String
+    var symbol: String
+    var tint: Color
 }
 
 /// The page's state. Changes go through the methods, which call the actions.
@@ -163,6 +174,8 @@ final class GlassSettingsModel: ObservableObject {
     @Published private(set) var streamingRegionChoices: [GlassSettingsChoice]?
     /// A key is being checked with TMDB.
     @Published private(set) var isCheckingTMDBKey = false
+    /// nil: no Profiles section.
+    @Published private(set) var profile: GlassSettingsProfile?
     /// "5.1.0 (2)".
     let version: String
     /// Offered by the language pickers, in display order.
@@ -183,6 +196,7 @@ final class GlassSettingsModel: ObservableObject {
         self.actions = actions
         self.isTraktSignedIn = actions.isTraktSignedIn()
         self.home = actions.readHome?()
+        self.profile = actions.readProfile?()
     }
 
     // MARK: Home
@@ -384,6 +398,7 @@ final class GlassSettingsModel: ObservableObject {
         if let stored = actions.readAutoPlayNext?(), stored != autoPlayNext { autoPlayNext = stored }
         if let stored = actions.readUpNextCardLead?(), stored != upNextCardLead { upNextCardLead = stored }
         if let stored = actions.readHome?(), stored != home { home = stored }
+        if let stored = actions.readProfile?(), stored != profile { profile = stored }
         cacheBytes = nil
         let measure = actions.measureCache
         DispatchQueue.global(qos: .utility).async {
@@ -468,6 +483,7 @@ enum GlassSettingsRowID: Hashable {
     case quality, autoPlayNext, upNextCard, audio, subtitles, themeSongs, clearCache, trakt, version
     case homeLanguages, homeShelves, homeLookup
     case tmdbKey, streamingRegion, streamingServices
+    case switchProfile, manageProfiles
 }
 
 struct GlassSettingsView: View {
@@ -592,6 +608,7 @@ struct GlassSettingsView: View {
                 }
                 .frame(maxWidth: .infinity)
                 VStack(alignment: .leading, spacing: 44) {
+                    if model.profile != nil { profilesSection }
                     if model.home != nil { homeSection }
                     if model.home != nil { streamingSection }
                     storageSection
@@ -696,6 +713,22 @@ struct GlassSettingsView: View {
             }
             .focused($focusedRow, equals: .streamingServices)
             .accessibilityIdentifier("Settings.Row.streamingServices")
+        }
+    }
+
+    private var profilesSection: some View {
+        GlassSettingsSection(title: "Profiles", footer: "Profiles.Footer") {
+            if let profile = model.profile {
+                GlassSettingsRow(symbol: profile.symbol, tint: profile.tint, title: "Profiles.Switch",
+                                 value: profile.name) { model.actions.showProfiles(false) }
+                    .focused($focusedRow, equals: .switchProfile)
+                    .accessibilityIdentifier("Settings.Row.switchProfile")
+                GlassSettingsDivider()
+                GlassSettingsRow(symbol: "person.2.fill", tint: .indigo, title: "Profiles.Manage",
+                                 value: nil) { model.actions.showProfiles(true) }
+                    .focused($focusedRow, equals: .manageProfiles)
+                    .accessibilityIdentifier("Settings.Row.manageProfiles")
+            }
         }
     }
 

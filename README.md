@@ -81,6 +81,22 @@ against TMDB). Not yet on a real Apple TV, iPhone, iPad or Mac.
 - **The tvOS build with Xcode 26.2**: PopcornKit's module verifier is off (it rejected the
   CocoaPods search paths) and a local name that hid a method is renamed.
 
+**Profiles — « Who's Watching? » (Apple TV, iPhone / iPad, Mac)**
+- **Who has what**: up to five profiles, each with a name and an avatar, and its own watched
+  marks, playback positions and Continue Watching (the release to resume included), watchlist,
+  new episodes already seen, preferred audio and subtitle languages, and Trakt account. The Home's
+  languages and shelves, the streaming services and TMDB key, the quality and Up Next settings,
+  the downloads and the caches stay the device's. The Top Shelf reads no user data (the extension
+  cannot read the app's), so nothing changes there.
+- **Where**: « Who's Watching? » at launch once the device has two profiles (not for a link
+  opened from the Top Shelf: the last profile watches it); Settings › Profiles › Switch Profile /
+  Manage Profiles to add, rename, change the avatar or delete one.
+- **Nothing to migrate by hand**: the history from before profiles becomes the main profile's,
+  under the very keys it was stored with (nothing is copied, an older build still reads it). The
+  main profile can be renamed, not deleted; the others keep their keys behind their own prefix
+  (`profile.<id>.…`), and deleting one removes them and its Trakt credential.
+  (`ProfileManager` in PopcornKit; `Library.shared` is the active profile's library.)
+
 ## New in 5.3.0
 
 The same notes are shown once in the app after the update (`WhatsNewRelease.current` in

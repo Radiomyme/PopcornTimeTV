@@ -79,15 +79,21 @@ enum HomeDebug {
                                                delay: defaults.double(forKey: "PTDebugHomeDelay"),
                                                isOffline: { offline })
         let feed = HomeFeed(store: HomeStore(directory: directory, now: { now }), transport: transport,
-                            hooks: HomeLocalHooks(library: .shared, now: { now }), options: options, now: { now })
-        feed.followChanges(of: .shared)
+                            hooks: HomeLocalHooks(libraryOf: { Library.shared }, now: { now }), options: options, now: { now })
+        feed.followActiveProfile()
         print("[Home] hub fed from \(folder)\(offline ? ", offline" : "")")
         return HomeState(feed: feed)
     }
 
     /// `-PTDebugHomeResume`: titles in progress, written through the same
     /// entry point as the players, into a library kept in memory.
+    private static var seeded = false
+
+    /// Once per launch: into the profile active when the Home is first made
+    /// (a Home made again for another profile does not get them).
     private static func seedResumeEntries() {
+        guard !seeded else { return }
+        seeded = true
         guard let entries = defaults.string(forKey: "PTDebugHomeResume"), !entries.isEmpty else { return }
         guard defaults.bool(forKey: "PTDebugLibraryInMemory") else {
             return print("[Home] -PTDebugHomeResume needs -PTDebugLibraryInMemory YES: nothing seeded")

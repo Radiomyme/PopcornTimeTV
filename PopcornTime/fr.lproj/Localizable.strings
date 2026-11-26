@@ -608,3 +608,26 @@
 "Grid.Service.Refused.Mac" = "TMDB a refusé votre clé. Vérifiez-la dans Réglages › Streaming.";
 "Home.Unavailable.Service" = "Le catalogue %@ ne peut pas se charger";
 "Movies, shows, people" = "Films, séries, personnes";
+
+/* Profiles: « Who’s Watching? », the profile editor, Settings */
+"Profiles.WhoIsWatching" = "Qui regarde ?";
+"Profiles.Manage" = "Gérer les profils";
+"Profiles.Done" = "Terminé";
+"Profiles.Add" = "Ajouter un profil";
+"Profiles.Edit" = "Modifier le profil";
+"Profiles.New" = "Nouveau profil";
+"Profiles.Name" = "Nom";
+"Profiles.Avatar" = "Avatar";
+"Profiles.Save" = "Enregistrer";
+"Profiles.Cancel" = "Annuler";
+"Profiles.Delete" = "Supprimer le profil";
+"Profiles.Delete.Message" = "L’historique, la reprise, la liste et les préférences de %@ seront supprimés de cet appareil.";
+"Profiles.Error.EmptyName" = "Saisissez un nom.";
+"Profiles.Error.DuplicateName" = "Un autre profil porte déjà ce nom.";
+"Profiles.Error.TooMany" = "Cet appareil a déjà le nombre maximal de profils.";
+"Profiles.DefaultName" = "Moi";
+"Profiles" = "Profils";
+"Profiles.Switch" = "Changer de profil";
+"Profiles.Footer" = "Chaque profil a son historique, sa reprise de lecture, sa liste, ses langues audio et de sous-titres, et son compte Trakt.";
+"Profiles.Primary.Note" = "Le profil principal garde l’historique d’avant les profils : il peut être renommé, pas supprimé.";
+"Profiles.Current" = "Profil : %@";
