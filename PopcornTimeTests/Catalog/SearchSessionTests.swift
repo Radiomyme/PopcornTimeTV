@@ -91,6 +91,11 @@ final class SearchSessionTests: CheckedTestCase {
         check(s.begin("dune 3") != nil, "a failed query can be sent again")
     }
 
+    func testTheQueryIsQuotedAsTheLanguageQuotes() {
+        eq("Dune".quotedForDisplay(locale: Locale(identifier: "fr_FR")), "«\u{00A0}Dune\u{00A0}»", "French guillemets, spaced")
+        eq("Dune".quotedForDisplay(locale: Locale(identifier: "en_US")), "“Dune”", "English quotes")
+    }
+
     func testAnEmptyAnswerWithASourceLeftOutCanBeAskedAgain() {
         var s = session()
         let token = s.begin("qxzvbnwpl")!

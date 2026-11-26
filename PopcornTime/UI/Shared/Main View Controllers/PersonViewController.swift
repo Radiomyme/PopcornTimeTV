@@ -53,9 +53,7 @@ class PersonViewController: MainViewController {
     }
     
     override func collectionView(isEmptyForUnknownReason collectionView: UICollectionView) {
-        let openQuote = Locale.current.quotationBeginDelimiter ?? "\""
-        let closeQuote = Locale.current.quotationEndDelimiter ?? "\""
         collectionViewController.showMessage(title: "No results".localized,
-                                             body: .localizedStringWithFormat("We didn't turn anything up for %@. Try something else.".localized, "\(openQuote + currentItem.name + closeQuote)"))
+                                             body: .localizedStringWithFormat("We didn't turn anything up for %@. Try something else.".localized, currentItem.name.quotedForDisplay()))
     }
 }

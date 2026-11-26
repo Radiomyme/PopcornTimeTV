@@ -204,7 +204,7 @@ struct MacSearchView: View {
                 Label { Text("No results") } icon: { Image(systemName: "magnifyingglass") }
             } description: {
                 Text(verbatim: String(format: "We didn't turn anything up for %@. Try something else.".localized,
-                                      "“\(model.session.query)”"))
+                                      model.session.query.quotedForDisplay()))
             }
         case .failed(let message):
             ContentUnavailableView {

@@ -210,10 +210,8 @@ class SearchViewController: MainViewController, UISearchBarDelegate {
         // blank one ("No results for "   "" used to show for a space), and
         // the query as it was searched, without the field's spaces.
         guard session.phase == .empty, !session.query.isEmpty else { return }
-        let openQuote = Locale.current.quotationBeginDelimiter ?? "\""
-        let closeQuote = Locale.current.quotationEndDelimiter ?? "\""
         collectionViewController.showMessage(title: "No results".localized,
-                                             body: .localizedStringWithFormat("We didn't turn anything up for %@. Try something else.".localized, "\(openQuote + session.query + closeQuote)"))
+                                             body: .localizedStringWithFormat("We didn't turn anything up for %@. Try something else.".localized, session.query.quotedForDisplay()))
     }
 
     #if DEBUG
