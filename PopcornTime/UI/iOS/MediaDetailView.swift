@@ -1705,12 +1705,15 @@ struct MediaDetailView: View {
             // "Always Ask": the quality sheet, never a silent pick.
             presentQualityPicker(for: viewModel.defaultPlaybackMedia ?? media, torrents: torrents)
             return
-        case "Highest": pick = torrents.first
+        // Highest / Lowest choose among the releases in the preferred audio
+        // language when there are seeded ones (`preferredLanguagePool`).
+        case "Highest": pick = Torrent.preferredLanguagePool(torrents).first
         case "Lowest":
             // Smallest resolution bucket, best-playing release inside it
             // (the list is sorted best first, so its first entry wins).
-            let lowestBucket = torrents.last?.qualityValue
-            pick = torrents.first(where: { $0.qualityValue == lowestBucket })
+            let pool = Torrent.preferredLanguagePool(torrents)
+            let lowestBucket = pool.last?.qualityValue
+            pick = pool.first(where: { $0.qualityValue == lowestBucket })
         default:        pick = Torrent.balancedPick(from: torrents)  // Balanced
         }
         if let pick = pick { requestPlay(pick, media: viewModel.defaultPlaybackMedia ?? media, sources: torrents) }

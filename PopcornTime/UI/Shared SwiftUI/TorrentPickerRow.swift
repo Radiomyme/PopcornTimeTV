@@ -31,6 +31,15 @@ struct TorrentPickerRow: View {
                         .font(.subheadline.weight(.semibold))
                         .lineLimit(1)
                         .truncationMode(.middle)
+                    if let language = torrent.languageBadge {
+                        Text(verbatim: language)
+                            .font(.caption2.weight(.bold))
+                            .padding(.horizontal, 6).padding(.vertical, 2)
+                            .overlay(Capsule().stroke(.secondary, lineWidth: 1))
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                            .fixedSize()
+                    }
                     if recommended {
                         Text(verbatim: NSLocalizedString("Picker.Recommended", value: "Recommended",
                                                          comment: "Quality picker: badge of the recommended release"))

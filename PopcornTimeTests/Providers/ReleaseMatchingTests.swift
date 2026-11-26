@@ -601,3 +601,102 @@ final class ReleaseMatchingTests: CheckedTestCase {
         }
     }
 }
+
+// MARK: - Audio language of a release
+
+/// `ReleaseLanguages` (PopcornKit/Models/Torrent.swift) and how the torrent
+/// lists favour the preferred audio language (`AudioLanguagePreference`):
+/// the ranking, `balancedPick`, `preferredLanguagePool`, the language slots
+/// of `TorrentioClient.merge` and the dubbed season packs Torrentio keeps.
+final class ReleaseLanguageTests: XCTestCase {
+
+    override func tearDown() {
+        AudioLanguagePreference.override = nil
+        super.tearDown()
+    }
+
+    private func magnet(_ name: String, _ hash: Character) -> String {
+        let dn = name.addingPercentEncoding(withAllowedCharacters: .alphanumerics) ?? name
+        return "magnet:?xt=urn:btih:\(String(repeating: hash, count: 40))&dn=\(dn)"
+    }
+
+    private func torrent(_ name: String, _ hash: Character, quality: String, seeds: Int, size: String = "2 GB") -> Torrent {
+        return Torrent(url: magnet(name, hash), quality: quality, seeds: seeds, size: size)
+    }
+
+    func testNamesGiveAudioLanguages() {
+        func parse(_ name: String) -> ReleaseLanguages { ReleaseLanguages.parse(name) }
+        XCTAssertEqual(parse("Interstellar.2014.MULTi.1080p.BluRay.x264-LOST"), ReleaseLanguages(isMulti: true))
+        XCTAssertEqual(parse("Interstellar.2014.MULTI.VFF.1080p.BluRay.REMUX-Asgardia").codes, ["fr"])
+        XCTAssertEqual(parse("Interstellar.2014.TRUEFRENCH.BRRip.XviD-Slay3R").codes, ["fr"])
+        XCTAssertEqual(parse("Breaking Bad Saison 1 FRENCH HDTV").codes, ["fr"])
+        XCTAssertEqual(parse("Breaking Bad (Integrale) VOSTFR + FRENCH 720p HDTV").codes, ["fr"])
+        XCTAssertEqual(parse("Dune.2021.iTALiAN.1080p.WEB-DL").codes, ["it"])
+        XCTAssertEqual(parse("Coco.2017.1080p.CASTELLANO.BluRay").codes, ["es"])
+        // Titles, subtitles and untagged names name no audio language.
+        XCTAssertTrue(parse("The.French.Dispatch.2021.1080p.WEB-DL.x264").isEmpty)
+        XCTAssertTrue(parse("The.Italian.Job.2003.720p.BluRay").isEmpty)
+        XCTAssertTrue(parse("Interstellar.2014.FANSUB.VOSTFR.BDRIP.XVID").isEmpty)
+        XCTAssertTrue(parse("Interstellar - Sci-Fi 2014 Eng Ita Multi-Subs 1080p").isEmpty)
+        XCTAssertTrue(parse("Interstellar.2014.1080p.BluRay.x264-SPARKS").isEmpty)
+    }
+
+    func testTorrentioFlagsAndSubtitledReleases() {
+        XCTAssertEqual(ReleaseLanguages.parse(flags: "Multi Audio / 🇫🇷 / 🇮🇹"), ReleaseLanguages(codes: ["fr", "it"], isMulti: true))
+        func stream(_ title: String) -> [String: Any] {
+            return ["infoHash": String(repeating: "a", count: 40), "title": title, "fileIdx": 0]
+        }
+        let dubbed = stream("Interstellar.2014.MULTi.1080p.BluRay.x264-LOST\n👤 27 💾 13.12 GB ⚙️ Torrent9\nMulti Audio / 🇫🇷")
+        XCTAssertEqual(TorrentioClient.torrent(fromStream: dubbed)?.audioLanguages, ReleaseLanguages(codes: ["fr"], isMulti: true))
+        // Torrentio flags a VOSTFR release 🇫🇷: its audio is the original.
+        let subtitled = stream("Breaking.Bad 1-6\nbreaking bad season 1/Breaking.Bad.S01E01.vostfr.720p.mkv\n👤 3 💾 1.09 GB ⚙️ MagnetDL\n🇫🇷")
+        XCTAssertEqual(TorrentioClient.audioLanguages(ofStream: subtitled).codes, [])
+        let both = stream("Breaking Bad (Integrale) VOSTFR + FRENCH 720p HDTV\n👤 9 💾 1 GB ⚙️ Torrent9\n🇫🇷")
+        XCTAssertEqual(TorrentioClient.audioLanguages(ofStream: both).codes, ["fr"])
+    }
+
+    func testRankingAndPicksFavourThePreferredLanguage() {
+        let english = torrent("Interstellar.2014.1080p.BluRay.x264-SPARKS", "a", quality: "1080p", seeds: 400)
+        let french = torrent("Interstellar.2014.MULTI.VFF.1080p.BluRay.x264-LOST", "b", quality: "1080p", seeds: 27)
+        let uhd = torrent("Interstellar.2014.2160p.UHD.BluRay.x265-TERMINAL", "c", quality: "2160p", seeds: 300, size: "12 GB")
+        let all = [english, french, uhd]
+
+        AudioLanguagePreference.override = .some(nil)
+        XCTAssertEqual(all.sorted(by: <).map(\.url), [french, english, uhd].map(\.url))
+        XCTAssertEqual(Torrent.preferredLanguagePool(all).count, 3)
+
+        AudioLanguagePreference.override = "fr"
+        XCTAssertEqual(all.sorted(by: <).map(\.url), [english, french, uhd].map(\.url), "VF first inside 1080p")
+        XCTAssertEqual(Torrent.balancedPick(from: all, connection: nil)?.url, french.url, "a healthy VF beats an English UHD")
+        XCTAssertEqual(Torrent.preferredLanguagePool(all).map(\.url), [french.url])
+
+        // English preference: nothing is favoured.
+        AudioLanguagePreference.override = "en"
+        XCTAssertNil(AudioLanguagePreference.current)
+    }
+
+    func testMergeKeepsSlotsForThePreferredLanguage() {
+        let english = (0..<6).map { torrent("Interstellar.2014.1080p.BluRay.x264-G\($0)", Character("\($0)"), quality: "1080p", seeds: 500 - $0) }
+        let french = torrent("Interstellar.2014.MULTI.VFF.1080p.BluRay.x264-LOST", "f", quality: "1080p", seeds: 27)
+        let aggregated = english + [french]
+
+        AudioLanguagePreference.override = .some(nil)
+        XCTAssertFalse(TorrentioClient.merge([], with: aggregated).contains { $0.url == french.url })
+        AudioLanguagePreference.override = "fr"
+        XCTAssertTrue(TorrentioClient.merge([], with: aggregated).contains { $0.url == french.url })
+    }
+
+    func testDubbedSeasonPacksStayForTheirLanguage() {
+        let pack: [String: Any] = [
+            "infoHash": String(repeating: "d", count: 40), "fileIdx": 0,
+            "title": "Breaking Bad Saison 1 FRENCH HDTV\nBreaking.Bad.S01E01.FRENCH.DVDRip.XviD-JMT.avi\n👤 64 💾 548.16 MB ⚙️ Torrent9\n🇫🇷",
+            "behaviorHints": ["filename": "Breaking.Bad.S01E01.FRENCH.DVDRip.XviD-JMT.avi"],
+        ]
+        XCTAssertTrue(TorrentioClient.keepsPack(pack, language: "fr"))
+        XCTAssertFalse(TorrentioClient.keepsPack(pack, language: nil))
+        XCTAssertFalse(TorrentioClient.keepsPack(pack, language: "it"))
+        var unselected = pack
+        unselected["fileIdx"] = nil
+        XCTAssertFalse(TorrentioClient.keepsPack(unselected, language: "fr"))
+    }
+}

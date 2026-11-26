@@ -146,6 +146,8 @@ final class UpNextTVLink {
             label += "  ·  \(torrent.seeds) seeds"
             if let size = torrent.size, !size.isEmpty { label += "  ·  \(size)" }
             if let source = torrent.sourceLabel { label += "  ·  \(source)" }
+            // The language first: tvOS cuts the middle of a row too long.
+            if let language = torrent.languageBadge { label = "[\(language)]  " + label }
             if torrent.url == plan.torrent?.url { label = "⭐︎ " + label }
             let action = UIAlertAction(title: label, style: .default) { [weak session] _ in
                 print("[UpNext] chooser: \(torrent.quality ?? "?") picked")
