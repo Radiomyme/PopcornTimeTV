@@ -607,7 +607,6 @@
 "Grid.Service.Refused" = "TMDB refused your key. Check it in Settings › Streaming Services.";
 "Grid.Service.Refused.Mac" = "TMDB refused your key. Check it in Settings › Streaming.";
 "Home.Unavailable.Service" = "The %@ Catalog Can't Load";
-"Movies, shows, people" = "Movies, shows, people";
 
 /* Profiles: « Who’s Watching? », the profile editor, Settings */
 "Profiles.WhoIsWatching" = "Who’s Watching?";
@@ -660,3 +659,7 @@
 "Picker.Audio.Spoken" = "Audio in %@";
 /* Quality pickers, VoiceOver: the MULTI tag */
 "Picker.Multi.Spoken" = "Several audio tracks";
+
+/* 5.4.0 b-search */
+"Search.MoviesFailed" = "Movies couldn’t be loaded.";
+"Search.ShowsFailed" = "Shows couldn’t be loaded.";

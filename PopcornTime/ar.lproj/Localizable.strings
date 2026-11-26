@@ -910,7 +910,6 @@
 "Grid.Service.Refused" = "رفض TMDB مفتاحك. تحقق منه في الإعدادات › خدمات البث.";
 "Grid.Service.Refused.Mac" = "رفض TMDB مفتاحك. تحقق منه في الإعدادات › البث.";
 "Home.Unavailable.Service" = "تعذّر تحميل كتالوج %@";
-"Movies, shows, people" = "أفلام، مسلسلات، أشخاص";
 
 /* Profiles: « Who’s Watching? », the profile editor, Settings */
 "Profiles.WhoIsWatching" = "من يشاهد؟";
@@ -963,3 +962,7 @@
 "Picker.Audio.Spoken" = "الصوت باللغة %@";
 /* Quality pickers, VoiceOver: the MULTI tag */
 "Picker.Multi.Spoken" = "عدة مسارات صوتية";
+
+/* 5.4.0 b-search */
+"Search.MoviesFailed" = "تعذّر تحميل الأفلام.";
+"Search.ShowsFailed" = "تعذّر تحميل المسلسلات.";

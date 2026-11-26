@@ -914,7 +914,6 @@
 "Grid.Service.Refused" = "TMDB rechazó tu clave. Revísala en Ajustes › Servicios de streaming.";
 "Grid.Service.Refused.Mac" = "TMDB rechazó tu clave. Revísala en Ajustes › Streaming.";
 "Home.Unavailable.Service" = "No se puede cargar el catálogo de %@";
-"Movies, shows, people" = "Películas, series, personas";
 
 /* Profiles: « Who’s Watching? », the profile editor, Settings */
 "Profiles.WhoIsWatching" = "¿Quién está viendo?";
@@ -967,3 +966,7 @@
 "Picker.Audio.Spoken" = "Audio en %@";
 /* Quality pickers, VoiceOver: the MULTI tag */
 "Picker.Multi.Spoken" = "Varias pistas de audio";
+
+/* 5.4.0 b-search */
+"Search.MoviesFailed" = "No se pudieron cargar las películas.";
+"Search.ShowsFailed" = "No se pudieron cargar las series.";

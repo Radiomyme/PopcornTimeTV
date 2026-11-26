@@ -16,6 +16,10 @@ extension SearchViewController {
         
         collectionViewController.delegate = self
         collectionViewController.paginated = false
+        // One row of movies, one row of shows, both on the first screen:
+        // stacked as grids, the shows came after every row of movies.
+        collectionViewController.loadViewIfNeeded()
+        collectionViewController.layOutAsRows()
 
         searchController = UISearchController(searchResultsController: collectionViewController)
         searchController.hidesNavigationBarDuringPresentation = false
@@ -24,9 +28,10 @@ extension SearchViewController {
         }
         
         searchBar = searchController.searchBar
-        // No scope bar: a search looks for movies, shows and people at once.
+        // No scope bar: a search looks for movies and shows at once. The
+        // same words as the iPhone's and the Mac's search fields.
         searchBar.showsScopeBar = false
-        searchBar.placeholder = "Movies, shows, people".localized
+        searchBar.placeholder = "Movie or show title".localized
         searchBar.delegate = self
         searchBar.keyboardAppearance = .dark
         searchBar.searchBarStyle = .minimal
@@ -54,8 +59,8 @@ extension SearchViewController {
             // ambiguous frame on tvOS — the search keyboard renders fine but
             // the focus engine can't move down into the results collection
             // view (it sees a 0-height results region). Pinning the
-            // container to fill the parent makes the keyboard → scope tabs
-            // → results focus chain work end to end.
+            // container to fill the parent makes the keyboard → results
+            // focus chain work end to end.
             container.view.translatesAutoresizingMaskIntoConstraints = false
             NSLayoutConstraint.activate([
                 container.view.topAnchor.constraint(equalTo: view.topAnchor),
@@ -77,13 +82,12 @@ extension SearchViewController {
     /// The results scrolled down take the keyboard and the search bar with
     /// them, off the screen: from the first row, Up found nothing above and
     /// the focus stayed there (Menu then left the app). Back on the first
-    /// row, the results scroll back to their top, the search bar with them,
-    /// so the next Up reaches the keyboard, then the tab bar.
+    /// row (the first section: each one is a row), the results scroll back
+    /// to their top, the search bar with them, so the next Up reaches the
+    /// keyboard, then the tab bar.
     private func revealSearchBarIfFirstRow(_ view: UIView?) {
         guard let cv = collectionViewController?.collectionView, let cell = view as? UICollectionViewCell,
-              cell.isDescendant(of: cv), cv.numberOfSections > 0, cv.numberOfItems(inSection: 0) > 0,
-              let firstRow = cv.layoutAttributesForItem(at: IndexPath(item: 0, section: 0))?.frame,
-              abs(cell.frame.minY - firstRow.minY) < 1 else { return }
+              cell.isDescendant(of: cv), cv.indexPath(for: cell)?.section == 0 else { return }
         let top = -cv.adjustedContentInset.top
         guard cv.contentOffset.y > top + 1 else { return }
         DispatchQueue.main.async {

@@ -914,7 +914,6 @@
 "Grid.Service.Refused" = "O TMDB recusou sua chave. Verifique-a em Ajustes › Serviços de streaming.";
 "Grid.Service.Refused.Mac" = "O TMDB recusou sua chave. Verifique-a em Ajustes › Streaming.";
 "Home.Unavailable.Service" = "Não foi possível carregar o catálogo de %@";
-"Movies, shows, people" = "Filmes, séries, pessoas";
 
 /* Profiles: « Who’s Watching? », the profile editor, Settings */
 "Profiles.WhoIsWatching" = "Quem está assistindo?";
@@ -967,3 +966,7 @@
 "Picker.Audio.Spoken" = "Áudio em %@";
 /* Quality pickers, VoiceOver: the MULTI tag */
 "Picker.Multi.Spoken" = "Várias faixas de áudio";
+
+/* 5.4.0 b-search */
+"Search.MoviesFailed" = "Não foi possível carregar os filmes.";
+"Search.ShowsFailed" = "Não foi possível carregar as séries.";
