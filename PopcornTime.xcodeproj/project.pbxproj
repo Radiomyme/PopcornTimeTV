@@ -87,6 +87,7 @@
 		1ABD9C745166D5D97847CB30 /* HomeHeroPager.swift in Sources */ = {isa = PBXBuildFile; fileRef = E9A1E5C4E19387B8694683C3 /* HomeHeroPager.swift */; };
 		1AC041EC46699C489B4E2DE4 /* HomeFixtures.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7EECEB654566C70D36309FE3 /* HomeFixtures.swift */; };
 		1AD7F9EFF746F69B6EB62F56 /* Top100Resolver.swift in Sources */ = {isa = PBXBuildFile; fileRef = E21D3391F815239A6A11AAB6 /* Top100Resolver.swift */; };
+		1AE2D58BC60AF7D134483936 /* GlassDownloadsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E3642F5F49056694F452C409 /* GlassDownloadsView.swift */; };
 		1B513EAF229EC73DF065E2E9 /* ArtworkURL.swift in Sources */ = {isa = PBXBuildFile; fileRef = 76D0172019B30A3CF3E7C46C /* ArtworkURL.swift */; };
 		1B98416F49CA0F67F7307870 /* PlaybackLanguagePreferences.swift in Sources */ = {isa = PBXBuildFile; fileRef = 545ED3913E5BBCC7F92D03A2 /* PlaybackLanguagePreferences.swift */; };
 		1BB8C6E5ACB80F4000D81D3D /* Torrent.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4D0F9D211E6F298000860852 /* Torrent.swift */; };
@@ -228,6 +229,7 @@
 		4555B56A59D72438CFA1FAB4 /* GridUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 35007AEB3FD93A8028019B4D /* GridUITests.swift */; };
 		4662246A4FFB09DBBD8B2932 /* Dictionary+Extension.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4DA42DD11DD8EF7A00933A10 /* Dictionary+Extension.swift */; };
 		47B4719BEE70F041913B00D0 /* ShowManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4D0F9D081E6F296400860852 /* ShowManager.swift */; };
+		47F38E899AB0E538123969A7 /* DownloadsStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2464A46F5144EEC990D42E0 /* DownloadsStore.swift */; };
 		48B830EC7270C5FC30750018 /* JSONValue.swift in Sources */ = {isa = PBXBuildFile; fileRef = B9A5B2894233AEB853E7A1E1 /* JSONValue.swift */; };
 		48D1BD31031B5260E652CBA5 /* GlassSettingsHostingController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 75533C77215A85953E8365E9 /* GlassSettingsHostingController.swift */; };
 		4947EFF0ACB302B9EED1A927 /* CellularStreamingPolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = C6CEE8B378B84F46EAD207EE /* CellularStreamingPolicy.swift */; };
@@ -1434,6 +1436,7 @@
 		9FB14CFA7FB736D1431C02F1 /* BandwidthDeficit.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = BandwidthDeficit.swift; path = BandwidthDeficit.swift; sourceTree = "<group>"; };
 		A10F45D737346813E820B91F /* LibraryRemote.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = LibraryRemote.swift; path = PopcornKit/Managers/Library/LibraryRemote.swift; sourceTree = SOURCE_ROOT; };
 		A1D548ED413774C8B36C1161 /* RemuxEvictionTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = RemuxEvictionTests.swift; path = PopcornTimeTests/Playback/RemuxEvictionTests.swift; sourceTree = SOURCE_ROOT; };
+		A2464A46F5144EEC990D42E0 /* DownloadsStore.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = DownloadsStore.swift; path = PopcornTime/UI/tvOS/Glass/DownloadsStore.swift; sourceTree = SOURCE_ROOT; };
 		A2DB4760845DED36CBAD57A4 /* TopShelfLoader.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = TopShelfLoader.swift; path = TopShelf/TopShelfLoader.swift; sourceTree = SOURCE_ROOT; };
 		A3415FA64C1EEF64F3CA1ECE /* BoundedRewindFloorTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = BoundedRewindFloorTests.swift; path = PopcornTimeTests/Playback/BoundedRewindFloorTests.swift; sourceTree = SOURCE_ROOT; };
 		A3ADADC9F10FDF6C0BDD6D1F /* TopShelfModel.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = TopShelfModel.swift; path = TopShelf/TopShelfModel.swift; sourceTree = SOURCE_ROOT; };
@@ -1519,6 +1522,7 @@
 		E2947FA51602965F696AF3C8 /* UpNextSession.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = UpNextSession.swift; path = PopcornTime/Resources/Playback/UpNextSession.swift; sourceTree = SOURCE_ROOT; };
 		E2F3DB8D9527EEE830BDE66D /* VLCDemuxChoiceTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = VLCDemuxChoiceTests.swift; path = PopcornTimeTests/Playback/VLCDemuxChoiceTests.swift; sourceTree = SOURCE_ROOT; };
 		E34980F0878DEB773B58CD64 /* ContinueWatchingTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = ContinueWatchingTests.swift; path = PopcornTimeTests/Library/ContinueWatchingTests.swift; sourceTree = SOURCE_ROOT; };
+		E3642F5F49056694F452C409 /* GlassDownloadsView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = GlassDownloadsView.swift; path = PopcornTime/UI/tvOS/Glass/GlassDownloadsView.swift; sourceTree = SOURCE_ROOT; };
 		E38A8C092311013400C4BC6B /* FMP4Muxer.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = FMP4Muxer.swift; sourceTree = "<group>"; };
 		E46DD2F099688E8AEBD09B06 /* Fixtures */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = folder; name = Fixtures; path = PopcornTimeTests/Fixtures; sourceTree = SOURCE_ROOT; };
 		E6BED127E3694CD406831EAD /* GlassSettingsView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = GlassSettingsView.swift; sourceTree = "<group>"; };
@@ -2491,6 +2495,8 @@
 				6F6D5475811A3E60423ADA08 /* GlassDetailHostingController.swift */,
 				3B121AAC35CB3A4B54868B80 /* GlassDetailWarmUp.swift */,
 				FCCF4434C33E6F0DA94830E9 /* ProfilesPresenter.swift */,
+				A2464A46F5144EEC990D42E0 /* DownloadsStore.swift */,
+				E3642F5F49056694F452C409 /* GlassDownloadsView.swift */,
 			);
 			name = Glass;
 			path = Glass;
@@ -3685,6 +3691,8 @@
 				3193F1A94C04E32269288271 /* ProfilesPresenter.swift in Sources */,
 				856543C9E8CEB7D8CA4EC004 /* ProfileTasteView.swift in Sources */,
 				56BDA537ADB8171948D8F970 /* DownloadsCatalog.swift in Sources */,
+				47F38E899AB0E538123969A7 /* DownloadsStore.swift in Sources */,
+				1AE2D58BC60AF7D134483936 /* GlassDownloadsView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

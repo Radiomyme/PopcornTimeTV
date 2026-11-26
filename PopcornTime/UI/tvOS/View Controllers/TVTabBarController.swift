@@ -1,4 +1,5 @@
 import UIKit
+import Combine
 import PopcornKit
 
 
@@ -39,7 +40,7 @@ class TVTabBarController: UITabBarController {
         // background of their own: the Home's black, not the system's grey.
         view.backgroundColor = .black
         installGlassSettings()
-        installDownloadsIcon()
+        installGlassDownloads()
         installHome()
         installBackFromTabBar()
         noteSelectedTab()
@@ -63,7 +64,7 @@ class TVTabBarController: UITabBarController {
         case is ShowsViewController: return .shows
         case is WatchlistViewController: return .watchlist
         case is SearchViewController: return .search
-        case is DownloadViewController: return .downloads
+        case is DownloadViewController, is GlassDownloadsHostingController: return .downloads
         case is GlassSettingsHostingController: return .settings
         default: return nil
         }
@@ -248,13 +249,28 @@ class TVTabBarController: UITabBarController {
         settingsTab.tabBarItem = TVTabBarController.iconItem("gearshape.fill", label: glassSettingsLocalized("Settings"))
     }
 
+    /// The Downloads tab shows `GlassDownloadsView` (the storyboard's grid of
+    /// posters gave no percentage and hid Delete behind a long press). Its
+    /// navigation controller stays; its root is replaced, like Settings'.
+    ///
     /// Downloads is an icon too (it was the system item, a text):
     /// "Téléchargements" took the place of two tabs, and the bar has to hold
-    /// one more title, Home. VoiceOver still reads "Downloads".
-    private func installDownloadsIcon() {
+    /// one more title, Home. VoiceOver still reads "Downloads". Its badge
+    /// counts the downloads not finished (failed ones left out).
+    private func installGlassDownloads() {
         guard let downloadsTab = viewControllers?.first(where: { name(of: $0) == .downloads }) else { return }
+        (downloadsTab as? UINavigationController)?.setViewControllers([GlassDownloadsHostingController()], animated: false)
         downloadsTab.tabBarItem = TVTabBarController.iconItem("arrow.down.circle.fill", label: "Downloads".localized)
+        downloadsBadge = DownloadsStore.shared.$entries
+            .receive(on: DispatchQueue.main)
+            .sink { [weak downloadsTab] _ in
+                let count = DownloadsStore.shared.activeCount
+                downloadsTab?.tabBarItem.badgeValue = count == 0 ? nil
+                    : NumberFormatter.localizedString(from: NSNumber(value: count), number: .none)
+            }
     }
+
+    private var downloadsBadge: AnyCancellable?
 
     /// A tab shown as a symbol, sized like the Search glyph (the default
     /// symbol size is much smaller); `label` is what VoiceOver reads.

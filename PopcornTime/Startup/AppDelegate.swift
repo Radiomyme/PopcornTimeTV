@@ -71,6 +71,9 @@ class AppDelegate: UIResponder, UIApplicationDelegate, UITabBarControllerDelegat
         // the players' cancelled requests. First: -PTDebugHTTPTrace replaces it.
         GCDWebServerLogging.configure()
         #if DEBUG
+        // `-PTDebugDownloadFixtures`: made-up downloads, written before the
+        // download manager reads its directory.
+        DownloadsDebug.prepareAtLaunch()
         // Bounded-storage verification runs: the loopback-only torrent
         // session and the download directory, before anything uses them.
         BoundedStorageDebugHooks.prepareAtLaunch()
@@ -111,6 +114,10 @@ class AppDelegate: UIResponder, UIApplicationDelegate, UITabBarControllerDelegat
 
         // The Top Shelf follows the Home and the library.
         TopShelfReloader.shared.start()
+
+        // The offline downloads: the progress saved as they go, the ones
+        // running at the last quit resumed, the folders nothing owns removed.
+        DownloadsStore.shared.start()
 
         // Trakt's user-data sync starts with the interface
         // (`SceneDelegate.installInterface`): after « Who's Watching? »,
