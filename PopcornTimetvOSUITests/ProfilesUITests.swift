@@ -89,10 +89,21 @@ final class ProfilesUITests: XCTestCase {
         snap("7-your-preferences")
         XCTAssertEqual(focusedIdentifier, "Profiles.Taste.Reset", "the focus does not start on Reset")
 
+        // The question in the card, its focus on Cancel; Menu cancels it.
         remote.press(.select)
-        pause(1.5)
+        XCTAssertTrue(element("Profiles.Taste.ResetCancel").waitForExistence(timeout: 10), "no question in the card")
+        pause(1)
         snap("8-reset-confirm")
-        // The alert's focus starts on Cancel; Reset is above it.
+        XCTAssertEqual(focusedIdentifier, "Profiles.Taste.ResetCancel", "the question's focus is not on Cancel")
+        remote.press(.menu)
+        XCTAssertTrue(element("Profiles.Taste.Reset").waitForExistence(timeout: 10), "Menu did not cancel the question")
+        XCTAssertTrue(element("Profiles.Taste.Title").exists, "Menu closed the sheet instead of the question")
+        pause(1)
+        XCTAssertEqual(focusedIdentifier, "Profiles.Taste.Reset", "the focus is not back on Reset")
+        // Asked again: Reset Preferences is above Cancel.
+        remote.press(.select)
+        XCTAssertTrue(element("Profiles.Taste.ResetConfirm").waitForExistence(timeout: 10), "no question in the card")
+        pause(1)
         remote.press(.up)
         pause(0.8)
         remote.press(.select)

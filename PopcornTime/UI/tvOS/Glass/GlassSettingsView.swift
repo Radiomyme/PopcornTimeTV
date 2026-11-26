@@ -1243,36 +1243,47 @@ struct GlassSettingsPickerSheet: View {
 
 /// Your Preferences (Settings › Profiles), a glass sheet like the pickers:
 /// what the active profile's taste learned, a facet a line — not focusable,
-/// there is nothing to choose — and Reset Preferences, the one focus.
-/// Nothing learned: one centred line, which holds the focus so that Menu
-/// still reaches the sheet. Menu closes it.
+/// there is nothing to choose — and Reset Preferences, the one focus. Reset
+/// asks in the card itself (a system alert stacked a second glass layer
+/// over this one): the question and its message take the header's place,
+/// then Reset Preferences and Cancel, the focus on Cancel; Menu cancels.
+/// Nothing learned: one line on the header's edge, which holds the focus so
+/// that Menu still reaches the sheet. Menu closes it.
 struct GlassSettingsTasteSheet: View {
     let lines: [GlassSettingsTasteLine]
-    /// For the confirmation (« Forget what was learned about Alex? »).
+    /// For the confirmation (« Forget what was learned for « Alex »? »).
     let profileName: String
     let onReset: () -> Void
     let onClose: () -> Void
 
     @State private var confirmReset = false
+    @FocusState private var focus: Focus?
     @Environment(\.glassSettingsFallback) private var fallback
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    private enum Focus: Hashable { case reset, confirm, cancel }
 
     var body: some View {
         ZStack {
             Color.black.opacity(0.4)
                 .ignoresSafeArea()
             VStack(alignment: .leading, spacing: 18) {
-                Text(glassSettingsLocalized("Profiles.Taste"))
+                Text(confirmReset ? String(format: glassSettingsLocalized("Profiles.Taste.ResetConfirm"), profileName)
+                                  : glassSettingsLocalized("Profiles.Taste"))
                     .font(.system(size: 46, weight: .bold))
                     .foregroundStyle(.white)
+                    .fixedSize(horizontal: false, vertical: true)
                     .accessibilityAddTraits(.isHeader)
                     .accessibilityIdentifier("Profiles.Taste.Title")
                     .padding(.horizontal, 58)
-                Text(glassSettingsLocalized("Profiles.Taste.Footer"))
+                Text(glassSettingsLocalized(confirmReset ? "Profiles.Taste.ResetMessage" : "Profiles.Taste.Footer"))
                     .font(.system(size: 24))
                     .foregroundStyle(GlassSettingsPalette.secondaryText)
                     .fixedSize(horizontal: false, vertical: true)
                     .padding(.horizontal, 58)
-                if lines.isEmpty {
+                if confirmReset {
+                    confirmation
+                } else if lines.isEmpty {
                     empty
                 } else {
                     facts
@@ -1285,14 +1296,46 @@ struct GlassSettingsTasteSheet: View {
             .fixedSize(horizontal: false, vertical: true)
             .modifier(GlassSettingsCard(cornerRadius: 50, fallback: fallback))
         }
-        .onExitCommand(perform: onClose)
+        .onExitCommand { confirmReset ? ask(false) : onClose() }
         .presentationBackground(.clear)
-        .alert(String(format: glassSettingsLocalized("Profiles.Taste.ResetConfirm"), profileName), isPresented: $confirmReset) {
-            SwiftUI.Button(glassSettingsLocalized("Profiles.Taste.Reset"), role: .destructive, action: onReset)
-            SwiftUI.Button(glassSettingsLocalized("Cancel"), role: .cancel) {}
-        } message: {
-            Text(glassSettingsLocalized("Profiles.Taste.ResetMessage"))
+    }
+
+    /// Swaps the facts for the question (or back), the focus on Cancel (or
+    /// back on Reset Preferences).
+    private func ask(_ asking: Bool) {
+        withAnimation(reduceMotion ? nil : .easeOut(duration: 0.2)) { confirmReset = asking }
+        DispatchQueue.main.async { focus = asking ? .cancel : .reset }
+    }
+
+    /// Reset Preferences in red, then Cancel, the default.
+    private var confirmation: some View {
+        VStack(spacing: 0) {
+            destructiveRow(glassSettingsLocalized("Profiles.Taste.Reset"), color: GlassSettingsPalette.accent) {
+                withAnimation(reduceMotion ? nil : .easeOut(duration: 0.2)) { confirmReset = false }
+                onReset()
+            }
+            .focused($focus, equals: .confirm)
+            .accessibilityIdentifier("Profiles.Taste.ResetConfirm")
+            destructiveRow(glassSettingsLocalized("Cancel"), color: .white) { ask(false) }
+                .focused($focus, equals: .cancel)
+                .accessibilityIdentifier("Profiles.Taste.ResetCancel")
         }
+        .padding(.vertical, 16)
+        .padding(.horizontal, 36)
+    }
+
+    /// A full-width row of the card (Settings' row style).
+    private func destructiveRow(_ title: String, color: Color, action: @escaping () -> Void) -> some View {
+        SwiftUI.Button(action: action) {
+            Text(title)
+                .font(.system(size: 31, weight: .medium))
+                .foregroundStyle(color)
+                .lineLimit(1)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 26)
+                .padding(.vertical, 18)
+        }
+        .buttonStyle(GlassSettingsRowStyle(cornerRadius: 22))
     }
 
     /// The facts, then Reset Preferences under them.
@@ -1325,39 +1368,33 @@ struct GlassSettingsTasteSheet: View {
                 .accessibilityIdentifier("Profiles.Taste.\(line.id)")
             }
             // Red words on the card, still red on the focused white platter
-            // (large text): never red on red. The confirmation carries the
-            // destructive role.
-            SwiftUI.Button { confirmReset = true } label: {
-                Text(glassSettingsLocalized("Profiles.Taste.Reset"))
-                    .font(.system(size: 31, weight: .medium))
-                    .foregroundStyle(GlassSettingsPalette.accent)
-                    .lineLimit(1)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.horizontal, 26)
-                    .padding(.vertical, 18)
-            }
-            .buttonStyle(GlassSettingsRowStyle(cornerRadius: 22))
-            .accessibilityIdentifier("Profiles.Taste.Reset")
-            .padding(.top, 16)
+            // (large text): never red on red.
+            destructiveRow(glassSettingsLocalized("Profiles.Taste.Reset"), color: GlassSettingsPalette.accent) { ask(true) }
+                .focused($focus, equals: .reset)
+                .accessibilityIdentifier("Profiles.Taste.Reset")
+                .padding(.top, 16)
         }
         .padding(.vertical, 16)
         .padding(.horizontal, 36)
     }
 
+    /// On the header's edge, as the facts' rows: leading, not centred
+    /// under a leading title.
     private var empty: some View {
         Text(glassSettingsLocalized("Profiles.Taste.Empty"))
             .font(.system(size: 29))
             .foregroundStyle(GlassSettingsPalette.secondaryText)
-            .multilineTextAlignment(.center)
+            .multilineTextAlignment(.leading)
             .fixedSize(horizontal: false, vertical: true)
-            .frame(maxWidth: .infinity)
-            .padding(26)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.top, 8)
+            .padding(.bottom, 26)
             // The sheet's one focus target, drawn as nothing: without one,
             // Menu would not reach the sheet.
             .focusable()
             .focusEffectDisabled()
             .accessibilityIdentifier("Profiles.Taste.Empty")
-            .padding(.horizontal, 36)
+            .padding(.horizontal, 58)
     }
 }
 
