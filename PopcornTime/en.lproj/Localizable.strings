@@ -713,3 +713,23 @@
 "The automatic choice stays at or below the maximum resolution." = "The automatic choice stays at or below the maximum resolution.";
 "Prefer Your Language" = "Prefer Your Language";
 "A release in your audio language comes before a higher resolution in another language." = "A release in your audio language comes before a higher resolution in another language.";
+/* 5.5 Downloads */
+"Downloads.Section.Downloading" = "Downloading";
+"Downloads.Section.Downloaded" = "Downloaded";
+"Downloads.Footer" = "Downloads stay on this Apple TV until you delete them. When it runs out of space, tvOS may remove some.";
+"Downloads.PauseAll" = "Pause All";
+"Downloads.ResumeAll" = "Resume All";
+"Downloads.Storage" = "Downloads use %1$@ · %2$@ free";
+"Downloads.Storage.Used" = "Downloads use %@";
+"Downloads.Episode" = "S%1$@ E%2$@";
+"Downloads.Status.Waiting" = "Looking for sources…";
+"Downloads.Status.Speed" = "%@/s";
+"Downloads.Status.TimeLeft" = "about %@ left";
+"Downloads.Status.Of" = "%1$@ of %2$@";
+"Downloads.Status.Paused" = "Paused";
+"Downloads.Status.Failed" = "Failed";
+"Downloads.Delete.Finished" = "This frees %@ on this Apple TV.";
+"Downloads.Delete.Active" = "The download stops and the part already downloaded is deleted.";
+"Downloads.Action.Show" = "Show in Downloads";
+"Downloads.NoSpace.Title" = "Not Enough Space";
+"Downloads.NoSpace.Message" = "This download needs %1$@, and %2$@ is free on this Apple TV. Delete a download or clear the cache in Settings, then try again.";

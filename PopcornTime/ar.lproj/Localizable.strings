@@ -1016,3 +1016,23 @@
 "The automatic choice stays at or below the maximum resolution." = "يبقى الاختيار التلقائي عند الدقة القصوى أو أقل.";
 "Prefer Your Language" = "تفضيل لغتك";
 "A release in your audio language comes before a higher resolution in another language." = "تأتي النسخة بلغة الصوت المفضلة لديك قبل دقة أعلى بلغة أخرى.";
+/* 5.5 Downloads */
+"Downloads.Section.Downloading" = "قيد التنزيل";
+"Downloads.Section.Downloaded" = "تم تنزيلها";
+"Downloads.Footer" = "تبقى التنزيلات على Apple TV هذا حتى تحذفها. عند نفاد المساحة قد يحذف tvOS بعضها.";
+"Downloads.PauseAll" = "إيقاف الكل مؤقتًا";
+"Downloads.ResumeAll" = "استئناف الكل";
+"Downloads.Storage" = "التنزيلات: %1$@ · %2$@ متاحة";
+"Downloads.Storage.Used" = "التنزيلات: %@";
+"Downloads.Episode" = "م%1$@ ح%2$@";
+"Downloads.Status.Waiting" = "جارٍ البحث عن مصادر…";
+"Downloads.Status.Speed" = "%@/ث";
+"Downloads.Status.TimeLeft" = "يتبقى نحو %@";
+"Downloads.Status.Of" = "%1$@ من %2$@";
+"Downloads.Status.Paused" = "متوقف مؤقتًا";
+"Downloads.Status.Failed" = "فشل";
+"Downloads.Delete.Finished" = "يحرّر %@ على Apple TV هذا.";
+"Downloads.Delete.Active" = "يتوقف التنزيل ويُحذف الجزء الذي تم تنزيله.";
+"Downloads.Action.Show" = "عرض في التنزيلات";
+"Downloads.NoSpace.Title" = "المساحة غير كافية";
+"Downloads.NoSpace.Message" = "يحتاج هذا التنزيل إلى %1$@ والمتاح %2$@ على Apple TV هذا. احذف تنزيلًا أو امسح ذاكرة التخزين المؤقت في الإعدادات، ثم أعد المحاولة.";

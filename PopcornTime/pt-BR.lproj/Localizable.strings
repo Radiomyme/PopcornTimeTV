@@ -1020,3 +1020,23 @@
 "The automatic choice stays at or below the maximum resolution." = "A escolha automática fica na resolução máxima ou abaixo.";
 "Prefer Your Language" = "Preferir seu idioma";
 "A release in your audio language comes before a higher resolution in another language." = "Uma versão no seu idioma de áudio vem antes de uma resolução maior em outro idioma.";
+/* 5.5 Downloads */
+"Downloads.Section.Downloading" = "Baixando";
+"Downloads.Section.Downloaded" = "Baixados";
+"Downloads.Footer" = "Os downloads ficam nesta Apple TV até você apagá-los. Quando falta espaço, o tvOS pode remover alguns.";
+"Downloads.PauseAll" = "Pausar tudo";
+"Downloads.ResumeAll" = "Retomar tudo";
+"Downloads.Storage" = "Downloads: %1$@ · %2$@ livres";
+"Downloads.Storage.Used" = "Downloads: %@";
+"Downloads.Episode" = "T%1$@ E%2$@";
+"Downloads.Status.Waiting" = "Procurando fontes…";
+"Downloads.Status.Speed" = "%@/s";
+"Downloads.Status.TimeLeft" = "cerca de %@ restantes";
+"Downloads.Status.Of" = "%1$@ de %2$@";
+"Downloads.Status.Paused" = "Pausado";
+"Downloads.Status.Failed" = "Falhou";
+"Downloads.Delete.Finished" = "Libera %@ nesta Apple TV.";
+"Downloads.Delete.Active" = "O download para e a parte já baixada é apagada.";
+"Downloads.Action.Show" = "Ver em Downloads";
+"Downloads.NoSpace.Title" = "Espaço insuficiente";
+"Downloads.NoSpace.Message" = "Este download precisa de %1$@ e restam %2$@ livres nesta Apple TV. Apague um download ou limpe o cache em Ajustes e tente de novo.";

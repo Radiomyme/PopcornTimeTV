@@ -204,6 +204,7 @@
 		3C2312866DCF188FC35FA05E /* EBML.swift in Sources */ = {isa = PBXBuildFile; fileRef = FD3ADE7ABACE8AC42374D51E /* EBML.swift */; };
 		3C5E5EADCAE987C4C3F83A6B /* PlaybackStartTrace.swift in Sources */ = {isa = PBXBuildFile; fileRef = F528C2BB9DAF1D4CCB0DD567 /* PlaybackStartTrace.swift */; };
 		3CE05C0FB0C1764A6677D5E6 /* DetailSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = 03B916517EA8ED6FEB44589B /* DetailSession.swift */; };
+		3D383972149342F1BF7FB10A /* DownloadsCatalogTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 809CE80B58B83FC81B93D36E /* DownloadsCatalogTests.swift */; };
 		3D4647311E3A3112B512785B /* Crew.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4D0F9D1F1E6F298000860852 /* Crew.swift */; };
 		3DA939004EE08521F19A35C9 /* SearchView.swift in Sources */ = {isa = PBXBuildFile; fileRef = EAAA2FC5821AA9CA5E484C9C /* SearchView.swift */; };
 		3DEC7BA57E06210F5F7DA323 /* HomeLibraryHooksTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8C67B73715C56D22328D9B0C /* HomeLibraryHooksTests.swift */; };
@@ -440,6 +441,7 @@
 		5608DE7B385F4B620BBEA7E0 /* MacCommands.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5D2374556133ADFF76963053 /* MacCommands.swift */; };
 		566255D6105896850515D238 /* HomeSources.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5DB31C676BCDC192B96C15FF /* HomeSources.swift */; };
 		5689F48A2B6579255266829F /* TorrentCachePurge.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6E3616FF1F8CF191CA20C702 /* TorrentCachePurge.swift */; };
+		56BDA537ADB8171948D8F970 /* DownloadsCatalog.swift in Sources */ = {isa = PBXBuildFile; fileRef = EBEFC655C75B0B17194961F6 /* DownloadsCatalog.swift */; };
 		56E8C13BF5C74CE63E34D725 /* GridChrome.swift in Sources */ = {isa = PBXBuildFile; fileRef = 60C30499BD16191E426F0FFC /* GridChrome.swift */; };
 		56F75894D46AD1592C8B6BE0 /* PopcornTorrent in Frameworks */ = {isa = PBXBuildFile; productRef = C8F5A16E5B5DF6EB1FAF93BB /* PopcornTorrent */; };
 		56F854A32F9D3BAB80318BB6 /* ShowManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4D0F9D081E6F296400860852 /* ShowManager.swift */; };
@@ -768,6 +770,7 @@
 		CE56AB1F6C4418D83BF9A87F /* NewEpisodes.swift in Sources */ = {isa = PBXBuildFile; fileRef = 69BF3063249C4ACAF695E348 /* NewEpisodes.swift */; };
 		CE989558EC8A29B39C6E5A54 /* RemuxPlayback.swift in Sources */ = {isa = PBXBuildFile; fileRef = 43ACA0733CDCDC15FEE82849 /* RemuxPlayback.swift */; };
 		CF066138CBB99DB9D80EDF47 /* ArtworkURLTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A56FEEC72DC54798E1ABFF37 /* ArtworkURLTests.swift */; };
+		CF0BC5D6A22E2CBDF3C1165A /* DownloadsCatalog.swift in Sources */ = {isa = PBXBuildFile; fileRef = EBEFC655C75B0B17194961F6 /* DownloadsCatalog.swift */; };
 		CF27EA98E40833924D860220 /* HomeRecordedTransport.swift in Sources */ = {isa = PBXBuildFile; fileRef = C87816ADC09E5A71620437A3 /* HomeRecordedTransport.swift */; };
 		CFE26433C13EE1916F59BD94 /* AVPlayerItemFailureObserver.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0E3DA7B2D4D7CA055941C925 /* AVPlayerItemFailureObserver.swift */; };
 		CFF28C83BA9559AE2AEE0449 /* ProfileViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = F0377E882C33FBD724D1E73C /* ProfileViews.swift */; };
@@ -1388,6 +1391,7 @@
 		7F4E3E36B21F145EE4A70D70 /* IOSDebugHooks.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = IOSDebugHooks.swift; path = PopcornTime/UI/iOS/IOSDebugHooks.swift; sourceTree = SOURCE_ROOT; };
 		802A7C4A81F290813BA300E1 /* UserNavigationTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = UserNavigationTests.swift; path = PopcornTimeTests/Playback/UserNavigationTests.swift; sourceTree = SOURCE_ROOT; };
 		808D9FF876C6F09389C72ACE /* HomeParsers.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = HomeParsers.swift; path = PopcornKit/Managers/Home/HomeParsers.swift; sourceTree = SOURCE_ROOT; };
+		809CE80B58B83FC81B93D36E /* DownloadsCatalogTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = DownloadsCatalogTests.swift; path = PopcornTimeTests/Library/DownloadsCatalogTests.swift; sourceTree = SOURCE_ROOT; };
 		813AF07BEF77D13438315729 /* GridDebugHooks.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = GridDebugHooks.swift; path = PopcornTime/UI/tvOS/Grid/GridDebugHooks.swift; sourceTree = SOURCE_ROOT; };
 		8161BD22E8631E21ED23B515 /* SubtitleCueController.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = SubtitleCueController.swift; sourceTree = "<group>"; };
 		82CA9D09FACF730E0F166195 /* MacSearchView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = MacSearchView.swift; path = PopcornTime/UI/Mac/MacSearchView.swift; sourceTree = SOURCE_ROOT; };
@@ -1522,6 +1526,7 @@
 		E991288CFC027F6313606357 /* iOS.plist */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.plist.xml; name = iOS.plist; path = "PopcornKit/Supporting Files/iOS.plist"; sourceTree = SOURCE_ROOT; };
 		E9A1E5C4E19387B8694683C3 /* HomeHeroPager.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = HomeHeroPager.swift; path = "PopcornTime/UI/Shared SwiftUI/Home/HomeHeroPager.swift"; sourceTree = SOURCE_ROOT; };
 		EAAA2FC5821AA9CA5E484C9C /* SearchView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = SearchView.swift; path = PopcornTime/UI/iOS/SearchView.swift; sourceTree = SOURCE_ROOT; };
+		EBEFC655C75B0B17194961F6 /* DownloadsCatalog.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = DownloadsCatalog.swift; path = PopcornTime/Resources/Downloads/DownloadsCatalog.swift; sourceTree = SOURCE_ROOT; };
 		EC0020856DC26C009F27DF96 /* HomeFeed.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = HomeFeed.swift; path = PopcornKit/Managers/Home/HomeFeed.swift; sourceTree = SOURCE_ROOT; };
 		EC00C80899EE46EAFD1E1E63 /* HomeStreaming.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = HomeStreaming.swift; path = PopcornKit/Managers/Home/HomeStreaming.swift; sourceTree = SOURCE_ROOT; };
 		ED27B03B02AF1B57ADC09A14 /* HomePresentationTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = HomePresentationTests.swift; path = PopcornTimeTests/Home/HomePresentationTests.swift; sourceTree = SOURCE_ROOT; };
@@ -2158,6 +2163,7 @@
 				78185D33B98120AB208898BC /* Remux */,
 				F7BFE98A41B51CEAF16975ED /* Subtitles */,
 				91561B00875A499F9C75A0CC /* Playback */,
+				582517B69133C18B60402B19 /* Downloads */,
 			);
 			path = Resources;
 			sourceTree = "<group>";
@@ -2349,6 +2355,14 @@
 				4DD6E4D41DFB2FAA00818A2C /* TapGestureRecogniser.swift */,
 			);
 			path = "Gesture Recognisers";
+			sourceTree = "<group>";
+		};
+		582517B69133C18B60402B19 /* Downloads */ = {
+			isa = PBXGroup;
+			children = (
+				EBEFC655C75B0B17194961F6 /* DownloadsCatalog.swift */,
+			);
+			name = Downloads;
 			sourceTree = "<group>";
 		};
 		5B429DD075F9D0B89689160D /* PopcornTimeTests */ = {
@@ -2636,6 +2650,7 @@
 				B7BF7017285A28707331B38E /* RememberedReleaseTests.swift */,
 				C28893230E5DFE59BDA0D7B2 /* ProfileManagerTests.swift */,
 				CBE8AB1CC27BD0E9FB1C83F5 /* ProfileTasteTests.swift */,
+				809CE80B58B83FC81B93D36E /* DownloadsCatalogTests.swift */,
 			);
 			name = Library;
 			sourceTree = "<group>";
@@ -3466,6 +3481,8 @@
 				29F95D2EC362B0BFADBF8708 /* StreamingSettingsStoreTests.swift in Sources */,
 				4E340F62F794D0F6937A826C /* ProfileManagerTests.swift in Sources */,
 				929CDEEEBC141DCD5AB2A720 /* ProfileTasteTests.swift in Sources */,
+				CF0BC5D6A22E2CBDF3C1165A /* DownloadsCatalog.swift in Sources */,
+				3D383972149342F1BF7FB10A /* DownloadsCatalogTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -3667,6 +3684,7 @@
 				5C51C5269716E9CBC10586A7 /* ProfileViews.swift in Sources */,
 				3193F1A94C04E32269288271 /* ProfilesPresenter.swift in Sources */,
 				856543C9E8CEB7D8CA4EC004 /* ProfileTasteView.swift in Sources */,
+				56BDA537ADB8171948D8F970 /* DownloadsCatalog.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

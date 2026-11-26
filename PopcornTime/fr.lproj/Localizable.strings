@@ -713,3 +713,23 @@
 "The automatic choice stays at or below the maximum resolution." = "Le choix automatique reste à la résolution maximale ou en dessous.";
 "Prefer Your Language" = "Privilégier votre langue";
 "A release in your audio language comes before a higher resolution in another language." = "Une version dans votre langue audio passe devant une meilleure résolution dans une autre langue.";
+/* 5.5 Downloads */
+"Downloads.Section.Downloading" = "En cours";
+"Downloads.Section.Downloaded" = "Téléchargés";
+"Downloads.Footer" = "Les téléchargements restent sur cette Apple TV jusqu’à ce que vous les supprimiez. Quand l’espace manque, tvOS peut en effacer.";
+"Downloads.PauseAll" = "Tout mettre en pause";
+"Downloads.ResumeAll" = "Tout reprendre";
+"Downloads.Storage" = "Téléchargements : %1$@ · %2$@ libres";
+"Downloads.Storage.Used" = "Téléchargements : %@";
+"Downloads.Episode" = "S%1$@ É%2$@";
+"Downloads.Status.Waiting" = "Recherche de sources…";
+"Downloads.Status.Speed" = "%@/s";
+"Downloads.Status.TimeLeft" = "encore environ %@";
+"Downloads.Status.Of" = "%1$@ sur %2$@";
+"Downloads.Status.Paused" = "En pause";
+"Downloads.Status.Failed" = "Échec";
+"Downloads.Delete.Finished" = "Libère %@ sur cette Apple TV.";
+"Downloads.Delete.Active" = "Le téléchargement s’arrête et la partie déjà téléchargée est supprimée.";
+"Downloads.Action.Show" = "Voir dans Téléchargements";
+"Downloads.NoSpace.Title" = "Espace insuffisant";
+"Downloads.NoSpace.Message" = "Ce téléchargement demande %1$@ et il reste %2$@ sur cette Apple TV. Supprimez un téléchargement ou videz le cache dans Réglages, puis réessayez.";
