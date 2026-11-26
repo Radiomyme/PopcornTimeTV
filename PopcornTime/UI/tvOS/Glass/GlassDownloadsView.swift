@@ -44,6 +44,9 @@ struct GlassDownloadsView: View {
     /// new sheet takes the focus where it says (Cancel).
     @State private var deleteEntry: DownloadsEntry?
     @State private var askDelete: DownloadsEntry?
+    /// The row that takes the focus once a deleted row's question closed:
+    /// the next one, else the one before (not the page's first).
+    @State private var focusAfterDelete: String?
     @FocusState private var focusedID: String?
     private let text = DownloadsText()
 
@@ -90,11 +93,15 @@ struct GlassDownloadsView: View {
                                  onClose: { menuEntry = nil })
         }
         .background {
-            Color.clear.fullScreenCover(item: $deleteEntry) { entry in
+            Color.clear.fullScreenCover(item: $deleteEntry, onDismiss: {
+                guard let id = focusAfterDelete else { return }
+                focusAfterDelete = nil
+                focusedID = id
+            }) { entry in
                 DownloadsActionSheet(entry: entry, mode: .confirmDelete,
                                      onAction: { _ in
                                          deleteEntry = nil
-                                         store.delete(entry.id)
+                                         delete(entry)
                                      },
                                      onClose: { deleteEntry = nil })
             }
@@ -220,13 +227,24 @@ struct GlassDownloadsView: View {
         }
     }
 
+    /// Deletes the row's download; its neighbour gets the focus.
+    private func delete(_ entry: DownloadsEntry) {
+        let sections = DownloadsCatalog.sections(store.entries)
+        let rows = (sections.active + sections.finished).map(\.id)
+        if let index = rows.firstIndex(of: entry.id) {
+            focusAfterDelete = index + 1 < rows.count ? rows[index + 1] : (index > 0 ? rows[index - 1] : nil)
+        }
+        store.delete(entry.id)
+        if let id = focusAfterDelete { focusedID = id }
+    }
+
     private func perform(_ action: DownloadsAction, on entry: DownloadsEntry) {
         switch action {
         case .play: store.play(entry.id)
         case .pause: store.pause(entry.id)
         case .resume: store.resume(entry.id)
         case .retry: store.retry(entry.id)
-        case .delete: store.delete(entry.id)
+        case .delete: delete(entry)
         case .showDownloads: break
         }
     }

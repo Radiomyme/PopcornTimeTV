@@ -17,6 +17,7 @@ final class DownloadsUITests: XCTestCase {
     private static let halloween = "Downloads.Row.tt0077651"       // « downloading », 42 %
     private static let mobLand = "Downloads.Row.tt31510819-1-5"     // paused episode, 73 %
     private static let heart = "Downloads.Row.tt7526136"            // downloaded movie
+    private static let blackDoves = "Downloads.Row.tt27995113-1-3"  // downloaded episode, the row above
 
     override func setUp() {
         super.setUp()
@@ -41,10 +42,35 @@ final class DownloadsUITests: XCTestCase {
         let paused = element(Self.mobLand).label
         XCTAssertTrue(paused.contains("MobLand") && paused.contains("S1 E5") && paused.contains("Paused · 73%"), "MobLand: « \(paused) »")
         let failed = element("Downloads.Row.tt38515310").label
-        XCTAssertTrue(failed.contains("Failed — There is not enough space"), "the failed download: « \(failed) »")
+        XCTAssertTrue(failed.contains("Failed — not enough space (") && failed.contains("to free)"), "the failed download: « \(failed) »")
         XCTAssertTrue(element(Self.heart).exists, "the downloaded movie is not listed")
         XCTAssertTrue(element("Downloads.Storage").exists, "the space the downloads take is not said")
         XCTAssertTrue(element("Downloads.PauseAll").exists, "no Pause All while a download runs")
+        // The tab's icon, focused (above), then selected with the focus in the page.
+        remote.press(.down)
+        pause(1)
+        snap("01b-tab-selected")
+    }
+
+    /// The tab's icon and the page in French: the count drawn into the icon,
+    /// the texts in French, a failure said in French.
+    func testThePageInFrench() throws {
+        launch(language: "fr")
+        XCTAssertTrue(element(Self.halloween).waitForExistence(timeout: 20), "the Downloads page never showed")
+        pause(1.5)
+        snap("06-fr-tab-focused")
+        let failed = element("Downloads.Row.tt38515310").label
+        XCTAssertTrue(failed.contains("Échec — espace insuffisant ("), "the failure is not in French: « \(failed) »")
+        XCTAssertTrue(element("Downloads.Storage").label.hasPrefix("Les téléchargements occupent"), element("Downloads.Storage").label)
+        remote.press(.down)
+        pause(1)
+        snap("07-fr-tab-selected")
+        // Another tab focused: the Downloads icon at rest.
+        remote.press(.up)
+        pause(1)
+        remote.press(.left)
+        pause(1.5)
+        snap("08-fr-other-tab")
     }
 
     /// Select opens the row's actions; Delete asks, the focus on Cancel; the
@@ -78,6 +104,9 @@ final class DownloadsUITests: XCTestCase {
         remote.press(.select)
         XCTAssertTrue(element("Settings.Picker").waitForNonExistence(timeout: 5), "the sheet stayed after Delete")
         XCTAssertTrue(element(Self.heart).waitForNonExistence(timeout: 6), "the deleted download is still listed")
+        pause(1)
+        // The last row went: the one before it has the focus, not the page's first.
+        XCTAssertEqual(focusedIdentifier, Self.blackDoves, "the focus did not move to the neighbouring row")
         snap("04-after-delete")
     }
 
@@ -101,14 +130,14 @@ final class DownloadsUITests: XCTestCase {
 
     // MARK: Helpers
 
-    private func launch() {
+    private func launch(language: String = "en") {
         let app = XCUIApplication()
         app.launchArguments = [
             "-tosAccepted", "YES",
             "-lastWhatsNewVersion", "99",
             "-themeSongVolume", "0",
-            "-AppleLanguages", "(en)",
-            "-AppleLocale", "en_US",
+            "-AppleLanguages", "(\(language))",
+            "-AppleLocale", language == "fr" ? "fr_FR" : "en_US",
             "-PTDebugLibraryInMemory", "YES",
             "-PTDebugHomeFixtures", Self.fixtures,
             "-PTDebugHomeDryRunPlay", "YES",
