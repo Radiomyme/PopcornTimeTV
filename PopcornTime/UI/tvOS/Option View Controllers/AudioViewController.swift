@@ -149,6 +149,9 @@ class AudioViewController: OptionsStackViewController, UITableViewDataSource {
     func tableView(_ tableView: UITableView, didSelectRowAt indexPath: IndexPath) {
         switch tableView {
         case firstTableView:
+            // The list opens focused on the playing track: Select there is
+            // no choice, and must not teach its language again.
+            guard audioTrackIndexes[indexPath.row] != currentAudioTrackIndex else { return }
             currentAudioTrackIndex = audioTrackIndexes[indexPath.row]
             delegate?.didSelectAudioTrack(currentAudioTrackIndex)
         case secondTableView:

@@ -622,13 +622,16 @@ class PCTPlayerViewController: UIViewController, VLCMediaPlayerDelegate, UIGestu
     /// The user picked one of the file's own text tracks in the options
     /// panel (nil: turned it off). Any OpenSubtitles file goes off first.
     func didSelectEmbeddedSubtitleTrack(_ trackId: String?) {
+        // Only a change is a choice to learn from (not the checked row again).
+        let changed = selectedEmbeddedTrackId != trackId || currentSubtitle != nil
         userChoseSubtitle = true
         currentSubtitle = nil // every text track off, nothing pending
         selectedEmbeddedTrackId = trackId
         if let trackId = trackId, let track = mediaplayer.textTracks.first(where: { $0.trackId == trackId }) {
             track.isSelectedExclusively = true
+            guard changed else { return }
             PlaybackLanguagePreferences.noteChosenSubtitle(languageOrName: (track.language as String?).flatMap { $0.isEmpty ? nil : $0 } ?? track.trackName, isOff: false)
-        } else if trackId == nil {
+        } else if trackId == nil, changed {
             PlaybackLanguagePreferences.noteChosenSubtitle(languageOrName: nil, isOff: true)
         }
     }
@@ -810,9 +813,11 @@ class PCTPlayerViewController: UIViewController, VLCMediaPlayerDelegate, UIGestu
     // MARK: - Options view controller delegate
     
     func didSelectSubtitle(_ subtitle: Subtitle?) {
+        let changed = currentSubtitle != subtitle || selectedEmbeddedTrackId != nil
         userChoseSubtitle = true
         selectedEmbeddedTrackId = nil
         currentSubtitle = subtitle
+        guard changed else { return }
         PlaybackLanguagePreferences.noteChosenSubtitle(languageOrName: subtitle.map { $0.ISO639.isEmpty ? $0.language : $0.ISO639 },
                                                        isOff: subtitle == nil)
     }
@@ -827,7 +832,10 @@ class PCTPlayerViewController: UIViewController, VLCMediaPlayerDelegate, UIGestu
         // in the tvOS presentOptionsViewController), so select that element.
         guard index >= 0, Int(index) < mediaplayer.audioTracks.count else { return }
         let track = mediaplayer.audioTracks[Int(index)]
+        // The track already playing, picked again: nothing chosen to learn.
+        let wasSelected = track.isSelected
         track.isSelectedExclusively = true
+        guard !wasSelected else { return }
         PlaybackLanguagePreferences.noteChosenAudio(languageOrName: (track.language as String?).flatMap { $0.isEmpty ? nil : $0 } ?? track.trackName)
     }
 
