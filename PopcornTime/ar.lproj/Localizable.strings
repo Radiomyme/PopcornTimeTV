@@ -910,3 +910,4 @@
 "Grid.Service.Refused" = "رفض TMDB مفتاحك. تحقق منه في الإعدادات › خدمات البث.";
 "Grid.Service.Refused.Mac" = "رفض TMDB مفتاحك. تحقق منه في الإعدادات › البث.";
 "Home.Unavailable.Service" = "تعذّر تحميل كتالوج %@";
+"Movies, shows, people" = "أفلام، مسلسلات، أشخاص";

@@ -17,121 +17,123 @@ class SearchViewController: MainViewController, UISearchBarDelegate {
     let searchDelay: TimeInterval = 0.25
     var workItem: DispatchWorkItem!
 
-    /// Bumped by every search: the answer of an older one (another text,
-    /// another scope) is ignored when it lands. A broad search ("ave") can
-    /// answer after the narrower one typed next ("avengers"): its results
-    /// used to replace the newer ones, movies could show under Shows.
+    /// Bumped by every search: the answer of an older one (another text)
+    /// is ignored when it lands. A broad search ("ave") can answer after the
+    /// narrower one typed next ("avengers"): its results used to replace the
+    /// newer ones.
     private var searchGeneration = 0
 
-    var fetchType: Trakt.MediaType = .movies
+    /// One search looks in every catalogue at once: movies, shows and
+    /// people come back in their own titled sections (there is no Movies /
+    /// Shows / People switch to pick first).
+    private enum Group: Int, CaseIterable { case movies, shows, people }
+    private var results: [Group: [AnyHashable]] = [:]
+    private var failures: [Group: NSError] = [:]
+    private var pending: Set<Group> = []
 
     override func load(page: Int) {
         filterSearchText(searchBar?.text ?? "")
     }
-    
-    
-    override func minItemSize(forCellIn collectionView: UICollectionView, at indexPath: IndexPath) -> CGSize? {
-        if UIDevice.current.userInterfaceIdiom == .tv {
-            // Posters on the grids' own layout; people keep their round cells.
-            return fetchType == .people ? CGSize(width: 250, height: 400) : nil
-        } else {
-            return CGSize(width: 108, height: fetchType == .people ? 160 : 185)
+
+    private func group(ofSection section: Int) -> Group? {
+        guard let first = collectionViewController.dataSources[safe: section]?.first else { return nil }
+        switch first {
+        case is Movie: return .movies
+        case is Show: return .shows
+        case is Crew: return .people
+        default: return nil
         }
     }
 
-    /// Center the cells horizontally when there are few results. tvOS focus
-    /// engine descends from the centered MOVIES/SHOWS/PEOPLE scope buttons
-    /// to whichever focusable view is geometrically closest below — with 1
-    /// or 2 left-aligned cells the engine refused to move down at all
-    /// because the cells are too far off-axis from the buttons. Centering
-    /// guarantees a cell sits directly under the scope tab.
-    override func collectionView(_ collectionView: UICollectionView, insetForSectionAt section: Int) -> UIEdgeInsets? {
-        guard UIDevice.current.userInterfaceIdiom == .tv else { return nil }
-        let count = collectionViewController.dataSources[safe: section]?.count ?? 0
-        let people = fetchType == .people
-        // The results start close under the scope bar (they were 210 pt
-        // below it: one row of posters showed their top third).
-        let top: CGFloat = people ? 60 : 44
-        let bottom: CGFloat = people ? 60 : GridStyle.sectionBottom
-        guard count > 0 && count <= 3 else {
-            return UIEdgeInsets(top: top, left: GridStyle.sideInset, bottom: bottom, right: GridStyle.sideInset)
+    override func minItemSize(forCellIn collectionView: UICollectionView, at indexPath: IndexPath) -> CGSize? {
+        let people = group(ofSection: indexPath.section) == .people
+        if UIDevice.current.userInterfaceIdiom == .tv {
+            // Posters on the grids' own layout; people keep their round cells.
+            return people ? CGSize(width: 250, height: 400) : nil
+        } else {
+            return CGSize(width: 108, height: people ? 160 : 185)
         }
-        let cellWidth: CGFloat  = people ? 250 : GridStyle.posterSize.width
-        let spacing:   CGFloat  = people ? 48 : GridStyle.columnSpacing
-        let total              = (CGFloat(count) * cellWidth) + (CGFloat(count - 1) * spacing)
-        let side               = max(GridStyle.sideInset, ((collectionView.bounds.width - total) / 2).rounded(.down))
-        return UIEdgeInsets(top: top, left: side, bottom: bottom, right: side)
     }
-    
-    func searchBar(_ searchBar: UISearchBar, selectedScopeButtonIndexDidChange selectedScope: Int) {
-        switch selectedScope {
-        case 0:
-            fetchType = .movies
-        case 1:
-            fetchType = .shows
-        case 2:
-            fetchType = .people
-        default: return
+
+    override func collectionView(_ collectionView: UICollectionView, titleForHeaderInSection section: Int) -> String? {
+        switch group(ofSection: section) {
+        case .movies: return "Movies".localized
+        case .shows: return "Shows".localized
+        case .people: return "People".localized
+        case nil: return nil
         }
-        filterSearchText(searchBar.text ?? "")
     }
-    
+
     func searchBar(_ searchBar: UISearchBar, textDidChange searchText: String) {
         workItem?.cancel()
-        
+
         workItem = DispatchWorkItem {
             self.filterSearchText(searchText)
         }
-        
+
         DispatchQueue.main.asyncAfter(deadline: .now() + searchDelay, execute: workItem)
     }
-    
+
     func filterSearchText(_ text: String) {
         searchGeneration += 1
         let generation = searchGeneration
-        collectionViewController.isLoading = !text.isEmpty
+        results = [:]
+        failures = [:]
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        pending = trimmed.isEmpty ? [] : Set(Group.allCases)
+        collectionViewController.isLoading = !pending.isEmpty
         collectionViewController.dataSources = [[]]
         collectionViewController.error = nil
         collectionView?.reloadData()
 
-        if text.isEmpty { return }
+        if trimmed.isEmpty { return }
 
-        let completion: ([AnyHashable]?, NSError?) -> Void = { [weak self] (data, error) in
-            guard let self = self, generation == self.searchGeneration else { return }
-            self.collectionViewController.dataSources = [data ?? []]
-            self.collectionViewController.error = error
-            self.collectionViewController.isLoading = false
-            self.collectionView?.reloadData()
-            // Reset the cached focus index path so the next focus update
-            // targets the first cell of the new result set. Without this,
-            // a previous index (say row=14 from a Shows search) sticks
-            // around and the focus engine refuses to descend into a Movies
-            // result set that only has 2 cells (out-of-bounds index).
-            self.collectionViewController.focusIndexPath = IndexPath(item: 0, section: 0)
-            self.collectionViewController.collectionView?.layoutIfNeeded()
-            self.collectionViewController.collectionView?.setNeedsFocusUpdate()
-            self.collectionViewController.collectionView?.updateFocusIfNeeded()
+        func receive(_ group: Group) -> ([AnyHashable]?, NSError?) -> Void {
+            return { [weak self] data, error in
+                DispatchQueue.main.async {
+                    guard let self = self, generation == self.searchGeneration else { return }
+                    self.results[group] = data ?? []
+                    if let error = error { self.failures[group] = error }
+                    self.pending.remove(group)
+                    self.showResults()
+                }
+            }
         }
-        
-        switch fetchType {
-        case .movies:
-            PopcornKit.loadMovies(searchTerm: text) { results, error in
-                completion(results, error)
-            }
-        case .shows:
-            PopcornKit.loadShows(searchTerm: text) { results, error in
-                completion(results, error)
-            }
-        case .people:
-            TraktManager.shared.search(forPerson: text) { results, error in
-                // Nil when Trakt fails (an error to show, not a crash).
-                completion(results?.compactMap { $0 as? Crew }, error)
-            }
-        default:
-            return
+
+        PopcornKit.loadMovies(searchTerm: trimmed) { results, error in
+            receive(.movies)(results, error)
+        }
+        PopcornKit.loadShows(searchTerm: trimmed) { results, error in
+            receive(.shows)(results, error)
+        }
+        TraktManager.shared.search(forPerson: trimmed) { results, error in
+            // Nil when Trakt fails: people simply stay out of the results
+            // (the search still answers with the movies and shows).
+            receive(.people)(results?.compactMap { $0 as? Crew }, error)
         }
     }
-    
+
+    /// The sections answered so far, movies first, then shows, then people.
+    /// An error shows only when every catalogue failed and none answered.
+    private func showResults() {
+        let sections = Group.allCases.compactMap { results[$0] }.filter { !$0.isEmpty }
+        collectionViewController.dataSources = sections.isEmpty ? [[]] : sections
+        collectionViewController.isLoading = !pending.isEmpty && sections.isEmpty
+        let catalogues: [Group] = [.movies, .shows]
+        collectionViewController.error = pending.isEmpty && sections.isEmpty && catalogues.allSatisfy({ failures[$0] != nil })
+            ? failures[.movies] : nil
+        collectionView?.reloadData()
+        // Reset the cached focus index path so the next focus update
+        // targets the first cell of the new result set. Without this, a
+        // previous index (say row=14 from a broader search) sticks around
+        // and the focus engine refuses to descend into a smaller result set
+        // (out-of-bounds index).
+        collectionViewController.focusIndexPath = IndexPath(item: 0, section: 0)
+        collectionViewController.collectionView?.layoutIfNeeded()
+        collectionViewController.collectionView?.setNeedsFocusUpdate()
+        collectionViewController.collectionView?.updateFocusIfNeeded()
+    }
+
     override func collectionView(isEmptyForUnknownReason collectionView: UICollectionView) {
         guard let text = searchBar.text, !text.isEmpty else { return }
         let openQuote = Locale.current.quotationBeginDelimiter ?? "\""
