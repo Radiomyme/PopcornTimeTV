@@ -4,7 +4,11 @@
 //
 //  The profiles (PopcornKit, ProfileManager): the migration of the data from before profiles into
 //  the primary profile, creating / renaming / deleting, the active profile, and each profile's
-//  library and preferences kept apart. No UserDefaults, no keychain, no network, no real clock.
+//  library and preferences kept apart. Then the same against real defaults (a throwaway domain in
+//  a temporary folder, as the apps' `DefaultsProfileStorage` reads them): every store kept apart, a
+//  deletion that removes one profile's keys and nothing else, a 5.3.0 install migrated, a 5.3.0
+//  build still reading the primary profile; and a Trakt answer written into the profile that
+//  asked. No keychain, no network, no real clock.
 //
 
 import Foundation
@@ -79,7 +83,7 @@ final class ProfileManagerTests: CheckedTestCase {
     func testTheMigrationRunsOnce() {
         let storage = storage5x()
         let first = manager(storage)
-        try? first.create(name: "Alex", avatar: 3)
+        _ = try? first.create(name: "Alex", avatar: 3)
         let data = storage.object(forKey: ProfileManager.profilesKey) as? Data
 
         let second = manager(storage)
@@ -276,5 +280,296 @@ final class ProfileManagerTests: CheckedTestCase {
         profiles.activate(sam.id)
         try profiles.delete(alex.id)
         eq(profiles.activeID, sam.id, "Sam stays active")
+    }
+
+    // MARK: - A Trakt answer on its way
+
+    func testATraktAnswerGoesToTheProfileThatAsked() throws {
+        let storage = storage5x()
+        let profiles = manager(storage)
+        let alex = try profiles.create(name: "Alex", avatar: 1)
+        let clock = F.Clock("2026-11-25T12:00:00Z")
+        let libraries = [Profile.primaryID: library(profiles, Profile.primaryID, clock: clock),
+                         alex.id: library(profiles, alex.id, clock: clock)]
+        _ = libraries[alex.id]!.addToWatchlist(["imdb_id": "tt0109830", "title": "Forrest Gump", "year": "1994"],
+                                               id: "tt0109830", list: .movies)
+        var shown: [[String]] = []
+        // What WatchlistManager.getWatchlist does: asked with Me's account…
+        let deliver = profiles.answerForActiveProfile(write: { (profileID, ids: [String]) in
+            libraries[profileID]!.replaceWatchlist(ids.map { ["imdb_id": $0, "title": $0, "year": "2001"] }, list: .movies)
+        }, show: { shown.append($0) })
+
+        // …Alex is picked while the answer is on its way.
+        profiles.activate(alex.id)
+        deliver(["tt0120737"])
+        check(libraries[Profile.primaryID]!.isInWatchlist("tt0120737"), "Me's Trakt watchlist goes to Me")
+        check(!libraries[Profile.primaryID]!.isInWatchlist("tt0111161"), "…in place of Me's list")
+        check(libraries[alex.id]!.isInWatchlist("tt0109830"), "Alex's watchlist is not replaced")
+        check(!libraries[alex.id]!.isInWatchlist("tt0120737"), "…nor given Me's titles")
+        check(storage.object(forKey: "profile.\(alex.id).moviesWatchlist").map { "\($0)".contains("tt0120737") } != true,
+              "nothing of Me's list is stored under Alex's keys")
+        eq(shown, [], "Alex's screen is not shown Me's list")
+
+        // Asked by Alex, answered while Alex still watches: written and shown.
+        let alexAsks = profiles.answerForActiveProfile(write: { (profileID, ids: [String]) in
+            _ = libraries[profileID]!.setWatched(true, id: ids[0], list: .movies)
+        }, show: { shown.append($0) })
+        alexAsks(["tt0133093"])
+        check(libraries[alex.id]!.isWatched("tt0133093"), "Alex's own answer is Alex's")
+        check(!libraries[Profile.primaryID]!.isWatched("tt0133093"), "…not Me's")
+        eq(shown, [["tt0133093"]], "and shown on Alex's screen")
+
+        // Asked by Alex, answered once Alex was deleted: dropped, Alex's keys do not come back.
+        var written = 0
+        let lateForAlex = profiles.answerForActiveProfile(write: { (_, _: [String]) in written += 1 }, show: { shown.append($0) })
+        try profiles.delete(alex.id)
+        lateForAlex(["tt0468569"])
+        eq(written, 0, "nothing is written for a deleted profile")
+        eq(shown.count, 1, "nor shown")
+        check(storage.keys.allSatisfy { !$0.hasPrefix("profile.\(alex.id).") }, "no key of Alex's is left")
+    }
+
+    // MARK: - Real defaults
+
+    /// A defaults domain of its own for one test: a file in a temporary folder (see
+    /// RecentSearchesTests), seen as the apps see the standard defaults (`DefaultsProfileStorage`).
+    private final class RealDefaults {
+        let domain: String
+        let suite: UserDefaults
+
+        init(_ name: String) {
+            let folder = (NSTemporaryDirectory() as NSString).appendingPathComponent("PopcornTimeTests-defaults")
+            try? FileManager.default.createDirectory(atPath: folder, withIntermediateDirectories: true)
+            domain = (folder as NSString).appendingPathComponent("\(name)-\(UUID().uuidString)")
+            suite = UserDefaults(suiteName: domain)!
+            suite.removePersistentDomain(forName: domain)
+        }
+
+        func storage() -> DefaultsProfileStorage {
+            return DefaultsProfileStorage(defaults: suite, domain: domain)
+        }
+
+        /// What is stored, as the defaults' file holds it.
+        var stored: [String: Any] {
+            return suite.persistentDomain(forName: domain) ?? [:]
+        }
+
+        func discard() {
+            suite.removePersistentDomain(forName: domain)
+            suite.synchronize()
+            try? FileManager.default.removeItem(atPath: domain + ".plist")
+        }
+    }
+
+    private func manager(_ defaults: RealDefaults, ids: [String] = ["p1", "p2", "p3", "p4"]) -> ProfileManager {
+        var remaining = ids
+        let clock = F.Clock("2026-11-25T12:00:00Z")
+        return ProfileManager(storage: defaults.storage(), defaultName: "Me", center: NotificationCenter(),
+                              makeID: { remaining.isEmpty ? UUID().uuidString : remaining.removeFirst() },
+                              now: { clock.now }, eraseExternal: { _ in })
+    }
+
+    private func taste(_ storage: LibraryStorage, clock: F.Clock) -> ProfileTaste {
+        return ProfileTaste(storage: storage, center: NotificationCenter(), now: { clock.now })
+    }
+
+    /// Two values the same as stored (a dictionary, an array, Data, a number…).
+    private func same(_ a: Any?, _ b: Any?) -> Bool {
+        guard let a = a, let b = b else { return a == nil && b == nil }
+        return (a as AnyObject).isEqual(b)
+    }
+
+    private static let darkKnight = PlaybackDetails(title: "The Dark Knight", runtime: 152)
+    private static let arrival = TasteTitle(imdbID: "tt2543164", kind: .movie, genres: ["Sci-Fi", "Drama"], year: 2016)
+
+    func testEveryStoreIsTheProfilesOwnInRealDefaults() throws {
+        let defaults = RealDefaults("profiles-stores")
+        defer { defaults.discard() }
+        let profiles = manager(defaults)
+        let alex = try profiles.create(name: "Alex", avatar: 1)
+        let clock = F.Clock("2026-11-25T12:00:00Z")
+        let me = library(profiles, Profile.primaryID, clock: clock)
+        let them = library(profiles, alex.id, clock: clock)
+        let searches = RecentSearches(defaults: defaults.suite, profiles: profiles)
+
+        // Me's data, under the plain keys.
+        _ = me.setProgress(0.4, id: "tt0816692", list: .movies)
+        searches.add("Interstellar")
+        defaults.suite.set("Français", forKey: profiles.scopedKey("preferredAudioLanguage"))
+        taste(profiles.storage(for: Profile.primaryID), clock: clock)
+            .notePlayback(of: TasteTitle(imdbID: "tt0816692", kind: .movie, genres: ["Sci-Fi"], year: 2014), progress: 1, isFinished: true)
+
+        // Alex's, with Alex active: each store the apps keep per profile.
+        profiles.activate(alex.id)
+        eq(searches.queries, [], "a screen kept across the switch shows Alex's searches: none")
+        _ = them.setProgress(0.3, id: "tt0468569", list: .movies, details: ProfileManagerTests.darkKnight)
+        _ = them.setWatched(true, id: "tt0133093", list: .movies)
+        _ = them.addToWatchlist(["imdb_id": "tt0109830", "title": "Forrest Gump", "year": "1994"], id: "tt0109830", list: .movies)
+        _ = them.acknowledgements.acknowledge("tt0944947", through: EpisodeNumber(season: 1, episode: 3))
+        searches.add("Arrival")
+        defaults.suite.set("Deutsch", forKey: profiles.scopedKey("preferredAudioLanguage"))
+        defaults.suite.set("English", forKey: profiles.scopedKey("preferredSubtitleLanguage"))
+        taste(profiles.storage(for: alex.id), clock: clock).notePlayback(of: ProfileManagerTests.arrival, progress: 1, isFinished: true)
+
+        eq(searches.queries, ["Arrival"], "Alex's recent searches")
+        eq(defaults.suite.string(forKey: profiles.scopedKey("preferredAudioLanguage")), "Deutsch", "Alex's audio language")
+        eq(profiles.traktCredentialIdentifier, "trakt.\(alex.id)", "Alex's Trakt account")
+
+        // Back to Me: nothing of Alex's shows through.
+        profiles.activate(Profile.primaryID)
+        eq(searches.queries, ["Interstellar"], "Me's recent searches, without Alex's")
+        eq(defaults.suite.string(forKey: profiles.scopedKey("preferredAudioLanguage")), "Français", "Me's audio language")
+        check(defaults.suite.object(forKey: profiles.scopedKey("preferredSubtitleLanguage")) == nil, "…and no subtitle language of Alex's")
+        eq(profiles.traktCredentialIdentifier, "trakt", "Me's Trakt account")
+        let meAgain = library(profiles, Profile.primaryID, clock: clock)
+        eq(meAgain.progress("tt0816692"), 0.4, "Me's position, read back from the defaults")
+        eq(meAgain.progress("tt0468569"), 0, "not Alex's")
+        check(!meAgain.isWatched("tt0133093") && !meAgain.isInWatchlist("tt0109830"), "nor Alex's marks and watchlist")
+        check(!meAgain.continueWatching().contains { $0.mediaID == "tt0468569" }, "nor Alex's Continue Watching")
+        check(defaults.suite.object(forKey: NewEpisodesAcknowledgements.storageKey) == nil, "nor the new episodes Alex has seen")
+        let myTaste = taste(profiles.storage(for: Profile.primaryID), clock: clock).snapshot()
+        check(myTaste.genres["Drama"] == nil, "nor Alex's taste")
+
+        // Alex's, read back from the defaults (a relaunch).
+        let alexAgain = library(profiles, alex.id, clock: clock)
+        check(alexAgain.continueWatching().contains { $0.mediaID == "tt0468569" }, "Alex's Continue Watching is stored")
+        check(alexAgain.isWatched("tt0133093") && alexAgain.isInWatchlist("tt0109830"), "…Alex's marks and watchlist")
+        check(defaults.suite.object(forKey: "profile.\(alex.id).\(NewEpisodesAcknowledgements.storageKey)") != nil, "…the new episodes seen")
+        check((taste(profiles.storage(for: alex.id), clock: clock).snapshot().genres["Drama"] ?? 0) > 0, "…Alex's taste")
+
+        // Deleting Alex takes every one of them, and nothing of Me's.
+        try profiles.delete(alex.id)
+        let left = defaults.stored.keys.filter { $0.hasPrefix("profile.") }
+        eq(left.sorted(), [], "nothing of Alex's is left in the defaults")
+        eq(searches.queries, ["Interstellar"], "Me keeps Me's searches")
+        eq(library(profiles, Profile.primaryID, clock: clock).progress("tt0816692"), 0.4, "…and Me's position")
+    }
+
+    func testDeletingFromRealDefaultsRemovesThatProfilesKeysOnly() throws {
+        let defaults = RealDefaults("profiles-delete")
+        defer { defaults.discard() }
+        for (key, value) in storage5x().keys.map({ ($0, storage5x().object(forKey: $0)!) }) {
+            defaults.suite.set(value, forKey: key)
+        }
+        defaults.suite.set(["Dune"], forKey: RecentSearches.defaultsKey)
+        defaults.suite.set(true, forKey: "tosAccepted")
+        // p10 begins with p1: only "profile.p1." is p1's.
+        let profiles = manager(defaults, ids: ["p1", "p10"])
+        let p1 = try profiles.create(name: "Alex", avatar: 1)
+        let p10 = try profiles.create(name: "Sam", avatar: 2)
+        eq([p1.id, p10.id], ["p1", "p10"], "the two ids")
+        let clock = F.Clock("2026-11-25T12:00:00Z")
+        for id in [p1.id, p10.id] {
+            _ = library(profiles, id, clock: clock).setProgress(0.3, id: "tt0468569", list: .movies, details: ProfileManagerTests.darkKnight)
+            _ = library(profiles, id, clock: clock).addToWatchlist(["imdb_id": "tt0109830", "title": "Forrest Gump", "year": "1994"],
+                                                                   id: "tt0109830", list: .movies)
+            defaults.suite.set(["Arrival"], forKey: ProfileManager.prefix(of: id) + RecentSearches.defaultsKey)
+            defaults.suite.set("Deutsch", forKey: ProfileManager.prefix(of: id) + "preferredAudioLanguage")
+            taste(profiles.storage(for: id), clock: clock).notePlayback(of: ProfileManagerTests.arrival, progress: 1, isFinished: true)
+        }
+        // Keys the apps never write under a profile: a deletion must not care.
+        defaults.suite.set(1, forKey: "profile.p1")
+        defaults.suite.set(1, forKey: "profile.p1x.moviesProgress")
+        let before = defaults.stored
+        check(before.keys.contains("profile.p1.moviesProgress") && before.keys.contains("profile.p10.moviesProgress"),
+              "both profiles' data is in the defaults' file", "\(before.keys.sorted())")
+
+        try profiles.delete(p1.id)
+        let after = defaults.stored
+        let gone = Set(before.keys).subtracting(after.keys)
+        check(!gone.isEmpty && gone.allSatisfy { $0.hasPrefix("profile.p1.") }, "only keys under « profile.p1. » are removed",
+              "\(gone.sorted())")
+        check(!after.keys.contains { $0.hasPrefix("profile.p1.") }, "and every one of them")
+        eq(Set(after.keys).subtracting(before.keys), [], "nothing is added")
+        for (key, value) in before where !key.hasPrefix("profile.p1.") && key != ProfileManager.profilesKey {
+            check(same(after[key], value), "\(key) is unchanged")
+        }
+        eq(profiles.profiles.map(\.id), [Profile.primaryID, "p10"], "Alex is gone, Sam stays")
+        eq(manager(defaults).profiles.map(\.id), [Profile.primaryID, "p10"], "…as the next launch reads it")
+    }
+
+    /// What a 5.3.0 install has in its defaults: the library under the plain keys (written by
+    /// 5.3.0's `Library`, which used the standard defaults themselves), the preferences, the
+    /// searches, the device's settings.
+    private func seed530(_ defaults: RealDefaults, clock: F.Clock) {
+        let plain = defaults.storage()
+        let library = Library(storage: plain, guideDirectory: nil, remote: .offline, center: NotificationCenter(), now: { clock.now })
+        _ = library.setProgress(0.55, id: "tt0816692", list: .movies, details: PlaybackDetails(title: "Interstellar", runtime: 169))
+        _ = library.setWatched(true, id: "tt1375666", list: .movies)
+        _ = library.setProgress(0.42, id: "tt0903747-s1e1", list: .episodes)
+        _ = library.addToWatchlist(["imdb_id": "tt0111161", "title": "The Shawshank Redemption", "year": "1994"],
+                                   id: "tt0111161", list: .movies)
+        _ = library.acknowledgements.acknowledge("tt0944947", through: EpisodeNumber(season: 2, episode: 1))
+        defaults.suite.set("Français", forKey: "preferredAudioLanguage")
+        defaults.suite.set("English", forKey: "preferredSubtitleLanguage")
+        defaults.suite.set(["Dune", "Severance"], forKey: RecentSearches.defaultsKey)
+        defaults.suite.set(Data([0x62, 0x70, 0x6c, 0x69, 0x73, 0x74]), forKey: "subtitleSettings")
+        defaults.suite.set(true, forKey: "tosAccepted")
+        defaults.suite.set(false, forKey: Library.bulkEpisodeLookupKey)
+    }
+
+    func testMigratingA530InstallChangesNothingOfItsData() {
+        let defaults = RealDefaults("profiles-530")
+        defer { defaults.discard() }
+        let clock = F.Clock("2026-11-20T12:00:00Z")
+        seed530(defaults, clock: clock)
+        let before = defaults.stored
+        check(before.keys.contains(ContinueWatchingStore.storageKey), "5.3.0 has stored its Continue Watching entries")
+
+        let profiles = manager(defaults)
+        let after = defaults.stored
+        eq(Set(after.keys).subtracting(before.keys), [ProfileManager.profilesKey, ProfileManager.activeKey],
+           "only the profiles' two keys are added")
+        for (key, value) in before {
+            check(same(after[key], value), "\(key) is stored exactly as 5.3.0 left it")
+        }
+        eq(profiles.profiles.map(\.id), [Profile.primaryID], "one profile, the primary one")
+        check(!profiles.asksAtLaunch, "no « Who's Watching? » after the update")
+
+        let primary = library(profiles, Profile.primaryID, clock: clock)
+        check(primary.isWatched("tt1375666"), "the primary profile has the watched movie")
+        eq(primary.progress("tt0903747-s1e1"), 0.42, "…the episode in progress")
+        check(primary.continueWatching().contains { $0.mediaID == "tt0816692" && $0.title == "Interstellar" },
+              "…the Continue Watching card, with its title")
+        check(primary.isInWatchlist("tt0111161"), "…the watchlist")
+        eq(RecentSearches(defaults: defaults.suite, profiles: profiles).queries, ["Dune", "Severance"], "…the recent searches")
+        eq(defaults.suite.string(forKey: profiles.scopedKey("preferredAudioLanguage")), "Français", "…the audio language")
+        check(!primary.isBulkEpisodeLookupEnabled, "the device's settings stay as they were")
+        eq(manager(defaults).profiles.map(\.id), [Profile.primaryID], "the next launch migrates nothing again")
+    }
+
+    func testA530BuildStillReadsThePrimaryProfileAfterTheUpdate() throws {
+        let defaults = RealDefaults("profiles-downgrade")
+        defer { defaults.discard() }
+        let clock = F.Clock("2026-11-20T12:00:00Z")
+        seed530(defaults, clock: clock)
+
+        // The update: two profiles, both used.
+        let profiles = manager(defaults)
+        let alex = try profiles.create(name: "Alex", avatar: 1)
+        _ = library(profiles, Profile.primaryID, clock: clock).setProgress(0.7, id: "tt0816692", list: .movies)
+        RecentSearches(defaults: defaults.suite, profiles: profiles).add("Arrival")
+        profiles.activate(alex.id)
+        _ = library(profiles, alex.id, clock: clock).setWatched(true, id: "tt0133093", list: .movies)
+        RecentSearches(defaults: defaults.suite, profiles: profiles).add("The Matrix")
+        defaults.suite.set("Deutsch", forKey: profiles.scopedKey("preferredAudioLanguage"))
+
+        // 5.3.0 installed again: it reads the plain keys and knows nothing of profiles.
+        let old = Library(storage: defaults.storage(), guideDirectory: nil, remote: .offline, center: NotificationCenter(), now: { clock.now })
+        eq(old.progress("tt0816692"), 0.7, "5.3.0 sees the primary profile's latest position")
+        check(old.isWatched("tt1375666") && old.isInWatchlist("tt0111161"), "…its marks and watchlist")
+        check(!old.isWatched("tt0133093"), "…not Alex's")
+        eq(defaults.suite.stringArray(forKey: RecentSearches.defaultsKey), ["Arrival", "Dune", "Severance"], "…the primary profile's searches")
+        eq(defaults.suite.string(forKey: "preferredAudioLanguage"), "Français", "…its audio language, not Alex's")
+        _ = old.setWatched(true, id: "tt0468569", list: .movies)
+
+        // Updated again: the profiles are all there, and what 5.3.0 did is the primary profile's.
+        let again = manager(defaults)
+        eq(again.profiles.map(\.name), ["Me", "Alex"], "the profiles survive the round trip")
+        eq(again.activeID, alex.id, "the last profile is still the one watching")
+        check(library(again, Profile.primaryID, clock: clock).isWatched("tt0468569"), "the primary profile has what 5.3.0 marked")
+        let alexLibrary = library(again, alex.id, clock: clock)
+        check(alexLibrary.isWatched("tt0133093") && !alexLibrary.isWatched("tt0468569"), "Alex keeps Alex's, and only Alex's")
+        eq(RecentSearches(defaults: defaults.suite, profiles: again).queries, ["The Matrix"], "Alex's searches")
     }
 }
