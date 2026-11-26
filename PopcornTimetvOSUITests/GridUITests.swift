@@ -266,7 +266,15 @@ final class GridUITests: XCTestCase {
         pause(0.8)
         try choose(markUnwatched, at: 2)
         pause(1.5)
-        XCTAssertEqual(focusedCell(in: grid)?.label, before, "the poster is not back as it was")
+        // Back as it was: its own poster, no « Watched » any more. Not the
+        // whole label: a live title's format badges can come in meanwhile
+        // (« 4K, HDR » then « 4K, Dolby Vision, HDR » once its releases are
+        // read), which says nothing about the menu.
+        guard let unwatched = focusedCell(in: grid) else { return XCTFail("no poster has the focus after unmarking") }
+        XCTAssertEqual(unwatched.identifier, identifier, "the focus is not back on the poster")
+        XCTAssertFalse(unwatched.label.contains(watchedWord), "the poster still says it is watched: \(unwatched.label)")
+        XCTAssertTrue(unwatched.label.hasPrefix(before.components(separatedBy: ", ").first ?? before),
+                      "the poster is not back as it was: \(unwatched.label)")
 
         remote.press(.select, forDuration: 1.6)
         let add = labelled(isEnglish ? "Add to Watchlist" : "Ajouter à ma liste")
