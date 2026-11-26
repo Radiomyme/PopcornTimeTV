@@ -90,7 +90,7 @@ final class StreamingServicesUITests: XCTestCase {
     func testAServiceWhoseListsTakeAWhileShowsPlaceholders() throws {
         launch(key: Self.key, ["-PTDebugHomeResume", Self.resume, "-PTDebugHomeFocus", "services:0", "-PTDebugHomeDelay", "3"])
         let netflix = element("Home.Card.service-8"), popular = element("Home.Section.streaming-8-movie-popular")
-        XCTAssertTrue(waitForFocus(on: netflix, timeout: 40), "the focus never reached Netflix's card: \(focusedLabel)")
+        XCTAssertTrue(waitForFocus(on: "Home.Card.service-8", timeout: 40), "the focus never reached Netflix's card: \(focusedLabel)")
         pause(1.5)
         remote.press(.select)
         pause(1.2)
@@ -113,8 +113,8 @@ final class StreamingServicesUITests: XCTestCase {
     /// row, « All » there, and no shelf of the service.
     func testAServiceThatListsNothingSaysSo() throws {
         launch(key: Self.key, ["-PTDebugHomeResume", Self.resume, "-PTDebugHomeFocus", "services:3"])
-        let apple = element("Home.Card.service-350"), empty = element("Home.Services.Empty")
-        XCTAssertTrue(waitForFocus(on: apple, timeout: 40), "the focus never reached Apple TV's card: \(focusedLabel)")
+        let empty = element("Home.Services.Empty")
+        XCTAssertTrue(waitForFocus(on: "Home.Card.service-350", timeout: 40), "the focus never reached Apple TV's card: \(focusedLabel)")
         pause(1.5)
         remote.press(.select)
         XCTAssertTrue(empty.waitForExistence(timeout: 30), "a service that lists nothing: no « No results »")
@@ -176,7 +176,7 @@ final class StreamingServicesUITests: XCTestCase {
         let row = element("Home.Section.services"), resume = element("Home.Section.continueWatching")
         let netflix = element("Home.Card.service-8"), all = element("Home.Card.service-all")
         XCTAssertTrue(row.waitForExistence(timeout: 30), "no « Services » row with a key")
-        XCTAssertTrue(waitForFocus(on: netflix), "the focus never reached Netflix's card: \(focusedLabel)")
+        XCTAssertTrue(waitForFocus(on: "Home.Card.service-8"), "the focus never reached Netflix's card: \(focusedLabel)")
         pause(1.5)
         snap("services-row")
         XCTAssertTrue(resume.exists, "no Continue Watching")
@@ -239,8 +239,8 @@ final class StreamingServicesUITests: XCTestCase {
     /// (Play), then to the usual page, and only then out of the app.
     func testMenuAtTheTopOfAFilteredPageBringsTheUsualPageBack() throws {
         launch(key: Self.key, ["-PTDebugHomeResume", Self.resume, "-PTDebugHomeFocus", "services:0"])
-        let netflix = element("Home.Card.service-8"), resume = element("Home.Section.continueWatching")
-        XCTAssertTrue(waitForFocus(on: netflix), "the focus never reached Netflix's card: \(focusedLabel)")
+        let resume = element("Home.Section.continueWatching")
+        XCTAssertTrue(waitForFocus(on: "Home.Card.service-8"), "the focus never reached Netflix's card: \(focusedLabel)")
         pause(1.5)
         remote.press(.select)
         let popular = element("Home.Section.streaming-8-movie-popular")
@@ -590,11 +590,13 @@ final class StreamingServicesUITests: XCTestCase {
         return card.exists && other.exists && card.frame.width > other.frame.width + 10
     }
 
-    private func waitForFocus(on element: XCUIElement, timeout: TimeInterval = 20) -> Bool {
+    private func waitForFocus(on identifier: String, timeout: TimeInterval = 20) -> Bool {
         // A query, not the element: one drawn again between two reads is
-        // not a failure.
+        // not a failure. Given the identifier, not an element: reading an
+        // element's `identifier` resolves it, which fails at once while the
+        // card is not drawn yet (a slow first Home).
         let focused = app.descendants(matching: .any)
-            .matching(NSPredicate(format: "identifier == %@ AND hasFocus == true", element.identifier)).firstMatch
+            .matching(NSPredicate(format: "identifier == %@ AND hasFocus == true", identifier)).firstMatch
         return waitUntil(timeout: timeout) { focused.exists }
     }
 
