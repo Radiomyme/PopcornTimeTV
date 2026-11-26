@@ -575,10 +575,14 @@ struct ProfilePickerView: View {
                     manageButton
                         .glassActionStyle()
                         .controlSize(.large)
+                        // White as the names: the glass button's own grey
+                        // read as disabled whenever the window was not key.
+                        .foregroundStyle(GlassPalette.primaryText)
                         .padding(.top, 44)
                 }
                 .padding(40)
             }
+            .modifier(MacPickerWindowChrome())
         case .sheet:
             VStack(spacing: 0) {
                 VStack(spacing: 28) {
@@ -765,6 +769,14 @@ struct ProfileEditorView: View {
     #else
     @FocusState private var nameFocused: Bool
     #endif
+    #if os(macOS)
+    /// The window the editor is on, its own sheet.
+    @State private var hostWindow: NSWindow?
+    /// Deleting the profile in use makes the main one active, which
+    /// rebuilds every main window: not while one shows the player (or
+    /// another sheet), as Use waits.
+    @State private var deleteWaits = false
+    #endif
 
     init(model: ProfilesModel, draft: ProfileDraft, onClose: @escaping () -> Void) {
         self.model = model
@@ -792,6 +804,11 @@ struct ProfileEditorView: View {
             }
             .alert(profilesLocalized("Profiles.Delete"), isPresented: $confirmDelete) {
                 SwiftUI.Button(profilesLocalized("Profiles.Delete"), role: .destructive) {
+                    #if os(macOS)
+                    // A player may have started while the alert was up.
+                    refreshDeleteWaits()
+                    guard !deleteWaits else { return NSSound.beep() }
+                    #endif
                     if let id = draft.id { model.delete(id) }
                     onClose()
                 }
@@ -800,6 +817,12 @@ struct ProfileEditorView: View {
                 Text(verbatim: String(format: profilesLocalized("Profiles.Delete.Message"), draft.name))
             }
     }
+
+    #if os(macOS)
+    private func refreshDeleteWaits() {
+        deleteWaits = draft.id == model.activeID && MacNavigator.isASheetUp(apartFrom: hostWindow)
+    }
+    #endif
 
     private func save() {
         guard !trimmedName.isEmpty else { return }
@@ -974,6 +997,8 @@ struct ProfileEditorView: View {
             HStack {
                 if isDeletable {
                     Button(profilesLocalized("Profiles.Delete") + "…", role: .destructive) { confirmDelete = true }
+                        .disabled(deleteWaits)
+                        .help(deleteWaits ? profilesLocalized("Profiles.Use.Busy") : "")
                         .accessibilityIdentifier("Profiles.Editor.Delete")
                 }
                 Spacer()
@@ -990,7 +1015,16 @@ struct ProfileEditorView: View {
             .padding(.vertical, 12)
         }
         .frame(width: 480)
+        .background(MacHostWindowReader { hostWindow = $0; refreshDeleteWaits() })
         .onAppear { if draft.id == nil { nameFocused = true } }
+        // A sheet put on or taken off any window (the player's): looked
+        // again once it has settled.
+        .onReceive(NotificationCenter.default.publisher(for: NSWindow.willBeginSheetNotification)) { _ in
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { refreshDeleteWaits() }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: NSWindow.didEndSheetNotification)) { _ in
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { refreshDeleteWaits() }
+        }
     }
     #else
     /// A system form: the preview and the name, the avatars, Delete Profile;
@@ -1275,9 +1309,11 @@ struct ProfilesSettingsSection: View {
 /// nothing opens behind the Settings window.
 struct MacProfilesSettingsPane: View {
     @StateObject private var model = ProfilesModel()
+    /// The main window may still ask « Who's Watching? »: Use answers it.
+    @ObservedObject private var question = ProfileLaunchQuestion.shared
     @State private var editing: ProfileDraft?
-    /// A main window shows the player (or another sheet): a switch would
-    /// close it, so Use waits.
+    /// A main window shows the player (or another sheet: the quality
+    /// picker, the release notes): a switch would close it, so Use waits.
     @State private var isASheetUp = MacNavigator.isASheetUp
 
     var body: some View {
@@ -1356,6 +1392,9 @@ struct MacProfilesSettingsPane: View {
                         return
                     }
                     ProfileManager.shared.activate(profile.id)
+                    // The windows then show the profile picked, not the
+                    // question behind which it changed.
+                    if question.isAsking { question.answer() }
                 }
                 .controlSize(.small)
                 .disabled(isASheetUp)
@@ -1385,6 +1424,48 @@ struct MacProfilePickerSheet: View {
     var body: some View {
         ProfilePickerView(layout: .sheet, onPick: { close($0.id) }, onCancel: { close(nil) })
             .background(MacSheetToFront())
+    }
+}
+
+/// The launch question's window as the Home's: no title, no toolbar
+/// strip, the backdrop under the traffic lights — the window does not change
+/// its chrome when the Home replaces the question.
+private struct MacPickerWindowChrome: ViewModifier {
+    func body(content: Content) -> some View {
+        if #available(macOS 15.0, *) {
+            content
+                .toolbarBackgroundVisibility(.hidden, for: .windowToolbar)
+                .toolbar(removing: .title)
+        } else {
+            content
+                .toolbarBackground(.hidden, for: .windowToolbar)
+                .navigationTitle("")
+        }
+    }
+}
+
+/// Tells its view the window it is in (a sheet's own window).
+private struct MacHostWindowReader: NSViewRepresentable {
+    let found: (NSWindow) -> Void
+
+    func makeNSView(context: Context) -> ReaderView {
+        let view = ReaderView()
+        view.found = found
+        return view
+    }
+
+    func updateNSView(_ view: ReaderView, context: Context) {}
+
+    final class ReaderView: NSView {
+        var found: ((NSWindow) -> Void)?
+
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            guard let window else { return }
+            DispatchQueue.main.async { [found] in found?(window) }
+        }
+
+        override func hitTest(_ point: NSPoint) -> NSView? { nil }
     }
 }
 

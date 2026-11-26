@@ -210,6 +210,26 @@ final class MacNavigator: ObservableObject {
         NSApp.windows.contains { $0.attachedSheet != nil || $0.isSheet }
     }
 
+    /// `isASheetUp`, leaving out `window`'s own chain: the sheet the caller
+    /// is on, the windows under it and their sheets. A profile editor is a
+    /// sheet itself (on the Settings window, or on the Switch Profile sheet)
+    /// and asks whether another window shows the player.
+    static func isASheetUp(apartFrom window: NSWindow?) -> Bool {
+        var own = Set<ObjectIdentifier>()
+        var next = window
+        while let current = next {
+            own.insert(ObjectIdentifier(current))
+            next = current.sheetParent
+        }
+        return NSApp.windows.contains { candidate in
+            if own.contains(ObjectIdentifier(candidate)) { return false }
+            if candidate.isSheet {
+                return !(candidate.sheetParent.map { own.contains(ObjectIdentifier($0)) } ?? false)
+            }
+            return candidate.attachedSheet != nil
+        }
+    }
+
     /// A popcorntime:// link (`DeepLink`, as `AppLinkAction` reads it for
     /// the apps): a section, the Settings window, a search, or a title's
     /// page pushed over the page in front — Back returns to where the user

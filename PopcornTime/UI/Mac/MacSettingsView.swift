@@ -60,7 +60,7 @@ struct MacSettingsView: View {
 
     /// The pane shown last, kept outside the view: a profile switch makes
     /// the window's content again (`ProfileScoped`), on the pane it was on.
-    @MainActor private static var lastPane = Pane.playback
+    @MainActor private static var lastPane = Pane.profiles
     @State private var pane = MacSettingsView.lastPane
 
     var body: some View {
@@ -93,6 +93,7 @@ struct MacSettingsView: View {
             // Streaming pane with that sheet open.
             switch MacDebugHooks.settingsPane {
             case "profiles": pane = .profiles
+            case "playback": pane = .playback
             case "home": pane = .home
             case "streaming": pane = .streaming
             case "about": pane = .about
@@ -357,7 +358,10 @@ struct MacHomeSettingsSheet<Content: View>: View {
             .padding(.horizontal, 20)
             .padding(.vertical, 12)
         }
-        .frame(width: 420, height: 520)
+        // No taller than the shortest pane it opens on (Home: 399 pt, 88 of
+        // them the window's bar): a 520 pt sheet hung below the Settings
+        // window, since 5.3.0. The list scrolls; the OK bar stays.
+        .frame(width: 420, height: 300)
     }
 }
 

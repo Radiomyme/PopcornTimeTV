@@ -977,8 +977,8 @@
 "Profiles.EditNamed" = "Editar %@";
 /* Mac, Settings › Profiles: the button that makes a profile the one in use. */
 "Profiles.Use" = "Usar";
-/* Mac, Settings › Profiles: the tooltip of Use while the player is up. */
-"Profiles.Use.Busy" = "Disponível depois que o player for fechado.";
+/* Mac, Settings › Profiles: the tooltip of Use (and of the profile in use's Delete) while a main window shows the player or another sheet. */
+"Profiles.Use.Busy" = "Disponível depois que a janela aberta for fechada.";
 /* The profile editor: the profile was deleted meanwhile (another window). */
 "Profiles.Error.Gone" = "Este perfil não existe mais.";
 /* 5.4.0 review-fixes-2 */
