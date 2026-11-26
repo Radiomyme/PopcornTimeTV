@@ -1741,7 +1741,7 @@ public struct ReleaseLanguages: Equatable, CustomStringConvertible {
         "polish": "pl", "pldub": "pl", "lektor": "pl",
         "japanese": "ja", "jpn": "ja", "jap": "ja",
         "korean": "ko", "kor": "ko",
-        "chinese": "zh", "mandarin": "zh", "cantonese": "zh", "chi": "zh", "chs": "zh", "cht": "zh",
+        "chinese": "zh", "mandarin": "zh", "cantonese": "zh", "chi": "zh",
         "hindi": "hi", "hin": "hi", "tamil": "ta", "telugu": "te", "turkish": "tr", "tur": "tr", "arabic": "ar", "ara": "ar",
         "swedish": "sv", "swe": "sv", "danish": "da", "norwegian": "no", "finnish": "fi", "hungarian": "hu", "hun": "hu",
         "czech": "cs", "cze": "cs", "ces": "cs", "romanian": "ro", "greek": "el", "gre": "el", "ell": "el",
@@ -1874,10 +1874,13 @@ public struct ReleaseLanguages: Equatable, CustomStringConvertible {
     }
 
     /// Words naming subtitles in a language, the audio being the original:
-    /// "VOSTFR", "SUBFRENCH", "SUBITA".
+    /// "VOSTFR", "SUBFRENCH", "SUBITA"; "CHS" / "CHT", the Simplified and
+    /// Traditional Chinese subtitles (often burnt in) of a release whose
+    /// audio is the original — a Mandarin dub says "Mandarin".
     static let subtitleOnlyWords: [String: String] = [
         "vostfr": "fr", "vost": "fr", "subfrench": "fr", "stfr": "fr", "subfr": "fr",
         "subita": "it", "subesp": "es", "subspa": "es", "legendado": "pt",
+        "chs": "zh", "cht": "zh",
     ]
 
     static func isLanguageWord(_ token: String) -> Bool {
@@ -2029,7 +2032,10 @@ public enum AudioLanguagePreference {
         let isNone = raw?.lowercased() == noneValue
         var code = isNone ? nil : resolve(raw)
         let isLearnt = code == nil && !isNone
-        if isLearnt { code = resolve(source.learnt(profileID)) }
+        // A learnt English changes nothing: a profile that never chose a
+        // language ranks as 5.3.0 did. English chosen in Settings is a
+        // preference (another language's dubs go below the originals).
+        if isLearnt { code = resolve(source.learnt(profileID)).flatMap { $0 == ReleaseLanguages.originalLanguage ? nil : $0 } }
         lock.lock()
         cache = Cache(profileID: profileID, raw: raw, code: code, isLearnt: isLearnt, time: now)
         lock.unlock()
@@ -2335,6 +2341,8 @@ public extension Torrent {
     /// over a clean one —, then `languageRank` (in the language, likely in
     /// it, neutral, a dub in another language), then, between releases in
     /// the language, the viewer's regional dub (`ReleaseLanguages.regionFit`).
+    /// English, the catalogue's own language, lifts nothing: it only puts
+    /// another language's dubs below, the rest keeps 5.3.0's score order.
     static func ranksBelow(_ lhs: Torrent, _ rhs: Torrent, capabilities: PlaybackCapabilities.Snapshot,
                            language: String? = AudioLanguagePreference.current) -> Bool {
         if lhs.qualityValue != rhs.qualityValue {
@@ -2342,7 +2350,9 @@ public extension Torrent {
         }
         let lhsPlayability = lhs.playability(for: capabilities), rhsPlayability = rhs.playability(for: capabilities)
         if language != nil {
-            if lhsPlayability.isPenalized != rhsPlayability.isPenalized { return lhsPlayability.isPenalized }
+            if language != ReleaseLanguages.originalLanguage, lhsPlayability.isPenalized != rhsPlayability.isPenalized {
+                return lhsPlayability.isPenalized
+            }
             let lhsRank = lhs.languageRank(language), rhsRank = rhs.languageRank(language)
             if lhsRank != rhsRank { return lhsRank < rhsRank }
             if lhsRank == .confirmed {
