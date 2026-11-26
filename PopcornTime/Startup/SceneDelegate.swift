@@ -38,6 +38,18 @@ class SceneDelegate: UIResponder, UIWindowSceneDelegate {
         AppDelegate.shared.window = window
 
         let launchURL = connectionOptions.urlContexts.first?.url
+        #if DEBUG
+        // `-PTDebugProfilesPick <name>` (with `-PTDebugProfiles "Alex,Sam"`):
+        // that profile answers the question at once (screenshots of the
+        // content with several profiles, DEBUG builds only), as on the
+        // iPhone and the Mac.
+        if let name = UserDefaults.standard.string(forKey: "PTDebugProfilesPick"),
+           let profile = ProfileManager.shared.profiles.first(where: { $0.name == name }) {
+            ProfileManager.shared.activate(profile.id)
+            window.makeKeyAndVisible()
+            return installInterface(in: window, launchURL: launchURL, animated: false)
+        }
+        #endif
         // « Who's Watching? » first when the device has several profiles —
         // not for a launch to open a link (the Top Shelf's Play): the last
         // profile watches it. A link that comes while it asks is opened
