@@ -114,6 +114,10 @@ public enum PlaybackRecorder {
             WatchedlistManager<Episode>.episode.setCurrentProgress(progress, for: episode.id, with: status, details: details)
         }
         noteTaste(progress, of: media, release: details.release)
+        // The taste writes a position saved again only now and then (the
+        // Mac's checkpoints say `.finished` too): what is left, at the pause
+        // or when the app goes to the background.
+        if status == .paused { ProfileTaste.shared.flush() }
     }
 
     /// The profile's taste learns from the play: the title (once it really

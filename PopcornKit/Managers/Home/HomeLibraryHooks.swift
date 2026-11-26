@@ -188,19 +188,15 @@ public extension HomeFeed {
     /// profile becomes active: `HomeFeed.shared`, for the app's life.
     @discardableResult
     func followActiveProfile(center: NotificationCenter = .default) -> [NSObjectProtocol] {
-        let library = followChanges(of: nil, center: center)
+        // A play, a mark or the list changes the library and the taste at
+        // once: one burst for both, one recomputation. A taste change on
+        // its own (a reset in Settings › Profiles: « For You » goes) is
+        // followed too.
+        let burst = Burst()
+        let library = recompute(on: .libraryDidChange, of: nil, burst: burst, center: center)
+        let taste = recompute(on: ProfileTaste.didChangeNotification, of: nil, burst: burst, center: center)
         let profile = center.addObserver(forName: .activeProfileDidChange, object: nil, queue: .main) { [weak self] _ in
             self?.refreshLocal()
-        }
-        // A taste reset (Settings › Profiles): « For You » goes. The other
-        // changes come with a library change, recomputed already.
-        let burst = Burst()
-        let taste = center.addObserver(forName: ProfileTaste.didChangeNotification, object: nil, queue: nil) { [weak self] _ in
-            guard burst.begin() else { return }
-            DispatchQueue.main.async {
-                burst.end()
-                self?.refreshLocal()
-            }
         }
         return [library, profile, taste]
     }
@@ -214,10 +210,15 @@ public extension HomeFeed {
     /// from `center` to stop. nil: every library (`followActiveProfile`).
     @discardableResult
     func followChanges(of library: Library?, center: NotificationCenter = .default) -> NSObjectProtocol {
-        let burst = Burst()
-        // No queue: the library posts on the main thread, and a change is
-        // only noted here.
-        return center.addObserver(forName: .libraryDidChange, object: library, queue: nil) { [weak self] _ in
+        return recompute(on: .libraryDidChange, of: library, burst: Burst(), center: center)
+    }
+
+    /// `refreshLocal` once per burst of `name` (from `object`; nil: any).
+    private func recompute(on name: Notification.Name, of object: AnyObject?, burst: Burst,
+                           center: NotificationCenter) -> NSObjectProtocol {
+        // No queue: the library and the taste post on the main thread, and
+        // a change is only noted here.
+        return center.addObserver(forName: name, object: object, queue: nil) { [weak self] _ in
             guard burst.begin() else { return }
             DispatchQueue.main.async {
                 burst.end()

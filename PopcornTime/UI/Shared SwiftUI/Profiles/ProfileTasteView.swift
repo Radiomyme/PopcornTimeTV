@@ -51,7 +51,6 @@ final class ProfileTasteModel: ObservableObject {
         add("Kinds", (top[.kind] ?? []).prefix(1).map { profilesLocalized($0.value == "show" ? "Profiles.Taste.Shows" : "Profiles.Taste.Movies") })
         add("Decades", (top[.decade] ?? []).map { String(format: profilesLocalized("Profiles.Taste.Decade"), $0.value) })
         add("People", (top[.person] ?? []).map(\.value))
-        add("Languages", (top[.language] ?? []).map { languageName($0.value) })
         add("Audio", taste.preferredChoice(.audio).map { [languageName($0)] } ?? [])
         if taste.prefersSubtitlesOff {
             add("Subtitles", [profilesLocalized("Profiles.Taste.Off")])
