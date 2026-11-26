@@ -701,3 +701,15 @@
 "Nature" = "Nature";
 "Travel" = "Voyage";
 "DIY" = "Bricolage";
+
+/* PR #14: the automatic choice (Quick Start / Balanced / Best Picture), the maximum resolution, the language first */
+"Quick Start" = "Démarrage rapide";
+"Best Picture" = "Meilleure image";
+"The most shared source first, even with a lesser picture." = "La source la plus partagée d’abord, même avec une image moins bonne.";
+"The best picture among the sources shared widely enough." = "La meilleure image parmi les sources assez partagées.";
+"Maximum Resolution" = "Résolution maximale";
+"No Limit" = "Aucune limite";
+"The automatic choice stays at or below it. Higher sources stay in the list." = "Le choix automatique reste à cette résolution ou en dessous. Les sources plus hautes restent dans la liste.";
+"The automatic choice stays at or below the maximum resolution." = "Le choix automatique reste à la résolution maximale ou en dessous.";
+"Prefer Your Language" = "Privilégier votre langue";
+"A release in your audio language comes before a higher resolution in another language." = "Une version dans votre langue audio passe devant une meilleure résolution dans une autre langue.";

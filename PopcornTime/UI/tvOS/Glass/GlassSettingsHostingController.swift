@@ -24,6 +24,13 @@ final class GlassSettingsHostingController: UIHostingController<GlassSettingsVie
             setUpNextCardLead: { UpNextPreferences.cardLeadSeconds = $0 },
             readUpNextCardLead: { UpNextPreferences.cardLeadSeconds },
             upNextCardLeadChoices: UpNextCountdown.cardLeadChoices,
+            setMaximumResolution: { GlassSettingsStore.store(maximumResolution: $0) },
+            readMaximumResolution: { SourcePreferences.maximumResolution?.rawValue ?? 0 },
+            maximumResolutionChoices: SourcePreferences.maximumResolutionChoices.map {
+                GlassSettingsChoice(id: String($0.rawValue), title: $0.settingsLabel)
+            },
+            setLanguageFirst: { UserDefaults.standard.set($0, forKey: SourcePreferences.languageFirstKey) },
+            readLanguageFirst: { SourcePreferences.languageFirst },
             measureCache: { GlassSettingsStore.cacheSize() },
             clearCache: { AppDelegate.aggressivelyFreeDiskSpace() },
             hasActiveDownloads: { !PTTorrentDownloadManager.shared().activeDownloads.isEmpty },
@@ -73,7 +80,7 @@ final class GlassSettingsHostingController: UIHostingController<GlassSettingsVie
                                    actions: actions)
         #if DEBUG
         // `-PTDebugSettingsRow <row>` (homeLanguages, homeShelves, homeLookup,
-        // tmdbKey, streamingRegion, streamingServices, switchProfile,
+        // maximumResolution, languageFirst, tmdbKey, streamingRegion, streamingServices, switchProfile,
         // profilePreferences…): the row that takes the focus;
         // `-PTDebugSettingsPicker <picker>` (homeLanguages, homeShelves,
         // taste…): the sheet open at first display.
@@ -84,6 +91,8 @@ final class GlassSettingsHostingController: UIHostingController<GlassSettingsVie
         case "homeLookup": row = .homeLookup
         case "autoPlayNext": row = .autoPlayNext
         case "upNextCard": row = .upNextCard
+        case "maximumResolution": row = .maximumResolution
+        case "languageFirst": row = .languageFirst
         case "tmdbKey": row = .tmdbKey
         case "streamingRegion": row = .streamingRegion
         case "streamingServices": row = .streamingServices
@@ -121,19 +130,43 @@ enum GlassSettingsStore {
     /// The quality chooser (`AppDelegate.presentQualityChoice`) compares the
     /// stored value to the *localized* title ("Highest".localized), so that is
     /// what is stored; nil means Off (always ask).
+    /// Quick Start and Best Picture are stored as Balanced (what the
+    /// quality chooser and Up Next read) with their `SourcePriority`.
     static var autoQuality: GlassSettingsAutoQuality {
-        autoQuality(fromStored: defaults.string(forKey: autoQualityKey))
+        let stored = autoQuality(fromStored: defaults.string(forKey: autoQualityKey))
+        guard stored == .balanced else { return stored }
+        switch SourcePreferences.priority {
+        case .quickStart: return .quickStart
+        case .balanced: return .balanced
+        case .picture: return .bestPicture
+        }
     }
 
     static func store(autoQuality: GlassSettingsAutoQuality) {
-        defaults.set(autoQuality == .off ? nil : autoQuality.titleKey.localized, forKey: autoQualityKey)
+        let stored: GlassSettingsAutoQuality
+        let priority: SourcePriority
+        switch autoQuality {
+        case .quickStart: (stored, priority) = (.balanced, .quickStart)
+        case .bestPicture: (stored, priority) = (.balanced, .picture)
+        default: (stored, priority) = (autoQuality, .balanced)
+        }
+        defaults.set(stored == .off ? nil : stored.titleKey.localized, forKey: autoQualityKey)
+        // Balanced is the default: nothing stored, nothing left behind.
+        defaults.set(priority == .balanced ? nil : priority.rawValue, forKey: SourcePreferences.priorityKey)
     }
 
     /// Recognizes a stored value written in any language the app ships (or
     /// the raw English key), so a change of UI language keeps the setting.
+    /// Only the four stored values (Quick Start and Best Picture are
+    /// Balanced there).
     static func autoQuality(fromStored value: String?) -> GlassSettingsAutoQuality {
         guard let value, !value.isEmpty else { return .off }
-        return GlassSettingsAutoQuality.allCases.first { spellings(of: $0.titleKey).contains(value) } ?? .off
+        return [GlassSettingsAutoQuality.balanced, .highest, .lowest].first { spellings(of: $0.titleKey).contains(value) } ?? .off
+    }
+
+    /// 0 removes the limit.
+    static func store(maximumResolution lines: Int) {
+        defaults.set(lines > 0 ? lines : nil, forKey: SourcePreferences.maximumResolutionKey)
     }
 
     /// Launch: rewrites a value stored under another UI language (e.g. English

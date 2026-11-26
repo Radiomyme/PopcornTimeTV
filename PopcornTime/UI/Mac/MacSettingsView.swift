@@ -18,6 +18,12 @@ import PopcornKit
 /// earlier version still shows, so that it can be signed out.
 struct MacSettingsView: View {
     @AppStorage("autoSelectQuality") private var autoSelectQuality = "Balanced"
+    /// With "autoSelectQuality", the automatic choice (`AutomaticQualityChoice`).
+    @AppStorage(SourcePreferences.priorityKey) private var sourcePriority: String?
+    /// « Maximum Resolution » in lines; 0: no limit.
+    @AppStorage(SourcePreferences.maximumResolutionKey) private var maximumResolution = 0
+    /// « Prefer Your Language » (on by default).
+    @AppStorage(SourcePreferences.languageFirstKey) private var languageFirst = true
     /// « Autoplay next episode » (decision D8: on unless turned off).
     @AppStorage(UpNextPreferences.autoPlayNextKey) private var autoPlayNext = true
     /// « Next Episode Card » (seconds before the end; absent = 60).
@@ -134,16 +140,35 @@ struct MacSettingsView: View {
 
     // MARK: Playback
 
+    /// « Auto Select Quality »: read from both keys (the two @AppStorage
+    /// above make the row follow a change).
+    private var automaticChoice: Binding<AutomaticQualityChoice> {
+        Binding(get: { _ = (autoSelectQuality, sourcePriority); return AutomaticQualityChoice.stored() },
+                set: { $0.store() })
+    }
+
     @ViewBuilder
     private var playbackSections: some View {
         Section {
-            // Labels only: the stored tags stay "Balanced" / "Highest" /
-            // "Lowest" / "" (MacAutoQuality, the iOS / tvOS settings).
-            Picker("Auto Select Quality", selection: $autoSelectQuality) {
-                Text("Balanced (quick start)").tag("Balanced")
-                Text("Highest").tag("Highest")
-                Text("Lowest").tag("Lowest")
-                Text("Always Ask").tag("")
+            // Stored as "autoSelectQuality" + the priority
+            // (`AutomaticQualityChoice`; MacAutoQuality reads the first).
+            Picker(selection: automaticChoice) {
+                ForEach(AutomaticQualityChoice.allCases) { choice in
+                    Text(LocalizedStringKey(choice.titleKey)).tag(choice)
+                }
+            } label: {
+                Text("Auto Select Quality")
+                Text(LocalizedStringKey(automaticChoice.wrappedValue.detailKey))
+            }
+            .pickerStyle(.menu)
+            Picker(selection: $maximumResolution) {
+                Text("No Limit").tag(0)
+                ForEach(SourcePreferences.maximumResolutionChoices, id: \.rawValue) { quality in
+                    Text(verbatim: quality.settingsLabel).tag(quality.rawValue)
+                }
+            } label: {
+                Text("Maximum Resolution")
+                Text("The automatic choice stays at or below it. Higher sources stay in the list.")
             }
             .pickerStyle(.menu)
             // Off: the next episode's card stays without a countdown,
@@ -167,6 +192,12 @@ struct MacSettingsView: View {
 
         Section {
             languagePicker("Audio Language", storage: $preferredAudioLanguage, subtitles: false)
+            if PlaybackLanguagePreferences.SettingValue(stored: preferredAudioLanguage).tag != "" {
+                Toggle(isOn: $languageFirst) {
+                    Text("Prefer Your Language")
+                    Text("A release in your audio language comes before a higher resolution in another language.")
+                }
+            }
             languagePicker("Subtitle Language", storage: $preferredSubtitleLanguage, subtitles: true)
         } header: {
             Text("Languages")

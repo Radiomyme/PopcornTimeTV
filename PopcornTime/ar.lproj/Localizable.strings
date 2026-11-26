@@ -1004,3 +1004,15 @@
 "Nature" = "طبيعة";
 "Travel" = "سفر";
 "DIY" = "اصنعها بنفسك";
+
+/* PR #14: the automatic choice (Quick Start / Balanced / Best Picture), the maximum resolution, the language first */
+"Quick Start" = "بدء سريع";
+"Best Picture" = "أفضل صورة";
+"The most shared source first, even with a lesser picture." = "المصدر الأكثر مشاركةً أولًا، حتى لو كانت الصورة أقل جودة.";
+"The best picture among the sources shared widely enough." = "أفضل صورة بين المصادر المشتركة بما يكفي.";
+"Maximum Resolution" = "الدقة القصوى";
+"No Limit" = "بلا حد";
+"The automatic choice stays at or below it. Higher sources stay in the list." = "يبقى الاختيار التلقائي عند هذه الدقة أو أقل. تبقى المصادر الأعلى في القائمة.";
+"The automatic choice stays at or below the maximum resolution." = "يبقى الاختيار التلقائي عند الدقة القصوى أو أقل.";
+"Prefer Your Language" = "تفضيل لغتك";
+"A release in your audio language comes before a higher resolution in another language." = "تأتي النسخة بلغة الصوت المفضلة لديك قبل دقة أعلى بلغة أخرى.";

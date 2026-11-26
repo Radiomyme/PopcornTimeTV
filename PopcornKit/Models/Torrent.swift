@@ -2145,6 +2145,76 @@ public enum SourcePreferences {
     }
 }
 
+/// « Auto Select Quality » as the iPhone, iPad and Mac Settings offer it:
+/// Quick Start, Balanced and Best Picture are the balanced pick with their
+/// `SourcePriority`, stored as "autoSelectQuality" Balanced (what the
+/// players and Up Next read) plus `SourcePreferences.priorityKey`; Highest,
+/// Lowest and Always Ask ("") as before. The Apple TV stores the same two
+/// keys (its quality value localized: `GlassSettingsStore`).
+public enum AutomaticQualityChoice: String, CaseIterable, Identifiable {
+    case quickStart, balanced, bestPicture, highest, lowest, alwaysAsk
+
+    public var id: String { rawValue }
+
+    public static let defaultsKey = "autoSelectQuality"
+
+    /// The stored choice; absent = Balanced (the iPhone and Mac default).
+    public static func stored(in defaults: UserDefaults = .standard) -> AutomaticQualityChoice {
+        switch defaults.string(forKey: defaultsKey) ?? "Balanced" {
+        case "": return .alwaysAsk
+        case "Highest": return .highest
+        case "Lowest": return .lowest
+        default:
+            switch defaults.string(forKey: SourcePreferences.priorityKey).flatMap(SourcePriority.init(rawValue:)) ?? .balanced {
+            case .quickStart: return .quickStart
+            case .balanced: return .balanced
+            case .picture: return .bestPicture
+            }
+        }
+    }
+
+    /// Writes both keys; a choice other than the three balanced ones resets
+    /// the priority, so it never lingers unseen.
+    public func store(in defaults: UserDefaults = .standard) {
+        let value: String
+        let priority: SourcePriority
+        switch self {
+        case .quickStart: (value, priority) = ("Balanced", .quickStart)
+        case .balanced: (value, priority) = ("Balanced", .balanced)
+        case .bestPicture: (value, priority) = ("Balanced", .picture)
+        case .highest: (value, priority) = ("Highest", .balanced)
+        case .lowest: (value, priority) = ("Lowest", .balanced)
+        case .alwaysAsk: (value, priority) = ("", .balanced)
+        }
+        defaults.set(value, forKey: Self.defaultsKey)
+        defaults.set(priority == .balanced ? nil : priority.rawValue, forKey: SourcePreferences.priorityKey)
+    }
+
+    /// Localizable.strings keys (the apps' bundles hold the translations;
+    /// the Apple TV's Settings use the same ones).
+    public var titleKey: String {
+        switch self {
+        case .quickStart: return "Quick Start"
+        case .balanced: return "Balanced"
+        case .bestPicture: return "Best Picture"
+        case .highest: return "Highest"
+        case .lowest: return "Lowest"
+        case .alwaysAsk: return "Always Ask"
+        }
+    }
+
+    public var detailKey: String {
+        switch self {
+        case .quickStart: return "The most shared source first, even with a lesser picture."
+        case .balanced: return "The best quality that starts quickly."
+        case .bestPicture: return "The best picture among the sources shared widely enough."
+        case .highest: return "Always the best picture, even if it takes longer to start."
+        case .lowest: return "The smallest file, for the quickest start."
+        case .alwaysAsk: return "Choose the source every time; the recommended one is starred."
+        }
+    }
+}
+
 // MARK: - Torrent
 
 public struct Torrent: Mappable, Equatable, Comparable {

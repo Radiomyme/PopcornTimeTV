@@ -20,25 +20,31 @@ import SwiftUI
 /// chooser compares the stored preference to (`AppDelegate.presentQualityChoice`);
 /// off is stored as no value (the chooser then always asks).
 enum GlassSettingsAutoQuality: String, CaseIterable, Identifiable {
-    case off, balanced, highest, lowest
+    /// Quick Start, Balanced and Best Picture are the balanced pick
+    /// (`Torrent.balancedPick`) with its three priorities (`SourcePriority`).
+    case quickStart, balanced, bestPicture, highest, lowest, off
 
     var id: String { rawValue }
 
     var titleKey: String {
         switch self {
-        case .off: return "Always Ask"
+        case .quickStart: return "Quick Start"
         case .balanced: return "Balanced"
+        case .bestPicture: return "Best Picture"
         case .highest: return "Highest"
         case .lowest: return "Lowest"
+        case .off: return "Always Ask"
         }
     }
 
     var detailKey: String {
         switch self {
-        case .off: return "Choose the source every time; the recommended one is starred."
+        case .quickStart: return "The most shared source first, even with a lesser picture."
         case .balanced: return "The best quality that starts quickly."
+        case .bestPicture: return "The best picture among the sources shared widely enough."
         case .highest: return "Always the best picture, even if it takes longer to start."
         case .lowest: return "The smallest file, for the quickest start."
+        case .off: return "Choose the source every time; the recommended one is starred."
         }
     }
 }
@@ -107,6 +113,16 @@ struct GlassSettingsActions {
     var setUpNextCardLead: (Int) -> Void = { _ in }
     var readUpNextCardLead: (() -> Int)? = nil
     var upNextCardLeadChoices: [Int] = [30, 45, 60, 90]
+    /// « Maximum Resolution » of the automatic choice, in lines (0: no
+    /// limit; `SourcePreferences.maximumResolution`): written, and re-read
+    /// by `refresh()`.
+    var setMaximumResolution: (Int) -> Void = { _ in }
+    var readMaximumResolution: (() -> Int)? = nil
+    var maximumResolutionChoices: [GlassSettingsChoice] = []
+    /// « Prefer Your Language » (`SourcePreferences.languageFirst`, on by
+    /// default): written, and re-read by `refresh()`.
+    var setLanguageFirst: (Bool) -> Void = { _ in }
+    var readLanguageFirst: (() -> Bool)? = nil
     /// Bytes the clearable cache holds now. Called off the main thread.
     var measureCache: @Sendable () -> Int64 = { 0 }
     /// Empties the cache. Called on the main thread.
@@ -183,6 +199,9 @@ final class GlassSettingsModel: ObservableObject {
     @Published private(set) var autoPlayNext: Bool
     /// Seconds before the end the next episode's card comes.
     @Published private(set) var upNextCardLead: Int
+    /// In lines; 0: no limit.
+    @Published private(set) var maximumResolution: Int
+    @Published private(set) var languageFirst: Bool
     @Published private(set) var isTraktSignedIn: Bool
     /// nil while it is being measured.
     @Published private(set) var cacheBytes: Int64?
@@ -213,6 +232,8 @@ final class GlassSettingsModel: ObservableObject {
         self.themeSongs = themeSongs
         self.autoPlayNext = actions.readAutoPlayNext?() ?? true
         self.upNextCardLead = actions.readUpNextCardLead?() ?? 60
+        self.maximumResolution = actions.readMaximumResolution?() ?? 0
+        self.languageFirst = actions.readLanguageFirst?() ?? true
         self.version = version
         self.languages = languages
         self.actions = actions
@@ -397,6 +418,26 @@ final class GlassSettingsModel: ObservableObject {
         actions.setAutoPlayNext(autoPlayNext)
     }
 
+    func select(maximumResolution lines: Int) {
+        maximumResolution = lines
+        actions.setMaximumResolution(lines)
+    }
+
+    /// « No Limit », « 1080p »…
+    var maximumResolutionText: String {
+        actions.maximumResolutionChoices.first { $0.id == String(maximumResolution) }?.title
+            ?? glassSettingsLocalized("No Limit")
+    }
+
+    func toggleLanguageFirst() {
+        languageFirst.toggle()
+        actions.setLanguageFirst(languageFirst)
+    }
+
+    /// The language row says something only when an audio language is in
+    /// use (« None » leaves nothing to prefer).
+    var showsLanguageFirst: Bool { audioLanguage != "" }
+
     func select(upNextCardLead seconds: Int) {
         upNextCardLead = seconds
         actions.setUpNextCardLead(seconds)
@@ -419,6 +460,8 @@ final class GlassSettingsModel: ObservableObject {
         if let stored = actions.readThemeSongs?(), stored != themeSongs { themeSongs = stored }
         if let stored = actions.readAutoPlayNext?(), stored != autoPlayNext { autoPlayNext = stored }
         if let stored = actions.readUpNextCardLead?(), stored != upNextCardLead { upNextCardLead = stored }
+        if let stored = actions.readMaximumResolution?(), stored != maximumResolution { maximumResolution = stored }
+        if let stored = actions.readLanguageFirst?(), stored != languageFirst { languageFirst = stored }
         if let stored = actions.readHome?(), stored != home { home = stored }
         if let stored = actions.readProfile?(), stored != profile { profile = stored }
         cacheBytes = nil
@@ -517,7 +560,7 @@ enum GlassSettingsPalette {
 /// The rows that open a picker.
 enum GlassSettingsPicker: String, Identifiable {
     case quality, upNextCard, audio, subtitles, homeLanguages, homeShelves, streamingRegion, streamingServices, tmdbKey
-    case taste
+    case taste, maximumResolution
     var id: String { rawValue }
 }
 
@@ -527,6 +570,7 @@ enum GlassSettingsRowID: Hashable {
     case homeLanguages, homeShelves, homeLookup
     case tmdbKey, streamingRegion, streamingServices
     case switchProfile, profilePreferences
+    case maximumResolution, languageFirst
 }
 
 struct GlassSettingsView: View {
@@ -676,6 +720,11 @@ struct GlassSettingsView: View {
                 .focused($focusedRow, equals: .quality)
                 .accessibilityIdentifier("Settings.Row.quality")
             GlassSettingsDivider()
+            GlassSettingsRow(symbol: "rectangle.compress.vertical", tint: .orange, title: "Maximum Resolution",
+                             value: model.maximumResolutionText) { picker = .maximumResolution }
+                .focused($focusedRow, equals: .maximumResolution)
+                .accessibilityIdentifier("Settings.Row.maximumResolution")
+            GlassSettingsDivider()
             GlassSettingsRow(symbol: "play.square.stack.fill", tint: .green, title: "Settings.AutoPlayNext",
                              detail: "Settings.AutoPlayNext.Footer", detailLines: 3,
                              value: glassSettingsLocalized(model.autoPlayNext ? "On" : "Off"),
@@ -691,6 +740,16 @@ struct GlassSettingsView: View {
             GlassSettingsRow(symbol: "speaker.wave.2.fill", tint: .blue, title: "Audio Language",
                              value: model.languageName(model.audioLanguage, subtitles: false)) { picker = .audio }
                 .focused($focusedRow, equals: .audio)
+            if model.showsLanguageFirst {
+                GlassSettingsDivider()
+                GlassSettingsRow(symbol: "text.bubble.fill", tint: .blue, title: "Prefer Your Language",
+                                 detail: "A release in your audio language comes before a higher resolution in another language.",
+                                 detailLines: 3,
+                                 value: glassSettingsLocalized(model.languageFirst ? "On" : "Off"),
+                                 showsChevron: false) { model.toggleLanguageFirst() }
+                    .focused($focusedRow, equals: .languageFirst)
+                    .accessibilityIdentifier("Settings.Row.languageFirst")
+            }
             GlassSettingsDivider()
             GlassSettingsRow(symbol: "captions.bubble.fill", tint: .teal, title: "Subtitle Language",
                              value: model.languageName(model.subtitleLanguage, subtitles: true)) { picker = .subtitles }
@@ -834,6 +893,18 @@ struct GlassSettingsView: View {
                 selectedID: model.autoQuality.rawValue,
                 onSelect: { id in
                     if let quality = GlassSettingsAutoQuality(rawValue: id) { model.select(autoQuality: quality) }
+                    self.picker = nil
+                },
+                onCancel: { self.picker = nil })
+        case .maximumResolution:
+            GlassSettingsPickerSheet(
+                title: "Maximum Resolution",
+                message: "The automatic choice stays at or below it. Higher sources stay in the list.",
+                options: [.init(id: "0", title: glassSettingsLocalized("No Limit"), detail: nil)]
+                    + model.actions.maximumResolutionChoices.map { .init(id: $0.id, title: $0.title, detail: nil) },
+                selectedID: String(model.maximumResolution),
+                onSelect: { id in
+                    if let lines = Int(id) { model.select(maximumResolution: lines) }
                     self.picker = nil
                 },
                 onCancel: { self.picker = nil })

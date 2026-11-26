@@ -701,3 +701,15 @@
 "Nature" = "Nature";
 "Travel" = "Travel";
 "DIY" = "DIY";
+
+/* PR #14: the automatic choice (Quick Start / Balanced / Best Picture), the maximum resolution, the language first */
+"Quick Start" = "Quick Start";
+"Best Picture" = "Best Picture";
+"The most shared source first, even with a lesser picture." = "The most shared source first, even with a lesser picture.";
+"The best picture among the sources shared widely enough." = "The best picture among the sources shared widely enough.";
+"Maximum Resolution" = "Maximum Resolution";
+"No Limit" = "No Limit";
+"The automatic choice stays at or below it. Higher sources stay in the list." = "The automatic choice stays at or below it. Higher sources stay in the list.";
+"The automatic choice stays at or below the maximum resolution." = "The automatic choice stays at or below the maximum resolution.";
+"Prefer Your Language" = "Prefer Your Language";
+"A release in your audio language comes before a higher resolution in another language." = "A release in your audio language comes before a higher resolution in another language.";

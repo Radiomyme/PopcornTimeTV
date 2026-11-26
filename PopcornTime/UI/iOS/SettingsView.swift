@@ -8,6 +8,12 @@ import PopcornKit
 /// a preference means the same on every platform.
 struct SettingsView: View {
     @AppStorage("autoSelectQuality") private var autoSelectQuality = "Balanced"
+    /// With "autoSelectQuality", the automatic choice (`AutomaticQualityChoice`).
+    @AppStorage(SourcePreferences.priorityKey) private var sourcePriority: String?
+    /// « Maximum Resolution » in lines; 0: no limit.
+    @AppStorage(SourcePreferences.maximumResolutionKey) private var maximumResolution = 0
+    /// « Prefer Your Language » (on by default).
+    @AppStorage(SourcePreferences.languageFirstKey) private var languageFirst = true
     @AppStorage(CellularStreamingPolicy.defaultsKey) private var streamOnCellular = false
     /// « Autoplay next episode » (episode chaining, on by default: D8).
     @AppStorage(UpNextPreferences.autoPlayNextKey) private var autoPlayNext = true
@@ -37,26 +43,45 @@ struct SettingsView: View {
                 set: { storedCardLead = Int(UpNextCountdown.cardLead(stored: $0)) })
     }
 
+    /// « Auto Select Quality »: read from both keys (the two @AppStorage
+    /// above make the row follow a change).
+    private var automaticChoice: Binding<AutomaticQualityChoice> {
+        Binding(get: { _ = (autoSelectQuality, sourcePriority); return AutomaticQualityChoice.stored() },
+                set: { $0.store() })
+    }
+
     var body: some View {
         Form {
             ProfilesSettingsSection()
 
             Section {
-                // Labels only: the stored tags stay "Balanced" / "Highest" /
-                // "Lowest" / "" (the tvOS / macOS settings).
-                Picker("Auto Select Quality", selection: $autoSelectQuality) {
-                    Text("Balanced (quick start)").tag("Balanced")
-                    Text("Highest").tag("Highest")
-                    Text("Lowest").tag("Lowest")
-                    Text("Always Ask").tag("")
+                // Stored as "autoSelectQuality" + the priority
+                // (`AutomaticQualityChoice`), as on the Apple TV and the Mac.
+                // Titles only: the chosen one's sentence is the footer's.
+                Picker("Auto Select Quality", selection: automaticChoice) {
+                    ForEach(AutomaticQualityChoice.allCases) { choice in
+                        Text(LocalizedStringKey(choice.titleKey)).tag(choice)
+                    }
                 }
                 // The value on the label's line, or under it aligned with
                 // it: a menu's long French value wrapped off the label.
                 .pickerStyle(.navigationLink)
 
-                Toggle("Stream on Cellular Data", isOn: $streamOnCellular)
+                Picker("Maximum Resolution", selection: $maximumResolution) {
+                    Text("No Limit").tag(0)
+                    ForEach(SourcePreferences.maximumResolutionChoices, id: \.rawValue) { quality in
+                        Text(verbatim: quality.settingsLabel).tag(quality.rawValue)
+                    }
+                }
+                .pickerStyle(.navigationLink)
             } header: {
                 Text("Playback")
+            } footer: {
+                Text(verbatim: "\(String(localized: String.LocalizationValue(automaticChoice.wrappedValue.detailKey))) \(String(localized: "The automatic choice stays at or below the maximum resolution."))")
+            }
+
+            Section {
+                Toggle("Stream on Cellular Data", isOn: $streamOnCellular)
             } footer: {
                 Text("When this is off, Popcorn Time asks before it starts a stream on cellular data or a personal hotspot.")
             }
@@ -79,6 +104,12 @@ struct SettingsView: View {
 
             Section {
                 languagePicker("Audio Language", storage: $preferredAudioLanguage, subtitles: false)
+                if PlaybackLanguagePreferences.SettingValue(stored: preferredAudioLanguage).tag != "" {
+                    Toggle(isOn: $languageFirst) {
+                        Text("Prefer Your Language")
+                        Text("A release in your audio language comes before a higher resolution in another language.")
+                    }
+                }
                 languagePicker("Subtitle Language", storage: $preferredSubtitleLanguage, subtitles: true)
             } header: {
                 Text("Languages")
