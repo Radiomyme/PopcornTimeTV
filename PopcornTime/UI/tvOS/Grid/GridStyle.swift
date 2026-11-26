@@ -52,6 +52,16 @@ enum GridStyle {
     /// and no more).
     static let titledSectionTop: CGFloat = 22
 
+    // MARK: Rows (Search: one row per section, scrolling sideways)
+
+    /// Between two posters of a row: the Home's shelves (`TVHomeLayout.poster`),
+    /// six whole posters and the edge of a seventh.
+    static let rowItemSpacing: CGFloat = 44
+    /// From a row's title to the next row's: the title, the posters, their
+    /// line of facts, the focused one's caption (94 pt under the poster) and
+    /// 42 pt of air. Both rows of a search are on the screen under the keyboard.
+    static let rowPitch: CGFloat = 570
+
     // MARK: Lines under a poster
 
     /// Under every poster, as on the Home's cards: "2026 · ★ 8,0 · 4K · DV"

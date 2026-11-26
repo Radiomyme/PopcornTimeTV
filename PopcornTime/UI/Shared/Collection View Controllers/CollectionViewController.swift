@@ -52,6 +52,13 @@ class CollectionViewController: ResponsiveCollectionViewController, UICollection
     var loadMoreError: NSError? {
         didSet { updateFooter() }
     }
+
+    /// A list shown although one of its sources failed (Search: the movies
+    /// found, the shows could not be searched): said in one quiet line under
+    /// the last row, with Try Again, which asks the whole list again.
+    var partialFailure: String? {
+        didSet { if partialFailure != oldValue { updateFooter() } }
+    }
     
     let paginationIndicatorInset: CGFloat = 25
     
@@ -217,11 +224,13 @@ class CollectionViewController: ResponsiveCollectionViewController, UICollection
         pendingCaption = nil
         guard let collectionView = collectionView else { return }
         guard let target = indexPath ?? focusedPosterIndexPath, let card = card(at: target),
-              let frame = collectionView.layoutAttributesForItem(at: target)?.frame else {
+              let frame = displayedFrame(ofItemAt: target) else {
             return hideCaption(animated: animated)
         }
+        captionIndexPath = target
         let caption = makeCaptionView()
         let inPlace = caption.card == card && abs(caption.frame.minY - (frame.maxY + GridStyle.captionTop)) < 0.5 && caption.alpha == 1
+            && (!showsRows || abs(caption.poster.minX - frame.minX) < 0.5)
         guard !inPlace else { return }
         caption.layer.removeAllAnimations()
         // Another poster: the line does not slide across the grid, it
@@ -234,6 +243,27 @@ class CollectionViewController: ResponsiveCollectionViewController, UICollection
     }
 
     private var pendingCaption: DispatchWorkItem?
+    /// The poster the caption is under.
+    private var captionIndexPath: IndexPath?
+
+    /// Where the poster at `indexPath` is drawn in the grid. A row that
+    /// scrolls sideways (`layOutAsRows`) holds its posters in a scroll view
+    /// of its own: their frame in the layout does not move with it.
+    private func displayedFrame(ofItemAt indexPath: IndexPath) -> CGRect? {
+        guard let collectionView = collectionView else { return nil }
+        if let cell = collectionView.cellForItem(at: indexPath), let row = cell.superview, row !== collectionView {
+            return collectionView.convert(cell.frame, from: row)
+        }
+        return collectionView.layoutAttributesForItem(at: indexPath)?.frame
+    }
+
+    /// A row scrolled sideways: the caption of its focused poster moves
+    /// with it (it is the grid's, not the row's).
+    private func captionFollowsRow(_ section: Int) {
+        guard let indexPath = captionIndexPath, indexPath.section == section, let caption = captionView,
+              caption.card != nil, let frame = displayedFrame(ofItemAt: indexPath), let collectionView = collectionView else { return }
+        caption.move(under: frame, gridWidth: collectionView.bounds.width)
+    }
 
     /// The focus moved to the poster at `indexPath`: its caption comes once
     /// the focus has rested there for a moment. The frame in which the
@@ -262,10 +292,66 @@ class CollectionViewController: ResponsiveCollectionViewController, UICollection
     func hideCaption(animated: Bool = true) {
         pendingCaption?.cancel()
         pendingCaption = nil
+        captionIndexPath = nil
         guard let caption = captionView, caption.card != nil || caption.alpha > 0 else { return }
         caption.clear()
         caption.layer.removeAllAnimations()
         UIView.animate(withDuration: animated ? GridStyle.fadeDuration : 0) { caption.alpha = 0 }
+    }
+
+    // MARK: - Rows
+
+    /// Whether each section is one row that scrolls sideways
+    /// (`layOutAsRows`), rather than a grid of rows.
+    private(set) var showsRows = false
+
+    /// Each section becomes one titled row of posters that scrolls sideways,
+    /// as the Home's shelves: Search, where Shows were under every row of
+    /// Movies. The posters keep their cell, their line of facts and the
+    /// caption of the focused one; the rows their title (`GridSectionTitleView`)
+    /// and the footer under the last one.
+    func layOutAsRows() {
+        guard let collectionView = collectionView, !showsRows else { return }
+        showsRows = true
+        let configuration = UICollectionViewCompositionalLayoutConfiguration()
+        configuration.contentInsetsReference = .none
+        let layout = UICollectionViewCompositionalLayout(sectionProvider: { [weak self] section, _ in self?.row(section) },
+                                                         configuration: configuration)
+        collectionView.setCollectionViewLayout(layout, animated: false)
+    }
+
+    private func row(_ section: Int) -> NSCollectionLayoutSection {
+        let poster = GridStyle.posterSize
+        let size = NSCollectionLayoutSize(widthDimension: .absolute(poster.width), heightDimension: .absolute(poster.height))
+        let group = NSCollectionLayoutGroup.horizontal(layoutSize: size, subitems: [NSCollectionLayoutItem(layoutSize: size)])
+        let row = NSCollectionLayoutSection(group: group)
+        // Six whole posters and the edge of a seventh: the row says it
+        // goes on (the Home's spacing, `TVHomeLayout.poster`).
+        row.interGroupSpacing = GridStyle.rowItemSpacing
+        row.orthogonalScrollingBehavior = .continuousGroupLeadingBoundary
+        let titled = !(dataSources[safe: section] ?? []).isEmpty
+            && collectionView.flatMap { delegate?.collectionView($0, titleForHeaderInSection: section) } != nil
+        row.contentInsets = NSDirectionalEdgeInsets(top: titled ? GridStyle.titledSectionTop : GridStyle.sectionTop, leading: GridStyle.sideInset,
+                                                    bottom: GridStyle.rowPitch - GridStyle.sectionTitleHeight - GridStyle.titledSectionTop - poster.height,
+                                                    trailing: GridStyle.sideInset)
+        // The title and the footer span the screen and lay out their own
+        // 90 pt edge, as on the grids; the 90 pt are from the screen's edge,
+        // not from the safe area's (80 pt in already).
+        row.supplementariesFollowContentInsets = false
+        row.contentInsetsReference = .none
+        var supplementaries: [NSCollectionLayoutBoundarySupplementaryItem] = []
+        if titled {
+            supplementaries.append(.init(layoutSize: .init(widthDimension: .fractionalWidth(1), heightDimension: .absolute(GridStyle.sectionTitleHeight)),
+                                         elementKind: UICollectionView.elementKindSectionHeader, alignment: .top))
+        }
+        let footer = footerState.height
+        if section == dataSources.count - 1, footer > 0 {
+            supplementaries.append(.init(layoutSize: .init(widthDimension: .fractionalWidth(1), heightDimension: .absolute(footer)),
+                                         elementKind: UICollectionView.elementKindSectionFooter, alignment: .bottom))
+        }
+        row.boundarySupplementaryItems = supplementaries
+        row.visibleItemsInvalidationHandler = { [weak self] _, _, _ in self?.captionFollowsRow(section) }
+        return row
     }
 
     // MARK: - Changing the list without losing the focus
@@ -393,7 +479,9 @@ class CollectionViewController: ResponsiveCollectionViewController, UICollection
     // MARK: - Footer (the next page)
 
     private var footerState: GridFooterView.State {
-        guard paginated, !dataSources.allSatisfy({ $0.isEmpty }) else { return .hidden }
+        guard !dataSources.allSatisfy({ $0.isEmpty }) else { return .hidden }
+        if let notice = partialFailure { return .notice(notice) }
+        guard paginated else { return .hidden }
         if loadMoreError != nil { return .failed("Couldn't load more titles.".localized) }
         return isLoading ? .loading : .hidden
     }
@@ -414,6 +502,16 @@ class CollectionViewController: ResponsiveCollectionViewController, UICollection
         guard loadMoreError != nil else { return }
         loadMoreError = nil
         delegate?.retryLoading(page: currentPage)
+    }
+
+    /// Try Again on the footer: the page that failed, or — under a list one
+    /// of whose sources failed — the whole list.
+    private func retryFromFooter() {
+        if partialFailure != nil {
+            delegate?.retryLoading(page: nil)
+        } else {
+            retryNextPage()
+        }
     }
 
     // MARK: - Empty, loading, error
@@ -443,11 +541,15 @@ class CollectionViewController: ResponsiveCollectionViewController, UICollection
         guard backgroundState != .loading || !(collectionView.backgroundView is GridSkeletonView) else { return }
         backgroundState = .loading
         let skeleton = GridSkeletonView()
+        if showsRows {
+            // The cards of a row, one row under the other.
+            skeleton.columnSpacing = GridStyle.rowItemSpacing
+            skeleton.rowSpacing = GridStyle.rowPitch - GridStyle.posterSize.height
+        }
         // Where the first row will be: under the grid's top inset and its
-        // first section's (Search has its own). The first section's header
-        // is added once the grid is laid out (`placeLoadingPlaceholders`).
-        let sectionTop = delegate?.collectionView(collectionView, insetForSectionAt: 0)?.top ?? GridStyle.sectionTop
-        skeleton.top = collectionView.adjustedContentInset.top + sectionTop
+        // first section's. The first section's header is added once the
+        // grid is laid out (`placeLoadingPlaceholders`).
+        skeleton.top = collectionView.adjustedContentInset.top + firstRowTop(in: collectionView)
         collectionView.backgroundView = skeleton
     }
 
@@ -463,10 +565,16 @@ class CollectionViewController: ResponsiveCollectionViewController, UICollection
     /// the layout would ask for the sections again).
     private func placeLoadingPlaceholders(in collectionView: UICollectionView) {
         guard let skeleton = collectionView.backgroundView as? GridSkeletonView, collectionView.numberOfSections > 0 else { return }
-        let header = collectionView.layoutAttributesForSupplementaryElement(ofKind: UICollectionView.elementKindSectionHeader,
-                                                                            at: IndexPath(item: 0, section: 0))
-        let sectionTop = delegate?.collectionView(collectionView, insetForSectionAt: 0)?.top ?? GridStyle.sectionTop
-        skeleton.top = collectionView.adjustedContentInset.top + max(0, header?.frame.maxY ?? 0) + sectionTop
+        let header = showsRows ? nil : collectionView.layoutAttributesForSupplementaryElement(ofKind: UICollectionView.elementKindSectionHeader,
+                                                                                              at: IndexPath(item: 0, section: 0))
+        skeleton.top = collectionView.adjustedContentInset.top + max(0, header?.frame.maxY ?? 0) + firstRowTop(in: collectionView)
+    }
+
+    /// From the top of the first section to its first posters: in rows
+    /// (`layOutAsRows`), under the title the row will have.
+    private func firstRowTop(in collectionView: UICollectionView) -> CGFloat {
+        if showsRows { return GridStyle.sectionTitleHeight + GridStyle.titledSectionTop }
+        return delegate?.collectionView(collectionView, insetForSectionAt: 0)?.top ?? GridStyle.sectionTop
     }
     
     /// Updates what can change on the visible posters while another screen
@@ -638,7 +746,6 @@ class CollectionViewController: ResponsiveCollectionViewController, UICollection
     func collectionView(_ collectionView: UICollectionView, layout collectionViewLayout: UICollectionViewLayout, referenceSizeForHeaderInSection section: Int) -> CGSize {
         if delegate?.collectionView(collectionView, titleForHeaderInSection: section) != nil {
             guard collectionView.numberOfItems(inSection: section) != 0 else { return .zero }
-            guard isPosterSection(section) else { return CGSize(width: collectionView.bounds.width, height: 40) }
             // The first title of the page keeps its distance from the page title.
             let isFirst = !(0..<section).contains { !(dataSources[safe: $0] ?? []).isEmpty }
             return CGSize(width: collectionView.bounds.width, height: GridStyle.sectionTitleHeight + (isFirst ? GridStyle.firstSectionTitleTop : 0))
@@ -658,16 +765,10 @@ class CollectionViewController: ResponsiveCollectionViewController, UICollection
     override func collectionView(_ collectionView: UICollectionView, viewForSupplementaryElementOfKind kind: String, at indexPath: IndexPath) -> UICollectionReusableView {
         if kind == UICollectionView.elementKindSectionHeader {
             if let title = delegate?.collectionView(collectionView, titleForHeaderInSection: indexPath.section) {
-                if isPosterSection(indexPath.section) {
-                    let header = collectionView.dequeueReusableSupplementaryView(ofKind: kind, withReuseIdentifier: GridSectionTitleView.reuseIdentifier, for: indexPath) as! GridSectionTitleView
-                    header.label.text = title
-                    return header
-                }
-                let header = collectionView.dequeueReusableSupplementaryView(ofKind: kind, withReuseIdentifier: "sectionHeader", for: indexPath)
-
-                let label = header.viewWithTag(1) as? UILabel
-                label?.text = title
-
+                // Every section's title alike (people too: theirs was the
+                // storyboard's, greyer and heavier, at another height).
+                let header = collectionView.dequeueReusableSupplementaryView(ofKind: kind, withReuseIdentifier: GridSectionTitleView.reuseIdentifier, for: indexPath) as! GridSectionTitleView
+                header.label.text = title
                 return header
             } else {
                 // tvOS 18+ requires a fresh dequeue for each index path. Caching
@@ -686,7 +787,7 @@ class CollectionViewController: ResponsiveCollectionViewController, UICollection
         if kind == UICollectionView.elementKindSectionFooter {
             let footer = collectionView.dequeueReusableSupplementaryView(ofKind: kind, withReuseIdentifier: GridFooterView.reuseIdentifier, for: indexPath) as! GridFooterView
             footer.show(footerState)
-            footer.onRetry = { [weak self] in self?.retryNextPage() }
+            footer.onRetry = { [weak self] in self?.retryFromFooter() }
             return footer
         }
         return UICollectionReusableView()

@@ -127,6 +127,8 @@ final class PosterCaptionView: UIView {
 
     private let label = UILabel()
     private(set) var card: PosterCard?
+    /// The frame of the poster it is under.
+    private(set) var poster = CGRect.null
 
     override init(frame: CGRect) {
         super.init(frame: frame)
@@ -177,9 +179,17 @@ final class PosterCaptionView: UIView {
         }
         label.attributedText = text
         let textWidth = min(ceil(size.width), room)
-        let x = max(GridStyle.sideInset, min(poster.minX, width - GridStyle.sideInset - textWidth))
-        frame = CGRect(x: x, y: poster.maxY + GridStyle.captionTop, width: textWidth, height: GridStyle.captionHeight)
+        frame.size = CGSize(width: textWidth, height: GridStyle.captionHeight)
         label.frame = bounds
+        move(under: poster, gridWidth: width)
+    }
+
+    /// Under `poster` again, the same words: its row scrolled sideways.
+    func move(under poster: CGRect, gridWidth width: CGFloat) {
+        self.poster = poster
+        let x = max(GridStyle.sideInset, min(poster.minX, width - GridStyle.sideInset - bounds.width))
+        let origin = CGPoint(x: x, y: poster.maxY + GridStyle.captionTop)
+        if frame.origin != origin { frame.origin = origin }
     }
 
     func clear() {

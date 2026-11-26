@@ -149,6 +149,10 @@ final class GridSkeletonView: UIView {
     /// From the view's top to the first row (the grid's top inset and its
     /// first section's).
     var top: CGFloat = 0 { didSet { if top != oldValue { setNeedsLayout() } } }
+    /// Between two cards of a row, and from a row's cards to the next ones':
+    /// the grid's, or the rows' (`CollectionViewController.layOutAsRows`).
+    var columnSpacing = GridStyle.columnSpacing { didSet { setNeedsLayout() } }
+    var rowSpacing = GridStyle.rowSpacing { didSet { setNeedsLayout() } }
 
     private var cards: [CALayer] = []
 
@@ -166,8 +170,8 @@ final class GridSkeletonView: UIView {
     override func layoutSubviews() {
         super.layoutSubviews()
         let size = GridStyle.posterSize
-        let columns = max(1, Int((bounds.width - GridStyle.sideInset * 2 + GridStyle.columnSpacing) / (size.width + GridStyle.columnSpacing)))
-        let rows = max(1, Int(ceil((bounds.height - top) / (size.height + GridStyle.rowSpacing))))
+        let columns = max(1, Int((bounds.width - GridStyle.sideInset * 2 + columnSpacing) / (size.width + columnSpacing)))
+        let rows = max(1, Int(ceil((bounds.height - top) / (size.height + rowSpacing))))
         let wanted = columns * rows
         while cards.count < wanted {
             let card = CALayer()
@@ -182,8 +186,8 @@ final class GridSkeletonView: UIView {
         for (index, card) in cards.enumerated() {
             card.isHidden = index >= wanted
             let column = CGFloat(index % columns), row = CGFloat(index / columns)
-            card.frame = CGRect(x: GridStyle.sideInset + column * (size.width + GridStyle.columnSpacing),
-                                y: top + row * (size.height + GridStyle.rowSpacing), width: size.width, height: size.height)
+            card.frame = CGRect(x: GridStyle.sideInset + column * (size.width + columnSpacing),
+                                y: top + row * (size.height + rowSpacing), width: size.width, height: size.height)
             // The rows fade out towards the bottom: a list is coming, not a wall.
             card.opacity = Float(max(0.25, 1 - 0.35 * row))
         }
@@ -279,12 +283,17 @@ final class GridFooterView: UICollectionReusableView {
         case hidden
         case loading
         case failed(String)
+        /// What a list shown in part is missing (`CollectionViewController
+        /// .partialFailure`): one quiet line on the rows' left edge, Try
+        /// Again right after it.
+        case notice(String)
 
         var height: CGFloat {
             switch self {
             case .hidden: return 0
             case .loading: return 110
             case .failed: return 170
+            case .notice: return 110
             }
         }
     }
@@ -292,16 +301,14 @@ final class GridFooterView: UICollectionReusableView {
     private let spinner = UIActivityIndicatorView(style: .medium)
     private let label = UILabel()
     private let retryButton: UIButton
+    private var centred: [NSLayoutConstraint] = []
+    private var leading: [NSLayoutConstraint] = []
     /// Down from any column of the last row reaches Retry.
     private let focusGuide = UIFocusGuide()
     var onRetry: (() -> Void)?
 
     override init(frame: CGRect) {
-        var configuration = UIButton.Configuration.gray()
-        configuration.cornerStyle = .capsule
-        configuration.contentInsets = NSDirectionalEdgeInsets(top: 12, leading: 34, bottom: 12, trailing: 34)
-        configuration.attributedTitle = AttributedString("Try Again".localized, attributes: AttributeContainer([.font: GridStyle.controlFont]))
-        retryButton = UIButton(configuration: configuration)
+        retryButton = UIButton(configuration: GridFooterView.grayButton)
         super.init(frame: frame)
 
         spinner.color = GridStyle.tertiaryText
@@ -321,12 +328,18 @@ final class GridFooterView: UICollectionReusableView {
         }
         addLayoutGuide(focusGuide)
         focusGuide.preferredFocusEnvironments = [retryButton]
-        NSLayoutConstraint.activate([
+        centred = [
+            row.centerXAnchor.constraint(equalTo: centerXAnchor),
+            row.leadingAnchor.constraint(greaterThanOrEqualTo: leadingAnchor, constant: GridStyle.sideInset),
+        ]
+        leading = [
+            row.leadingAnchor.constraint(equalTo: leadingAnchor, constant: GridStyle.sideInset),
+            row.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor, constant: -GridStyle.sideInset),
+        ]
+        NSLayoutConstraint.activate(centred + [
             spinner.centerXAnchor.constraint(equalTo: centerXAnchor),
             spinner.topAnchor.constraint(equalTo: topAnchor, constant: 24),
-            row.centerXAnchor.constraint(equalTo: centerXAnchor),
             row.topAnchor.constraint(equalTo: topAnchor, constant: 30),
-            row.leadingAnchor.constraint(greaterThanOrEqualTo: leadingAnchor, constant: GridStyle.sideInset),
             focusGuide.leadingAnchor.constraint(equalTo: leadingAnchor),
             focusGuide.trailingAnchor.constraint(equalTo: trailingAnchor),
             focusGuide.topAnchor.constraint(equalTo: topAnchor),
@@ -352,10 +365,52 @@ final class GridFooterView: UICollectionReusableView {
             focusGuide.isEnabled = false
         case .failed(let message):
             spinner.stopAnimating()
-            label.text = message
-            label.superview?.isHidden = false
-            focusGuide.isEnabled = true
+            showLine(message, notice: false)
+        case .notice(let message):
+            spinner.stopAnimating()
+            showLine(message, notice: true)
         }
+    }
+
+    /// The line and Try Again: centred under a list whose next page failed;
+    /// a quiet note on the rows' left edge under a list shown in part, with
+    /// the system's glass button.
+    private func showLine(_ message: String, notice: Bool) {
+        label.text = message
+        label.font = notice ? GridFooterView.noticeFont : GridStyle.messageBodyFont
+        label.textColor = notice ? GridStyle.tertiaryText : GridStyle.secondaryText
+        (label.superview as? UIStackView)?.spacing = notice ? 24 : 36
+        NSLayoutConstraint.deactivate(notice ? centred : leading)
+        NSLayoutConstraint.activate(notice ? leading : centred)
+        retryButton.configuration = notice ? GridFooterView.glassButton : GridFooterView.grayButton
+        retryButton.accessibilityIdentifier = notice ? "Grid.RetryNotice" : "Grid.RetryMore"
+        label.accessibilityIdentifier = notice ? "Grid.Notice" : nil
+        label.superview?.isHidden = false
+        focusGuide.isEnabled = true
+    }
+
+    private static let noticeFont = UIFont.systemFont(ofSize: 25, weight: .medium)
+
+    private static var grayButton: UIButton.Configuration {
+        var configuration = UIButton.Configuration.gray()
+        configuration.cornerStyle = .capsule
+        configuration.contentInsets = NSDirectionalEdgeInsets(top: 12, leading: 34, bottom: 12, trailing: 34)
+        configuration.attributedTitle = AttributedString("Try Again".localized, attributes: AttributeContainer([.font: GridStyle.controlFont]))
+        return configuration
+    }
+
+    /// The Glass detail page's Try Again (`glassActionStyle()`), in UIKit.
+    private static var glassButton: UIButton.Configuration {
+        var configuration: UIButton.Configuration
+        if #available(tvOS 26.0, *) {
+            configuration = .glass()
+        } else {
+            configuration = .gray()
+            configuration.cornerStyle = .capsule
+        }
+        configuration.contentInsets = NSDirectionalEdgeInsets(top: 12, leading: 30, bottom: 12, trailing: 30)
+        configuration.attributedTitle = AttributedString("Try Again".localized, attributes: AttributeContainer([.font: GridStyle.controlFont]))
+        return configuration
     }
 
     @objc private func retryTapped() {
