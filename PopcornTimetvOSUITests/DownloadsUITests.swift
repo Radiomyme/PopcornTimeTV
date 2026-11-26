@@ -104,10 +104,11 @@ final class DownloadsUITests: XCTestCase {
         remote.press(.select)
         XCTAssertTrue(element("Settings.Picker").waitForNonExistence(timeout: 5), "the sheet stayed after Delete")
         XCTAssertTrue(element(Self.heart).waitForNonExistence(timeout: 6), "the deleted download is still listed")
-        pause(1)
-        // The last row went: the one before it has the focus, not the page's first.
-        XCTAssertEqual(focusedIdentifier, Self.blackDoves, "the focus did not move to the neighbouring row")
+        pause(1.5)
         snap("04-after-delete")
+        // The last row went: the one before it has the focus, not the page's first.
+        XCTAssertEqual(focusedIdentifier, Self.blackDoves,
+                       "the focus did not move to the neighbouring row: \(focusedElement.debugDescription)")
     }
 
     /// Pause All pauses what runs (the button becomes Resume All), Resume All
@@ -154,10 +155,10 @@ final class DownloadsUITests: XCTestCase {
             .appendingPathComponent("PopcornTimeTests/Fixtures/Home").path
     }
 
-    /// Moves the focus onto `identifier` with the arrows (down first, from
-    /// the tab bar or a row above, then up).
+    /// Moves the focus onto `identifier` with the arrows: down (from the tab
+    /// bar or a row above), right (along the Downloaded shelf), then up and left.
     private func focus(_ identifier: String) throws {
-        for direction in [XCUIRemote.Button.down, .up] {
+        for direction in [XCUIRemote.Button.down, .right, .up, .left] {
             for _ in 0..<10 {
                 if focusedIdentifier == identifier { return }
                 remote.press(direction)
