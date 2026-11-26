@@ -512,7 +512,7 @@ final class ProfileTasteTests: CheckedTestCase {
         eq(Setting.none.stored, P.noneValue, "…is stored as a choice")
         eq(P.effectiveCode(stored: Setting.none.stored, learned: "fr"), nil, "…which the learnt French never replaces")
         eq(Setting(stored: "Français"), .language("fr"), "a language")
-        eq(Setting(stored: "Klingon"), .automatic, "a value no language reads: what the players treat as never set")
+        eq(Setting(stored: "Not a language"), .automatic, "a value no language reads: what the players treat as never set")
         check(Setting.automatic.stored == nil, "choosing « Automatic » removes the key")
         for setting in [Setting.automatic, .none, .language("ko")] {
             eq(Setting(tag: setting.tag), setting, "the pickers' tag of \(setting)")
