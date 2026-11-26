@@ -1,7 +1,10 @@
 // AppLink.swift — the iOS app's tabs, and what a popcorntime:// link asks it
 // for. No SwiftUI: PopcornKit's `DeepLink` says what the URL means, this
 // file says what the iOS app does with it (unit-tested); `AppRouter` shows it.
+// Also the rules of « Who's Watching? » on the iPhone, the iPad and the Mac
+// (`ProfileGate`): asked once per run, the links that come meanwhile.
 import Foundation
+import Combine
 import PopcornKit
 
 /// The root tabs of the iOS app, in bar order (`RootTabView`).
@@ -144,5 +147,66 @@ extension AppLinkAction {
         guard case .page(let kind, let id, let title, var request) = self else { return self }
         request.autoPlay = false
         return .page(kind: kind, id: id, title: title, request: request)
+    }
+}
+
+// MARK: - « Who's Watching? » (iPhone, iPad, Mac)
+
+/// The launch's « Who's Watching? »: asked once per run of the app, in
+/// every window at once (`ProfileGate`), so that a window opened with ⌘N,
+/// a Dock click or a second iPad scene goes straight to the content once a
+/// profile is picked, and a pick in one window answers them all. A link
+/// that arrives while it asks has no screen to open in yet: it is held,
+/// the latest one only, and opened by the content once it is there — as
+/// on the Apple TV (`ProfilesPresenter`).
+@MainActor
+final class ProfileLaunchQuestion: ObservableObject {
+    static let shared = ProfileLaunchQuestion(asks: ProfileManager.shared.asksAtLaunch)
+
+    /// The question is on screen: no window shows the content yet.
+    @Published private(set) var isAsking: Bool
+    /// The link that arrived while it asked.
+    private(set) var heldLink: URL?
+
+    init(asks: Bool) {
+        isAsking = asks
+    }
+
+    /// A profile was picked: every window shows the content.
+    func answer() {
+        isAsking = false
+    }
+
+    /// A link arrived (`onOpenURL`). True when it is held for after the
+    /// pick; false when the content is there to open it itself.
+    @discardableResult
+    func hold(_ url: URL) -> Bool {
+        guard isAsking else { return false }
+        heldLink = url
+        return true
+    }
+
+    /// The held link, once (the first window to show the content opens it).
+    func takeHeldLink() -> URL? {
+        guard !isAsking else { return nil }
+        defer { heldLink = nil }
+        return heldLink
+    }
+}
+
+/// The tiles of « Who's Watching? » on an iPhone: one row when they all fit,
+/// else rows of three (two when three do not fit either). Each row is drawn
+/// centred on its own, so a short last row — « Add Profile » alone — is
+/// centred too, not left against the edge as in a grid.
+enum ProfilePickerRows {
+    /// The indices of `count` tiles `tile` points wide, `spacing` apart,
+    /// split into rows that fit `width`.
+    static func rows(count: Int, tile: CGFloat, spacing: CGFloat, width: CGFloat) -> [[Int]] {
+        guard count > 0 else { return [] }
+        func fits(_ columns: Int) -> Bool {
+            CGFloat(columns) * tile + CGFloat(columns - 1) * spacing <= width
+        }
+        let columns = fits(count) ? count : (fits(3) ? 3 : (fits(2) ? 2 : 1))
+        return stride(from: 0, to: count, by: columns).map { Array($0..<min($0 + columns, count)) }
     }
 }

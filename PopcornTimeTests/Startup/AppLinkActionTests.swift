@@ -4,7 +4,9 @@
 //
 //  What the iOS app does with a popcorntime:// link (PopcornTime/UI/iOS/AppLink.swift): PopcornKit's
 //  `DeepLink` says what the URL means, `AppLinkAction` which tab, sheet or page shows it — and
-//  what is not a link of the app (Trakt's redirect, a screen iOS does not have).
+//  what is not a link of the app (Trakt's redirect, a screen iOS does not have). Also the rules of
+//  « Who's Watching? » on the iPhone, iPad and Mac: asked once per run, the links held meanwhile,
+//  the tiles' rows.
 //
 
 import Foundation
@@ -113,5 +115,55 @@ final class AppLinkActionTests: CheckedTestCase {
            MediaPageRequest(), "a poster: its page")
         eq(MediaPageRequest.home(item: movie, shelfID: HomeShelfID.hero, plays: true),
            MediaPageRequest(autoPlay: true), "the carousel's Play")
+    }
+
+    // MARK: - « Who's Watching? »
+
+    /// Asked once per run: every window shows the question until one answers it; a window opened
+    /// afterwards (⌘N, a Dock click, a second iPad scene) goes straight to the content.
+    @MainActor
+    func testTheLaunchQuestionIsAskedOncePerRun() {
+        let one = ProfileLaunchQuestion(asks: false)
+        check(!one.isAsking, "one profile: no question at launch")
+        let question = ProfileLaunchQuestion(asks: true)
+        check(question.isAsking, "two profiles: the question at launch")
+        question.answer()
+        check(!question.isAsking, "a pick answers it for every window")
+        question.answer()
+        check(!question.isAsking, "answered stays answered")
+    }
+
+    /// A link that arrives while the question is up has no screen to open in: held (the latest
+    /// only), handed once to the first window that shows the content — never while it still asks.
+    @MainActor
+    func testALinkWaitsForThePick() throws {
+        let question = ProfileLaunchQuestion(asks: true)
+        let first = try XCTUnwrap(URL(string: "popcorntime://movie/tt0816692"))
+        let last = try XCTUnwrap(URL(string: "popcorntime://show/tt0903747?season=2"))
+        check(question.hold(first), "held while it asks")
+        check(question.hold(last), "a second link too")
+        eq(question.takeHeldLink(), nil, "nothing to open while it still asks")
+        question.answer()
+        eq(question.takeHeldLink(), last, "after the pick: the latest link")
+        eq(question.takeHeldLink(), nil, "opened once, by one window")
+        check(!question.hold(first), "answered: the content opens a link itself")
+        eq(question.takeHeldLink(), nil, "and nothing is held")
+    }
+
+    /// The iPhone's tiles: one row when all fit, else rows of three (two on a narrow screen), the
+    /// short last row on its own — centred by its view, never left against the edge.
+    func testThePickersRows() {
+        // iPhone 17 Pro, portrait: 402 pt less 2 × 16 of margins; 96 pt tiles, 24 apart.
+        let phone: CGFloat = 370
+        eq(ProfilePickerRows.rows(count: 2, tile: 96, spacing: 24, width: phone), [[0, 1]], "Me and Add: one row")
+        eq(ProfilePickerRows.rows(count: 3, tile: 96, spacing: 24, width: phone), [[0, 1, 2]], "three fit on one row")
+        eq(ProfilePickerRows.rows(count: 4, tile: 96, spacing: 24, width: phone), [[0, 1, 2], [3]], "3 + 1: Add Profile alone")
+        eq(ProfilePickerRows.rows(count: 5, tile: 96, spacing: 24, width: phone), [[0, 1, 2], [3, 4]], "five profiles: 3 + 2")
+        // The tiles grown by a large text size (× 1.35): two a row.
+        eq(ProfilePickerRows.rows(count: 5, tile: 129.6, spacing: 24, width: phone), [[0, 1], [2, 3], [4]], "large text: rows of two")
+        eq(ProfilePickerRows.rows(count: 3, tile: 300, spacing: 24, width: phone), [[0], [1], [2]], "never more than fits")
+        // iPad 11-inch, portrait: 834 less the margins, 120 pt tiles 40 apart — always one row.
+        eq(ProfilePickerRows.rows(count: 5, tile: 120, spacing: 40, width: 802), [[0, 1, 2, 3, 4]], "an iPad: one row of five")
+        eq(ProfilePickerRows.rows(count: 0, tile: 96, spacing: 24, width: phone), [], "nothing to lay out")
     }
 }
