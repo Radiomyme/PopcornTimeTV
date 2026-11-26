@@ -174,8 +174,12 @@ public final class YTSEZTVProvider: MediaProvider {
         var t4pMerged = false
         /// Time4Popcorn could not be reached.
         var t4pFailed = false
+        /// YTS answered, if only with nothing: an empty list is an answer,
+        /// not a failure, whatever optional source was left out.
+        var ytsAnswered = false
 
-        let gate = SourceGate(grace: searching ? SourceGate.searchGrace : SourceGate.browseGrace) { complete in
+        let gate = SourceGate(grace: searching ? SourceGate.searchGrace : SourceGate.browseGrace,
+                              gracesEmptyAnswers: searching) { complete in
             var seen = Set<String>()
             var merged: [Movie] = []
             for movie in t4pMovies + ytsMovies + cinemetaMovies where seen.insert(movie.id).inserted {
@@ -197,8 +201,8 @@ public final class YTSEZTVProvider: MediaProvider {
             // A list without Time4Popcorn's page is not "Popular" as it will
             // be once the host answers again: not kept.
             self.lastListWasPartial = !complete || t4pFailed
-            if merged.isEmpty, ytsError != nil || !complete {
-                return completion(nil, ytsError ?? YTSEZTVProvider.timedOut)
+            if let failure = YTSEZTVProvider.failure(listIsEmpty: merged.isEmpty, error: ytsError, requiredAnswered: ytsAnswered) {
+                return completion(nil, failure)
             }
             completion(merged, nil)
         }
@@ -224,7 +228,10 @@ public final class YTSEZTVProvider: MediaProvider {
         }
         let ytsLoaded: ([Movie]?) -> Void = { movies in
             ytsMovies = movies ?? []
-            if movies != nil { ytsError = nil }
+            if movies != nil {
+                ytsError = nil
+                ytsAnswered = true
+            }
             ytsDone(!ytsMovies.isEmpty)
         }
         if searching {
@@ -272,6 +279,18 @@ public final class YTSEZTVProvider: MediaProvider {
         }
 
         gate.start()
+    }
+
+    /// The error a list with nothing to show is delivered with: the
+    /// required source's (YTS, the shows' base list) when it failed, a time
+    /// out when it never answered. Nil when it answered with nothing: an
+    /// empty list (« No results »), whatever optional source was left out —
+    /// the list is still partial then (`lastListWasPartial`), so a retry
+    /// asks again.
+    static func failure(listIsEmpty: Bool, error: NSError?, requiredAnswered: Bool) -> NSError? {
+        guard listIsEmpty else { return nil }
+        if let error = error { return error }
+        return requiredAnswered ? nil : timedOut
     }
 
     /// What a load answers when its deadline passed with nothing to show.
@@ -695,8 +714,12 @@ public final class YTSEZTVProvider: MediaProvider {
         // TVMaze's search isn't paginated: later pages of a search come from
         // Time4Popcorn's paginated catalog alone.
         let withBase = !searching || page <= 1
+        /// The required source (the base list, else Time4Popcorn for a
+        /// search's later pages) answered, if only with nothing.
+        var requiredAnswered = false
 
-        let gate = SourceGate(grace: searching ? SourceGate.searchGrace : SourceGate.browseGrace) { complete in
+        let gate = SourceGate(grace: searching ? SourceGate.searchGrace : SourceGate.browseGrace,
+                              gracesEmptyAnswers: searching) { complete in
             var seen = Set<String>()
             var merged: [Show] = []
             for show in t4pShows + baseShows + cinemetaShows where seen.insert(show.id).inserted {
@@ -712,8 +735,8 @@ public final class YTSEZTVProvider: MediaProvider {
                 self.t4pPages.set(t4pMerged ? t4pPage + 1 : t4pPage, of: max(page, 1) + 1, in: listKey)
             }
             self.lastListWasPartial = !complete || t4pFailed || baseIsPartial
-            if merged.isEmpty, baseError != nil || !complete {
-                return completion(nil, baseError ?? YTSEZTVProvider.timedOut)
+            if let failure = YTSEZTVProvider.failure(listIsEmpty: merged.isEmpty, error: baseError, requiredAnswered: requiredAnswered) {
+                return completion(nil, failure)
             }
             completion(merged, nil)
         }
@@ -723,6 +746,7 @@ public final class YTSEZTVProvider: MediaProvider {
             let deliver: ([Show]?, NSError?) -> Void = { shows, error in
                 baseShows = shows ?? []
                 baseError = shows == nil ? error : nil
+                if shows != nil { requiredAnswered = true }
                 baseDone(!baseShows.isEmpty)
             }
             if searching {
@@ -757,6 +781,7 @@ public final class YTSEZTVProvider: MediaProvider {
                     return t4pDone(false)
                 }
                 t4pMerged = true
+                if !withBase { requiredAnswered = true }
                 if searching {
                     result = result.filter { $0.title.localizedCaseInsensitiveContains(term) }
                 }

@@ -425,6 +425,30 @@ final class SourceGateTests: CheckedTestCase {
         eq(nothing(), [false], "the deadline delivers")
     }
 
+    func testASearchWhoseRequiredSourceFoundNothingDoesNotWaitForTheDeadline() {
+        let scheduler = ManualScheduler()
+        var fired: [Bool] = []
+        let gate = SourceGate(deadline: deadline, grace: grace, gracesEmptyAnswers: true, schedule: scheduler.schedule) { fired.append($0) }
+        let yts = gate.source(required: true), t4p = gate.source(required: false)
+        gate.start()
+        yts(false)
+        eq(scheduler.count(grace), 1, "a search: the mute optional source gets the grace only")
+        scheduler.fire(grace)
+        eq(fired, [false], "delivered after the grace, not the deadline")
+        t4p(true)
+        eq(fired, [false], "once only")
+    }
+
+    func testAnEmptyAnswerIsNoResultsAndAFailureAnError() {
+        let failure = NSError(domain: "yts", code: -1)
+        check(YTSEZTVProvider.failure(listIsEmpty: true, error: nil, requiredAnswered: true) == nil,
+              "YTS answered with nothing, Time4Popcorn left out: an empty list (« No results »), not « check your connection »")
+        eq(YTSEZTVProvider.failure(listIsEmpty: true, error: failure, requiredAnswered: false), failure, "YTS failed: its error")
+        eq(YTSEZTVProvider.failure(listIsEmpty: true, error: nil, requiredAnswered: false)?.code, NSURLErrorTimedOut,
+           "YTS never answered: a time out")
+        check(YTSEZTVProvider.failure(listIsEmpty: false, error: failure, requiredAnswered: false) == nil, "something to show: no error")
+    }
+
     func testTheDeadline() {
         let scheduler = ManualScheduler()
         let (gate, fired) = gate(scheduler)

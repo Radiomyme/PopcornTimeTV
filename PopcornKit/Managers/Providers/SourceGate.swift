@@ -11,7 +11,10 @@ import Foundation
 ///   content used to count: a search YTS has nothing for waited 8 s for a
 ///   mute Time4Popcorn with Cinemeta's results in hand.)
 /// - No source brought anything yet: the optional ones still out are all
-///   there is, they are waited for until the deadline.
+///   there is, they are waited for until the deadline — except in a search
+///   (`gracesEmptyAnswers`): once the required sources answered, even with
+///   nothing, the optional ones get the grace, so « No results » does not
+///   take the deadline to come.
 /// - `deadline` seconds after `start()`: whatever arrived.
 ///
 /// (The loads used to wait for the slowest source with no deadline: a mute
@@ -45,13 +48,15 @@ final class SourceGate {
     private var delivered = false
     private var started = false
     private var graceScheduled = false
+    private let gracesEmptyAnswers: Bool
 
     /// `completion(complete)`: `complete` false when a source was left out.
-    init(deadline: TimeInterval = SourceGate.deadline, grace: TimeInterval,
+    init(deadline: TimeInterval = SourceGate.deadline, grace: TimeInterval, gracesEmptyAnswers: Bool = false,
          schedule: @escaping Scheduler = SourceGate.mainQueue,
          completion: @escaping (_ complete: Bool) -> Void) {
         self.deadline = deadline
         self.grace = grace
+        self.gracesEmptyAnswers = gracesEmptyAnswers
         self.schedule = schedule
         self.completion = completion
     }
@@ -81,7 +86,7 @@ final class SourceGate {
     private func evaluate() {
         guard started, completion != nil else { return }
         if pendingRequired == 0 && pendingOptional == 0 { return fire(complete: true) }
-        guard pendingRequired == 0, delivered, !graceScheduled else { return }
+        guard pendingRequired == 0, delivered || gracesEmptyAnswers, !graceScheduled else { return }
         graceScheduled = true
         schedule(grace) { [self] in fire(complete: false) }
     }
