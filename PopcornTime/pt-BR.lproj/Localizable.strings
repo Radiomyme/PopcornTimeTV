@@ -934,14 +934,14 @@
 "Profiles.DefaultName" = "Eu";
 "Profiles" = "Perfis";
 "Profiles.Switch" = "Trocar de perfil";
-"Profiles.Footer" = "Cada perfil tem seu histórico, a fileira « Continuar assistindo », « Favoritos », seus idiomas e sua conta Trakt.";
+"Profiles.Footer" = "Cada perfil tem seu histórico, a fileira “Continuar assistindo”, “Favoritos” e seus idiomas.";
 "Profiles.Primary.Note" = "O perfil principal guarda o histórico de antes dos perfis: pode ser renomeado, não apagado.";
 
 /* Profile preferences (ProfileTaste): the Home's « For You » shelf, Settings › Profiles › Your Preferences. */
 "For You" = "Para você";
 "Profiles.Taste" = "Suas preferências";
 "Profiles.Taste.Footer" = "Aprendido neste dispositivo a partir do que este perfil assiste, adiciona à lista e escolhe durante a reprodução. Nada é enviado.";
-"Profiles.Taste.Empty" = "Nada aprendido ainda. Assista a alguns títulos e « Para você » aparecerá no Início.";
+"Profiles.Taste.Empty" = "Nada aprendido ainda. Assista a alguns títulos e “Para você” aparecerá no Início.";
 "Profiles.Taste.Nothing" = "Nada ainda";
 "Profiles.Taste.Genres" = "Gêneros";
 "Profiles.Taste.Kinds" = "Filmes ou séries";
@@ -955,8 +955,8 @@
 "Profiles.Taste.Quality" = "Qualidade";
 "Profiles.Taste.Off" = "Desativadas";
 "Profiles.Taste.Reset" = "Redefinir preferências";
-"Profiles.Taste.ResetConfirm" = "Esquecer o que foi aprendido sobre %@?";
-"Profiles.Taste.ResetMessage" = "« Para você » some até este perfil assistir de novo. O histórico e a lista são mantidos.";
+"Profiles.Taste.ResetConfirm" = "Esquecer o que foi aprendido para “%@”?";
+"Profiles.Taste.ResetMessage" = "“Para você” some até este perfil assistir de novo. O histórico e a lista são mantidos.";
 
 /* 5.4.0 a-lang */
 /* Quality pickers: the language tag of a release with several audio tracks, likely in the preferred language (all caps, like the format tags) */
@@ -988,3 +988,5 @@
 "Settings.Language.AutomaticNamed" = "Automático (%@)";
 /* Settings › Languages: what Automatic does (after the section's footer; under the row on the Apple TV). */
 "Settings.Language.Automatic.Footer" = "Automático segue o idioma que você mais escolhe no player.";
+/* iPhone, iPad: Your Preferences with nothing learned, under « Nothing yet » (the Apple TV and the Mac keep Profiles.Taste.Empty). */
+"Profiles.Taste.EmptyHint" = "Assista a alguns títulos e “Para você” aparecerá no Início.";

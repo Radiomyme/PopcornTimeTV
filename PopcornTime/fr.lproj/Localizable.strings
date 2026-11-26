@@ -627,7 +627,7 @@
 "Profiles.DefaultName" = "Moi";
 "Profiles" = "Profils";
 "Profiles.Switch" = "Changer de profil";
-"Profiles.Footer" = "Chaque profil a son historique, sa rangée « Reprendre », « Ma liste », ses langues et son compte Trakt.";
+"Profiles.Footer" = "Chaque profil a son historique, sa rangée « Reprendre », « Ma liste » et ses langues.";
 "Profiles.Primary.Note" = "Le profil principal garde l’historique d’avant les profils : il peut être renommé, pas supprimé.";
 
 /* Profile preferences (ProfileTaste): the Home's « For You » shelf, Settings › Profiles › Your Preferences. */
@@ -648,7 +648,7 @@
 "Profiles.Taste.Quality" = "Qualité";
 "Profiles.Taste.Off" = "Désactivés";
 "Profiles.Taste.Reset" = "Réinitialiser les préférences";
-"Profiles.Taste.ResetConfirm" = "Oublier ce qui a été appris sur %@ ?";
+"Profiles.Taste.ResetConfirm" = "Oublier ce qui a été appris pour « %@ » ?";
 "Profiles.Taste.ResetMessage" = "« Pour vous » disparaît jusqu’à ce que ce profil regarde à nouveau. Son historique et sa liste sont conservés.";
 
 /* 5.4.0 a-lang */
@@ -681,3 +681,5 @@
 "Settings.Language.AutomaticNamed" = "Automatique (%@)";
 /* Settings › Languages: what Automatic does (after the section's footer; under the row on the Apple TV). */
 "Settings.Language.Automatic.Footer" = "Automatique suit la langue que vous choisissez le plus souvent dans le lecteur.";
+/* iPhone, iPad: Your Preferences with nothing learned, under « Nothing yet » (the Apple TV and the Mac keep Profiles.Taste.Empty). */
+"Profiles.Taste.EmptyHint" = "Regardez quelques titres et « Pour vous » apparaîtra sur l’Accueil.";

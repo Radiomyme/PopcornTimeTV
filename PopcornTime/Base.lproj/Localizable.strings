@@ -627,7 +627,7 @@
 "Profiles.DefaultName" = "Me";
 "Profiles" = "Profiles";
 "Profiles.Switch" = "Switch Profile";
-"Profiles.Footer" = "Each profile keeps its own history, watchlist, languages and Trakt account.";
+"Profiles.Footer" = "Each profile keeps its own history, Continue Watching, watchlist and languages.";
 "Profiles.Primary.Note" = "The main profile holds the history from before profiles: it can be renamed, not deleted.";
 
 /* Profile preferences (ProfileTaste): the Home's « For You » shelf, Settings › Profiles › Your Preferences. */
@@ -648,7 +648,7 @@
 "Profiles.Taste.Quality" = "Quality";
 "Profiles.Taste.Off" = "Off";
 "Profiles.Taste.Reset" = "Reset Preferences";
-"Profiles.Taste.ResetConfirm" = "Forget what was learned about %@?";
+"Profiles.Taste.ResetConfirm" = "Forget what was learned for « %@ »?";
 "Profiles.Taste.ResetMessage" = "« For You » goes away until this profile watches again. Its history and list are kept.";
 
 /* 5.4.0 a-lang */
@@ -681,3 +681,5 @@
 "Settings.Language.AutomaticNamed" = "Automatic (%@)";
 /* Settings › Languages: what Automatic does (after the section's footer; under the row on the Apple TV). */
 "Settings.Language.Automatic.Footer" = "Automatic follows the language you pick most often in the player.";
+/* iPhone, iPad: Your Preferences with nothing learned, under « Nothing yet » (the Apple TV and the Mac keep Profiles.Taste.Empty). */
+"Profiles.Taste.EmptyHint" = "Watch a few titles and « For You » will appear on Home.";

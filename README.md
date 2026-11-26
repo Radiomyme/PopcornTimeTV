@@ -84,9 +84,9 @@ against TMDB). Not yet on a real Apple TV, iPhone, iPad or Mac.
 **Profiles — « Who's Watching? » (Apple TV, iPhone / iPad, Mac)**
 - **Who has what**: up to five profiles, each with a name and an avatar, and its own watched
   marks, playback positions and Continue Watching (the release to resume included), watchlist,
-  new episodes already seen, preferred audio and subtitle languages, recent searches (iPhone,
-  iPad), and Trakt account (its lists synced into that profile when it is picked, an answer still
-  on its way going to the profile that asked). The Home's languages and shelves, the streaming
+  new episodes already seen, preferred audio and subtitle languages and recent searches (iPhone,
+  iPad). No platform offers a Trakt sign-in any more (Trakt refuses the app's key); an account
+  signed in with an earlier version belongs to the main profile. The Home's languages and shelves, the streaming
   services and TMDB key, the quality and Up Next settings, the subtitle appearance and encoding,
   the downloads and the caches stay the device's. The Top Shelf reads no user data (the extension
   cannot read the app's), so nothing changes there.

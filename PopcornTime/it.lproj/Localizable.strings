@@ -927,14 +927,14 @@
 "Profiles.DefaultName" = "Io";
 "Profiles" = "Profili";
 "Profiles.Switch" = "Cambia profilo";
-"Profiles.Footer" = "Ogni profilo ha la sua cronologia, la fila « Continua a guardare », la sua Watchlist, le sue lingue e il suo account Trakt.";
+"Profiles.Footer" = "Ogni profilo ha la sua cronologia, la fila «Continua a guardare», la sua Watchlist e le sue lingue.";
 "Profiles.Primary.Note" = "Il profilo principale conserva la cronologia di prima dei profili: si può rinominare, non eliminare.";
 
 /* Profile preferences (ProfileTaste): the Home's « For You » shelf, Settings › Profiles › Your Preferences. */
 "For You" = "Per te";
 "Profiles.Taste" = "Le tue preferenze";
 "Profiles.Taste.Footer" = "Appreso su questo dispositivo da ciò che questo profilo guarda, aggiunge alla sua lista e sceglie durante la riproduzione. Non viene inviato nulla.";
-"Profiles.Taste.Empty" = "Ancora nulla di appreso. Guarda qualche titolo e « Per te » comparirà nella Home.";
+"Profiles.Taste.Empty" = "Ancora nulla di appreso. Guarda qualche titolo e «Per te» comparirà nella Home.";
 "Profiles.Taste.Nothing" = "Ancora nulla";
 "Profiles.Taste.Genres" = "Generi";
 "Profiles.Taste.Kinds" = "Film o serie";
@@ -948,8 +948,8 @@
 "Profiles.Taste.Quality" = "Qualità";
 "Profiles.Taste.Off" = "Disattivati";
 "Profiles.Taste.Reset" = "Reimposta preferenze";
-"Profiles.Taste.ResetConfirm" = "Dimenticare ciò che è stato appreso su %@?";
-"Profiles.Taste.ResetMessage" = "« Per te » scompare finché questo profilo non guarda di nuovo qualcosa. La cronologia e la lista restano.";
+"Profiles.Taste.ResetConfirm" = "Dimenticare ciò che è stato appreso per «%@»?";
+"Profiles.Taste.ResetMessage" = "«Per te» scompare finché questo profilo non guarda di nuovo qualcosa. La cronologia e la lista restano.";
 
 /* 5.4.0 a-lang */
 /* Quality pickers: the language tag of a release with several audio tracks, likely in the preferred language (all caps, like the format tags) */
@@ -981,3 +981,5 @@
 "Settings.Language.AutomaticNamed" = "Automatico (%@)";
 /* Settings › Languages: what Automatic does (after the section's footer; under the row on the Apple TV). */
 "Settings.Language.Automatic.Footer" = "Automatico segue la lingua che scegli più spesso nel lettore.";
+/* iPhone, iPad: Your Preferences with nothing learned, under « Nothing yet » (the Apple TV and the Mac keep Profiles.Taste.Empty). */
+"Profiles.Taste.EmptyHint" = "Guarda qualche titolo e «Per te» comparirà nella Home.";
