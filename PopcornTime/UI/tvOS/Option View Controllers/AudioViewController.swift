@@ -77,7 +77,8 @@ class AudioViewController: OptionsStackViewController, UITableViewDataSource {
         }
 
         cell.contentView.backgroundColor = .clear
-        cell.textLabel?.tintColor = .white
+        cell.textLabel?.textColor = cell.isFocused ? .black : UIColor(white: 1.0, alpha: 0.5)
+        cell.tintColor = cell.isFocused ? .black : .white
 
         return cell
     }

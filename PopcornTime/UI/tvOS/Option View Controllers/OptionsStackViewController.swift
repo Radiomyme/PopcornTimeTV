@@ -114,12 +114,14 @@ class OptionsStackViewController: UIViewController, UITableViewDelegate {
             topGuide.preferredFocusEnvironments = [firstTableView, secondTableView, thirdTableView]
         }
         
-        if let indexPath = context.nextFocusedIndexPath, let cell = context.nextFocusedView as? UITableViewCell {
+        if let cell = context.nextFocusedView as? UITableViewCell {
             // tvOS renders the focused row as a WHITE pill — the text (and
             // the checkmark) must flip to black or they vanish into it.
             cell.textLabel?.textColor = .black
             cell.tintColor = .black
-            tableView.scrollToRow(at: indexPath, at: .none, animated: true)
+            // No scrollToRow here: the focus engine already scrolls the
+            // focused row into view, and a second animated scroll on every
+            // move fought it and made long lists (languages, delays) stutter.
             
             switch cell.tableView! {
             case firstTableView:

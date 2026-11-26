@@ -55,8 +55,10 @@ class SubtitlesViewController: OptionsStackViewController, UITableViewDataSource
             break
         }
         cell.contentView.backgroundColor = .clear
-        cell.textLabel?.tintColor = .white
-        
+        // Reused cells keep the colors of their last focus state; set them
+        // for this one (black on the focused white pill, dimmed otherwise).
+        cell.textLabel?.textColor = cell.isFocused ? .black : UIColor(white: 1.0, alpha: 0.5)
+        cell.tintColor = cell.isFocused ? .black : .white
         
         return cell
     }
