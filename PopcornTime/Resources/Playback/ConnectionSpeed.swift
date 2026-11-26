@@ -358,14 +358,16 @@ extension Torrent {
     }
 
     /// A row of the tvOS quality choosers (a `UIAlertAction` title, plain
-    /// text): "⭐︎ ⚠︎ 1080p H.264 DD  ·  1265 seeds  ·  9.1 GB  ·  ≈ 8 Mb/s
-    /// ·  ThePirateBay  ·  FR". The language tag (`languageTag`) goes last:
-    /// tvOS shrinks a row too long for the sheet, then cuts its middle, so
-    /// the start (the quality) and the end (the tag) both survive. The
-    /// bitrate is left out of a row it would take past `tvChooserLength`
-    /// characters, so the rows stop shrinking unevenly. In a right-to-left
-    /// interface the quality and the tag are isolated, so their Latin text
-    /// keeps its order.
+    /// text): "⭐︎ ⚠︎ 1080p H.264 DD  ·  1265 sources  ·  9,1 Go  ·  FR". The
+    /// language tag (`languageTag`) goes last: tvOS shrinks a row too long
+    /// for the sheet, then cuts its middle, so the start (the quality) and
+    /// the end (the tag) both survive. The whole row keeps to
+    /// `tvChooserLength` characters, so the rows stop shrinking unevenly and
+    /// never scroll: the bitrate goes first, then the source, then the
+    /// seeds' word (the number stays), then the size. Sizes are written in
+    /// the UI's units and decimal mark (the iPhone's rows do the same). In a
+    /// right-to-left interface the quality and the tag are isolated, so
+    /// their Latin text keeps its order.
     /// - Parameters:
     ///   - recommended: the star (the recommended or the planned release).
     ///   - tooHeavy: the warning sign (likely too heavy for the connection).
@@ -375,21 +377,30 @@ extension Torrent {
         func isolated(_ text: String) -> String { return isolates ? "\u{2068}" + text + "\u{2069}" : text }
         let separator = "  ·  "
         let prefix = (recommended ? "⭐︎ " : "") + (tooHeavy ? "⚠︎ " : "")
-        var head = [isolated(qualityLabel.isEmpty ? "—" : qualityLabel),
-                    String(format: NSLocalizedString("Sources.Seeds", value: "%lld seeds",
-                                                     comment: "Number of seeders of a release; %lld = the number"), seeds)]
-        if let size = size, !size.isEmpty { head.append(size) }
-        var tail: [String] = []
-        if let source = sourceLabel { tail.append(source) }
-        if let token = languageTag?.token { tail.append(isolated(token)) }
-        if let bitrate = bitrateLabel {
-            let full = prefix + (head + [bitrate] + tail).joined(separator: separator)
-            if full.count <= Torrent.tvChooserLength { return full }
+        let quality = isolated(qualityLabel.isEmpty ? "—" : qualityLabel)
+        let seedsText = String(format: NSLocalizedString("Sources.Seeds", value: "%lld seeds",
+                                                          comment: "Number of seeders of a release; %lld = the number"), seeds)
+        var sizeText: String?
+        if let bytes = sizeInBytes, bytes > 0 {
+            sizeText = ByteCountFormatter.string(fromByteCount: bytes, countStyle: .file)
+        } else if let size = size, !size.isEmpty {
+            sizeText = size
         }
-        return prefix + (head + tail).joined(separator: separator)
+        let token = languageTag.map { isolated($0.token) }
+        // From the fullest row to the shortest: the first that fits.
+        let rows: [[String?]] = [
+            [quality, seedsText, sizeText, bitrateLabel, sourceLabel, token],
+            [quality, seedsText, sizeText, sourceLabel, token],
+            [quality, seedsText, sizeText, token],
+            [quality, "\(seeds)", sizeText, token],
+            [quality, "\(seeds)", token],
+        ]
+        let labels = rows.map { prefix + $0.compactMap { $0 }.joined(separator: separator) }
+        return labels.first { $0.count <= Torrent.tvChooserLength } ?? labels[labels.count - 1]
     }
 
-    /// The longest tvOS chooser row that keeps its bitrate (`tvChooserLabel`).
+    /// The longest tvOS chooser row (`tvChooserLabel`): about what the
+    /// chooser's sheet shows at its full size.
     static let tvChooserLength = 44
 }
 
