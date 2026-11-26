@@ -652,3 +652,11 @@
 "Profiles.Taste.Reset" = "Reset Preferences";
 "Profiles.Taste.ResetConfirm" = "Forget what was learnt about %@?";
 "Profiles.Taste.ResetMessage" = "« For You » goes away until this profile watches again. Its history and list are kept.";
+
+/* 5.4.0 a-lang */
+/* Quality pickers: the language tag of a release with several audio tracks, likely in the preferred language (all caps, like the format tags) */
+"Picker.Multi" = "MULTI";
+/* Quality pickers, VoiceOver: the language tag of a release in the preferred audio language; %@ = the language's name */
+"Picker.Audio.Spoken" = "Audio in %@";
+/* Quality pickers, VoiceOver: the MULTI tag */
+"Picker.Multi.Spoken" = "Several audio tracks";

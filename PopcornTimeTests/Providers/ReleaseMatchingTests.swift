@@ -772,6 +772,22 @@ final class ReleaseLanguageTests: CheckedTestCase {
         check(french.languageTag == nil, "no preference, no tag")
     }
 
+    func testTVChooserRows() {
+        AudioLanguagePreference.override = "fr"
+        let french = torrent("Interstellar.2014.MULTI.VFF.1080p.BluRay.x264-LOST", "b", quality: "1080p H.264 DD — Torrent9",
+                             seeds: 1265, size: "9.1 GB").withMediaRuntime(10_140)
+        let label = french.tvChooserLabel(recommended: true)
+        check(label.hasPrefix("⭐︎ 1080p H.264 DD  ·  "), "the star, then the quality", label)
+        check(label.hasSuffix("  ·  Torrent9  ·  FR"), "the source, then the tag last", label)
+        check(!label.contains("["), "no brackets", label)
+        check(label.count <= Torrent.tvChooserLength || !label.contains("Mb/s"), "a long row drops its bitrate", label)
+        let short = torrent("Interstellar.2014.720p.BluRay", "c", quality: "720p", seeds: 63, size: "3.96 GB").withMediaRuntime(10_140)
+        check(short.tvChooserLabel(recommended: false, tooHeavy: true).hasPrefix("⚠︎ 720p  ·  "), "the warning sign",
+              short.tvChooserLabel(recommended: false, tooHeavy: true))
+        check(short.tvChooserLabel(recommended: false).contains("Mb/s"), "a short row keeps its bitrate",
+              short.tvChooserLabel(recommended: false))
+    }
+
     // MARK: The active profile's language
 
     func testTheActiveProfilesLanguage() {

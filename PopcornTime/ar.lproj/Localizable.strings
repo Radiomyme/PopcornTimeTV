@@ -955,3 +955,11 @@
 "Profiles.Taste.Reset" = "إعادة تعيين التفضيلات";
 "Profiles.Taste.ResetConfirm" = "هل تريد نسيان ما تم تعلّمه عن %@؟";
 "Profiles.Taste.ResetMessage" = "يختفي « مقترح لك » حتى يشاهد هذا الملف شيئًا مجددًا. يُحتفَظ بالسجل والقائمة.";
+
+/* 5.4.0 a-lang */
+/* Quality pickers: the language tag of a release with several audio tracks, likely in the preferred language (all caps, like the format tags) */
+"Picker.Multi" = "MULTI";
+/* Quality pickers, VoiceOver: the language tag of a release in the preferred audio language; %@ = the language's name */
+"Picker.Audio.Spoken" = "الصوت باللغة %@";
+/* Quality pickers, VoiceOver: the MULTI tag */
+"Picker.Multi.Spoken" = "عدة مسارات صوتية";

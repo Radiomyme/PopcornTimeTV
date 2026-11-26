@@ -31,19 +31,13 @@ struct TorrentPickerRow: View {
                         .font(.subheadline.weight(.semibold))
                         .lineLimit(1)
                         .truncationMode(.middle)
-                    if let language = torrent.languageBadge {
-                        Text(verbatim: language)
-                            .font(.caption2.weight(.bold))
-                            .padding(.horizontal, 6).padding(.vertical, 2)
-                            .overlay(Capsule().stroke(.secondary, lineWidth: 1))
-                            .foregroundStyle(.secondary)
-                            .lineLimit(1)
-                            .fixedSize()
-                    }
+                        // Nothing on this line may cut the quality first.
+                        .layoutPriority(1)
                     if recommended {
                         Text(verbatim: NSLocalizedString("Picker.Recommended", value: "Recommended",
                                                          comment: "Quality picker: badge of the recommended release"))
                             .font(.caption2.weight(.bold))
+                            .lineLimit(1)
                             .padding(.horizontal, 6).padding(.vertical, 2)
                             .background(.tint, in: Capsule())
                             .foregroundStyle(.white)
@@ -52,11 +46,18 @@ struct TorrentPickerRow: View {
                 // One text that wraps (two lines at most) rather than two
                 // that truncate: on an iPhone in portrait the source used to
                 // vanish and the bitrate to be cut.
-                Text(detailText)
-                    .lineLimit(2)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .font(.caption.monospacedDigit())
-                    .foregroundStyle(.secondary)
+                // The audio language leads the metadata line, not the title
+                // line: beside the title it cut the quality name.
+                HStack(alignment: .firstTextBaseline, spacing: 6) {
+                    if let tag = torrent.languageTag {
+                        LanguageTag(token: tag.token, spoken: tag.spoken)
+                    }
+                    Text(detailText)
+                        .lineLimit(2)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .font(.caption.monospacedDigit())
+                        .foregroundStyle(.secondary)
+                }
                 if let warning = torrent.bandwidthWarning() {
                     Label(warning, systemImage: "exclamationmark.triangle.fill")
                         .font(.caption.weight(.semibold))
@@ -95,6 +96,28 @@ struct TorrentPickerRow: View {
         if let size = torrent.size, !size.isEmpty { parts.append(size) }
         if let bitrate = torrent.bitrateLabel { parts.append(bitrate) }
         return parts.joined(separator: " · ")
+    }
+}
+
+/// The audio language of a release at the head of a quality row's metadata
+/// line ("FR", "MULTI": `Torrent.languageTag`), with the look of the Home's
+/// format tags (small outlined capitals) at caption size. Shared by
+/// `TorrentPickerRow` and the iOS `SourceRow`; VoiceOver reads "Audio in
+/// French", not the letters.
+struct LanguageTag: View {
+    let token: String
+    let spoken: String
+
+    var body: some View {
+        Text(verbatim: token)
+            .font(.caption2.weight(.heavy))
+            .tracking(0.3)
+            .foregroundStyle(.secondary)
+            .padding(.horizontal, 4)
+            .padding(.vertical, 1)
+            .overlay(RoundedRectangle(cornerRadius: 4, style: .continuous).stroke(.secondary.opacity(0.7), lineWidth: 0.75))
+            .fixedSize()
+            .accessibilityLabel(Text(verbatim: spoken))
     }
 }
 

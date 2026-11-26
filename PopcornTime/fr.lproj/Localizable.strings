@@ -652,3 +652,11 @@
 "Profiles.Taste.Reset" = "Réinitialiser les préférences";
 "Profiles.Taste.ResetConfirm" = "Oublier ce qui a été appris sur %@ ?";
 "Profiles.Taste.ResetMessage" = "« Pour vous » disparaît jusqu’à ce que ce profil regarde à nouveau. Son historique et sa liste sont conservés.";
+
+/* 5.4.0 a-lang */
+/* Quality pickers: the language tag of a release with several audio tracks, likely in the preferred language (all caps, like the format tags) */
+"Picker.Multi" = "MULTI";
+/* Quality pickers, VoiceOver: the language tag of a release in the preferred audio language; %@ = the language's name */
+"Picker.Audio.Spoken" = "Audio en %@";
+/* Quality pickers, VoiceOver: the MULTI tag */
+"Picker.Multi.Spoken" = "Plusieurs pistes audio";

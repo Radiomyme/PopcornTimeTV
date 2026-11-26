@@ -301,25 +301,15 @@ extension AppDelegate {
         // too heavy for the connection starts with "⚠︎", explained once in
         // the alert's message (a "(may stutter)" in each row made them too
         // long). Best resolution first. The source (TPB, Knaben · 1337x, a
-        // Torrentio indexer…) comes last, and the separators are narrow:
-        // tvOS shrinks a row too long for the sheet, then cuts its middle
-        // (the seeds); the focused row scrolls to show it all.
+        // Torrentio indexer…) and the language tag come last
+        // (`Torrent.tvChooserLabel`, shared with the Up Next chooser).
         let recommendedURL = Torrent.balancedPick(from: sorted, connection: connection)?.url
         var recommendedAction: UIAlertAction?
         var flagged = false
         for torrent in sorted.reversed() {
-            var label = torrent.qualityLabel.isEmpty ? "—" : torrent.qualityLabel
-            label += "  ·  \(torrent.seeds) seeds"
-            if let size = torrent.size, !size.isEmpty { label += "  ·  \(size)" }
-            if let bitrate = torrent.bitrateLabel { label += "  ·  \(bitrate)" }
-            if let source = torrent.sourceLabel { label += "  ·  \(source)" }
-            if torrent.bandwidthFit(connection: connection).isTooHeavy {
-                label = "⚠︎ " + label
-                flagged = true
-            }
-            // The language first: tvOS cuts the middle of a row too long.
-            if let language = torrent.languageBadge { label = "[\(language)]  " + label }
-            if torrent.url == recommendedURL { label = "⭐︎ " + label }
+            let tooHeavy = torrent.bandwidthFit(connection: connection).isTooHeavy
+            if tooHeavy { flagged = true }
+            let label = torrent.tvChooserLabel(recommended: torrent.url == recommendedURL, tooHeavy: tooHeavy)
             let action = UIAlertAction(title: label, style: .default) { _ in completion(torrent) }
             alertController.addAction(action)
             if torrent.url == recommendedURL { recommendedAction = action }

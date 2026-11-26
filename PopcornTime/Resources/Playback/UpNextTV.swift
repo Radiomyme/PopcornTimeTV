@@ -142,13 +142,9 @@ final class UpNextTVLink {
                                       preferredStyle: .alert, blurStyle: .extraLight)
         var plannedAction: UIAlertAction?
         for torrent in ordered {
-            var label = torrent.qualityLabel.isEmpty ? "—" : torrent.qualityLabel
-            label += "  ·  \(torrent.seeds) seeds"
-            if let size = torrent.size, !size.isEmpty { label += "  ·  \(size)" }
-            if let source = torrent.sourceLabel { label += "  ·  \(source)" }
-            // The language first: tvOS cuts the middle of a row too long.
-            if let language = torrent.languageBadge { label = "[\(language)]  " + label }
-            if torrent.url == plan.torrent?.url { label = "⭐︎ " + label }
+            // The quality chooser's rows (`Torrent.tvChooserLabel`), the
+            // planned release starred.
+            let label = torrent.tvChooserLabel(recommended: torrent.url == plan.torrent?.url)
             let action = UIAlertAction(title: label, style: .default) { [weak session] _ in
                 print("[UpNext] chooser: \(torrent.quality ?? "?") picked")
                 session?.chose(torrent)

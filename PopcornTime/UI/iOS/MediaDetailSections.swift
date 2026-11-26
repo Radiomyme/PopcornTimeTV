@@ -192,28 +192,29 @@ struct SourceRow: View {
                         .font(.subheadline.weight(.semibold))
                         .lineLimit(1)
                         .truncationMode(.middle)
-                    if let language = torrent.languageBadge {
-                        Text(verbatim: language)
-                            .font(.caption2.weight(.bold))
-                            .padding(.horizontal, 6).padding(.vertical, 2)
-                            .overlay(Capsule().stroke(.secondary, lineWidth: 1))
-                            .foregroundStyle(.secondary)
-                            .lineLimit(1)
-                            .fixedSize()
-                    }
+                        // Nothing on this line may cut the quality first.
+                        .layoutPriority(1)
                     if recommended {
                         Text("Picker.Recommended")
                             .font(.caption2.weight(.bold))
+                            .lineLimit(1)
                             .padding(.horizontal, 6).padding(.vertical, 2)
                             .background(.tint, in: Capsule())
                             .foregroundStyle(.white)
                     }
                 }
-                Text(detailText)
-                    .lineLimit(2)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .font(.caption.monospacedDigit())
-                    .foregroundStyle(.secondary)
+                // The audio language leads the metadata line, not the title
+                // line: beside the title it cut the quality name.
+                HStack(alignment: .firstTextBaseline, spacing: 6) {
+                    if let tag = torrent.languageTag {
+                        LanguageTag(token: tag.token, spoken: tag.spoken)
+                    }
+                    Text(detailText)
+                        .lineLimit(2)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .font(.caption.monospacedDigit())
+                        .foregroundStyle(.secondary)
+                }
                 if let warning = torrent.bandwidthWarning() {
                     Label(warning, systemImage: "exclamationmark.triangle.fill")
                         .font(.caption.weight(.semibold))

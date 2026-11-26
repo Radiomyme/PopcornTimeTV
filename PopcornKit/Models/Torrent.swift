@@ -2669,11 +2669,6 @@ public extension Torrent {
         }
     }
 
-    /// The language tag's text, until the pickers show `languageTag`.
-    var languageBadge: String? {
-        return languageTag?.token
-    }
-
     /// The app's interface language (its strings), for the language names.
     internal static var interfaceLocale: Locale {
         return Locale(identifier: Bundle.main.preferredLocalizations.first ?? "en")
