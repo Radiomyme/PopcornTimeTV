@@ -1,4 +1,5 @@
 import Foundation
+import CoreText
 import PopcornKit
 import PopcornTorrent
 
@@ -358,15 +359,17 @@ extension Torrent {
     }
 
     /// A row of the tvOS quality choosers (a `UIAlertAction` title, plain
-    /// text): "⭐︎ ⚠︎ 1080p H.264 DD  ·  1265 sources  ·  9,1 Go  ·  FR". The
-    /// language tag (`languageTag`) goes last: tvOS shrinks a row too long
-    /// for the sheet, then cuts its middle, so the start (the quality) and
-    /// the end (the tag) both survive. The whole row keeps to
-    /// `tvChooserLength` characters, so the rows stop shrinking unevenly and
-    /// never scroll: the bitrate goes first, then the source, then the
-    /// seeds' word (the number stays), then the size. Sizes are written in
-    /// the UI's units and decimal mark (the iPhone's rows do the same). In a
-    /// right-to-left interface the quality and the tag are isolated, so
+    /// text): "⭐︎ ⚠︎ 1080p H.264 DD · 1265 sources · 9,1 Go · FR". The
+    /// language tag (`languageTag`) goes last: tvOS cuts the middle of a row
+    /// it cannot fit, so the start (the quality) and the end (the tag) both
+    /// survive. tvOS also shrinks a row wider than the sheet, each by its own
+    /// amount, and scrolls the focused one: so the row keeps to the width the
+    /// sheet shows at full size (`tvChooserFits`, measured in points, not
+    /// characters), dropping the bitrate first, then the source, then the
+    /// size. The quality, the seeds — with their word — and the tag always
+    /// stay; a quality too long even alone is left to tvOS. Sizes are written
+    /// in the UI's units and decimal mark (the iPhone's rows do the same). In
+    /// a right-to-left interface the quality and the tag are isolated, so
     /// their Latin text keeps its order.
     /// - Parameters:
     ///   - recommended: the star (the recommended or the planned release).
@@ -375,7 +378,9 @@ extension Torrent {
         let language = Bundle.main.preferredLocalizations.first ?? "en"
         let isolates = Locale.Language(identifier: language).characterDirection == .rightToLeft
         func isolated(_ text: String) -> String { return isolates ? "\u{2068}" + text + "\u{2069}" : text }
-        let separator = "  ·  "
+        // One space each side, as the detail pages' metadata line: the
+        // double spaces cost a size on most rows.
+        let separator = " · "
         let prefix = (recommended ? "⭐︎ " : "") + (tooHeavy ? "⚠︎ " : "")
         let quality = isolated(qualityLabel.isEmpty ? "—" : qualityLabel)
         let seedsText = String(format: NSLocalizedString("Sources.Seeds", value: "%lld seeds",
@@ -392,16 +397,26 @@ extension Torrent {
             [quality, seedsText, sizeText, bitrateLabel, sourceLabel, token],
             [quality, seedsText, sizeText, sourceLabel, token],
             [quality, seedsText, sizeText, token],
-            [quality, "\(seeds)", sizeText, token],
-            [quality, "\(seeds)", token],
+            [quality, seedsText, token],
         ]
         let labels = rows.map { prefix + $0.compactMap { $0 }.joined(separator: separator) }
-        return labels.first { $0.count <= Torrent.tvChooserLength } ?? labels[labels.count - 1]
+        return labels.first(where: Torrent.tvChooserFits) ?? labels[labels.count - 1]
     }
 
-    /// The longest tvOS chooser row (`tvChooserLabel`): about what the
-    /// chooser's sheet shows at its full size.
-    static let tvChooserLength = 44
+    /// Whether a chooser row fits the sheet at full size. Measured on the
+    /// Apple TV's sheet: its rows are the system font at 29 pt in about
+    /// 406 pt; the budget keeps a little room, so the focused row, slightly
+    /// larger, does not scroll either.
+    static func tvChooserFits(_ label: String) -> Bool {
+        let font = CTFontCreateUIFontForLanguage(.system, 29, nil)
+            ?? CTFontCreateWithName("Helvetica" as CFString, 29, nil)
+        let text = NSAttributedString(string: label, attributes: [NSAttributedString.Key(kCTFontAttributeName as String): font])
+        let width = CTLineGetTypographicBounds(CTLineCreateWithAttributedString(text), nil, nil, nil)
+        return width <= tvChooserWidth
+    }
+
+    /// The widest tvOS chooser row, in points (`tvChooserFits`).
+    static let tvChooserWidth: Double = 396
 }
 
 enum BandwidthText {

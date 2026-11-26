@@ -785,21 +785,28 @@ final class ReleaseLanguageTests: CheckedTestCase {
         let french = torrent("Interstellar.2014.MULTI.VFF.1080p.BluRay.x264-LOST", "b", quality: "1080p H.264 DD — Torrent9",
                              seeds: 1265, size: "9.1 GB").withMediaRuntime(10_140)
         let label = french.tvChooserLabel(recommended: true)
-        check(label.hasPrefix("⭐︎ 1080p H.264 DD  ·  1265"), "the star, then the quality, then the seeds", label)
-        check(label.hasSuffix("  ·  FR"), "the tag last", label)
-        check(!label.contains("["), "no brackets", label)
-        check(label.count <= Torrent.tvChooserLength, "the whole row keeps to the budget", label)
+        check(label.hasPrefix("⭐︎ 1080p H.264 DD · 1265 seeds"), "the star, then the quality, then the seeds and their word", label)
+        check(label.hasSuffix(" · FR"), "the tag last", label)
+        check(!label.contains("[") && !label.contains("  "), "no brackets, no double spaces", label)
+        check(Torrent.tvChooserFits(label), "the whole row fits the sheet's width", label)
         check(!label.contains("Mb/s") && !label.contains("Torrent9"), "a long row drops its bitrate, then its source", label)
         let long = torrent("Interstellar.2014.MULTI.VFF.2160p.UHD.BluRay.REMUX.HDR.DV.HEVC.TrueHD.Atmos-LOST", "d",
                            quality: "2160p DV HDR HEVC TrueHD Atmos — Torrent9", seeds: 12_345, size: "61.2 GB").withMediaRuntime(10_140)
         let longest = long.tvChooserLabel(recommended: true, tooHeavy: true)
-        check(longest.hasPrefix("⭐︎ ⚠︎ 2160p") && longest.hasSuffix("  ·  FR"), "the marks first, the tag last", longest)
-        check(longest.contains("12345"), "the seeds' number stays", longest)
-        let short = torrent("Interstellar.2014.720p.BluRay", "c", quality: "720p", seeds: 63, size: "3.96 GB").withMediaRuntime(10_140)
-        check(short.tvChooserLabel(recommended: false, tooHeavy: true).hasPrefix("⚠︎ 720p  ·  "), "the warning sign",
-              short.tvChooserLabel(recommended: false, tooHeavy: true))
-        check(short.tvChooserLabel(recommended: false).contains("Mb/s"), "a short row keeps its bitrate",
-              short.tvChooserLabel(recommended: false))
+        check(longest.hasPrefix("⭐︎ ⚠︎ 2160p") && longest.hasSuffix(" · FR"), "the marks first, the tag last", longest)
+        check(longest.contains("12345 seeds"), "the seeds keep their word, even on a row too long", longest)
+        let atmos = torrent("Project.Hail.Mary.2026.720p.WEB-DL.DDP5.1.Atmos.H.264", "e",
+                            quality: "720p H.264 DD+ Atmos — TPB", seeds: 21, size: "5.92 GB").withMediaRuntime(9_360)
+        let atmosLabel = atmos.tvChooserLabel(recommended: false)
+        check(atmosLabel.contains("21 seeds"), "a long quality still says « seeds »", atmosLabel)
+        check(!atmosLabel.contains("TPB"), "its source goes before its size", atmosLabel)
+        let short = torrent("Interstellar.2014.720p.BluRay", "c", quality: "720p — YTS", seeds: 9, size: "1.2 GB").withMediaRuntime(10_140)
+        let warned = short.tvChooserLabel(recommended: false, tooHeavy: true)
+        check(warned.hasPrefix("⚠︎ 720p · "), "the warning sign", warned)
+        let shortLabel = short.tvChooserLabel(recommended: false)
+        check(shortLabel.contains("YTS") && shortLabel.contains("GB") && Torrent.tvChooserFits(shortLabel),
+              "a short row keeps its size and source", shortLabel)
+        AudioLanguagePreference.override = .some(nil)
     }
 
     // MARK: The active profile's language

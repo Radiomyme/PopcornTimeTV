@@ -301,8 +301,8 @@ extension AppDelegate {
         // too heavy for the connection starts with "⚠︎", explained once in
         // the alert's message (a "(may stutter)" in each row made them too
         // long). Best resolution first. The source (TPB, Knaben · 1337x, a
-        // Torrentio indexer…) and the language tag come last
-        // (`Torrent.tvChooserLabel`, shared with the Up Next chooser).
+        // Torrentio indexer…) when the row has room, and the language tag
+        // last (`Torrent.tvChooserLabel`, shared with the Up Next chooser).
         let recommendedURL = Torrent.balancedPick(from: sorted, connection: connection)?.url
         var recommendedAction: UIAlertAction?
         var flagged = false
