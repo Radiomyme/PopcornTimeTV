@@ -1043,10 +1043,6 @@ struct ProfileEditorView: View {
         NavigationStack {
             Form {
                 Section {
-                    ProfileAvatarView(avatar: draft.avatar, size: 88)
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 8)
-                        .listRowBackground(Color.clear)
                     TextField(profilesLocalized("Profiles.Name"), text: $draft.name)
                         .textContentType(.name)
                         .textInputAutocapitalization(.words)
@@ -1054,14 +1050,27 @@ struct ProfileEditorView: View {
                         .submitLabel(.done)
                         .focused($nameFocused)
                         .accessibilityIdentifier("Profiles.Editor.Name")
+                } header: {
+                    // The preview over the name's card, not a clear first
+                    // row of it: the name is a whole rounded card.
+                    ProfileAvatarView(avatar: draft.avatar, size: 88)
+                        .frame(maxWidth: .infinity)
+                        .padding(.bottom, 12)
+                        .textCase(nil)
                 } footer: {
                     nameFooter
                 }
                 Section(profilesLocalized("Profiles.Avatar")) {
-                    let cell: CGFloat = UIDevice.current.userInterfaceIdiom == .phone ? 44 : 48
-                    LazyVGrid(columns: [GridItem(.adaptive(minimum: cell, maximum: 56), spacing: 14)], spacing: 14) {
+                    // Six columns on every width, 6 + 6: the adaptive grid
+                    // put 8 + 4 on an iPad. 40 pt on an iPhone so that six
+                    // fit a 375 pt screen's row with the ring's room.
+                    let isPhone = UIDevice.current.userInterfaceIdiom == .phone
+                    let cell: CGFloat = isPhone ? 40 : 48
+                    let spacing: CGFloat = isPhone ? 10 : 14
+                    LazyVGrid(columns: Array(repeating: GridItem(.fixed(cell), spacing: spacing), count: 6), spacing: spacing) {
                         avatarCells(size: cell)
                     }
+                    .frame(maxWidth: .infinity)
                     .padding(.vertical, 8)
                 }
                 if isDeletable {
@@ -1233,9 +1242,24 @@ struct ProfilesSettingsSection: View {
             NavigationLink {
                 ProfileTasteView()
             } label: {
-                LabeledContent(profilesLocalized("Profiles.Taste")) {
+                // Laid out as Switch Profile: the same 30 pt slot, so both
+                // titles start on one edge, as the separator does; the
+                // value on the title's line, cut rather than wrapped.
+                HStack(spacing: 12) {
+                    Image(systemName: "sparkles")
+                        .font(.footnote.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                        .frame(width: 30, height: 30)
+                        .background(Circle().fill(Color.white.opacity(0.10)))
+                        .accessibilityHidden(true)
+                    Text(verbatim: profilesLocalized("Profiles.Taste"))
+                        .layoutPriority(1)
+                    Spacer(minLength: 8)
                     Text(verbatim: tasteSummary ?? profilesLocalized("Profiles.Taste.Nothing"))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
                 }
+                .accessibilityElement(children: .combine)
             }
             .accessibilityIdentifier("Settings.ProfilePreferences")
             #if DEBUG

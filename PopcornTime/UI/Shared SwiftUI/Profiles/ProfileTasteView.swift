@@ -35,11 +35,12 @@ final class ProfileTasteModel: ObservableObject {
         reload()
     }
 
-    /// "Sci-Fi, Drama" — the Settings row's value; nil: nothing learnt.
+    /// "Drama · Science Fiction" — the Settings row's value, joined as the
+    /// panel's lines are; nil: nothing learnt.
     static func summary(of taste: ProfileTaste = .shared) -> String? {
         let genres = taste.topAffinities(limit: 2)[.genre] ?? []
         guard !genres.isEmpty else { return nil }
-        return genres.map { genreName($0.value) }.joined(separator: ", ")
+        return genres.map { genreName($0.value) }.joined(separator: " · ")
     }
 
     static func lines(of taste: ProfileTaste) -> [ProfileTasteLine] {
@@ -98,7 +99,9 @@ struct ProfileTasteView: View {
                 ContentUnavailableView {
                     Label(profilesLocalized("Profiles.Taste.Nothing"), systemImage: "sparkles")
                 } description: {
-                    Text(verbatim: profilesLocalized("Profiles.Taste.Empty"))
+                    // Under « Nothing yet »: the hint alone, not « Nothing
+                    // learned yet » a second time.
+                    Text(verbatim: profilesLocalized("Profiles.Taste.EmptyHint"))
                 }
                 .accessibilityIdentifier("Profiles.Taste.Empty")
             } else {

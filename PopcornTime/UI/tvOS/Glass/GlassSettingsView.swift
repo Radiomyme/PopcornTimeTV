@@ -160,7 +160,7 @@ struct GlassSettingsProfile: Equatable {
     var name: String
     /// Its avatar (`ProfileAvatar`), the Switch Profile row's icon.
     var avatar: Int
-    /// Its strongest genres ("Sci-Fi, Drama"); nil: nothing learned yet.
+    /// Its strongest genres ("Drama · Science Fiction"); nil: nothing learned yet.
     var preferences: String? = nil
 }
 
