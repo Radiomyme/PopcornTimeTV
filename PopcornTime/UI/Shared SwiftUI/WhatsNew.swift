@@ -58,12 +58,72 @@ struct WhatsNewRelease {
     }
 
     /// The notes shown at launch and from Settings: the latest release's
-    /// (keep the README's "New in" section in step).
-    static let current = v5_3_0
+    /// (keep CHANGELOG.md's section of that version in step).
+    static let current = v5_4_0
 
-    /// What is new since 5.2.0. Only what a check saw running is announced
-    /// (see the README's "New in 5.3.0" and its known limits); at most eight
+    /// What is new since 5.3.0. Only what a check saw running is announced
+    /// (see CHANGELOG.md's "5.4.0" and its known limits); at most eight
     /// items per platform.
+    static let v5_4_0 = WhatsNewRelease(version: "5.4.0", items: [
+        // Where profiles are switched and managed differs on each app, so
+        // each platform names its own place.
+        WhatsNewItem(id: "profiles-tv", symbol: "person.2.circle",
+                     titleFR: "Un profil pour chacun",
+                     bodyFR: "Jusqu'à cinq profils, chacun avec son nom, son avatar, son historique, ses reprises, sa liste et ses langues. « Qui regarde ? » s'affiche au lancement dès qu'il y a deux profils ; Réglages › Profils change de profil ou les gère.",
+                     titleEN: "A profile for everyone",
+                     bodyEN: "Up to five profiles, each with its own name, avatar, history, Continue Watching, watchlist and languages. Who's Watching? comes up at launch once there are two; Settings › Profiles switches or manages them.",
+                     platforms: [.tvOS]),
+        WhatsNewItem(id: "profiles", symbol: "person.2.circle",
+                     titleFR: "Un profil pour chacun",
+                     bodyFR: "Jusqu'à cinq profils, chacun avec son nom, son avatar, son historique, ses reprises, sa liste, ses langues et ses recherches récentes. « Qui regarde ? » s'affiche au lancement dès qu'il y a deux profils ; Réglages › Profils change de profil ou les gère.",
+                     titleEN: "A profile for everyone",
+                     bodyEN: "Up to five profiles, each with its own name, avatar, history, Continue Watching, watchlist, languages and recent searches. Who's Watching? comes up at launch once there are two; Settings › Profiles switches or manages them.",
+                     platforms: [.iOS]),
+        WhatsNewItem(id: "profiles-mac", symbol: "person.2.circle",
+                     titleFR: "Un profil pour chacun",
+                     bodyFR: "Jusqu'à cinq profils, chacun avec son nom, son avatar, son historique, ses reprises, sa liste et ses langues. « Qui regarde ? » s'affiche au lancement dès qu'il y a deux profils ; Popcorn Time › Changer de profil… (⇧⌘P) change de profil, Réglages › Profils les gère.",
+                     titleEN: "A profile for everyone",
+                     bodyEN: "Up to five profiles, each with its own name, avatar, history, Continue Watching, watchlist and languages. Who's Watching? comes up at launch once there are two; Popcorn Time › Switch Profile… (⇧⌘P) switches, Settings › Profiles manages them.",
+                     platforms: [.macOS]),
+        WhatsNewItem(id: "for-you", symbol: "sparkles",
+                     titleFR: "Pour vous",
+                     bodyFR: "Une rangée de l'Accueil choisit, parmi les titres de la page, ceux qui devraient plaire à ce profil, sans ce qu'il a déjà vu, commencé ou mis dans sa liste. Elle apprend sur l'appareil, de ce qu'il regarde ; rien n'est envoyé. Réglages › Profils › Vos préférences montre ce qui a été appris et le réinitialise.",
+                     titleEN: "For You",
+                     bodyEN: "A Home row picks, from the page's titles, the ones this profile should like, leaving out what it has watched, started or listed. It learns on the device from what the profile watches; nothing is sent. Settings › Profiles › Your Preferences shows what was learned and resets it.",
+                     platforms: [.tvOS, .iOS, .macOS]),
+        WhatsNewItem(id: "automatic-language", symbol: "captions.bubble",
+                     titleFR: "Des langues qui suivent vos choix",
+                     bodyFR: "Langue audio et Langue des sous-titres proposent Automatique : la langue que ce profil choisit le plus souvent dans le lecteur. Aucune reste aucune, et Automatique n'active pas de sous-titres dans la langue que vous entendez déjà.",
+                     titleEN: "Languages that follow your choices",
+                     bodyEN: "Audio Language and Subtitle Language offer Automatic: the language this profile picks most often in the player. None stays none, and Automatic doesn't turn on subtitles in the language you're already hearing.",
+                     platforms: [.tvOS, .iOS, .macOS]),
+        WhatsNewItem(id: "release-language", symbol: "character.bubble",
+                     titleFR: "Les versions dans votre langue d'abord",
+                     bodyFR: "Les versions dans votre langue audio passent en tête de chaque qualité, et un repère discret (FR, IT… ou MULTI) les signale dans le choix de qualité. Jamais devant une version propre et bien partagée : un CAM ou un fichier trop lourd pour votre connexion reste derrière.",
+                     titleEN: "Releases in your language first",
+                     bodyEN: "Releases in your audio language lead each quality, and a quiet tag (FR, IT… or MULTI) marks them in the quality picker. Never ahead of a clean, well-seeded release: a CAM or a file too heavy for your connection stays behind.",
+                     platforms: [.tvOS, .iOS, .macOS]),
+        WhatsNewItem(id: "services", symbol: "play.tv",
+                     titleFR: "Parcourir par service de streaming",
+                     bodyFR: "Avec votre propre clé TMDB (gratuite), la rangée Services de l'Accueil montre ce que Netflix, Prime Video, Disney+ ou Apple TV proposent dans votre pays. Popcorn Time lit ces titres depuis ses propres sources.",
+                     titleEN: "Browse by streaming service",
+                     bodyEN: "With your own free TMDB key, the Services row on Home shows what Netflix, Prime Video, Disney+ or Apple TV offer in your country. Popcorn Time plays those titles from its own sources.",
+                     platforms: [.tvOS, .iOS, .macOS]),
+        WhatsNewItem(id: "search-tv", symbol: "magnifyingglass",
+                     titleFR: "Une seule recherche",
+                     bodyFR: "Plus besoin de choisir entre films et séries : la recherche montre une rangée de films et une rangée de séries, ensemble, sous le clavier.",
+                     titleEN: "One search",
+                     bodyEN: "No more choosing between movies and shows: Search shows a row of movies and a row of shows, together, under the keyboard.",
+                     platforms: [.tvOS]),
+        WhatsNewItem(id: "player-lists-tv", symbol: "list.bullet",
+                     titleFR: "Des listes plus fluides dans le lecteur",
+                     bodyFR: "Les listes Sous-titres et Audio défilent sans à-coup et s'ouvrent sur le choix en cours : la langue, le décalage, l'encodage.",
+                     titleEN: "Smoother lists in the player",
+                     bodyEN: "The Subtitles and Audio lists scroll smoothly and open on the current choice: the language, the delay, the encoding.",
+                     platforms: [.tvOS]),
+    ])
+
+    /// What was new in 5.3.0 (since 5.2.0), kept for the record.
     static let v5_3_0 = WhatsNewRelease(version: "5.3.0", items: [
         WhatsNewItem(id: "home", symbol: "house",
                      titleFR: "Un nouvel écran d'accueil",
