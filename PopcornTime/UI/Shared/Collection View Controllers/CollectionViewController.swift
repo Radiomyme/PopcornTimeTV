@@ -337,7 +337,7 @@ class CollectionViewController: ResponsiveCollectionViewController, UICollection
         // The title and the footer span the screen and lay out their own
         // 90 pt edge, as on the grids; the 90 pt are from the screen's edge,
         // not from the safe area's (80 pt in already).
-        row.supplementariesFollowContentInsets = false
+        row.supplementaryContentInsetsReference = .none
         row.contentInsetsReference = .none
         var supplementaries: [NSCollectionLayoutBoundarySupplementaryItem] = []
         if titled {
