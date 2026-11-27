@@ -59,7 +59,23 @@ struct WhatsNewRelease {
 
     /// The notes shown at launch and from Settings: the latest release's
     /// (keep CHANGELOG.md's section of that version in step).
-    static let current = v5_4_0
+    static let current = v5_4_1
+
+    /// What is new since 5.4.0 (CHANGELOG.md's "5.4.1").
+    static let v5_4_1 = WhatsNewRelease(version: "5.4.1", items: [
+        WhatsNewItem(id: "dolby-vision", symbol: "sparkles.tv",
+                     titleFR: "Dolby Vision selon votre téléviseur",
+                     bodyFR: "Le Dolby Vision 8.1 s'adapte à votre téléviseur, ou passe en HDR10 si l'image scintille.",
+                     titleEN: "Dolby Vision that fits your TV",
+                     bodyEN: "Dolby Vision 8.1 adapts to your TV, or plays as HDR10 if the picture flickers.",
+                     platforms: [.tvOS, .iOS, .macOS]),
+        WhatsNewItem(id: "audio-switch", symbol: "speaker.wave.3",
+                     titleFR: "Changer de langue audio",
+                     bodyFR: "La piste choisie repart proprement, Dolby Atmos compris.",
+                     titleEN: "Switching audio",
+                     bodyEN: "The track you pick starts cleanly, Dolby Atmos included.",
+                     platforms: [.tvOS, .iOS, .macOS]),
+    ])
 
     /// What is new since 5.3.0. Only what a check saw running is announced
     /// (see CHANGELOG.md's "5.4.0" and its known limits); at most eight

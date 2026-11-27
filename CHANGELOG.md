@@ -5,6 +5,25 @@ What changed in each version of this fork of PopcornTimeTV, newest first. The in
 (`PopcornTime/UI/Shared SwiftUI/WhatsNew.swift`). The technical reference (formats, Top Shelf,
 logs, tests) is in [docs/TECHNICAL.md](docs/TECHNICAL.md).
 
+## 5.4.1
+
+Its short form is shown once in the app after the update (`WhatsNewRelease.v5_4_1`).
+Seen on the Apple TV simulator (tvOS 26.5) with a local test file; not yet on a real Apple TV.
+
+**Dolby Vision 8.1 (Apple TV, iPhone / iPad, Mac)**
+- A new setting, Settings › Playback › Dolby Vision 8.1, for profile 8 files with an HDR10
+  base layer: **Automatic** (the default: Dolby Vision when the TV takes it, else HDR10+, which
+  is HDR10 on a TV or a file without HDR10+), **Dolby Vision**, **HDR10** (the Dolby Vision and
+  HDR10+ per-frame metadata are dropped: a steady picture on TVs that pump or flicker) or
+  **HDR10+**. The setting shows the HDR formats detected for the TV (« Your TV: Dolby Vision,
+  HDR10, HLG. »); tvOS has no way to tell HDR10+ support. Profiles 8.4 and 5 stay Dolby Vision.
+
+**Audio tracks**
+- A track picked in the player's Audio menu now restarts the item on that track at the same
+  position: tvOS sets the HDMI output (passthrough, Dolby Atmos) up for the track an item starts
+  on. A rebuild of a stuck item keeps the track being heard; it used to go back to the file's
+  default language.
+
 ## 5.4.0
 
 Their short form is shown once in the app after the update (`WhatsNewRelease.v5_4_0` in
