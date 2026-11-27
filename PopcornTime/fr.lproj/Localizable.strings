@@ -705,6 +705,7 @@
 "No Limit" = "Aucune limite";
 "The automatic choice stays at or below it. Higher sources stay in the list." = "Le choix automatique reste à cette résolution ou en dessous. Les sources plus hautes restent dans la liste.";
 "If the picture flickers, try HDR10." = "Si l'image scintille, essayez HDR10.";
+"Your TV: %@." = "Votre téléviseur : %@.";
 "The automatic choice stays at or below the maximum resolution." = "Le choix automatique reste à la résolution maximale ou en dessous.";
 "Prefer Your Language" = "Privilégier votre langue";
 "A release in your audio language comes before a higher resolution in another language." = "Une version dans votre langue audio passe devant une meilleure résolution dans une autre langue.";

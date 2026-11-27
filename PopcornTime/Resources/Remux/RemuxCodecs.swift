@@ -35,6 +35,10 @@ struct RemuxUnsupported: Error, CustomStringConvertible, Equatable {
 /// ID 1). Some TVs pump or flicker on its per-frame metadata; the HDR10
 /// base layer plays with a steady picture. Device-wide, like the quality.
 enum DolbyVisionPlaybackMode: String, CaseIterable, Identifiable {
+    /// The default: Dolby Vision when the display path takes it (tvOS: the
+    /// TV, as the Apple TV reads it over HDMI), else HDR10+ — which is
+    /// HDR10 on a TV or a file without HDR10+ (`resolved`).
+    case automatic
     /// The RPUs signalled and kept: the TV switches to Dolby Vision.
     case dolbyVision
     /// The HDR10 base layer only: RPUs and HDR10+ metadata dropped, the
@@ -48,23 +52,39 @@ enum DolbyVisionPlaybackMode: String, CaseIterable, Identifiable {
 
     static let defaultsKey = "dolbyVision81Playback"
 
-    /// The stored choice; absent or unknown = Dolby Vision.
+    /// The stored choice; absent or unknown = automatic.
     static func stored(in defaults: UserDefaults = .standard) -> DolbyVisionPlaybackMode {
-        defaults.string(forKey: defaultsKey).flatMap(DolbyVisionPlaybackMode.init(rawValue:)) ?? .dolbyVision
+        defaults.string(forKey: defaultsKey).flatMap(DolbyVisionPlaybackMode.init(rawValue:)) ?? .automatic
     }
 
     /// The default removes the key.
     func store(in defaults: UserDefaults = .standard) {
-        defaults.set(self == .dolbyVision ? nil : rawValue, forKey: Self.defaultsKey)
+        defaults.set(self == .automatic ? nil : rawValue, forKey: Self.defaultsKey)
     }
 
-    /// Format names, the same in every language.
+    /// What the remux does: `automatic` becomes Dolby Vision when the
+    /// display takes it, else HDR10+ (kept only when the file has it; the
+    /// Apple TV sends HDR10 to a TV without HDR10+). Never `automatic`.
+    func resolved(displaySupportsDolbyVision: Bool) -> DolbyVisionPlaybackMode {
+        guard self == .automatic else { return self }
+        return displaySupportsDolbyVision ? .dolbyVision : .hdr10Plus
+    }
+
+    /// Format names, the same in every language; « Automatique » translated.
     var title: String {
         switch self {
+        case .automatic: return Bundle.main.localizedString(forKey: "Settings.Language.Automatic", value: "Automatic", table: nil)
         case .dolbyVision: return "Dolby Vision"
         case .hdr10: return "HDR10"
         case .hdr10Plus: return "HDR10+"
         }
+    }
+
+    /// « Your TV: Dolby Vision, HDR10, HLG. » — the HDR formats the display
+    /// path takes, as detected now (`PlaybackCapabilities.displayHDRFormats`).
+    static func detectedFormatsLine(_ formats: [String]) -> String {
+        let format = Bundle.main.localizedString(forKey: "Your TV: %@.", value: "Your TV: %@.", table: nil)
+        return String(format: format, formats.isEmpty ? "SDR" : formats.joined(separator: ", "))
     }
 
     /// The setting's name and its one-line explanation (Localizable.strings keys).
@@ -1860,7 +1880,8 @@ extension RemuxCodecs {
         var noteNeedsRange = false
         if let dv = dv {
             switch dv.profile {
-            case _ where dv.profile == 8 && dv.compatibilityID == 1 && dolbyVisionMode != .dolbyVision:
+            // (`automatic` unresolved keeps Dolby Vision.)
+            case _ where dv.profile == 8 && dv.compatibilityID == 1 && ![.dolbyVision, .automatic].contains(dolbyVisionMode):
                 stripDolbyVisionLayers = true
                 ignoredDolbyVision81 = true
             case _ where dv.profile == 5 || (dv.profile == 8 && [1, 2, 4].contains(dv.compatibilityID)):

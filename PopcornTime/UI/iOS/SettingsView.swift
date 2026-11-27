@@ -16,7 +16,7 @@ struct SettingsView: View {
     @AppStorage(SourcePreferences.languageFirstKey) private var languageFirst = true
     @AppStorage(CellularStreamingPolicy.defaultsKey) private var streamOnCellular = false
     /// « Dolby Vision 8.1 » (`DolbyVisionPlaybackMode`).
-    @AppStorage(DolbyVisionPlaybackMode.defaultsKey) private var dolbyVisionMode = DolbyVisionPlaybackMode.dolbyVision
+    @AppStorage(DolbyVisionPlaybackMode.defaultsKey) private var dolbyVisionMode = DolbyVisionPlaybackMode.automatic
     /// « Autoplay next episode » (episode chaining, on by default: D8).
     @AppStorage(UpNextPreferences.autoPlayNextKey) private var autoPlayNext = true
     /// « Next Episode Card » (seconds before the end; absent = 60).
@@ -92,7 +92,8 @@ struct SettingsView: View {
                 }
                 .pickerStyle(.navigationLink)
             } footer: {
-                Text(LocalizedStringKey(DolbyVisionPlaybackMode.settingFooterKey))
+                Text(verbatim: DolbyVisionPlaybackMode.detectedFormatsLine(PlaybackCapabilities.displayHDRFormats) + " "
+                     + String(localized: String.LocalizationValue(DolbyVisionPlaybackMode.settingFooterKey)))
             }
 
             Section {

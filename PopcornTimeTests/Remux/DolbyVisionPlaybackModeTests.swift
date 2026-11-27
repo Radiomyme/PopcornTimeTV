@@ -166,14 +166,19 @@ final class DolbyVisionPlaybackModeTests: CheckedTestCase {
     func testTheSettingIsStoredDeviceWide() {
         let defaults = UserDefaults(suiteName: "DolbyVisionPlaybackModeTests")!
         defaults.removePersistentDomain(forName: "DolbyVisionPlaybackModeTests")
-        eq(DolbyVisionPlaybackMode.stored(in: defaults), .dolbyVision, "absent = Dolby Vision")
+        eq(DolbyVisionPlaybackMode.stored(in: defaults), .automatic, "absent = automatic")
         DolbyVisionPlaybackMode.hdr10.store(in: defaults)
         eq(defaults.string(forKey: "dolbyVision81Playback"), "hdr10", "key")
         eq(DolbyVisionPlaybackMode.stored(in: defaults), .hdr10, "read back")
         DolbyVisionPlaybackMode.dolbyVision.store(in: defaults)
+        eq(defaults.string(forKey: "dolbyVision81Playback"), "dolbyVision", "Dolby Vision is kept as a choice")
+        DolbyVisionPlaybackMode.automatic.store(in: defaults)
         eq(defaults.object(forKey: "dolbyVision81Playback") == nil, true, "the default removes the key")
         defaults.set("bogus", forKey: "dolbyVision81Playback")
-        eq(DolbyVisionPlaybackMode.stored(in: defaults), .dolbyVision, "unknown = Dolby Vision")
+        eq(DolbyVisionPlaybackMode.stored(in: defaults), .automatic, "unknown = automatic")
+        eq(DolbyVisionPlaybackMode.automatic.resolved(displaySupportsDolbyVision: true), .dolbyVision, "a Dolby Vision TV")
+        eq(DolbyVisionPlaybackMode.automatic.resolved(displaySupportsDolbyVision: false), .hdr10Plus, "another HDR TV")
+        eq(DolbyVisionPlaybackMode.hdr10.resolved(displaySupportsDolbyVision: true), .hdr10, "a choice stays")
         defaults.removePersistentDomain(forName: "DolbyVisionPlaybackModeTests")
     }
 

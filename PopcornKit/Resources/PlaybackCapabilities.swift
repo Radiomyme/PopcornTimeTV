@@ -39,6 +39,24 @@ public enum PlaybackCapabilities {
         return AVPlayer.eligibleForHDRPlayback
     }
 
+    /// The HDR formats the display path takes now, by name ("Dolby Vision",
+    /// "HDR10", "HLG"); empty for SDR. tvOS: what the Apple TV reads from
+    /// the TV over HDMI (it changes with the TV and the Apple TV's video
+    /// settings). HDR10+ is not listed: no API tells it.
+    public static var displayHDRFormats: [String] {
+        var formats: [String] = []
+        #if os(tvOS)
+        let modes = AVPlayer.availableHDRModes
+        if modes.contains(.dolbyVision) { formats.append("Dolby Vision") }
+        if modes.contains(.hdr10) { formats.append("HDR10") }
+        if modes.contains(.hlg) { formats.append("HLG") }
+        #else
+        if supportsDolbyVision { formats.append("Dolby Vision") }
+        if supportsHDR { formats += ["HDR10", "HLG"] }
+        #endif
+        return formats
+    }
+
     // MARK: - Snapshot
 
     /// Value copy of the four capabilities, so a ranking pass evaluates every

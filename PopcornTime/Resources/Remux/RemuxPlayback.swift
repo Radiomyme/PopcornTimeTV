@@ -2346,7 +2346,13 @@ final class RemuxPlayback {
         var options = MKVToHLSRemuxSession.Options()
         options.releaseTaggedAtmos = isAtmos
         options.releaseHintsHDR = releaseHintsHDR
-        options.dolbyVisionMode = .stored()
+        let storedMode = DolbyVisionPlaybackMode.stored()
+        let displayDV = PlaybackCapabilities.current.dolbyVision
+        options.dolbyVisionMode = storedMode.resolved(displaySupportsDolbyVision: displayDV)
+        if storedMode == .automatic {
+            print("[Remux] Dolby Vision 8.1: automatic → \(options.dolbyVisionMode.title) "
+                  + "(display: \(PlaybackCapabilities.displayHDRFormats.joined(separator: ", ")))")
+        }
         options.preferredAudioLanguages = preferredAudioLanguages
         options.preferredSubtitleLanguages = preferredSubtitleLanguages
         return options

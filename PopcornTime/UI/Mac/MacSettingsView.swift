@@ -25,7 +25,7 @@ struct MacSettingsView: View {
     /// « Prefer Your Language » (on by default).
     @AppStorage(SourcePreferences.languageFirstKey) private var languageFirst = true
     /// « Dolby Vision 8.1 » (`DolbyVisionPlaybackMode`).
-    @AppStorage(DolbyVisionPlaybackMode.defaultsKey) private var dolbyVisionMode = DolbyVisionPlaybackMode.dolbyVision
+    @AppStorage(DolbyVisionPlaybackMode.defaultsKey) private var dolbyVisionMode = DolbyVisionPlaybackMode.automatic
     /// « Autoplay next episode » (decision D8: on unless turned off).
     @AppStorage(UpNextPreferences.autoPlayNextKey) private var autoPlayNext = true
     /// « Next Episode Card » (seconds before the end; absent = 60).
@@ -179,7 +179,8 @@ struct MacSettingsView: View {
                 }
             } label: {
                 Text(verbatim: DolbyVisionPlaybackMode.settingTitle)
-                Text(LocalizedStringKey(DolbyVisionPlaybackMode.settingFooterKey))
+                Text(verbatim: DolbyVisionPlaybackMode.detectedFormatsLine(PlaybackCapabilities.displayHDRFormats) + " "
+                     + String(localized: String.LocalizationValue(DolbyVisionPlaybackMode.settingFooterKey)))
             }
             .pickerStyle(.menu)
             // Off: the next episode's card stays without a countdown,

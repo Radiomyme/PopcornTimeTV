@@ -705,6 +705,7 @@
 "No Limit" = "No Limit";
 "The automatic choice stays at or below it. Higher sources stay in the list." = "The automatic choice stays at or below it. Higher sources stay in the list.";
 "If the picture flickers, try HDR10." = "If the picture flickers, try HDR10.";
+"Your TV: %@." = "Your TV: %@.";
 "The automatic choice stays at or below the maximum resolution." = "The automatic choice stays at or below the maximum resolution.";
 "Prefer Your Language" = "Prefer Your Language";
 "A release in your audio language comes before a higher resolution in another language." = "A release in your audio language comes before a higher resolution in another language.";

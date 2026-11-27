@@ -12,6 +12,7 @@
 // state itself from @Environment(\.isFocused) (custom glass gets no system
 // focus effect on tvOS). No GlassEffectContainer is used.
 import SwiftUI
+import PopcornKit
 
 // MARK: - Model
 
@@ -921,7 +922,8 @@ struct GlassSettingsView: View {
         case .dolbyVision:
             GlassSettingsPickerSheet(
                 title: DolbyVisionPlaybackMode.settingTitle,
-                message: DolbyVisionPlaybackMode.settingFooterKey,
+                message: DolbyVisionPlaybackMode.detectedFormatsLine(PlaybackCapabilities.displayHDRFormats) + " "
+                    + glassSettingsLocalized(DolbyVisionPlaybackMode.settingFooterKey),
                 options: DolbyVisionPlaybackMode.allCases.map { .init(id: $0.rawValue, title: $0.title, detail: nil) },
                 selectedID: model.dolbyVisionMode.rawValue,
                 onSelect: { id in
