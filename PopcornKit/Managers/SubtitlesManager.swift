@@ -73,9 +73,41 @@ open class SubtitlesManager: NetworkManager {
     /// callers (`SubtitleSearch`, the players' menus) waiting a full minute.
     static let requestTimeout: TimeInterval = 10
 
-    private func request(components: [String], completion: @escaping ([Subtitle], NSError?) -> Void) {
+    /// Search the subtitles made for, or linked to, one exact file: its
+    /// OpenSubtitles hash (`OpenSubtitlesHash`) and size in bytes.
+    ///
+    ///   /search/moviebytesize-12909756/moviehash-8e245d9679d31e12
+    ///
+    /// The answer is noisy: the same hash and size are linked to unrelated
+    /// titles (the test hash above names a dozen films and episodes), so the
+    /// caller keeps only the rows of the title it plays
+    /// (`SubtitleMatching.rowsForTitle`). Every usable row is returned, not
+    /// one per language (`candidates(from:)`).
+    ///
+    /// - Parameter completion: Called on the main queue.
+    open func search(movieHash hash: String, fileSize: Int64,
+                     completion: @escaping ([Subtitle], NSError?) -> Void) {
+        guard fileSize > 0, !hash.isEmpty else {
+            DispatchQueue.main.async { completion([], nil) }
+            return
+        }
+        request(components: ["moviebytesize-\(fileSize)", "moviehash-\(hash.lowercased())"],
+                parse: SubtitlesManager.candidates(from:), completion: completion)
+    }
+
+    /// The URL of a search: path components joined in alphabetical order.
+    static func url(for components: [String]) -> String {
         // Alphabetical order of path components is a hard API requirement.
-        let url = SubtitlesManager.base + "/" + components.sorted().joined(separator: "/")
+        SubtitlesManager.base + "/" + components.sorted().joined(separator: "/")
+    }
+
+    private func request(components: [String], completion: @escaping ([Subtitle], NSError?) -> Void) {
+        request(components: components, parse: SubtitlesManager.bestSubtitles(from:), completion: completion)
+    }
+
+    private func request(components: [String], parse: @escaping ([[String: Any]]) -> [Subtitle],
+                         completion: @escaping ([Subtitle], NSError?) -> Void) {
+        let url = SubtitlesManager.url(for: components)
         self.manager.request(url, headers: SubtitlesManager.headers,
                              requestModifier: { $0.timeoutInterval = SubtitlesManager.requestTimeout })
             .validate().responseData { response in
@@ -85,14 +117,17 @@ open class SubtitlesManager: NetworkManager {
                 DispatchQueue.main.async { completion([], error.underlyingError as NSError? ?? error as NSError) }
             case .success(let data):
                 let rows = (try? JSONSerialization.jsonObject(with: data)) as? [[String: Any]] ?? []
-                let subtitles = SubtitlesManager.bestSubtitles(from: rows)
-                print("[Subtitles] \(url) -> \(rows.count) rows, \(subtitles.count) languages")
+                let subtitles = parse(rows)
+                print("[Subtitles] \(url) -> \(rows.count) rows, \(Set(subtitles.map(\.ISO639)).count) languages")
                 DispatchQueue.main.async { completion(subtitles, nil) }
             }
         }
     }
 
-    /// Best subtitle per language (`ISO639`), sorted by language name.
+    /// Best subtitle per language (`ISO639`), sorted by language name, the
+    /// language's other rows kept as its `alternates` (best first): the
+    /// player picks among them for the file it plays (`SubtitleMatching`);
+    /// with nothing known about that file it keeps this best one.
     ///
     /// Rows split over several CDs (`SubSumCD` > 1) are dropped: one file only
     /// covers part of the movie. The others are ranked by, in order:
@@ -105,6 +140,27 @@ open class SubtitlesManager: NetworkManager {
     /// 4. rating × 10 000 + download count (rating is sparse — most rows are
     ///    0.0 — so "the one everyone uses" wins within a tier).
     static func bestSubtitles(from rows: [[String: Any]]) -> [Subtitle] {
+        var byLanguage: [String: [Subtitle]] = [:]
+        var order: [String] = []
+        for subtitle in candidates(from: rows) {
+            if byLanguage[subtitle.ISO639] == nil { order.append(subtitle.ISO639) }
+            byLanguage[subtitle.ISO639, default: []].append(subtitle)
+        }
+        var subtitles = order.compactMap { code -> Subtitle? in
+            // Stable: the first of equal scores wins, as it always did.
+            let ranked = (byLanguage[code] ?? []).enumerated()
+                .sorted { $0.element.rating != $1.element.rating ? $0.element.rating > $1.element.rating : $0.offset < $1.offset }
+                .map(\.element)
+            guard let best = ranked.first else { return nil }
+            return best.with(alternates: Array(ranked.dropFirst()))
+        }
+        subtitles.sort(by: { $0.language < $1.language })
+        return subtitles
+    }
+
+    /// Every usable row, in the answer's order, scored (`score`), without
+    /// alternates.
+    static func candidates(from rows: [[String: Any]]) -> [Subtitle] {
         var subtitles = [Subtitle]()
         for info in rows {
             guard
@@ -122,26 +178,37 @@ open class SubtitlesManager: NetworkManager {
                                                flaggedBad: field(info["SubBad"]) == "1",
                                                rating: Double(field(info["SubRating"]) ?? "") ?? 0,
                                                downloads: Double(field(info["SubDownloadsCnt"]) ?? "") ?? 0)
-            let subtitle = Subtitle(language: localizedLanguageName,
-                                    link: link,
-                                    ISO639: ISO639,
-                                    rating: score,
-                                    format: format,
-                                    encoding: field(info["SubEncoding"]),
-                                    releaseName: field(info["MovieReleaseName"]),
-                                    hearingImpaired: hearingImpaired,
-                                    frameRate: Double(field(info["MovieFPS"]) ?? ""))
-
-            if let index = subtitles.firstIndex(where: { $0.ISO639 == ISO639 }) {
-                if score > subtitles[index].rating {
-                    subtitles[index] = subtitle
-                }
-            } else {
-                subtitles.append(subtitle)
-            }
+            let isEpisode = field(info["MovieKind"]) == "episode"
+            subtitles.append(Subtitle(language: localizedLanguageName,
+                                      link: link,
+                                      ISO639: ISO639,
+                                      rating: score,
+                                      format: format,
+                                      encoding: field(info["SubEncoding"]),
+                                      releaseName: field(info["MovieReleaseName"]),
+                                      hearingImpaired: hearingImpaired,
+                                      frameRate: Double(field(info["MovieFPS"]) ?? ""),
+                                      fileName: field(info["SubFileName"]),
+                                      lastCueTime: field(info["SubLastTS"]).flatMap(clockSeconds),
+                                      movieHash: field(info["MatchedBy"]) == "moviehash" ? field(info["MovieHash"]) : nil,
+                                      imdbId: field(info["IDMovieImdb"]),
+                                      showImdbId: isEpisode ? field(info["SeriesIMDBParent"]) : nil,
+                                      season: isEpisode ? Int(field(info["SeriesSeason"]) ?? "") : nil,
+                                      episode: isEpisode ? Int(field(info["SeriesEpisode"]) ?? "") : nil,
+                                      fileId: field(info["IDSubtitleFile"])))
         }
-        subtitles.sort(by: { $0.language < $1.language })
         return subtitles
+    }
+
+    /// "01:55:25" → 6925 s. `SubLastTS` is a frame number for frame-based
+    /// files ("198137"): nil, the frame rate it counts in is unknown.
+    static func clockSeconds(_ text: String) -> Double? {
+        let parts = text.split(separator: ":", omittingEmptySubsequences: false)
+        guard parts.count == 3, let h = Int(parts[0]), let m = Int(parts[1]),
+              let s = Double(parts[2].replacingOccurrences(of: ",", with: ".")),
+              h >= 0, (0..<60).contains(m), s >= 0, s < 61 else { return nil }
+        let seconds = Double(h * 3600 + m * 60) + s
+        return seconds > 0 ? seconds : nil
     }
 
     /// Lexicographic score: each criterion outweighs everything after it

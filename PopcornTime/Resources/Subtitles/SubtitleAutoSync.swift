@@ -189,6 +189,8 @@ final class SubtitleAutoSync {
     /// A downloaded subtitle being synced.
     private struct External {
         let language: String
+        /// The file version of its key (`register`).
+        let generation: Int
         /// As parsed from the download, subtitle time: every estimate is
         /// made from these, never from a retimed copy.
         let cues: [SubtitleCue]
@@ -205,9 +207,10 @@ final class SubtitleAutoSync {
     }
 
     let schedule: SubtitleAutoSyncSchedule
-    /// The retimed cues of a subtitle (its key), to serve from now on. Set
-    /// before the first `register`; called on the sync queue.
-    var onApply: ((_ key: String, _ cues: [SubtitleCue]) -> Void)?
+    /// The retimed cues of a subtitle (its key, the generation it was
+    /// registered with), to serve from now on. Set before the first
+    /// `register`; called on the sync queue.
+    var onApply: ((_ key: String, _ generation: Int, _ cues: [SubtitleCue]) -> Void)?
 
     private let queue = DispatchQueue(label: "remux.subsync", qos: .utility)
     private let log: (String) -> Void
@@ -299,11 +302,19 @@ final class SubtitleAutoSync {
 
     /// A downloaded subtitle, as parsed (subtitle time), under `key` (the
     /// remux's `sub_{key}`), `language` for the log. A key registered again
-    /// starts over.
-    func register(key: String, language: String, cues: [SubtitleCue]) {
+    /// starts over — another row's file for that language (the moviehash
+    /// match) gets a fresh plan. `generation`: the remux's version of the
+    /// key's file, handed back with its retimed cues (`onApply`); a lower one
+    /// than the key's (a late call for a file already replaced) is ignored.
+    func register(key: String, language: String, cues: [SubtitleCue], generation: Int = 0) {
         queue.async { [self] in
+            if let known = externals[key], known.generation > generation { return }
+            if let known = externals[key], known.generation < generation {
+                log("[SubSync] \(language): another file replaces the one being synced — starting over")
+            }
             let spans = SubtitleSyncAligner.speechSpans(from: cues, maxDuration: schedule.aligner.maxCueDuration)
-            externals[key] = External(language: language, cues: cues, spans: spans, plan: SubtitleAutoSyncPlan(schedule: schedule))
+            externals[key] = External(language: language, generation: generation, cues: cues, spans: spans,
+                                      plan: SubtitleAutoSyncPlan(schedule: schedule))
             evaluate()
         }
     }
@@ -316,6 +327,11 @@ final class SubtitleAutoSync {
     /// The plan of `key` (tests, logs).
     func plan(forKey key: String) -> SubtitleAutoSyncPlan? {
         queue.sync { externals[key]?.plan }
+    }
+
+    /// The generation `key` was registered with (tests).
+    func generation(forKey key: String) -> Int? {
+        queue.sync { externals[key]?.generation }
     }
 
     // MARK: Sync queue
@@ -384,7 +400,7 @@ final class SubtitleAutoSync {
             let (transform, verdict) = external.plan.record(estimate, knownSeconds: reference.stats.knownSeconds)
             externals[key] = external
             log("[SubSync] \(external.language): reference \(reference.name), \(estimate.summary), \(verdict)")
-            if let transform { onApply?(key, transform.apply(to: external.cues)) }
+            if let transform { onApply?(key, external.generation, transform.apply(to: external.cues)) }
         }
     }
 

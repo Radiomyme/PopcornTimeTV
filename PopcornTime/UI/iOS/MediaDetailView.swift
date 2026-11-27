@@ -558,7 +558,8 @@ private struct PlaybackScreen: View {
             VLCPlayerView(url: playback.url,
                           title: playback.title,
                           streamer: playback.streamer,
-                          subtitles: playback.media.subtitles,
+                          // Picked for this file (`SubtitleHashLookup.pick`).
+                          subtitles: SubtitleHashLookup.pick(playback.media.subtitles, forFile: playback.localFile),
                           media: playback.media,
                           startPosition: playback.startPosition)
                 .ignoresSafeArea()
@@ -616,6 +617,9 @@ private struct DirectPlayerScreen: View {
     let onClose: () -> Void
     @StateObject private var subtitles: SubtitleCueController
     @State private var didAutoSelectSubtitle = false
+    /// The OpenSubtitles moviehash of the file (`SubtitleHashLookup`): its
+    /// rows switch the overlay to the subtitles made for this file.
+    @State private var hashLookup: SubtitleHashLookup?
 
     init(playback: PendingPlayback,
          onFallback: @escaping (_ reason: String, _ resumeFraction: Float, _ resumeDecided: Bool) -> Void,
@@ -623,7 +627,8 @@ private struct DirectPlayerScreen: View {
         self.playback = playback
         self.onFallback = onFallback
         self.onClose = onClose
-        _subtitles = StateObject(wrappedValue: SubtitleCueController(subtitles: playback.media.subtitles))
+        _subtitles = StateObject(wrappedValue: SubtitleCueController(subtitles: playback.media.subtitles,
+                                                                     releaseNames: SubtitleFileContext.releaseNames(ofFile: playback.localFile)))
     }
 
     var body: some View {
@@ -661,7 +666,15 @@ private struct DirectPlayerScreen: View {
         .overlay(alignment: .topTrailing) {
             PlayerChromeButtons(subtitles: subtitles, onClose: onClose)
         }
-        .onAppear { subtitles.loadSubtitlesIfNeeded(for: playback.media) }
+        .onAppear {
+            subtitles.loadSubtitlesIfNeeded(for: playback.media)
+            if hashLookup == nil,
+               let lookup = SubtitleHashLookup.make(file: playback.localFile, streamer: playback.streamer, media: playback.media) {
+                lookup.onMatches = { [weak subtitles] rows in subtitles?.applyMovieHashMatches(rows) }
+                hashLookup = lookup
+                lookup.start()
+            }
+        }
         // Preferred subtitle language, once the list is known. `$available`
         // fires before the property changes — hop a turn.
         .onReceive(subtitles.$available.receive(on: DispatchQueue.main)) { list in
@@ -669,7 +682,11 @@ private struct DirectPlayerScreen: View {
             didAutoSelectSubtitle = true
             if subtitles.selected == nil { subtitles.autoSelectPreferred() }
         }
-        .onDisappear { subtitles.detach() }
+        .onDisappear {
+            subtitles.detach()
+            hashLookup?.stop()
+            hashLookup = nil
+        }
     }
 }
 

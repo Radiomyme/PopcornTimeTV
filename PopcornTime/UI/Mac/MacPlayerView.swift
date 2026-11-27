@@ -412,7 +412,9 @@ private struct MacPlayerSession: View {
         ZStack(alignment: .topLeading) {
             if let vlcURL = controller.vlcURL {
                 // Resumes where the native player stopped.
-                MacVLCPlayerView(url: vlcURL, subtitles: controller.subtitles, media: playback.media,
+                // Each language's row picked for this file (`SubtitleHashLookup.pick`).
+                MacVLCPlayerView(url: vlcURL, subtitles: SubtitleHashLookup.pick(controller.subtitles, forFile: controller.playedFile),
+                                 media: playback.media,
                                  startPosition: controller.vlcStartPosition,
                                  resumePoint: controller.resumePoint, nativeHighWater: controller.highWater,
                                  boundedStorage: BoundedStorageSession.session(for: controller.streamer),
@@ -796,6 +798,14 @@ final class MacPlayerController: ObservableObject {
     /// item is rebuilt when it is the subtitle on screen
     /// (`rebuildForRetimedSubtitlesIfDue`).
     private var retimeWatch = SubtitleRetimeWatch()
+    /// The OpenSubtitles moviehash of the file played (`SubtitleHashLookup`),
+    /// the rows it found for it, and the file's release names: which row of
+    /// each language the remux serves or the overlay offers.
+    private var hashLookup: SubtitleHashLookup?
+    private var movieHashMatches: [Subtitle] = []
+    private var releaseNames: [String] = []
+    /// The file played (VLC's subtitle pick: `SubtitleHashLookup.pick`).
+    private(set) var playedFile: URL?
     /// The retimed files' selection check is under way (asynchronous).
     private var retimeCheckInFlight = false
     /// Picture in Picture is on: the stuck-playback safety net stays out of
@@ -1040,6 +1050,11 @@ final class MacPlayerController: ObservableObject {
                                               : "decided start at \(Int(position * 100)) % — no question")
                           + ", native jumps \(self.nativeJumps ? "on" : "off (\(RemuxPlayback.nativeJumpsDisabledKey))")")
                 }
+                self.playedFile = videoFilePath
+                if route != .vlc {
+                    self.releaseNames = SubtitleFileContext.releaseNames(ofFile: videoFilePath)
+                    self.startHashLookup(localFile: videoFilePath)
+                }
                 switch route {
                 case .remux:
                     self.startRemux(localFile: videoFilePath, isAtmos: isAtmos, releaseHintsHDR: hintsHDR)
@@ -1154,6 +1169,24 @@ final class MacPlayerController: ObservableObject {
 
     // MARK: - Remux path (MKV / WebM)
 
+    /// The moviehash lookup of `localFile` (`SubtitleHashLookup`): its rows
+    /// go to the remux (which replaces the file of a language whose pick
+    /// changed, and says so through `onExternalSubtitleRetimed`) or to the
+    /// overlay of the direct path (which switches at once).
+    private func startHashLookup(localFile: URL) {
+        guard hashLookup == nil, let lookup = SubtitleHashLookup.make(file: localFile, streamer: streamer, media: media) else { return }
+        lookup.onMatches = { [weak self] rows in
+            MainActor.assumeIsolated {
+                guard let self, !self.stopped else { return }
+                self.movieHashMatches = rows
+                self.remux?.applyMovieHashMatches(rows)
+                self.cueController?.applyMovieHashMatches(rows)
+            }
+        }
+        hashLookup = lookup
+        lookup.start()
+    }
+
     private func startRemux(localFile: URL, isAtmos: Bool, releaseHintsHDR: Bool) {
         statusLine = "Remuxing MKV → HLS…".localized
         engineLine = "MKV remux → AVPlayer (macOS natif)"
@@ -1177,6 +1210,10 @@ final class MacPlayerController: ObservableObject {
             subtitles = found
         }
         remux.subtitles = subtitles
+        // Which OpenSubtitles row of each language is served: the one made
+        // for this release (`SubtitleMatching`).
+        remux.subtitleReleaseNames = releaseNames
+        if !movieHashMatches.isEmpty { remux.applyMovieHashMatches(movieHashMatches) }
         // Native jumps (the hidden switch): a saved position is prepared now —
         // the remux says whether it can resume there natively
         // (`resumeReadiness`) and turns the torrent to it while the user is
@@ -1292,7 +1329,8 @@ final class MacPlayerController: ObservableObject {
                   !session.canSeek(to: seconds, fromPlayerTime: reference) else { return false }
             return !self.limitRecoveringRewind(to: seconds)
         }
-        let cues = SubtitleCueController(subtitles: subtitles)
+        let cues = SubtitleCueController(subtitles: subtitles, releaseNames: releaseNames)
+        if !movieHashMatches.isEmpty { cues.applyMovieHashMatches(movieHashMatches) }
         cueController = cues
         if cues.available.isEmpty {
             // Preferred subtitle language once OpenSubtitles answers
@@ -2965,6 +3003,8 @@ final class MacPlayerController: ObservableObject {
         #endif
         saveProgressIfNeeded()
         stopped = true
+        hashLookup?.stop()
+        hashLookup = nil
         MacPlaybackCommandCenter.shared.unregister(self)
         statsTimer?.invalidate()
         statsTimer = nil

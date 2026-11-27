@@ -295,6 +295,31 @@ final class RemuxPlayback {
         set { stateLock.withLock { lockedOnRetimed = newValue } }
     }
 
+    /// The names of the release played (the file's, its torrent folder's:
+    /// `SubtitleFileContext.releaseNames(ofFile:)`). With the film's length
+    /// and frame rate once the header is read, they pick which OpenSubtitles
+    /// row of each language `sub_{key}` serves (`SubtitleMatching`): with
+    /// none, the best one by the plain score, as before. Set before `start()`.
+    var subtitleReleaseNames: [String] {
+        get { stateLock.withLock { lockedReleaseNames } }
+        set { stateLock.withLock { lockedReleaseNames = newValue } }
+    }
+
+    /// The rows the moviehash search found for this very file and title
+    /// (`SubtitleHashLookup`, usually after playback started): they win their
+    /// language. A language whose file was already fetched is fetched again
+    /// with the new pick and served instead under the same URI — the
+    /// automatic sync starts over on it — and when a player had requested
+    /// the old one, `onExternalSubtitleRetimed(key)` tells the owner, which
+    /// rebuilds its item if that language is on screen
+    /// (`SubtitleRetimeWatch`). A language not fetched yet simply fetches
+    /// the new pick; a download in flight is redone with it when it ends.
+    /// Any thread.
+    func applyMovieHashMatches(_ rows: [Subtitle]) {
+        stateLock.withLock { lockedHashMatches = rows }
+        workQueue.async { [weak self] in self?.replaceExternalSubtitlesForHashMatches() }
+    }
+
     /// The automatic sync of the OpenSubtitles files (`SubtitleAutoSync`);
     /// nil when « Automatic Subtitle Sync » is off (read when the object is
     /// made: a change applies from the next playback).
@@ -1027,6 +1052,10 @@ final class RemuxPlayback {
     private var lockedSession: MKVToHLSRemuxSession?
     private var lockedSubtitles: [Subtitle] = []
     private var lockedSubtitlesPending = false
+    /// `subtitleReleaseNames`, and the moviehash rows of the title
+    /// (`applyMovieHashMatches`): which row of each language is fetched.
+    private var lockedReleaseNames: [String] = []
+    private var lockedHashMatches: [Subtitle] = []
     private var lockedStopped = false
     private var lockedFinished = false
     /// Segment indexes deleted for good (never 0).
@@ -1299,7 +1328,9 @@ final class RemuxPlayback {
         }
         #endif
         self.subtitleSync = SubtitleAutoSyncPreference.isEnabled() ? SubtitleAutoSync(schedule: schedule) : nil
-        subtitleSync?.onApply = { [weak self] key, cues in self?.applySubtitleSync(key: key, cues: cues) }
+        subtitleSync?.onApply = { [weak self] key, generation, cues in
+            self?.applySubtitleSync(key: key, generation: generation, cues: cues)
+        }
         if subtitleSync == nil { print("[SubSync] off (Settings)") }
         #if DEBUG
         if let injected = Self.debugExternalSubtitle {
@@ -1452,6 +1483,8 @@ final class RemuxPlayback {
                 // the subtitle was withdrawn): a WebVTT without cues, on the
                 // same timeline as a real one.
                 let body = data ?? Data(Self.emptyExternalVTT(mpegts: self.session?.timelineStart90k ?? 0).utf8)
+                // A player holds this language's file now (`applyMovieHashMatches`).
+                self.vttLock.withLock { _ = self.vttServedKeys.insert(key) }
                 completion(GCDWebServerDataResponse(data: body, contentType: "text/vtt"))
             }
         })
@@ -1945,8 +1978,23 @@ final class RemuxPlayback {
         return result
     }
 
+    /// The row `sub_{key}` serves: among its language's rows (the entry of
+    /// `subtitles` and its alternates, plus the moviehash rows), the one
+    /// `SubtitleMatching` picks for this file — with nothing known of it,
+    /// the entry itself.
     private func externalSubtitle(forKey key: String) -> Subtitle? {
-        subtitles.first { Self.externalKey(for: $0) == key }
+        guard let entry = subtitles.first(where: { Self.externalKey(for: $0) == key }) else { return nil }
+        let (names, hashRows) = stateLock.withLock { (lockedReleaseNames, lockedHashMatches) }
+        return SubtitleMatching.choose([entry], file: subtitleFileContext(releaseNames: names), hashRows: hashRows).first
+    }
+
+    /// What the remux knows of the file for `SubtitleMatching`: the release
+    /// names, the header's length and the video's frame rate once read.
+    private func subtitleFileContext(releaseNames: [String]) -> SubtitleFileContext {
+        let session = self.session
+        let length = session?.playlistDurationSeconds ?? 0
+        return SubtitleFileContext(releaseNames: releaseNames, durationSeconds: length > 0 ? length : nil,
+                                   frameRate: session?.video?.frameRate)
     }
 
     /// `sub_{key}` is served (never 404): a current subtitle, or one a served
@@ -2142,6 +2190,20 @@ final class RemuxPlayback {
     }
 
     private var vttCache: [String: Data] = [:]
+    /// The link of the row whose file `vttCache` holds, by key.
+    private var vttFetchedLinks: [String: String] = [:]
+    /// Keys a player requested (`sub_{key}.vtt` answered, with a file or the
+    /// empty one): it may hold that file until its item is rebuilt.
+    private var vttServedKeys = Set<String>()
+    /// Keys whose next file replaces the empty one a failure served
+    /// (`applyMovieHashMatches` after a failed fetch).
+    private var vttReplacements = Set<String>()
+    /// Each key's file version: raised when another row's file replaces it,
+    /// so the automatic sync of the previous one can't overwrite it
+    /// (`applySubtitleSync`).
+    private var vttGenerations: [String: Int] = [:]
+    /// Rows whose pick was logged (`noteSubtitleChoice`).
+    private var vttNotedChoices = Set<String>()
     /// The latest failed attempt of a key (removed by a successful one).
     private var vttFailures: [String: ExternalSubtitleFailureRecord] = [:]
     /// Keys whose failure was logged (once per key).
@@ -2259,6 +2321,7 @@ final class RemuxPlayback {
             finishExternalAttempt(key: key, data: nil, failure: nil)
             return
         }
+        noteSubtitleChoice(subtitle, key: key)
         // MicroDVD files are timed in frames: the remuxed video's own frame
         // rate beats OpenSubtitles' MovieFPS (which describes the release the
         // subtitle was made for).
@@ -2282,6 +2345,15 @@ final class RemuxPlayback {
                 guard let self = self, !self.isStopped else {
                     try? FileManager.default.removeItem(at: directory)
                     self?.finishExternalAttempt(key: key, data: nil, failure: nil)
+                    return
+                }
+                // Another row became the pick meanwhile (the moviehash
+                // answer): this one is not served — the attempt starts over
+                // with the new pick, for the same waiters.
+                if let current = self.externalSubtitle(forKey: key), current.link != subtitle.link {
+                    print("[Subtitles] sub_\(key): '\(Self.releaseLabel(subtitle))' fetched, but "
+                          + "'\(Self.releaseLabel(current))' is the pick now: fetched instead")
+                    self.startExternalAttempt(key: key, after: 0)
                     return
                 }
                 guard let fileURL = fileURL else {
@@ -2314,9 +2386,11 @@ final class RemuxPlayback {
                 // file is fetched ahead of it only once segment 0 exists).
                 let start90k = self.session?.timelineStart90k ?? 0
                 let vtt = SubtitleConversion.makeWebVTT(cues)
-                self.finishExternalAttempt(key: key, data: Data(Self.withTimestampMap(vtt, mpegts: start90k).utf8), failure: nil)
-                // After the file is cached: a retimed version replaces it.
-                self.subtitleSync?.register(key: key, language: Self.bcp47(for: subtitle), cues: cues)
+                let generation = self.finishExternalAttempt(key: key, data: Data(Self.withTimestampMap(vtt, mpegts: start90k).utf8),
+                                                            failure: nil, link: subtitle.link)
+                // After the file is cached: a retimed version replaces it. A
+                // new row's file (`applyMovieHashMatches`) starts it over.
+                self.subtitleSync?.register(key: key, language: Self.bcp47(for: subtitle), cues: cues, generation: generation)
             }
         }
     }
@@ -2331,14 +2405,34 @@ final class RemuxPlayback {
     /// `externalSubtitleTransientRetryDelay` later
     /// (`externalSubtitleRetryHoldSeconds` at most beyond that pause, never
     /// past their deadline).
+    ///
+    /// `link`: the row whose file `data` is. A file of another row than the
+    /// one cached (`applyMovieHashMatches`) raises the key's generation and,
+    /// when a player requested the previous one, tells the owner
+    /// (`onExternalSubtitleRetimed`). A failure while a file is cached (a
+    /// replacement that could not be fetched) keeps that file and records
+    /// nothing. Returns the key's generation.
+    @discardableResult
     private func finishExternalAttempt(key: String, data: Data?,
-                                       failure: (kind: ExternalSubtitleFailure, text: String)?) {
+                                       failure: (kind: ExternalSubtitleFailure, text: String)?,
+                                       link: String? = nil) -> Int {
         vttLock.lock()
         let now = Self.uptime
         var record: ExternalSubtitleFailureRecord?
+        var replacedServedFile = false
         if let data = data {
+            let previous = vttFetchedLinks[key]
+            if (previous != nil && previous != link) || vttReplacements.contains(key) {
+                vttGenerations[key, default: 0] += 1
+                replacedServedFile = vttServedKeys.contains(key)
+            }
+            vttReplacements.remove(key)
             vttCache[key] = data
+            vttFetchedLinks[key] = link
             vttFailures[key] = nil
+        } else if let failure = failure, vttCache[key] != nil {
+            vttReplacements.remove(key)
+            print("[Subtitles] sub_\(key): the new pick could not be had (\(failure.text)) — the file served so far stays")
         } else if let failure = failure {
             let previous = vttFailures[key].flatMap { $0.kind == .transient ? $0.transientInARow : nil } ?? 0
             record = ExternalSubtitleFailureRecord(at: now, kind: failure.kind,
@@ -2369,7 +2463,17 @@ final class RemuxPlayback {
         }
         let answeredRequests = answered.filter(\.isRequest).count
         let firstFailure = record != nil && vttLoggedFailures.insert(key).inserted
+        let generation = vttGenerations[key, default: 0]
+        // A replacement that failed answers with the file kept.
+        let answer = data ?? vttCache[key]
         vttLock.unlock()
+        if replacedServedFile {
+            print("[Subtitles] sub_\(key).vtt: the new pick is served from now on — the player's item is rebuilt if it shows it")
+            DispatchQueue.main.async { [weak self] in
+                guard let self = self, !self.isStopped else { return }
+                self.onExternalSubtitleRetimed?(key)
+            }
+        }
         if let record = record, let failure = failure {
             let pause = String(format: "%g s", Self.externalSubtitleTransientRetryDelay)
             let empty = "an empty WebVTT (no subtitles), the download is retried after "
@@ -2400,7 +2504,8 @@ final class RemuxPlayback {
             }
         }
         if retry { startExternalAttempt(key: key, after: Self.externalSubtitleTransientRetryDelay) }
-        answered.forEach { $0.completion(data) }
+        answered.forEach { $0.completion(answer) }
+        return generation
     }
 
     /// External files are timed from the movie's start, while AVPlayer's
@@ -2412,6 +2517,67 @@ final class RemuxPlayback {
         HLSPlaylists.withTimestampMap(vtt, mpegts: mpegts)
     }
 
+    // MARK: - The subtitles made for this file (SubtitleMatching)
+
+    /// `applyMovieHashMatches`: each language whose pick changed is handled
+    /// as `SubtitleMatching.lateReplacement` decides. Work queue.
+    private func replaceExternalSubtitlesForHashMatches() {
+        guard !isStopped else { return }
+        for entry in subtitles {
+            let key = Self.externalKey(for: entry)
+            guard let chosen = externalSubtitle(forKey: key) else { continue }
+            var starts = false
+            let (decision, fetchedLink): (SubtitleMatching.LateReplacement, String?) = vttLock.withLock {
+                guard !vttClosed else { return (.keep, nil) }
+                let fetched = vttCache[key] != nil ? vttFetchedLinks[key] : nil
+                let decision = SubtitleMatching.lateReplacement(fetchedLink: fetched, chosenLink: chosen.link,
+                                                                servedToPlayer: vttServedKeys.contains(key),
+                                                                failed: fetched == nil && vttFailures[key] != nil)
+                // One attempt per key at a time: one in flight is redone
+                // with the new pick when it ends (`startExternalAttempt`).
+                if case .replace = decision, vttWaiters[key] == nil {
+                    if vttCache[key] == nil {
+                        vttFailures[key] = nil
+                        vttLoggedFailures.remove(key)
+                        vttReplacements.insert(key)
+                    }
+                    vttWaiters[key] = []
+                    starts = true
+                }
+                return (decision, fetched)
+            }
+            let label = "'\(Self.releaseLabel(chosen))' (\(choiceReason(chosen)))"
+            switch decision {
+            case .keep:
+                continue
+            case .takeOnNextFetch:
+                print("[Subtitles] sub_\(key): \(label) is the pick now — fetched when needed")
+            case .replace(let notify):
+                let previous = fetchedLink.flatMap { link in entry.allRows.first { $0.link == link } }.map(Self.releaseLabel)
+                print("[Subtitles] sub_\(key): \(label) replaces " + (previous.map { "'\($0)'" } ?? (fetchedLink != nil ? "the file served so far" : "the file that failed"))
+                      + (notify ? " — the player requested the old one" : "") + (starts ? ", fetched now" : ", after the fetch in flight"))
+            }
+            if starts { startExternalAttempt(key: key, after: 0) }
+        }
+    }
+
+    /// Logs, once per key and row, a pick that is not the plain score's.
+    private func noteSubtitleChoice(_ subtitle: Subtitle, key: String) {
+        guard let entry = subtitles.first(where: { Self.externalKey(for: $0) == key }), entry.link != subtitle.link,
+              vttLock.withLock({ vttNotedChoices.insert(subtitle.link).inserted }) else { return }
+        print("[Subtitles] sub_\(key): '\(Self.releaseLabel(subtitle))' (\(choiceReason(subtitle))) "
+              + "rather than the most popular '\(Self.releaseLabel(entry))'")
+    }
+
+    private func choiceReason(_ subtitle: Subtitle) -> String {
+        let (names, hashRows) = stateLock.withLock { (lockedReleaseNames, lockedHashMatches) }
+        return SubtitleMatching.reason(for: subtitle, file: subtitleFileContext(releaseNames: names), hashRows: hashRows)
+    }
+
+    static func releaseLabel(_ subtitle: Subtitle) -> String {
+        subtitle.releaseName ?? subtitle.fileName ?? subtitle.link
+    }
+
     // MARK: - Automatic subtitle sync
 
     /// The automatic sync retimed `key`'s file (`SubtitleAutoSync.onApply`,
@@ -2419,11 +2585,13 @@ final class RemuxPlayback {
     /// an item rebuilt on it keeps the user's selection. The cues moved
     /// themselves (a negative offset can't go through X-TIMESTAMP-MAP, which
     /// is clamped at 0); the map stays the session's.
-    private func applySubtitleSync(key: String, cues: [SubtitleCue]) {
+    /// `generation`: the file version the cues were registered with — the
+    /// retimed cues of a file another row's replaced are dropped.
+    private func applySubtitleSync(key: String, generation: Int, cues: [SubtitleCue]) {
         let start90k = session?.timelineStart90k ?? 0
         let data = Data(Self.withTimestampMap(SubtitleConversion.makeWebVTT(cues), mpegts: start90k).utf8)
         let replaced: Bool = vttLock.withLock {
-            guard !vttClosed, vttCache[key] != nil else { return false }
+            guard !vttClosed, vttCache[key] != nil, vttGenerations[key, default: 0] == generation else { return false }
             vttCache[key] = data
             return true
         }

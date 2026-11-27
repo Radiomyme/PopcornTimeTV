@@ -767,6 +767,11 @@ class PCTPlayerViewController: UIViewController, VLCMediaPlayerDelegate, UIGestu
         self.media = media
         // « Vos langues »: the title's type decides its languages.
         PlaybackLanguagePreferences.beginTitle(media)
+        // Each language's OpenSubtitles row picked for this file: its release
+        // name, and the moviehash rows an AVPlayer route found for it before
+        // handing over (`SubtitleHashLookup.pick`). VLC loads one slave: no
+        // lookup here, no switch of a slave already shown.
+        if !media.subtitles.isEmpty { self.media.subtitles = SubtitleHashLookup.pick(media.subtitles, forFile: local) }
         self.startPosition = fromPosition
         // A switch to a lighter release whose first player is VLC: the user
         // chose where to resume — no question (taken once per stream).
@@ -801,6 +806,7 @@ class PCTPlayerViewController: UIViewController, VLCMediaPlayerDelegate, UIGestu
     /// choice was already made without it and nothing else is on.
     private func attachLateSubtitles(_ found: [Subtitle]) {
         guard !found.isEmpty, !isClosing, media != nil, media.subtitles.isEmpty else { return }
+        let found = SubtitleHashLookup.pick(found, forFile: localPathToMedia)
         media.subtitles = found
         print("[Player] subtitles: \(found.count) OpenSubtitles language(s) arrived after the player started")
         subtitleSwitcherButton?.isHidden = false

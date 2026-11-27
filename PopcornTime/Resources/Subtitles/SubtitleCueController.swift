@@ -155,11 +155,47 @@ final class SubtitleCueController: ObservableObject {
     /// files (MicroDVD) that don't declare theirs — see `apply(_:)`.
     private var nativeFrameRateTask: Task<Double?, Never>?
 
-    init(subtitles: [Subtitle] = []) {
-        available = subtitles
+    /// The names of the release played (`SubtitleFileContext.releaseNames`):
+    /// with the moviehash rows (`applyMovieHashMatches`) they pick which row
+    /// of each language the menus offer (`SubtitleMatching`); with neither,
+    /// the best one by the plain score, as before.
+    let releaseNames: [String]
+    /// The list as given or found, before the pick for this file.
+    private var offered: [Subtitle] = []
+    /// The moviehash rows of this file and title.
+    private var movieHashMatches: [Subtitle] = []
+
+    init(subtitles: [Subtitle] = [], releaseNames: [String] = []) {
+        self.releaseNames = releaseNames
+        offered = subtitles
+        available = SubtitleMatching.choose(subtitles, file: SubtitleFileContext(releaseNames: releaseNames))
         // A given list is final: `loadSubtitlesIfNeeded` searches only when
         // it is empty.
         availableIsFinal = !subtitles.isEmpty
+    }
+
+    /// The rows the moviehash search found for this very file
+    /// (`SubtitleHashLookup`): they win their language in the menus, and the
+    /// overlay switches at once to its language's new pick when it shows
+    /// another file of that language (no rebuild here: the overlay draws the
+    /// cues itself). The manual offset goes back to 0 then: it was set for
+    /// the other file.
+    func applyMovieHashMatches(_ rows: [Subtitle]) {
+        movieHashMatches = rows
+        guard !offered.isEmpty else { return }
+        available = pickForThisFile(offered)
+        guard let selected, let pick = SubtitleMatching.replacement(for: selected, in: available) else { return }
+        print("[Subtitles] overlay: '\(pick.releaseName ?? pick.language)' (hash match) replaces "
+              + "'\(selected.releaseName ?? selected.language)'")
+        offset = 0
+        apply(pick)
+    }
+
+    /// `subtitles` with each language's row picked for this file.
+    private func pickForThisFile(_ subtitles: [Subtitle]) -> [Subtitle] {
+        let duration = nativeItem.map { CMTimeGetSeconds($0.duration) }
+        let file = SubtitleFileContext(releaseNames: releaseNames, durationSeconds: duration)
+        return SubtitleMatching.choose(subtitles, file: file, hashRows: movieHashMatches)
     }
 
     deinit {
@@ -612,7 +648,8 @@ final class SubtitleCueController: ObservableObject {
 
     /// The final OpenSubtitles list (possibly empty).
     private func setAvailable(_ subtitles: [Subtitle]) {
-        available = subtitles
+        offered = subtitles
+        available = pickForThisFile(subtitles)
         availableIsFinal = true
         if wantsPreferredSelection {
             wantsPreferredSelection = false

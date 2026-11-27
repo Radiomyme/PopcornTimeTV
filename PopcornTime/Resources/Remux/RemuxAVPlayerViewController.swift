@@ -239,6 +239,12 @@ final class RemuxAVPlayerViewController: AVPlayerViewController {
 
     private var hasAppeared = false
     private var isTornDown = false
+    /// The OpenSubtitles moviehash of the file played (`SubtitleHashLookup`),
+    /// and the rows it found for it: handed to the remux or the overlay.
+    private var hashLookup: SubtitleHashLookup?
+    private var movieHashMatches: [Subtitle] = []
+    /// The file's release names (`SubtitleFileContext.releaseNames`).
+    private var releaseNames: [String] = []
     private var fallbackRequested = false
     private var pendingFallback: (reason: String, resume: Float, decided: Bool)?
 
@@ -396,6 +402,8 @@ final class RemuxAVPlayerViewController: AVPlayerViewController {
         let fileName = localFile.lastPathComponent
         route = PlaybackRouting.route(forFileName: fileName)
         print("[Player] \(fileName) → \(route)")
+        releaseNames = SubtitleFileContext.releaseNames(ofFile: localFile)
+        if route != .vlc { startHashLookup(localFile: localFile, streamer: streamer) }
         switch route {
         case .remux:
             // A payload still downloading: the conversion reads it in file
@@ -471,6 +479,10 @@ final class RemuxAVPlayerViewController: AVPlayerViewController {
         remux.preferredSubtitleLanguages = PlaybackLanguagePreferences.preferredSubtitleLanguageCode(
             whileHearing: PlaybackLanguagePreferences.preferredAudioLanguageCode).map { [$0] } ?? []
         remux.releaseHintsHDR = releaseHintsHDR
+        // Which OpenSubtitles row of each language is served: the one made
+        // for this release (`SubtitleMatching`).
+        remux.subtitleReleaseNames = releaseNames
+        if !movieHashMatches.isEmpty { remux.applyMovieHashMatches(movieHashMatches) }
         // Native jumps (the hidden switch): a saved position is prepared now —
         // the remux says whether it can resume there natively
         // (`resumeReadiness`) and turns the torrent to it while the user is
@@ -562,6 +574,22 @@ final class RemuxAVPlayerViewController: AVPlayerViewController {
         // the torrent is turned to the resume point, and « Reprendre du
         // début » then starts at once.
         remux.start()
+    }
+
+    /// The moviehash lookup of `localFile` (`SubtitleHashLookup`): its rows
+    /// go to the remux (which replaces the file of a language whose pick
+    /// changed, and says so through `onExternalSubtitleRetimed`) or to the
+    /// overlay of the direct path (which switches at once).
+    private func startHashLookup(localFile: URL, streamer: PTTorrentStreamer?) {
+        guard hashLookup == nil, let lookup = SubtitleHashLookup.make(file: localFile, streamer: streamer, media: media) else { return }
+        lookup.onMatches = { [weak self] rows in
+            guard let self = self, !self.isTornDown else { return }
+            self.movieHashMatches = rows
+            self.remux?.applyMovieHashMatches(rows)
+            self.subtitleController?.applyMovieHashMatches(rows)
+        }
+        hashLookup = lookup
+        lookup.start()
     }
 
     private func remuxDidBecomeReady(_ playlistURL: URL) {
@@ -1302,7 +1330,8 @@ final class RemuxAVPlayerViewController: AVPlayerViewController {
                   !session.canSeek(to: seconds, fromPlayerTime: reference) else { return false }
             return !self.limitRecoveringRewind(to: seconds)
         }
-        let controller = SubtitleCueController(subtitles: media?.subtitles ?? [])
+        let controller = SubtitleCueController(subtitles: media?.subtitles ?? [], releaseNames: releaseNames)
+        if !movieHashMatches.isEmpty { controller.applyMovieHashMatches(movieHashMatches) }
         subtitleController = controller
         if controller.available.isEmpty {
             // Auto-select the preferred language once OpenSubtitles answers.
@@ -2294,6 +2323,8 @@ final class RemuxAVPlayerViewController: AVPlayerViewController {
         if !isHandingOff { saveProgress(status: .finished) }
         let closedAt = String(format: "%.1f", player?.currentTime().seconds ?? .nan)
         isTornDown = true
+        hashLookup?.stop()
+        hashLookup = nil
         NotificationCenter.default.removeObserver(self, name: UIApplication.didEnterBackgroundNotification, object: nil)
         resumeChoicePending = false
         pendingPlaylistURL = nil

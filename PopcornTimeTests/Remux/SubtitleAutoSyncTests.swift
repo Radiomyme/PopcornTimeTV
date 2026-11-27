@@ -146,7 +146,7 @@ final class SubtitleAutoSyncTests: RemuxSessionTestCase {
 
     private func coordinator(_ applied: Applied) -> SubtitleAutoSync {
         let sync = SubtitleAutoSync(schedule: .standard) { line in applied.lines.append(line) }
-        sync.onApply = { key, cues in applied.calls.append((key, cues)) }
+        sync.onApply = { key, _, cues in applied.calls.append((key, cues)) }
         sync.configure(tracks: [.init(index: 0, name: "Français (forcés)", isForced: true), .init(index: 1, name: "English", isForced: false)],
                        audio: nil)
         return sync
@@ -231,7 +231,7 @@ final class SubtitleAutoSyncTests: RemuxSessionTestCase {
         check(commentary.count > dialogue.count, "the commentary has more cues", "\(commentary.count) vs \(dialogue.count)")
         let applied = Applied()
         let sync = SubtitleAutoSync(schedule: .standard) { applied.lines.append($0) }
-        sync.onApply = { key, cues in applied.calls.append((key, cues)) }
+        sync.onApply = { key, _, cues in applied.calls.append((key, cues)) }
         sync.configure(tracks: [.init(index: 0, name: "English", isForced: false),
                                 .init(index: 1, name: "English Commentary", isForced: false, isCommentary: true)],
                        audio: nil)
