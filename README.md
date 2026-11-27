@@ -10,7 +10,7 @@
 </p>
 
 <p align="center">
-  <a href="CHANGELOG.md"><img src="https://img.shields.io/badge/version-5.4.1-blue.svg?style=flat" alt="Version 5.4.1"></a>
+  <a href="CHANGELOG.md"><img src="https://img.shields.io/badge/version-5.5.0-blue.svg?style=flat" alt="Version 5.5.0"></a>
   <img src="https://img.shields.io/badge/platform-tvOS%20%7C%20iOS%20%7C%20iPadOS%20%7C%20macOS-lightgrey.svg?style=flat" alt="tvOS, iOS, iPadOS, macOS">
   <img src="https://img.shields.io/badge/swift-5-orange.svg?style=flat" alt="Swift 5">
   <a href="LICENSE.md"><img src="https://img.shields.io/badge/license-GPL_v3-373737.svg?style=flat" alt="GPL v3"></a>

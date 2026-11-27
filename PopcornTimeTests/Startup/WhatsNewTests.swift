@@ -208,9 +208,10 @@ final class WhatsNewTests: CheckedTestCase {
 
     // MARK: The notes
 
-    func testTheCurrentNotesAre541AndTheEarlierOnesAreKept() {
-        eq(WhatsNewRelease.current.version, "5.4.1", "current")
-        eq(WhatsNewRelease.current.shortVersion, "5.4.1", "the title's number")
+    func testTheCurrentNotesAre550AndTheEarlierOnesAreKept() {
+        eq(WhatsNewRelease.current.version, "5.5.0", "current")
+        eq(WhatsNewRelease.current.shortVersion, "5.5", "the title's number")
+        eq(WhatsNewRelease.v5_4_1.version, "5.4.1", "5.4.1 kept")
         eq(WhatsNewRelease.v5_4_0.version, "5.4.0", "5.4.0 kept")
         eq(WhatsNewRelease.v5_3_0.version, "5.3.0", "5.3.0 kept")
         eq(WhatsNewRelease.v5_2_0.version, "5.2.0", "5.2.0 kept")
@@ -218,7 +219,7 @@ final class WhatsNewTests: CheckedTestCase {
     }
 
     func testEveryItemHasItsFourTextsAndASymbol() {
-        for release in [WhatsNewRelease.current, .v5_4_0, .v5_3_0, .v5_2_0, .v5_1_0] {
+        for release in [WhatsNewRelease.current, .v5_4_1, .v5_4_0, .v5_3_0, .v5_2_0, .v5_1_0] {
             for item in release.items {
                 let texts = [item.titleFR, item.bodyFR, item.titleEN, item.bodyEN, item.symbol]
                 check(texts.allSatisfy { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty },
@@ -231,7 +232,7 @@ final class WhatsNewTests: CheckedTestCase {
     }
 
     func testIdsAreUniqueInARelease() {
-        for release in [WhatsNewRelease.current, .v5_4_0, .v5_3_0, .v5_2_0, .v5_1_0] {
+        for release in [WhatsNewRelease.current, .v5_4_1, .v5_4_0, .v5_3_0, .v5_2_0, .v5_1_0] {
             let ids = release.items.map(\.id)
             eq(Set(ids).count, ids.count, "\(release.version): unique ids (\(ids))")
         }

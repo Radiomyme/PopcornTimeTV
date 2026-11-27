@@ -5,6 +5,26 @@ What changed in each version of this fork of PopcornTimeTV, newest first. The in
 (`PopcornTime/UI/Shared SwiftUI/WhatsNew.swift`). The technical reference (formats, Top Shelf,
 logs, tests) is in [docs/TECHNICAL.md](docs/TECHNICAL.md).
 
+## 5.5.0
+
+Its short form is shown once in the app after the update (`WhatsNewRelease.v5_5_0`).
+Checked on the Apple TV simulator and with unit tests on a real Dolby Vision 8.1 file; an
+independent decoder re-read all 719 frames of that file. Not yet seen on an HDR10+ TV.
+
+**HDR10+ from Dolby Vision (Apple TV)**
+- On a TV without Dolby Vision, a Dolby Vision 8.1 file with no HDR10+ of its own now plays in
+  HDR10+: for every frame, the scene levels of its Dolby Vision metadata (L1 minimum, average and
+  maximum, bounded by L6 and the mastering peak) become HDR10+ metadata (SMPTE ST 2094-40,
+  one window, 400-nit target, a tone curve per scene). It follows Settings › Playback ›
+  Dolby Vision 8.1: Automatic (HDR10+ when the TV has no Dolby Vision) or HDR10+. HDR10+ output
+  needs an Apple TV 4K (3rd generation) or later and an HDR10+ TV; elsewhere it plays as HDR10.
+  No public algorithm exists for this conversion: it is the app's own, from the published
+  formats (dovi_tool, FFmpeg, ST 2094-40).
+
+**HDR10+ signalling (Apple TV, iPhone / iPad, Mac)**
+- A stream whose frames carry HDR10+, its own or converted, is announced as HDR10+ to the player
+  (`SUPPLEMENTAL-CODECS` with the `cdm4` brand, as Apple asks since 2024).
+
 ## 5.4.1
 
 Its short form is shown once in the app after the update (`WhatsNewRelease.v5_4_1`).

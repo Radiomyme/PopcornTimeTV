@@ -167,6 +167,15 @@
 		3053F4D54E3DD9DA353721DF /* MatroskaDemuxer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8C2EC1C69555712A03A2CCA7 /* MatroskaDemuxer.swift */; };
 		30BEC24AFCD4BD1934CD4A4C /* CatalogSnapshots.swift in Sources */ = {isa = PBXBuildFile; fileRef = C3348FC6A7ED20AED8D59D4F /* CatalogSnapshots.swift */; };
 		30DA708533446E524E45A599 /* RemuxCodecs.swift in Sources */ = {isa = PBXBuildFile; fileRef = ACE7601285B6B25366D04FEF /* RemuxCodecs.swift */; };
+		B466015C06BB1FD6606266B0 /* RemuxDolbyVisionRPU.swift in Sources */ = {isa = PBXBuildFile; fileRef = ABF4BED35E3893BED109496F /* RemuxDolbyVisionRPU.swift */; };
+		BB6A1FC6696FF4A89517169A /* RemuxHDR10Plus.swift in Sources */ = {isa = PBXBuildFile; fileRef = 595077E8954BD227F07D6070 /* RemuxHDR10Plus.swift */; };
+		7D623DA0148730FF26CC88D7 /* RemuxDolbyVisionRPU.swift in Sources */ = {isa = PBXBuildFile; fileRef = ABF4BED35E3893BED109496F /* RemuxDolbyVisionRPU.swift */; };
+		980E11842FCA2AACF9A6E015 /* RemuxHDR10Plus.swift in Sources */ = {isa = PBXBuildFile; fileRef = 595077E8954BD227F07D6070 /* RemuxHDR10Plus.swift */; };
+		7A1401A75FDA22504BA3C2B5 /* RemuxDolbyVisionRPU.swift in Sources */ = {isa = PBXBuildFile; fileRef = ABF4BED35E3893BED109496F /* RemuxDolbyVisionRPU.swift */; };
+		187696D1BA79E67EC2901096 /* RemuxHDR10Plus.swift in Sources */ = {isa = PBXBuildFile; fileRef = 595077E8954BD227F07D6070 /* RemuxHDR10Plus.swift */; };
+		F7C3A9BB53ACC6F9AFC6A0F7 /* RemuxDolbyVisionRPU.swift in Sources */ = {isa = PBXBuildFile; fileRef = ABF4BED35E3893BED109496F /* RemuxDolbyVisionRPU.swift */; };
+		59F206B0E13CBC17215ACFA0 /* RemuxHDR10Plus.swift in Sources */ = {isa = PBXBuildFile; fileRef = 595077E8954BD227F07D6070 /* RemuxHDR10Plus.swift */; };
+		998D9F65D302A83008AA8EC1 /* DolbyVisionToHDR10PlusTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 631EF4D9617AA4A248F1C4E6 /* DolbyVisionToHDR10PlusTests.swift */; };
 		30F64CBB6930370727E0A9EB /* WhatsNew.swift in Sources */ = {isa = PBXBuildFile; fileRef = 183512CDB2D5F647BC5011FB /* WhatsNew.swift */; };
 		3193F1A94C04E32269288271 /* ProfilesPresenter.swift in Sources */ = {isa = PBXBuildFile; fileRef = FCCF4434C33E6F0DA94830E9 /* ProfilesPresenter.swift */; };
 		3214F30E22EBBB35CCEECED7 /* CellularStreamingPolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = C6CEE8B378B84F46EAD207EE /* CellularStreamingPolicy.swift */; };
@@ -1061,6 +1070,7 @@
 		224BD88708A37BB12A9D1EBB /* WatchlistView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = WatchlistView.swift; path = PopcornTime/UI/iOS/WatchlistView.swift; sourceTree = SOURCE_ROOT; };
 		2274CD17180CD2CE85175EEA /* ObjCExceptionCatcher.m */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.c.objc; name = ObjCExceptionCatcher.m; path = PopcornTime/UI/tvOS/Views/ObjCExceptionCatcher.m; sourceTree = SOURCE_ROOT; };
 		228B6390A26857F0A9144FB7 /* DolbyVisionPlaybackModeTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = DolbyVisionPlaybackModeTests.swift; path = PopcornTimeTests/Remux/DolbyVisionPlaybackModeTests.swift; sourceTree = SOURCE_ROOT; };
+		631EF4D9617AA4A248F1C4E6 /* DolbyVisionToHDR10PlusTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = DolbyVisionToHDR10PlusTests.swift; path = PopcornTimeTests/Remux/DolbyVisionToHDR10PlusTests.swift; sourceTree = SOURCE_ROOT; };
 		22F85F2B92BDB15700534691 /* HomeCardMenu.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = HomeCardMenu.swift; path = "PopcornTime/UI/Shared SwiftUI/Home/HomeCardMenu.swift"; sourceTree = SOURCE_ROOT; };
 		2421B9AF4982E4364E732997 /* PlaybackStartTiming.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = PlaybackStartTiming.swift; path = PopcornTime/Resources/Playback/PlaybackStartTiming.swift; sourceTree = SOURCE_ROOT; };
 		287B85341C9873A200EEF5C8 /* PopcornTime.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = PopcornTime.app; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -1450,6 +1460,8 @@
 		A8D4DEC18AD6159096B680B6 /* NextUpTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = NextUpTests.swift; path = PopcornTimeTests/Library/NextUpTests.swift; sourceTree = SOURCE_ROOT; };
 		ABBC31B1BF74E0D49685490B /* RemuxJumpRefusalTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = RemuxJumpRefusalTests.swift; path = PopcornTimeTests/Remux/RemuxJumpRefusalTests.swift; sourceTree = SOURCE_ROOT; };
 		ACE7601285B6B25366D04FEF /* RemuxCodecs.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = RemuxCodecs.swift; sourceTree = "<group>"; };
+		ABF4BED35E3893BED109496F /* RemuxDolbyVisionRPU.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = RemuxDolbyVisionRPU.swift; sourceTree = "<group>"; };
+		595077E8954BD227F07D6070 /* RemuxHDR10Plus.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = RemuxHDR10Plus.swift; sourceTree = "<group>"; };
 		ACE95A032F7EA6C545758B65 /* MacGlassDetailScreen.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MacGlassDetailScreen.swift; sourceTree = "<group>"; };
 		AD48D854255C13ED3B2D36E7 /* LoadingPhase.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = LoadingPhase.swift; sourceTree = "<group>"; };
 		AEE05BE17BF851732332EC8E /* HomeTransport.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = HomeTransport.swift; path = PopcornKit/Managers/Home/HomeTransport.swift; sourceTree = SOURCE_ROOT; };
@@ -1992,6 +2004,7 @@
 				76B53B224FDAE1F5F30C3494 /* RemuxResumeEngineTests.swift */,
 				B1A8C3A6124637AD94DF7505 /* RemuxWaitNudgeTests.swift */,
 				228B6390A26857F0A9144FB7 /* DolbyVisionPlaybackModeTests.swift */,
+				631EF4D9617AA4A248F1C4E6 /* DolbyVisionToHDR10PlusTests.swift */,
 			);
 			name = Remux;
 			sourceTree = "<group>";
@@ -2460,6 +2473,8 @@
 				8C2EC1C69555712A03A2CCA7 /* MatroskaDemuxer.swift */,
 				E38A8C092311013400C4BC6B /* FMP4Muxer.swift */,
 				ACE7601285B6B25366D04FEF /* RemuxCodecs.swift */,
+				ABF4BED35E3893BED109496F /* RemuxDolbyVisionRPU.swift */,
+				595077E8954BD227F07D6070 /* RemuxHDR10Plus.swift */,
 				E07267B3D72BCBF52A5C33B0 /* RemuxAudioTranscoder.swift */,
 				4B349F9C64DEB0228DE4C1AD /* HLSPlaylists.swift */,
 				C2F95F473701410C083AFC2F /* RemuxAVPlayerViewController.swift */,
@@ -3381,6 +3396,8 @@
 				CFE26433C13EE1916F59BD94 /* AVPlayerItemFailureObserver.swift in Sources */,
 				7B754A13C47EAB5A6D1C2097 /* PlaybackLanguagePreferences.swift in Sources */,
 				9507C4BD7FF8A1AB1B7DACF0 /* EBML.swift in Sources */,
+				F7C3A9BB53ACC6F9AFC6A0F7 /* RemuxDolbyVisionRPU.swift in Sources */,
+				59F206B0E13CBC17215ACFA0 /* RemuxHDR10Plus.swift in Sources */,
 				D144E6290DCEAF1805795B2D /* FMP4Muxer.swift in Sources */,
 				378127B8C5B222984F9F1E89 /* HLSPlaylists.swift in Sources */,
 				5D0E62F82A747CB67314CF12 /* MKVToHLSRemuxer.swift in Sources */,
@@ -3497,6 +3514,7 @@
 				CF0BC5D6A22E2CBDF3C1165A /* DownloadsCatalog.swift in Sources */,
 				3D383972149342F1BF7FB10A /* DownloadsCatalogTests.swift in Sources */,
 				4903B1470FE551F7A2A470BD /* DolbyVisionPlaybackModeTests.swift in Sources */,
+				998D9F65D302A83008AA8EC1 /* DolbyVisionToHDR10PlusTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -3626,6 +3644,8 @@
 				9B35D6FF8E16F86307B20B6E /* RemuxPlayback.swift in Sources */,
 				4B9522DFF0F10432F24D6DDF /* TorrentCacheCleanup.swift in Sources */,
 				185BA974F4C2CD8D41BFD9F8 /* EBML.swift in Sources */,
+				B466015C06BB1FD6606266B0 /* RemuxDolbyVisionRPU.swift in Sources */,
+				BB6A1FC6696FF4A89517169A /* RemuxHDR10Plus.swift in Sources */,
 				E6D6BE5D9C236396295B6A5F /* MatroskaDemuxer.swift in Sources */,
 				E7F3B5907C10CED9BE3E9500 /* FMP4Muxer.swift in Sources */,
 				4E3524FB722B8944B00D384C /* RemuxCodecs.swift in Sources */,
@@ -4072,6 +4092,8 @@
 				3B1A65A373004CA2D62F47B3 /* TorrentPickerRow.swift in Sources */,
 				2DDFD29B22CACBCA9B2FEA83 /* DetailComponents.swift in Sources */,
 				3C2312866DCF188FC35FA05E /* EBML.swift in Sources */,
+				7D623DA0148730FF26CC88D7 /* RemuxDolbyVisionRPU.swift in Sources */,
+				980E11842FCA2AACF9A6E015 /* RemuxHDR10Plus.swift in Sources */,
 				1E833D11FC24808B0575A9F3 /* MatroskaDemuxer.swift in Sources */,
 				6D0B4FB96FF095113ECA16D2 /* FMP4Muxer.swift in Sources */,
 				84DE26A4FBBDFA5731BFE619 /* RemuxCodecs.swift in Sources */,
@@ -4172,6 +4194,8 @@
 				32B7FD6AF55B886929E46B1A /* TorrentPickerRow.swift in Sources */,
 				EF3FD47376F1CC28BB1B9356 /* DetailComponents.swift in Sources */,
 				50D9747CA9B3FEA5A4DD2EAA /* EBML.swift in Sources */,
+				7A1401A75FDA22504BA3C2B5 /* RemuxDolbyVisionRPU.swift in Sources */,
+				187696D1BA79E67EC2901096 /* RemuxHDR10Plus.swift in Sources */,
 				3053F4D54E3DD9DA353721DF /* MatroskaDemuxer.swift in Sources */,
 				AC43541AADB083AC1CE56E91 /* FMP4Muxer.swift in Sources */,
 				30DA708533446E524E45A599 /* RemuxCodecs.swift in Sources */,
@@ -4414,7 +4438,7 @@
 				CLANG_WARN_SUSPICIOUS_MOVE = YES;
 				CLANG_WARN_UNREACHABLE_CODE = YES;
 				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
-				CURRENT_PROJECT_VERSION = 6;
+				CURRENT_PROJECT_VERSION = 7;
 				DEBUG_INFORMATION_FORMAT = dwarf;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
 				ENABLE_TESTABILITY = YES;
@@ -4428,7 +4452,7 @@
 				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
 				GCC_WARN_UNUSED_FUNCTION = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
-				MARKETING_VERSION = 5.4.1;
+				MARKETING_VERSION = 5.5.0;
 				MTL_ENABLE_DEBUG_INFO = YES;
 				ONLY_ACTIVE_ARCH = YES;
 				SDKROOT = appletvos;
@@ -4470,7 +4494,7 @@
 				CLANG_WARN_SUSPICIOUS_MOVE = YES;
 				CLANG_WARN_UNREACHABLE_CODE = YES;
 				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
-				CURRENT_PROJECT_VERSION = 6;
+				CURRENT_PROJECT_VERSION = 7;
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
 				ENABLE_NS_ASSERTIONS = NO;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
@@ -4483,7 +4507,7 @@
 				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
 				GCC_WARN_UNUSED_FUNCTION = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
-				MARKETING_VERSION = 5.4.1;
+				MARKETING_VERSION = 5.5.0;
 				MTL_ENABLE_DEBUG_INFO = NO;
 				ONLY_ACTIVE_ARCH = NO;
 				SDKROOT = appletvos;
@@ -4508,7 +4532,7 @@
 				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
 				COPY_PHASE_STRIP = NO;
-				CURRENT_PROJECT_VERSION = 6;
+				CURRENT_PROJECT_VERSION = 7;
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
 				DEVELOPMENT_TEAM = 8A4M4QND2E;
 				ENABLE_BITCODE = NO;
@@ -4520,7 +4544,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 5.4.1;
+				MARKETING_VERSION = 5.5.0;
 				OTHER_LDFLAGS = (
 					"$(inherited)",
 					"-Wl,-no_warn_duplicate_libraries",
@@ -4547,7 +4571,7 @@
 				CODE_SIGN_ENTITLEMENTS = "PopcornTime/Supporting Files/PopcornTime.entitlements";
 				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 6;
+				CURRENT_PROJECT_VERSION = 7;
 				DEVELOPMENT_TEAM = 8A4M4QND2E;
 				ENABLE_BITCODE = NO;
 				ENABLE_USER_SCRIPT_SANDBOXING = NO;
@@ -4558,7 +4582,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 5.4.1;
+				MARKETING_VERSION = 5.5.0;
 				OTHER_LDFLAGS = (
 					"$(inherited)",
 					"-Wl,-no_warn_duplicate_libraries",
@@ -4603,7 +4627,7 @@
 				CLANG_ENABLE_OBJC_WEAK = NO;
 				CODE_SIGN_IDENTITY = "";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 6;
+				CURRENT_PROJECT_VERSION = 7;
 				DEFINES_MODULE = YES;
 				DYLIB_COMPATIBILITY_VERSION = 1;
 				DYLIB_CURRENT_VERSION = 1;
@@ -4620,7 +4644,7 @@
 					"@executable_path/Frameworks",
 					"@loader_path/Frameworks",
 				);
-				MARKETING_VERSION = 5.4.1;
+				MARKETING_VERSION = 5.5.0;
 				MODULE_VERIFIER_SUPPORTED_LANGUAGE_STANDARDS = "gnu99 gnu++11";
 				PRODUCT_BUNDLE_IDENTIFIER = com.popcorntime.ios.PopcornKit;
 				PRODUCT_NAME = PopcornKit;
@@ -4646,7 +4670,7 @@
 				"CODE_SIGN_IDENTITY[sdk=appletvos*]" = "";
 				CODE_SIGN_STYLE = Automatic;
 				COPY_PHASE_STRIP = NO;
-				CURRENT_PROJECT_VERSION = 6;
+				CURRENT_PROJECT_VERSION = 7;
 				DEFINES_MODULE = YES;
 				DEVELOPMENT_TEAM = "";
 				DYLIB_COMPATIBILITY_VERSION = 1;
@@ -4668,7 +4692,7 @@
 					"@executable_path/Frameworks",
 					"@loader_path/Frameworks",
 				);
-				MARKETING_VERSION = 5.4.1;
+				MARKETING_VERSION = 5.5.0;
 				MODULEMAP_FILE = "$(SRCROOT)/PopcornKit/Supporting Files/PopcornKit.modulemap";
 				MODULE_VERIFIER_SUPPORTED_LANGUAGE_STANDARDS = "gnu99 gnu++11";
 				PRODUCT_BUNDLE_IDENTIFIER = com.king.popcornkit;
@@ -4695,7 +4719,7 @@
 				CODE_SIGN_IDENTITY = "";
 				"CODE_SIGN_IDENTITY[sdk=appletvos*]" = "";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 6;
+				CURRENT_PROJECT_VERSION = 7;
 				DEFINES_MODULE = YES;
 				DEVELOPMENT_TEAM = "";
 				DYLIB_COMPATIBILITY_VERSION = 1;
@@ -4712,7 +4736,7 @@
 					"@executable_path/Frameworks",
 					"@loader_path/Frameworks",
 				);
-				MARKETING_VERSION = 5.4.1;
+				MARKETING_VERSION = 5.5.0;
 				MODULEMAP_FILE = "$(SRCROOT)/PopcornKit/Supporting Files/PopcornKit.modulemap";
 				MODULE_VERIFIER_SUPPORTED_LANGUAGE_STANDARDS = "gnu99 gnu++11";
 				PRODUCT_BUNDLE_IDENTIFIER = com.king.popcornkit;
@@ -4736,7 +4760,7 @@
 				CLANG_WARN_SUSPICIOUS_MOVES = YES;
 				CODE_SIGN_ENTITLEMENTS = TopShelf/TopShelf.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 6;
+				CURRENT_PROJECT_VERSION = 7;
 				DEVELOPMENT_TEAM = 8A4M4QND2E;
 				ENABLE_BITCODE = NO;
 				ENABLE_USER_SCRIPT_SANDBOXING = YES;
@@ -4753,7 +4777,7 @@
 					"@executable_path/Frameworks",
 					"@executable_path/../../Frameworks",
 				);
-				MARKETING_VERSION = 5.4.1;
+				MARKETING_VERSION = 5.5.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.popcorntime.tvos.TopShelf;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SKIP_INSTALL = YES;
@@ -4774,7 +4798,7 @@
 				CLANG_WARN_SUSPICIOUS_MOVES = YES;
 				CODE_SIGN_ENTITLEMENTS = TopShelf/TopShelf.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 6;
+				CURRENT_PROJECT_VERSION = 7;
 				DEVELOPMENT_TEAM = 8A4M4QND2E;
 				ENABLE_BITCODE = NO;
 				ENABLE_USER_SCRIPT_SANDBOXING = YES;
@@ -4787,7 +4811,7 @@
 					"@executable_path/Frameworks",
 					"@executable_path/../../Frameworks",
 				);
-				MARKETING_VERSION = 5.4.1;
+				MARKETING_VERSION = 5.5.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.popcorntime.tvos.TopShelf;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SKIP_INSTALL = YES;
@@ -4805,7 +4829,7 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CLANG_ENABLE_OBJC_WEAK = NO;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 6;
+				CURRENT_PROJECT_VERSION = 7;
 				DEVELOPMENT_TEAM = 8A4M4QND2E;
 				ENABLE_BITCODE = NO;
 				ENABLE_USER_SCRIPT_SANDBOXING = NO;
@@ -4817,7 +4841,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 5.4.1;
+				MARKETING_VERSION = 5.5.0;
 				OTHER_LDFLAGS = (
 					"$(inherited)",
 					"-Wl,-no_warn_duplicate_libraries",
@@ -4859,7 +4883,7 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CLANG_ENABLE_OBJC_WEAK = NO;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 6;
+				CURRENT_PROJECT_VERSION = 7;
 				DEVELOPMENT_TEAM = 8A4M4QND2E;
 				ENABLE_BITCODE = NO;
 				ENABLE_USER_SCRIPT_SANDBOXING = NO;
@@ -4871,7 +4895,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 5.4.1;
+				MARKETING_VERSION = 5.5.0;
 				OTHER_LDFLAGS = (
 					"$(inherited)",
 					"-Wl,-no_warn_duplicate_libraries",
@@ -4890,7 +4914,7 @@
 			buildSettings = {
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 6;
+				CURRENT_PROJECT_VERSION = 7;
 				DEFINES_MODULE = YES;
 				DYLIB_COMPATIBILITY_VERSION = 1;
 				DYLIB_CURRENT_VERSION = 1;
@@ -4921,7 +4945,7 @@
 				CLANG_ENABLE_OBJC_WEAK = NO;
 				CODE_SIGN_IDENTITY = "";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 6;
+				CURRENT_PROJECT_VERSION = 7;
 				DEFINES_MODULE = YES;
 				DYLIB_COMPATIBILITY_VERSION = 1;
 				DYLIB_CURRENT_VERSION = 1;
@@ -4938,7 +4962,7 @@
 					"@executable_path/Frameworks",
 					"@loader_path/Frameworks",
 				);
-				MARKETING_VERSION = 5.4.1;
+				MARKETING_VERSION = 5.5.0;
 				MODULE_VERIFIER_SUPPORTED_LANGUAGE_STANDARDS = "gnu99 gnu++11";
 				PRODUCT_BUNDLE_IDENTIFIER = com.popcorntime.ios.PopcornKit;
 				PRODUCT_NAME = PopcornKit;
@@ -4959,7 +4983,7 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 6;
+				CURRENT_PROJECT_VERSION = 7;
 				ENABLE_HARDENED_RUNTIME = NO;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = PopcornTime/UI/Mac/Info.plist;
@@ -4971,7 +4995,7 @@
 					"@executable_path/../Frameworks",
 				);
 				MACOSX_DEPLOYMENT_TARGET = 14.0;
-				MARKETING_VERSION = 5.4.1;
+				MARKETING_VERSION = 5.5.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.popcorntime.mac;
 				PRODUCT_NAME = PopcornTime;
 				SDKROOT = macosx;
@@ -5004,7 +5028,7 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 6;
+				CURRENT_PROJECT_VERSION = 7;
 				ENABLE_HARDENED_RUNTIME = NO;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = PopcornTime/UI/Mac/Info.plist;
@@ -5016,7 +5040,7 @@
 					"@executable_path/../Frameworks",
 				);
 				MACOSX_DEPLOYMENT_TARGET = 14.0;
-				MARKETING_VERSION = 5.4.1;
+				MARKETING_VERSION = 5.5.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.popcorntime.mac;
 				PRODUCT_NAME = PopcornTime;
 				SDKROOT = macosx;
@@ -5051,7 +5075,7 @@
 			buildSettings = {
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 6;
+				CURRENT_PROJECT_VERSION = 7;
 				DEFINES_MODULE = YES;
 				DYLIB_COMPATIBILITY_VERSION = 1;
 				DYLIB_CURRENT_VERSION = 1;

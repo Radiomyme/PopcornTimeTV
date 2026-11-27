@@ -59,7 +59,23 @@ struct WhatsNewRelease {
 
     /// The notes shown at launch and from Settings: the latest release's
     /// (keep CHANGELOG.md's section of that version in step).
-    static let current = v5_4_1
+    static let current = v5_5_0
+
+    /// What is new since 5.4.1 (CHANGELOG.md's "5.5.0").
+    static let v5_5_0 = WhatsNewRelease(version: "5.5.0", items: [
+        WhatsNewItem(id: "hdr10plus-tv", symbol: "sparkles.tv",
+                     titleFR: "HDR10+ pour le Dolby Vision",
+                     bodyFR: "Sur un téléviseur HDR10+ sans Dolby Vision, les films Dolby Vision 8.1 passent en HDR10+.",
+                     titleEN: "HDR10+ from Dolby Vision",
+                     bodyEN: "On an HDR10+ TV without Dolby Vision, Dolby Vision 8.1 movies play in HDR10+.",
+                     platforms: [.tvOS]),
+        WhatsNewItem(id: "hdr10plus", symbol: "sparkles.tv",
+                     titleFR: "HDR10+ reconnu",
+                     bodyFR: "Les films HDR10+ sont signalés comme tels au lecteur.",
+                     titleEN: "HDR10+ recognised",
+                     bodyEN: "HDR10+ movies are announced as such to the player.",
+                     platforms: [.iOS, .macOS]),
+    ])
 
     /// What is new since 5.4.0 (CHANGELOG.md's "5.4.1").
     static let v5_4_1 = WhatsNewRelease(version: "5.4.1", items: [
