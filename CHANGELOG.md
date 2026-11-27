@@ -49,6 +49,15 @@ independent decoder re-read all 719 frames of that file. Not yet seen on an HDR1
 - Checked with unit tests and on the simulators (Apple TV, iPhone, Mac); not yet seen on a real
   device.
 
+**Subtitles made for your file (Apple TV, iPhone / iPad, Mac)**
+- Once the start and the end of the file are downloaded, its OpenSubtitles fingerprint
+  (moviehash) is looked up: a subtitle made for this exact file wins its language. Otherwise the
+  subtitle whose release name matches the torrent's (group, source, resolution, edition) comes
+  first, and one that ends past the film or was made for another frame rate is set aside. A
+  better file found during playback replaces the one shown (MKV: served again, the player
+  reloads in place; MP4: switched live; VLC: at the next load). With nothing known about the
+  file, the choice is the same as before.
+
 **HDR10+ signalling (Apple TV, iPhone / iPad, Mac)**
 - A stream whose frames carry HDR10+, its own or converted, is announced as HDR10+ to the player
   (`SUPPLEMENTAL-CODECS` with the `cdm4` brand, as Apple asks since 2024).
