@@ -32,6 +32,23 @@ independent decoder re-read all 719 frames of that file. Not yet seen on an HDR1
   Automatic Subtitle Sync turns it off. Checked with unit tests (synthetic films, real fixtures)
   and on the Apple TV simulator, where a file shifted by −2.0 s was set right (+2.04 s found).
 
+**Languages by content type (Apple TV, iPhone / iPad, Mac)**
+- Each profile chooses its audio and subtitles for three kinds of titles: movies and shows,
+  cartoons (animation not from Japan) and anime (Japanese animation). Audio is Automatic (as
+  before), the original version or a language; subtitles are Automatic, Off or a language. The
+  choice feeds the release ranking and the player's audio and subtitle picks for that title.
+- A title's kind and original language come from the metadata the app already loads
+  (Cinemeta's genres and country, TVMaze's type and language, YTS's and TMDB's original
+  language). YTS's « Animation » tag alone is not trusted. When the original language is unknown
+  (a country with several languages and no source), the original version falls back to
+  Automatic and the log says why. Nothing is fetched for a profile that keeps every kind on
+  Automatic.
+- « Your Languages » is asked once per profile at its next launch, after the release notes and
+  « Who's Watching? »; « Later » keeps everything on Automatic. Settings › Profiles ›
+  « Languages by Type » changes it at any time.
+- Checked with unit tests and on the simulators (Apple TV, iPhone, Mac); not yet seen on a real
+  device.
+
 **HDR10+ signalling (Apple TV, iPhone / iPad, Mac)**
 - A stream whose frames carry HDR10+, its own or converted, is announced as HDR10+ to the player
   (`SUPPLEMENTAL-CODECS` with the `cdm4` brand, as Apple asks since 2024).

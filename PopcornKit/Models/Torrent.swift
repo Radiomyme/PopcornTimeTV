@@ -2010,7 +2010,36 @@ public enum AudioLanguagePreference {
     /// of times.
     static let learntLifetime: TimeInterval = 5
 
+    /// The preferred audio language of the title being looked at or played
+    /// (`ContentLanguages.focus`): the profile's choice for its type
+    /// (« Vos langues »: its original language, or a language) when one is
+    /// made, else the profile's own (`profileCurrent`).
     public static var current: String? {
+        if let forced = override { return forced }
+        if let code = ContentLanguages.focusedPlan?.audio { return code }
+        return profileCurrent
+    }
+
+    /// `current` for the title the last player started
+    /// (`ContentLanguages.playingPlan`), whatever page opened since: a
+    /// lighter release offered during playback.
+    public static var playing: String? {
+        if let forced = override { return forced }
+        if let code = ContentLanguages.playingPlan?.audio { return code }
+        return profileCurrent
+    }
+
+    /// `current` for a title known by its id (a list built for it, whatever
+    /// title is focused): the movie's, or the show's for its episodes.
+    public static func current(forTitle imdbID: String, isShow: Bool) -> String? {
+        if let forced = override { return forced }
+        if let code = ContentLanguages.audioOverride(forTitle: imdbID, isShow: isShow) { return code }
+        return profileCurrent
+    }
+
+    /// The active profile's preferred audio language, whatever the title:
+    /// its setting, else its learnt language.
+    public static var profileCurrent: String? {
         if let forced = override { return forced }
         let source = self.source
         let profileID = source.activeProfileID()

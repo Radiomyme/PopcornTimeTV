@@ -30,6 +30,8 @@ struct VLCPlayerView: UIViewControllerRepresentable {
         vc.streamer = streamer
         vc.externalSubtitles = subtitles
         vc.media = media
+        // « Vos langues »: the title's type decides its languages.
+        if let media { PlaybackLanguagePreferences.beginTitle(media) }
         vc.startPosition = startPosition
         return vc
     }

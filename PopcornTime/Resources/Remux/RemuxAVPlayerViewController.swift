@@ -363,6 +363,8 @@ final class RemuxAVPlayerViewController: AVPlayerViewController {
         delegate = self
         keepAliveStreamer = streamer
         self.media = media
+        // « Vos langues »: the title's type decides its languages (read by startRemux below).
+        if let media { PlaybackLanguagePreferences.beginTitle(media) }
         self.title = title
         self.nextEpisode = nextEpisode
         self.onPlayNext = onPlayNext

@@ -223,7 +223,87 @@ final class ProfilesUITests: XCTestCase {
         XCTAssertTrue(element("Detail.Title").waitForExistence(timeout: 60), "the link was not opened after the pick")
     }
 
+    /// « Your Languages » (forced with `-PTDebugLanguagesScreen YES`): the
+    /// focus starts on Continue; Anime's audio set to Japanese in the glass
+    /// picker; Continue; Settings › Profiles › « Languages by Type » says
+    /// Anime and its editor shows Japanese; Menu closes it.
+    func testYourLanguagesScreenAndItsSettingsRow() throws {
+        launch(["-PTDebugLanguagesScreen", "YES"])
+        XCTAssertTrue(element("Languages.Screen").waitForExistence(timeout: 30), "« Your Languages » never showed")
+        XCTAssertEqual(element("Languages.Screen").label, "Your Languages")
+        XCTAssertTrue(element("Languages.Later").exists, "no Later button")
+        pause(1.5)
+        snap("12-your-languages")
+        XCTAssertEqual(focusedIdentifier, "Languages.Continue", "the focus does not start on Continue")
+
+        // Anime › Audio › Japanese.
+        moveFocus(to: "Languages.Row.anime.audio")
+        remote.press(.select)
+        XCTAssertTrue(element("Settings.Picker").waitForExistence(timeout: 10), "the audio picker never showed")
+        pause(1)
+        for _ in 0..<80 where focusedElement.label != "Japanese" {
+            remote.press(.down)
+            pause(0.25)
+        }
+        XCTAssertEqual(focusedElement.label, "Japanese", "Japanese is not offered")
+        snap("13-anime-audio-picker")
+        remote.press(.select)
+        XCTAssertTrue(element("Settings.Picker").waitForNonExistence(timeout: 10), "the picker stayed")
+        pause(1)
+        XCTAssertTrue(languageValue("Languages.Row.anime.audio").contains("Japanese"), "Anime's audio")
+        XCTAssertEqual(element("Languages.Row.anime.audio").label, "Anime, Audio", "VoiceOver does not name the type")
+        XCTAssertEqual(focusedIdentifier, "Languages.Row.anime.audio", "the focus did not come back to the row")
+
+        // Continue: the screen goes, the Home is there.
+        moveFocus(to: "Languages.Continue")
+        remote.press(.select)
+        XCTAssertTrue(element("Languages.Screen").waitForNonExistence(timeout: 10), "Continue did not close the screen")
+
+        // Settings › Profiles › Languages by Type.
+        try openSettingsRow("Settings.Row.contentLanguages")
+        let row = element("Settings.Row.contentLanguages")
+        XCTAssertTrue(row.label.contains("Anime"), "the row does not say Anime: \(row.label)")
+        snap("14-settings-row")
+        remote.press(.select)
+        XCTAssertTrue(element("Languages.Screen").waitForExistence(timeout: 10), "the editor never showed")
+        XCTAssertEqual(element("Languages.Screen").label, "Languages by Type")
+        XCTAssertFalse(element("Languages.Later").exists, "Later in the Settings editor")
+        XCTAssertTrue(languageValue("Languages.Row.anime.audio").contains("Japanese"), "Anime's audio was not kept")
+        XCTAssertTrue(languageValue("Languages.Row.movie.audio").hasPrefix("Automatic"), "Movies & Shows changed too")
+        pause(1)
+        snap("15-settings-editor")
+        remote.press(.menu)
+        XCTAssertTrue(element("Languages.Screen").waitForNonExistence(timeout: 10), "Menu did not close the editor")
+        pause(1)
+        XCTAssertEqual(focusedIdentifier, "Settings.Row.contentLanguages", "the focus left the row")
+    }
+
     // MARK: - Helpers
+
+    /// A « Your Languages » button's value (its label names the type and « Audio »).
+    private func languageValue(_ identifier: String) -> String {
+        return element(identifier).value as? String ?? ""
+    }
+
+    /// Moves the focus to an element by its place on screen.
+    private func moveFocus(to identifier: String) {
+        let target = element(identifier)
+        XCTAssertTrue(target.waitForExistence(timeout: 10), "no \(identifier)")
+        for _ in 0..<12 where focusedIdentifier != identifier {
+            let focused = focusedElement
+            guard focused.exists else { remote.press(.down); pause(0.6); continue }
+            let (from, to) = (focused.frame, target.frame)
+            if to.midY < from.minY {
+                remote.press(.up)
+            } else if to.midY > from.maxY {
+                remote.press(.down)
+            } else {
+                remote.press(to.midX < from.midX ? .left : .right)
+            }
+            pause(0.6)
+        }
+        XCTAssertEqual(focusedIdentifier, identifier, "\(identifier) never got the focus")
+    }
 
     /// From the Home: the tab bar, Settings, then the focus on a row of the
     /// right column (the Profiles section is its top).

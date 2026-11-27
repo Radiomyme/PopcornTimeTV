@@ -1057,6 +1057,9 @@ final class NavigationUITests: XCTestCase {
             // No TMDB key, whatever the simulator saved: the grids' header
             // is Sort and Genre (StreamingServicesUITests has the key's).
             "-popcornkit.tmdb.apiKey", "",
+            // « Your Languages » never shows over the tests (the library is
+            // the simulator's: its profile may not have answered it).
+            "-PTLanguagesAsked", "YES",
         ] + arguments
         app.launch()
         self.app = app

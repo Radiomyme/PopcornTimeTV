@@ -121,6 +121,10 @@ enum YTSCatalog {
     static func listPage(_ root: [String: Any]) -> (movies: [Movie], count: Int, movieCount: Int?) {
         let data = root["data"] as? [String: Any]
         let raw = (data?["movies"] as? [[String: Any]]) ?? []
+        // Each film's original language, for « Vos langues » (`TitleOriginStore`).
+        for movie in raw {
+            if let imdb = movie["imdb_code"] as? String { TitleOriginStore.shared.note(TitleOrigin(yts: movie), for: imdb) }
+        }
         return (raw.compactMap(Movie.init(yts:)), raw.count, data?["movie_count"] as? Int)
     }
 

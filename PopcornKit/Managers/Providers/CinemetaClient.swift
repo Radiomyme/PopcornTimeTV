@@ -181,6 +181,8 @@ public enum CinemetaClient {
                 guard let root = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] else { return completion(nil) }
                 let meta = trimmed(root["meta"] as? [String: Any] ?? [:])
                 metas.set(meta, for: key)
+                // Its genres and countries, for « Vos langues ».
+                if !meta.isEmpty { TitleOriginStore.shared.note(TitleOrigin(cinemeta: meta), for: imdbId) }
                 completion(meta)
             case .status(let status) where status == 404:
                 metas.set([:], for: key)
@@ -197,6 +199,7 @@ public enum CinemetaClient {
         fetcher.data(hosts: hosts, path: "/meta/series/\(imdbId).json") { data in
             let root = data.flatMap { (try? JSONSerialization.jsonObject(with: $0)) as? [String: Any] }
             let meta = root?["meta"] as? [String: Any]
+            if let meta, !meta.isEmpty { TitleOriginStore.shared.note(TitleOrigin(cinemeta: meta), for: imdbId) }
             DispatchQueue.main.async { completion((meta?.isEmpty ?? true) ? nil : meta) }
         }
     }

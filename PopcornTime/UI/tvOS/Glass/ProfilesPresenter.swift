@@ -85,5 +85,10 @@ enum ProfilesPresenter {
             window.rootViewController?.dismiss(animated: false)
             window.rootViewController = root
         }
+        // « Vos langues » for a profile that has not answered it yet.
+        Task { @MainActor in
+            LanguagesLaunchPresenter.schedule(in: window, launchedFromURL: false,
+                                              makeScreen: GlassLanguagesView.makeLaunchScreen)
+        }
     }
 }

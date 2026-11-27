@@ -15,6 +15,10 @@ struct RootTabView: View {
     /// over a launch by link).
     @State private var showWhatsNew = false
     @State private var whatsNewCheck = WhatsNewLaunchCheck()
+    /// « Vos langues », once per profile, after the notes and never over
+    /// another sheet (`LanguagesLaunchQueue`).
+    @State private var showLanguages = false
+    @State private var languagesQueue = LanguagesLaunchQueue()
 
     var body: some View {
         TabView(selection: Bindable(router).selection) {
@@ -45,9 +49,16 @@ struct RootTabView: View {
         // (PopcornKit's `DeepLink`). Trakt's redirect has the same scheme:
         // it is not one of them and stays `PopcornTimeApp`'s.
         .onOpenURL { url in
+            // A link: « Vos langues » closes (or never shows) without being
+            // marked — the next launch asks again.
+            let closedLanguages = languagesQueue.linkOpened()
+            if closedLanguages {
+                showLanguages = false
+                LanguagesScreenGate.didCloseUnanswered(profileID: ProfileManager.shared.activeID)
+            }
             // A link that launched the app: no release notes over its page
             // (they show at the next normal launch).
-            if whatsNewCheck.linkOpened() {
+            if whatsNewCheck.linkOpened() || closedLanguages {
                 showWhatsNew = false
                 // The notes' sheet leaves first: a link to Settings is a
                 // sheet too, and only one is presented at a time.
@@ -62,6 +73,7 @@ struct RootTabView: View {
             // release notes over its page, as for a launch by link.
             if let url = ProfileLaunchQuestion.shared.takeHeldLink() {
                 _ = whatsNewCheck.linkOpened()
+                _ = languagesQueue.linkOpened()
                 router.open(url: url)
             }
             #if DEBUG
@@ -71,6 +83,9 @@ struct RootTabView: View {
                 // `-WhatsNewForce YES` still shows the notes over a hooked
                 // launch (e.g. the recorded Home of `-PTDebugHomeFixtures`).
                 showWhatsNew = UserDefaults.standard.bool(forKey: WhatsNewGate.forceKey)
+                // Only `-PTDebugLanguagesScreen YES` shows « Vos langues » here.
+                _ = languagesQueue.check(harness: true)
+                updateLanguages()
                 return
             }
             #endif
@@ -78,9 +93,18 @@ struct RootTabView: View {
             // arrive first; if it comes after, it closes the notes.
             try? await Task.sleep(for: .milliseconds(300))
             showWhatsNew = whatsNewCheck.check(isFreshInstall: WhatsNewGate.looksLikeFreshInstall())
+            // (A hooked run returned above: `IOSDebugHooks` is the harness.)
+            _ = languagesQueue.check()
+            updateLanguages()
         }
+        // « Vos langues » waits for the notes and Settings to close.
+        .onChange(of: showWhatsNew) { updateLanguages(afterASheet: true) }
+        .onChange(of: router.showsSettings) { updateLanguages(afterASheet: true) }
         .sheet(isPresented: $showWhatsNew) {
             WhatsNewView { showWhatsNew = false }
+        }
+        .sheet(isPresented: $showLanguages, onDismiss: { languagesQueue.finished() }) {
+            LanguagesLaunchSheet { showLanguages = false }
         }
         .sheet(isPresented: Bindable(router).showsSettings) {
             NavigationStack {
@@ -93,6 +117,17 @@ struct RootTabView: View {
                         }
                     }
             }
+        }
+    }
+
+    /// Shows « Vos langues » when it is due and no other sheet is up. After
+    /// a sheet changed, it waits for that sheet to finish leaving: two
+    /// sheets never swap in the same update (as on the Mac).
+    private func updateLanguages(afterASheet: Bool = false) {
+        guard languagesQueue.pending else { return }
+        Task { @MainActor in
+            if afterASheet { try? await Task.sleep(for: .milliseconds(400)) }
+            if languagesQueue.update(blocked: showWhatsNew || router.showsSettings) { showLanguages = true }
         }
     }
 }

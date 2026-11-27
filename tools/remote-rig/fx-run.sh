@@ -82,7 +82,7 @@ if [[ -n ${SLOW_ON:-} ]]; then
 fi
 sandbox-exec -f $R/tools/localhost-only.sb /usr/bin/python3 -I $N/tools/seeder3.py $FILM $TOR $PORT ${SEED_RATE:-4} $ratefile > $L/seeder-$label.log 2>&1 &
 seeder=$!
-appargs=(-themeSongVolume 0 -PTDebugPlayTorrent $TOR -PTDebugLoopbackPort $PORT -PTDebugDuration $DUR \
+appargs=(-themeSongVolume 0 -PTLanguagesAsked YES -PTDebugPlayTorrent $TOR -PTDebugLoopbackPort $PORT -PTDebugDuration $DUR \
   -PTDebugResumeTrace 1 -PTDebugPlayerStateEvery 1 -PTDebugHTTPTrace 1 $dirargs "$@")
 if [[ -n ${REMOTE:-} ]]; then
   # The remote: the UI test runner launches the app itself (script step "launch") with these arguments; the app's

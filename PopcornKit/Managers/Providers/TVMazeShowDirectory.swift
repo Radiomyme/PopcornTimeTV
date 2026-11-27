@@ -299,6 +299,8 @@ final class TVMazeShowDirectory {
         var entry: [String: Any] = ["t": now().timeIntervalSince1970]
         if let show = show {
             entry["show"] = TVMazeShowDirectory.trimmed(show)
+            // Its type and language, for « Vos langues » (the app's directory only).
+            if self === TVMazeShowDirectory.shared { TitleOriginStore.shared.note(TitleOrigin(tvmaze: show), for: imdbId) }
             // The alternate titles of the same TVMaze show stay valid.
             if let known = entries[imdbId], let akas = known["akas"], let stored = known["akasT"],
                (known["show"] as? [String: Any])?["id"] as? Int == show["id"] as? Int {
@@ -350,6 +352,7 @@ final class TVMazeShowDirectory {
     private static let keptFields: Set<String> = [
         "id", "name", "type", "language", "genres", "status", "runtime", "averageRuntime", "premiered",
         "schedule", "rating", "weight", "network", "webChannel", "externals", "image", "summary", "source",
+        "country",   // a record built from Cinemeta (`record(fromCinemeta:)`)
     ]
 
     static func trimmed(_ show: [String: Any]) -> [String: Any] {
@@ -376,6 +379,8 @@ final class TVMazeShowDirectory {
         if let rating = Double((meta["imdbRating"] as? String) ?? "") { record["rating"] = ["average": rating] }
         if let description = meta["description"] as? String { record["summary"] = description }
         if let genres = (meta["genres"] as? [String]) ?? (meta["genre"] as? [String]) { record["genres"] = genres }
+        // The first country tells a Japanese series (« Vos langues »).
+        if let country = meta["country"] as? String, !country.isEmpty { record["country"] = country }
         if let status = meta["status"] as? String { record["status"] = status }
         if let poster = meta["poster"] as? String { record["image"] = ["original": OpenMetadata.largerPoster(poster)] }
         return record

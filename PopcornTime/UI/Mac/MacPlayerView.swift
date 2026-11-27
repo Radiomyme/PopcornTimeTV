@@ -929,6 +929,8 @@ final class MacPlayerController: ObservableObject {
         Self.liveControllers.add(self)
 
         media = playback.media
+        // « Vos langues »: the title's type decides its languages (read by startRemux).
+        if let media { PlaybackLanguagePreferences.beginTitle(media) }
         resumePoint = MacPlaybackProgress.resumePoint(for: playback.media)
         subtitles = playback.media.subtitles
         // The `[Start]` trace of this playback, and the OpenSubtitles search

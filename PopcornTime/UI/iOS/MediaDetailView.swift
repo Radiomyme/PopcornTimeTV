@@ -870,6 +870,8 @@ struct MediaDetailView: View {
         .task {
             viewModel.linkedSeason = linkedSeason ?? request.season
             viewModel.linkedEpisode = linkedEpisode ?? request.episode
+            // « Vos langues »: the release lists sort for this title's type.
+            PlaybackLanguagePreferences.focusTitle(media)
             viewModel.load(media)
         }
         .onAppear {

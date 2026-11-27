@@ -54,6 +54,8 @@ struct MacGlassDetailScreen: View {
         .task { controller.load() }
         .onAppear {
             if ownDepth == nil { ownDepth = stackDepth }
+            // « Vos langues »: the release lists sort for this title's type.
+            PlaybackLanguagePreferences.focusTitle(controller.media)
             controller.pageAppeared()
             navigator.pageAppeared(controller, depth: ownDepth ?? stackDepth)
         }

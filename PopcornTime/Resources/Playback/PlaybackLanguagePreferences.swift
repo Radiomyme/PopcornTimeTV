@@ -48,32 +48,131 @@ enum PlaybackLanguagePreferences {
     /// stands in for a setting never made, never for « None ».
     static let noneValue = "none"
 
-    /// ISO 639-1 code of the preferred audio language, nil = none: the
-    /// profile's setting, else the language it picks itself most often
-    /// (`ProfileTaste`, learnt from the players' menus).
+    /// ISO 639-1 code of the preferred audio language, nil = none: for the
+    /// title playing (`beginTitle`), the profile's choice for its type
+    /// (« Vos langues »: its original language, or a language) when one is
+    /// made; else `automaticAudioLanguageCode`.
     static var preferredAudioLanguageCode: String? {
+        #if canImport(PopcornKit)
+        return audioCode(plan: ContentLanguages.playingPlan, automatic: automaticAudioLanguageCode)
+        #else
+        return automaticAudioLanguageCode
+        #endif
+    }
+
+    /// The profile's preferred audio language, whatever the title: its
+    /// setting, else the language it picks itself most often
+    /// (`ProfileTaste`, learnt from the players' menus).
+    static var automaticAudioLanguageCode: String? {
         return effectiveCode(stored: UserDefaults.standard.string(forKey: audioLanguageDefaultsKey),
                              learned: learnedCode(.audio))
     }
 
     /// ISO 639-1 code of the preferred subtitle language, nil = none: the
+    /// type's choice for the title playing (« Désactivés »: none), else the
     /// profile's setting, else the language it turns on itself most often.
     /// A player that knows the audio it plays asks
     /// `preferredSubtitleLanguageCode(whileHearing:)` instead.
     static var preferredSubtitleLanguageCode: String? {
+        #if canImport(PopcornKit)
+        if let chosen = subtitleOverride(plan: ContentLanguages.playingPlan) { return chosen }
+        #endif
         return effectiveCode(stored: UserDefaults.standard.string(forKey: subtitleLanguageDefaultsKey),
                              learned: learnedCode(.subtitle))
     }
 
     /// The subtitle language to turn on by itself while the audio `heard`
-    /// (a track's language tag or name) plays: the profile's setting, else
-    /// the language it turns on most — but not the one it hears (French
-    /// subtitles picked for Korean films are no reason to subtitle a French
-    /// one), nor while what it hears is unknown (nil).
+    /// (a track's language tag or name) plays: the type's choice for the
+    /// title playing, else the profile's setting, else the language it turns
+    /// on most — but not the one it hears (French subtitles picked for
+    /// Korean films are no reason to subtitle a French one), nor while what
+    /// it hears is unknown (nil). A language chosen (for the type or in
+    /// Settings) is turned on even in the language heard.
     static func preferredSubtitleLanguageCode(whileHearing heard: String?) -> String? {
+        #if canImport(PopcornKit)
+        if let chosen = subtitleOverride(plan: ContentLanguages.playingPlan) { return chosen }
+        #endif
         return subtitleCode(stored: UserDefaults.standard.string(forKey: subtitleLanguageDefaultsKey),
                             learned: learnedCode(.subtitle), heard: heard)
     }
+
+    #if canImport(PopcornKit)
+    /// The audio of a title's plan, else the profile's (`automatic`).
+    static func audioCode(plan: TitleLanguagePlan?, automatic: @autoclosure () -> String?) -> String? {
+        if let code = plan?.audio { return isoCode(for: code) ?? code }
+        return automatic()
+    }
+
+    /// The subtitles a title's plan imposes: nil when its type is
+    /// Automatic, `.some(nil)` for « Désactivés », else the language.
+    static func subtitleOverride(plan: TitleLanguagePlan?) -> String?? {
+        switch plan?.subtitles {
+        case .off?: return .some(nil)
+        case .language(let code)?: return .some(isoCode(for: code) ?? code)
+        case .automatic?, nil: return nil
+        }
+    }
+
+    // MARK: - The title playing (« Vos langues »)
+
+    /// A title's page opened: the release lists sort for its type's
+    /// language (`AudioLanguagePreference.current`), and its origin is
+    /// asked when the app doesn't know it yet.
+    static func focusTitle(_ media: Media) {
+        guard let title = ContentLanguages.Title(media: media) else { return }
+        ContentLanguages.focus(on: title)
+        ContentLanguages.ensureOrigin(of: title)
+    }
+
+    /// A title starts playing (every player, every route): the readers
+    /// above follow its type's choice until another title starts, even if
+    /// another page opens meanwhile (a second Mac window). Logs one line:
+    /// « [Languages] <title>: <type> → audio <x> (<why>), subtitles <y> »,
+    /// again if its origin, asked now, changes it.
+    static func beginTitle(_ media: Media) {
+        guard let title = ContentLanguages.Title(media: media) else {
+            ContentLanguages.clearFocus()
+            ContentLanguages.beginPlaying(nil)
+            print("[Languages] \(media.title): no IMDb id → audio and subtitles automatic")
+            return
+        }
+        ContentLanguages.beginPlaying(title)
+        logPlan(of: title)
+        ContentLanguages.ensureOrigin(of: title) { changed in
+            guard changed, ContentLanguages.playingPlan?.imdbID == title.imdbID else { return }
+            logPlan(of: title)
+        }
+    }
+
+    private static func logPlan(of title: ContentLanguages.Title) {
+        guard let plan = ContentLanguages.playingPlan else { return }
+        print(planDescription(plan, name: title.name, automaticAudio: automaticAudioLanguageCode,
+                              automaticSubtitles: effectiveCode(stored: UserDefaults.standard.string(forKey: subtitleLanguageDefaultsKey),
+                                                                learned: learnedCode(.subtitle))))
+        if ContentLanguages.logsClassification {
+            print("[ContentType] \(plan.imdbID) \(plan.type.rawValue): \(plan.typeReason)")
+        }
+    }
+
+    /// The log line of a plan (pure).
+    static func planDescription(_ plan: TitleLanguagePlan, name: String,
+                                automaticAudio: String?, automaticSubtitles: String?) -> String {
+        let audio: String
+        switch plan.audioReason {
+        case .automatic: audio = "\(automaticAudio ?? "unchanged") (automatic)"
+        case .original(let source): audio = "\(plan.audio ?? "?") (original version, from \(source.rawValue))"
+        case .originalUnknown: audio = "\(automaticAudio ?? "unchanged") (original version unknown → automatic)"
+        case .chosen: audio = "\(plan.audio ?? "?") (chosen for \(plan.type.rawValue))"
+        }
+        let subtitles: String
+        switch plan.subtitles {
+        case .automatic: subtitles = "\(automaticSubtitles ?? "none") (automatic)"
+        case .off: subtitles = "off (chosen)"
+        case .language(let code): subtitles = "\(code) (chosen)"
+        }
+        return "[Languages] \(name): \(plan.type.rawValue) → audio \(audio), subtitles \(subtitles)"
+    }
+    #endif
 
     /// Lets PopcornKit read the setting: the torrent lists, pickers and
     /// automatic picks favour the active profile's audio language

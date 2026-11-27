@@ -27,6 +27,10 @@ struct MacRootView: View {
     @State private var whatsNewCheck = WhatsNewLaunchCheck()
     /// The profile picked in the Switch Profile… sheet.
     @State private var profilePicked: String?
+    /// « Vos langues », once per profile, when no other sheet is up
+    /// (`LanguagesLaunchQueue`); the profile it was asked for.
+    @State private var languagesQueue = LanguagesLaunchQueue()
+    @State private var languagesProfile: String?
     #if DEBUG
     /// `-PTDebugPlayTorrent` (BoundedStorageDebugHooks): the player sheet.
     @State private var debugPlayback: MacPendingPlayback?
@@ -80,6 +84,11 @@ struct MacRootView: View {
             // A link that launched the app: no release notes over its page
             // (they show at the next normal launch).
             if whatsNewCheck.linkOpened() { showWhatsNew = false }
+            // Nor « Vos langues »: closed unanswered, asked again next launch.
+            if languagesQueue.linkOpened(), let profile = languagesProfile {
+                LanguagesScreenGate.didCloseUnanswered(profileID: profile)
+                languagesProfile = nil
+            }
             if navigator.open(url: url) { return }
             // popcorntime://trakt?code=…&state=…, from the browser.
             if url.scheme == "popcorntime", url.host == "trakt" {
@@ -103,6 +112,7 @@ struct MacRootView: View {
             // notes over its page, as for a launch by link.
             if let url = ProfileLaunchQuestion.shared.takeHeldLink() {
                 _ = whatsNewCheck.linkOpened()
+                _ = languagesQueue.linkOpened()
                 navigator.open(url: url)
             }
             #if DEBUG
@@ -113,6 +123,8 @@ struct MacRootView: View {
             // Verification runs (-PTDebug… launch arguments): no release
             // notes over the page, and the requested section / page.
             if MacDebugHooks.isActive || BoundedStorageDebugHooks.isActive {
+                // « Vos langues » only with `-PTDebugLanguagesScreen YES`.
+                checkLanguages()
                 await runDebugHooks()
                 return
             }
@@ -121,9 +133,24 @@ struct MacRootView: View {
             // arrive first; if it comes after, it closes the notes.
             try? await Task.sleep(for: .milliseconds(300))
             showWhatsNew = whatsNewCheck.check(isFreshInstall: WhatsNewGate.looksLikeFreshInstall())
+            // Then « Vos langues », once the notes have gone.
+            checkLanguages()
         }
         .sheet(isPresented: $showWhatsNew) {
             WhatsNewView { showWhatsNew = false }
+        }
+        // « Vos langues » waits for the other sheets of the window.
+        .onChange(of: showWhatsNew) { _, _ in presentLanguagesIfDue() }
+        .onChange(of: navigator.showsProfilePicker) { _, _ in presentLanguagesIfDue() }
+        .sheet(isPresented: Binding(get: { languagesQueue.isPresented }, set: { shown in
+            if !shown { languagesQueue.finished() }
+        }), onDismiss: {
+            languagesQueue.finished()
+            languagesProfile = nil
+        }) {
+            MacLanguagesLaunchSheet(profileID: languagesProfile ?? ProfileManager.shared.activeID) {
+                languagesQueue.finished()
+            }
         }
         // Popcorn Time › Switch Profile… (`MacProfileCommands`). Another
         // profile is made active once the sheet has gone: the window is
@@ -156,6 +183,39 @@ struct MacRootView: View {
             }
         }
         #endif
+    }
+
+    /// The launch check of « Vos langues » (once per window; the gate lets
+    /// one window of the process show it), then shown if nothing else is.
+    private func checkLanguages() {
+        #if DEBUG
+        let harness = MacDebugHooks.isActive || BoundedStorageDebugHooks.isActive
+        #else
+        let harness = false
+        #endif
+        let profile = ProfileManager.shared.activeID
+        if languagesQueue.check(profileID: profile, harness: harness) { languagesProfile = profile }
+        presentLanguagesIfDue()
+    }
+
+    /// Shows « Vos langues » when it is due and no other sheet is up; a
+    /// sheet that has just gone gets a moment to leave first.
+    private func presentLanguagesIfDue() {
+        guard languagesQueue.pending else { return }
+        Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(400))
+            _ = languagesQueue.update(blocked: isAnotherSheetUp)
+        }
+    }
+
+    /// The window's other sheets: the release notes, Switch Profile…, the
+    /// debug player.
+    private var isAnotherSheetUp: Bool {
+        var up = showWhatsNew || navigator.showsProfilePicker
+        #if DEBUG
+        up = up || debugPlayback != nil
+        #endif
+        return up
     }
 
     /// The root of the detail stack: the section's page — over the Home,

@@ -81,6 +81,12 @@ struct WhatsNewRelease {
                      titleEN: "Subtitles in sync",
                      bodyEN: "Downloaded subtitles line up with the dialogue on their own.",
                      platforms: [.tvOS, .iOS, .macOS]),
+        WhatsNewItem(id: "languages-by-type", symbol: "globe",
+                     titleFR: "Vos langues par type",
+                     bodyFR: "Choisissez l'audio et les sous-titres des films, des dessins animés et des animés.",
+                     titleEN: "Your languages by type",
+                     bodyEN: "Choose audio and subtitles for movies, cartoons and anime.",
+                     platforms: [.tvOS, .iOS, .macOS]),
     ])
 
     /// What is new since 5.4.0 (CHANGELOG.md's "5.4.1").

@@ -8,7 +8,8 @@ import PopcornKit
 /// macOS Settings window (⌘,) mirroring the iOS `SettingsView`: same
 /// UserDefaults keys, so preferences carry the same meaning across platforms.
 /// Five panes, as a Mac's settings have — Profiles (`MacProfilesSettingsPane`:
-/// who is watching, each profile's editor, Your Preferences), Playback,
+/// who is watching, each profile's editor, Your Preferences; then
+/// `MacLanguagesSettingsSection`: each profile's languages by type), Playback,
 /// Home, Streaming (`MacStreamingSettingsPane`: the TMDB key, the country,
 /// the services), About — each a grouped form no taller than its rows: in
 /// one pane the window had grown taller than a 14-inch screen once the
@@ -75,7 +76,12 @@ struct MacSettingsView: View {
 
     var body: some View {
         TabView(selection: $pane) {
-            MacProfilesSettingsPane()
+            // The profiles, what the one in use has learned, then each
+            // profile's « Langues par type » (`MacLanguagesSettingsSection`).
+            VStack(spacing: 0) {
+                MacProfilesSettingsPane()
+                MacLanguagesSettingsSection()
+            }
                 .tabItem { Label(profilesLocalized("Profiles"), systemImage: "person.2") }
                 .tag(Pane.profiles)
             form { playbackSections }
@@ -109,6 +115,9 @@ struct MacSettingsView: View {
             case "about": pane = .about
             default: break
             }
+            // `-PTDebugSettingsSheet contentLanguages`: the Profiles pane with
+            // the profile in use's « Langues par type » open.
+            if MacDebugHooks.settingsSheet == "contentlanguages" { pane = .profiles }
             if MacDebugHooks.settingsSheet.flatMap(MacStreamingSettingsPane.Sheet.init(rawValue:)) != nil {
                 pane = .streaming
             }

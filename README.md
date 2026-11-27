@@ -64,6 +64,9 @@
 ### Languages
 - Releases in your audio language come first, marked by one quiet tag (FR, IT… or MULTI).
 - Audio and subtitles on **Automatic** follow the language a profile picks most in the player.
+- **Languages by type**: each profile sets audio and subtitles for movies and shows, cartoons
+  and anime (original version, a language or Automatic), asked once at launch and changed in
+  Settings › Profiles.
 - The app speaks English, French, Spanish, Italian, Arabic and Brazilian Portuguese.
 
 ### Sources and search

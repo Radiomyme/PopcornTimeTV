@@ -131,6 +131,13 @@ class SceneDelegate: UIResponder, UIWindowSceneDelegate {
         // A title's page is laid out once ahead, at a still moment: the
         // first press on a poster then opens its page at once.
         if warmsUp { GlassDetailWarmUp.schedule(in: window) }
+
+        // « Vos langues », once per profile, after the Terms of Service and
+        // What's New (it waits until nothing else is presented); never for
+        // a launch to open a link.
+        LanguagesLaunchPresenter.schedule(in: window,
+                                          launchedFromURL: launchURL != nil || debugLaunchURL != nil || keptLink != nil,
+                                          makeScreen: GlassLanguagesView.makeLaunchScreen)
     }
 
     func scene(_ scene: UIScene, openURLContexts URLContexts: Set<UIOpenURLContext>) {

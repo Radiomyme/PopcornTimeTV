@@ -821,6 +821,8 @@ struct VideoPlayerWrapper: UIViewControllerRepresentable {
         try? AVAudioSession.sharedInstance().setCategory(.playback, mode: .moviePlayback)
         try? AVAudioSession.sharedInstance().setActive(true)
 
+        // « Vos langues »: the title's type decides its languages.
+        if let media { PlaybackLanguagePreferences.beginTitle(media) }
         let item = Coordinator.makeItem(url: url, title: title)
         let player = AVPlayer(playerItem: item)
         player.allowsExternalPlayback = true

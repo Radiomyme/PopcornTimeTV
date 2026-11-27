@@ -26,7 +26,7 @@ func profilesLocalized(_ key: String) -> String {
 /// editor, else the first's), `new` (a new profile's editor), on the first
 /// picker shown; `picker` (iPhone, iPad: Settings › Switch Profile's cover,
 /// with `-PTDebugSettings YES`), `taste` (iPhone, iPad: Your Preferences
-/// pushed), `sheet` (Mac: Switch Profile…'s sheet), `paneEditor` (Mac:
+/// pushed), `languages` (iPhone, iPad: « Langues par type » pushed), `sheet` (Mac: Switch Profile…'s sheet), `paneEditor` (Mac:
 /// the Profiles pane's editor of the second profile).
 @MainActor
 enum ProfilesDebugScreen {
@@ -1270,6 +1270,8 @@ struct ProfilesSettingsSection: View {
     @State private var picked: String?
     #if DEBUG
     @State private var debugTaste = false
+    /// `-PTDebugProfilesScreen languages`: « Langues par type » pushed.
+    @State private var debugLanguages = false
     #endif
 
     var body: some View {
@@ -1311,9 +1313,10 @@ struct ProfilesSettingsSection: View {
             .navigationDestination(isPresented: $debugTaste) { ProfileTasteView() }
             .task {
                 try? await Task.sleep(for: .milliseconds(800))
-                switch ProfilesDebugScreen.take(["picker", "taste"]) {
+                switch ProfilesDebugScreen.take(["picker", "taste", "languages"]) {
                 case "picker": showsPicker = true
                 case "taste": debugTaste = true
+                case "languages": debugLanguages = true
                 default: break
                 }
             }
@@ -1323,6 +1326,17 @@ struct ProfilesSettingsSection: View {
             .onReceive(NotificationCenter.default.publisher(for: ProfileTaste.didChangeNotification).receive(on: RunLoop.main)) { _ in
                 tasteGenres = ProfileTasteModel.summaryGenres()
             }
+            // « Langues par type »: this profile's languages by content type
+            // (LanguagesView.swift, iOS).
+            NavigationLink {
+                LanguagesByTypeSettingsView()
+            } label: {
+                LanguagesByTypeSettingsRow()
+            }
+            .accessibilityIdentifier("Settings.Row.contentLanguages")
+            #if DEBUG
+            .navigationDestination(isPresented: $debugLanguages) { LanguagesByTypeSettingsView() }
+            #endif
         } header: {
             Text(verbatim: profilesLocalized("Profiles"))
         } footer: {

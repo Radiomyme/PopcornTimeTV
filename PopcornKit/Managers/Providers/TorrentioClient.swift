@@ -109,7 +109,9 @@ public final class TorrentioClient {
             let json = data.flatMap { try? JSONSerialization.jsonObject(with: $0) }
             if let root = json as? [String: Any],
                let streams = root["streams"] as? [[String: Any]] {
-                result = TorrentioClient.torrents(fromStreams: streams, season: season, episode: episode)
+                // The title's own preferred language (« Vos langues »), whatever page is focused.
+                result = TorrentioClient.torrents(fromStreams: streams, season: season, episode: episode,
+                                                  language: AudioLanguagePreference.current(forTitle: imdbId, isShow: season != nil))
             }
             func sample(_ names: [String]) -> String {
                 return names.isEmpty ? "" : " (\(names.prefix(3).joined(separator: " | ")))"

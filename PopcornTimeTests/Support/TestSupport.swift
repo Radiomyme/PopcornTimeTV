@@ -52,6 +52,9 @@ final class TestsPrincipal: NSObject {
         UserDefaults.standard.setVolatileDomain(arguments, forName: UserDefaults.argumentDomain)
         AudioLanguagePreference.source = .nothing
         AudioLanguagePreference.region = nil
+        // Nor the profile's languages by type (« Vos langues »): Automatic, origins in memory.
+        ContentLanguages.environment = ContentLanguages.Environment(
+            activeProfileID: { Profile.primaryID }, choices: { _ in .automatic }, origins: TitleOriginStore(fileURL: nil))
         super.init()
     }
 }

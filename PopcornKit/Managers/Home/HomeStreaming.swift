@@ -390,6 +390,8 @@ extension HomeParse {
             backdropURL: text("backdrop_path").flatMap { URL(string: "https://image.tmdb.org/t/p/w1280" + $0) } ?? HomeArtwork.backdrop(imdbId),
             logoURL: HomeArtwork.logo(imdbId),
             date: CatalogDates.date(from: date))
+        // TMDB's original language, genres and country, for « Vos langues ».
+        if let result { TitleOriginStore.shared.note(TitleOrigin(tmdb: result), for: imdbId) }
         return HomeEntry(item: item, language: text("original_language"))
     }
 }

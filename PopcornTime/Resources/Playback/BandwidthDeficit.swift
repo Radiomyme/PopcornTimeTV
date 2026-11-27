@@ -338,8 +338,10 @@ struct BandwidthDeficitWatch {
     /// release that would stall too, nor a gamble on a few seeds. The best
     /// of them by `Torrent.balancedPick` (highest resolution, then the best
     /// playability); nil when none: the offer then has « Continue » only.
+    /// `language`: the playing title's (« Vos langues »), not a page opened since.
     static func lighterRelease(than bitrate: Double, playing url: String, among sources: [Torrent],
-                               downloadRate: Double, bitrateOf: (Torrent) -> Double? = { $0.estimatedBitrate }) -> Torrent? {
+                               downloadRate: Double, bitrateOf: (Torrent) -> Double? = { $0.estimatedBitrate },
+                               language: String? = AudioLanguagePreference.playing) -> Torrent? {
         let playing = MagnetLink.sourceKey(of: url)
         let lighter = sources.filter { candidate in
             guard candidate.url != url, MagnetLink.sourceKey(of: candidate.url) != playing,
@@ -349,7 +351,7 @@ struct BandwidthDeficitWatch {
                 && !StreamBandwidth.fit(bitrate: candidateBitrate, connection: downloadRate).isTooHeavy
         }
         guard !lighter.isEmpty else { return nil }
-        return Torrent.balancedPick(from: lighter, connection: downloadRate)
+        return Torrent.balancedPick(from: lighter, connection: downloadRate, language: language)
     }
 }
 

@@ -66,7 +66,9 @@ final class GlassSettingsHostingController: UIHostingController<GlassSettingsVie
                     GlassSettingsTasteLine(id: $0.id, title: $0.title, values: $0.values.joined(separator: " · "))
                 }
             },
-            resetTaste: { ProfileTaste.shared.reset() })
+            resetTaste: { ProfileTaste.shared.reset() },
+            readContentLanguages: { GlassLanguagesView.settingsSummary() },
+            contentLanguagesEditor: { GlassLanguagesView.settingsEditor(onClose: $0) })
 
         // Never set, « None » or a language: three states the rows tell apart.
         let audio = PlaybackLanguagePreferences.audioSetting
@@ -81,9 +83,9 @@ final class GlassSettingsHostingController: UIHostingController<GlassSettingsVie
         #if DEBUG
         // `-PTDebugSettingsRow <row>` (homeLanguages, homeShelves, homeLookup,
         // maximumResolution, languageFirst, tmdbKey, streamingRegion, streamingServices, switchProfile,
-        // profilePreferences…): the row that takes the focus;
+        // profilePreferences, contentLanguages…): the row that takes the focus;
         // `-PTDebugSettingsPicker <picker>` (homeLanguages, homeShelves,
-        // taste…): the sheet open at first display.
+        // taste, contentLanguages…): the sheet open at first display.
         let row: GlassSettingsRowID
         switch UserDefaults.standard.string(forKey: "PTDebugSettingsRow") {
         case "homeLanguages": row = .homeLanguages
@@ -100,6 +102,7 @@ final class GlassSettingsHostingController: UIHostingController<GlassSettingsVie
         case "streamingServices": row = .streamingServices
         case "switchProfile": row = .switchProfile
         case "profilePreferences": row = .profilePreferences
+        case "contentLanguages": row = .contentLanguages
         default: row = .quality
         }
         let picker = UserDefaults.standard.string(forKey: "PTDebugSettingsPicker").flatMap(GlassSettingsPicker.init(rawValue:))

@@ -1035,3 +1035,24 @@
 "Downloads.Failure.NoEpisode" = "l’episodio non è in questa versione";
 "Downloads.Failure.Other" = "il download si è interrotto";
 "Downloads.Storage.Free" = "%@ liberi su questa Apple TV";
+
+/* Languages by content type (« Vos langues »): the screen shown once per profile at launch, and Settings › Profiles › Languages by Type. Types: Movie = live action, Cartoon = animation not from Japan, Anime = Japanese animation. Summary: %1$@ = the audio choice, %2$@ = the subtitle choice. */
+"Languages.Title" = "Le tue lingue";
+"Languages.Message" = "Scegli come guardare ogni tipo di contenuto.";
+"Languages.Continue" = "Continua";
+"Languages.Later" = "Più tardi";
+"Languages.Type.Movie" = "Film e serie";
+"Languages.Type.Movie.Detail" = "Tutto tranne l’animazione";
+"Languages.Type.Cartoon" = "Cartoni animati";
+"Languages.Type.Cartoon.Detail" = "Animazione non giapponese";
+"Languages.Type.Anime" = "Anime";
+"Languages.Type.Anime.Detail" = "Animazione giapponese";
+"Languages.Audio" = "Audio";
+"Languages.Subtitles" = "Sottotitoli";
+"Languages.Automatic" = "Automatico";
+"Languages.Original" = "Versione originale";
+"Languages.Original.Short" = "Originale";
+"Languages.Off" = "Disattivati";
+"Languages.Settings.Row" = "Lingue per tipo";
+"Languages.Settings.Footer" = "Ogni profilo ha le sue.";
+"Languages.Done" = "Fine";

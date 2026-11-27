@@ -47,6 +47,8 @@ struct MacVLCPlayerView: View {
         self.url = url
         self.subtitles = subtitles
         self.media = media
+        // « Vos langues »: the title's type decides its languages.
+        if let media { PlaybackLanguagePreferences.beginTitle(media) }
         self.startPosition = startPosition
         self.resumePoint = resumePoint
         self.nativeHighWater = nativeHighWater

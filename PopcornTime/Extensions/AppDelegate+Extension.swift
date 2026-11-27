@@ -93,6 +93,9 @@ extension AppDelegate {
     ///   continuity with the show's last one, D4).
     func chooseQuality(_ sender: UIView?, media: Media, excluding: Set<String> = [], replaysRemembered: Bool = false,
                        completion: @escaping (Torrent) -> Void) {
+        // « Vos langues »: the releases sort for this title's type (Continue
+        // Watching and links come here without a page).
+        PlaybackLanguagePreferences.focusTitle(media)
         let excluded = excluding.union(AppDelegate.unansweredSources[media.id] ?? [])
         // Episodes: EZTV only carries what its uploaders pushed, so before
         // picking a quality, ask the Torrentio aggregator (YTS/RARBG-archive/

@@ -586,6 +586,8 @@ public final class YTSEZTVProvider: MediaProvider {
             lists.ytsKnowsTitle = ytsMovie != nil
             if (movie["id"] as? Int ?? 0) > 0 {   // 0 = a title YTS doesn't have
                 known = movie
+                // Its original language, for « Vos langues ».
+                TitleOriginStore.shared.note(TitleOrigin(yts: movie), for: imdbId)
                 ytsTitles = [movie["title"], movie["title_english"]].compactMap { $0 as? String }
                 offer(title: movie["title"] as? String, year: movie["year"] as? Int)
             }

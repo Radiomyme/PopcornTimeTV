@@ -166,6 +166,12 @@ struct GlassSettingsActions {
     var readTaste: () -> [GlassSettingsTasteLine] = { [] }
     /// Forgets what it learned.
     var resetTaste: () -> Void = {}
+    /// « Langues par type »: the row's value (« Automatique », « Animés »),
+    /// re-read by `refresh()`. nil: no row.
+    var readContentLanguages: (() -> String)? = nil
+    /// The editor of the active profile's languages by type, a cover over
+    /// the page; it calls `close` when done.
+    var contentLanguagesEditor: (_ close: @escaping () -> Void) -> AnyView = { _ in AnyView(EmptyView()) }
 }
 
 /// The active profile as the Profiles section shows it.
@@ -218,6 +224,8 @@ final class GlassSettingsModel: ObservableObject {
     @Published private(set) var profile: GlassSettingsProfile?
     /// Your Preferences, read when its sheet opens (`loadTaste`).
     @Published private(set) var taste: [GlassSettingsTasteLine] = []
+    /// « Langues par type »'s value; nil: no row.
+    @Published private(set) var contentLanguages: String?
     /// "5.1.0 (2)".
     let version: String
     /// Offered by the language pickers, in display order.
@@ -241,6 +249,7 @@ final class GlassSettingsModel: ObservableObject {
         self.isTraktSignedIn = actions.isTraktSignedIn()
         self.home = actions.readHome?()
         self.profile = actions.readProfile?()
+        self.contentLanguages = actions.readContentLanguages?()
     }
 
     // MARK: Home
@@ -477,6 +486,7 @@ final class GlassSettingsModel: ObservableObject {
         if let stored = actions.readLanguageFirst?(), stored != languageFirst { languageFirst = stored }
         if let stored = actions.readHome?(), stored != home { home = stored }
         if let stored = actions.readProfile?(), stored != profile { profile = stored }
+        refreshContentLanguages()
         cacheBytes = nil
         let measure = actions.measureCache
         DispatchQueue.global(qos: .utility).async {
@@ -517,6 +527,11 @@ final class GlassSettingsModel: ObservableObject {
         actions.resetTaste()
         taste = actions.readTaste()
         if let stored = actions.readProfile?(), stored != profile { profile = stored }
+    }
+
+    /// Re-reads « Langues par type »'s value (its editor closed).
+    func refreshContentLanguages() {
+        if let stored = actions.readContentLanguages?(), stored != contentLanguages { contentLanguages = stored }
     }
 
     /// A language row's value: « Automatic (French) », « None » or the language.
@@ -573,7 +588,7 @@ enum GlassSettingsPalette {
 /// The rows that open a picker.
 enum GlassSettingsPicker: String, Identifiable {
     case quality, upNextCard, audio, subtitles, homeLanguages, homeShelves, streamingRegion, streamingServices, tmdbKey
-    case taste, maximumResolution, dolbyVision
+    case taste, maximumResolution, dolbyVision, contentLanguages
     var id: String { rawValue }
 }
 
@@ -582,7 +597,7 @@ enum GlassSettingsRowID: Hashable {
     case quality, autoPlayNext, upNextCard, audio, subtitles, themeSongs, clearCache, trakt, version
     case homeLanguages, homeShelves, homeLookup
     case tmdbKey, streamingRegion, streamingServices
-    case switchProfile, profilePreferences
+    case switchProfile, profilePreferences, contentLanguages
     case maximumResolution, languageFirst, dolbyVision, subtitleSync
 }
 
@@ -848,8 +863,9 @@ struct GlassSettingsView: View {
         }
     }
 
-    /// Two rows: Switch Profile, its icon the profile's own avatar (the
-    /// picker's Manage Profiles edits them), and Your Preferences.
+    /// Three rows: Switch Profile, its icon the profile's own avatar (the
+    /// picker's Manage Profiles edits them), Your Preferences, and
+    /// « Langues par type » (the profile's languages by content type).
     private var profilesSection: some View {
         GlassSettingsSection(title: "Profiles", footer: "Profiles.Footer") {
             if let profile = model.profile {
@@ -865,6 +881,13 @@ struct GlassSettingsView: View {
                 }
                 .focused($focusedRow, equals: .profilePreferences)
                 .accessibilityIdentifier("Settings.Row.profilePreferences")
+                if let languages = model.contentLanguages {
+                    GlassSettingsDivider()
+                    GlassSettingsRow(symbol: "character.bubble.fill", tint: .teal, title: "Languages.Settings.Row",
+                                     value: languages) { picker = .contentLanguages }
+                        .focused($focusedRow, equals: .contentLanguages)
+                        .accessibilityIdentifier("Settings.Row.contentLanguages")
+                }
             }
         }
     }
@@ -1053,6 +1076,11 @@ struct GlassSettingsView: View {
                 profileName: model.profile?.name ?? "",
                 onReset: { model.resetTaste() },
                 onClose: { self.picker = nil })
+        case .contentLanguages:
+            model.actions.contentLanguagesEditor {
+                self.picker = nil
+                model.refreshContentLanguages()
+            }
         }
     }
 

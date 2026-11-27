@@ -217,6 +217,8 @@ class AppDelegate: UIResponder, UIApplicationDelegate, UITabBarControllerDelegat
         // The release notes go: a page must not open under them, and playback
         // is presented from the root view controller.
         WhatsNewPresenter.dismiss(animated: false)
+        // « Vos langues » too, unanswered: it asks again at the next launch.
+        LanguagesLaunchPresenter.cancelForLink()
 
         let presented = tabBarController.presentedViewController.flatMap { $0.isBeingDismissed ? nil : $0 }
         if let alert = presented as? UIAlertController {

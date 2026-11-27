@@ -335,6 +335,9 @@ final class GlassDetailHostingController: UIHostingController<GlassDetailView>, 
 
     override func viewWillAppear(_ animated: Bool) {
         super.viewWillAppear(animated)
+        // « Vos langues »: the release lists sort for this title's type
+        // (again when a page pushed over it closes).
+        if let media { PlaybackLanguagePreferences.focusTitle(media) }
         navigationController?.setNavigationBarHidden(true, animated: false)
         // The page is the title's, full screen, as in the Apple TV app:
         // no tab bar over its artwork. Gone at once: animated, the bar slid

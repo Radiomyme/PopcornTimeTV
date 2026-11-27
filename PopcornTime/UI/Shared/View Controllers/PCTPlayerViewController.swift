@@ -765,6 +765,8 @@ class PCTPlayerViewController: UIViewController, VLCMediaPlayerDelegate, UIGestu
         self.url = url
         self.localPathToMedia = local
         self.media = media
+        // « Vos langues »: the title's type decides its languages.
+        PlaybackLanguagePreferences.beginTitle(media)
         self.startPosition = fromPosition
         // A switch to a lighter release whose first player is VLC: the user
         // chose where to resume — no question (taken once per stream).
