@@ -2348,6 +2348,8 @@ final class RemuxAVPlayerViewController: AVPlayerViewController {
         // A kill while suspended (or a crash later) keeps what was watched.
         NotificationCenter.default.addObserver(self, selector: #selector(applicationDidEnterBackground),
                                                name: UIApplication.didEnterBackgroundNotification, object: nil)
+        NotificationCenter.default.addObserver(self, selector: #selector(userPickedAudio(_:)),
+                                               name: MediaSelectionLearner.userPickedAudio, object: nil)
 #if DEBUG
         // BoundedStorageDebugHooks' scripted seeks and pauses.
         NotificationCenter.default.addObserver(self, selector: #selector(debugScriptSeek(_:)), name: .ptDebugSeek, object: nil)
@@ -2486,7 +2488,33 @@ final class RemuxAVPlayerViewController: AVPlayerViewController {
 #if os(tvOS)
         upNextTick()
 #endif
+#if DEBUG
+        debugPickAudioIfDue()
+#endif
     }
+
+#if DEBUG
+    /// `-PTDebugPickAudio "<language>@<s>"`: once the player's time reaches
+    /// <s>, the first audio option in <language> is selected the way AVKit's
+    /// Audio menu does it (`AVPlayerItem.select`, not the app's own
+    /// selection), so the menu pick's handling can be timed in a test rig.
+    private func debugPickAudioIfDue() {
+        guard !debugPickedAudio, let spec = UserDefaults.standard.string(forKey: "PTDebugPickAudio"),
+              let at = spec.split(separator: "@").last.flatMap({ Double($0) }),
+              let language = spec.split(separator: "@").first.map(String.init),
+              let player = player, let item = player.currentItem, player.currentTime().seconds >= at else { return }
+        debugPickedAudio = true
+        Task { @MainActor in
+            guard let group = try? await item.asset.loadMediaSelectionGroup(for: .audible),
+                  let option = group.options.first(where: { ($0.extendedLanguageTag ?? "").hasPrefix(language) }) else {
+                print("[DebugPickAudio] no '\(language)' option"); return
+            }
+            print("[DebugPickAudio] selecting '\(option.displayName)' at \(String(format: "%.3f", player.currentTime().seconds)) s")
+            item.select(option, in: group)
+        }
+    }
+    private var debugPickedAudio = false
+#endif
 
     /// Bounded storage, 1 Hz: a reverse scan (a held rewind) stops at the
     /// earliest point still available, with the message, and plays on from
@@ -2698,6 +2726,33 @@ final class RemuxAVPlayerViewController: AVPlayerViewController {
         starvation.rebuildNow(player: player, at: time, reason: LateSubtitlesWatch.reason,
                               resumesPlayback: playing, exactPosition: true, picksSubtitlesAnew: true)
     }
+
+    /// Remux path: the user picked another audio track in AVKit's menu. The
+    /// item is rebuilt in place on that track (position kept, playing on
+    /// only if the user wants playback) instead of AVPlayer switching
+    /// renditions inside the item: tvOS sets the HDMI audio output up
+    /// (passthrough, Dolby Atmos) for the track an item starts on, and a
+    /// switch inside the item could keep the old track or freeze the
+    /// picture — the stuck-item rebuild then went back to the master's
+    /// default language. The new item gets the pick explicitly
+    /// (`MediaSelectionSnapshot`), so it is a clean start of that track.
+    @objc private func userPickedAudio(_ note: Notification) {
+        guard let player = player, route == .remux, remux != nil, let item = player.currentItem,
+              note.object as AnyObject? === item, didStartPlayback else { return }
+        let time = player.currentTime().seconds
+        guard canRebuildInPlace(player, at: time) else {
+            print("[Player] audio track picked — no rebuild now (recovery, hand-off or background): AVPlayer switches it")
+            return
+        }
+        let playing = playIntent.wantsPlayback
+        print("[Player] audio track picked: rebuilding the item at \(String(format: "%.3f", time)) s on it "
+              + "(\(playing ? "playing" : "paused")) — a clean start of its audio")
+        starvation.rebuildNow(player: player, at: time, reason: Self.audioPickReason,
+                              resumesPlayback: playing, exactPosition: true)
+    }
+
+    /// Why (the rebuild's log line).
+    static let audioPickReason = "Changement de piste audio"
 
     override var canBecomeFirstResponder: Bool { return true }
 

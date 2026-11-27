@@ -517,8 +517,14 @@ struct MediaSelectionSnapshot {
             guard let group = try? await asset.loadMediaSelectionGroup(for: characteristic) else { continue }
             let selection = item.currentMediaSelection
             let option = selection.selectedMediaOption(in: group)
+            // The audio heard is always kept as such: AVKit's menu can leave
+            // the group "automatic" after the user's pick (its criteria, not
+            // an explicit selection), and an automatic entry put the new
+            // item back on the master's DEFAULT rendition — the language the
+            // user had just left.
+            let keepsHeardAudio = characteristic == .audible && option != nil
             entries.append(Entry(characteristic: characteristic,
-                                 isAutomatic: selection.mediaSelectionCriteriaCanBeAppliedAutomatically(to: group),
+                                 isAutomatic: !keepsHeardAudio && selection.mediaSelectionCriteriaCanBeAppliedAutomatically(to: group),
                                  propertyList: option?.propertyList(),
                                  languageTag: option?.extendedLanguageTag,
                                  displayName: option?.displayName,

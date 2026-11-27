@@ -871,6 +871,10 @@ enum PlaybackLanguagePreferences {
 @MainActor
 final class MediaSelectionLearner {
 
+    /// Posted (object: the item) when the user picks another audio track in
+    /// AVKit's menu — the remux player starts that track cleanly on it.
+    static let userPickedAudio = Notification.Name("PTUserPickedAudio")
+
     /// Ready, then this long: the item has settled.
     private static let settleDelay: TimeInterval = 1.5
     /// A change is judged once it held this long (AVPlayer flips the
@@ -970,8 +974,12 @@ final class MediaSelectionLearner {
         guard let item else { return }
         for (characteristic, track) in tracks {
             let current = selected(in: track.group, characteristic, of: item)
-            switch PlaybackLanguagePreferences.selectionChange(current: current, known: track.known, own: own[characteristic],
-                                                               settled: isSettled) {
+            let change = PlaybackLanguagePreferences.selectionChange(current: current, known: track.known, own: own[characteristic],
+                                                                     settled: isSettled)
+            if characteristic == .audible, change != .none {
+                print("[Playback] audio selection → \(current?.displayName ?? "none") (\(change == .user ? "user" : "app / AVPlayer"))")
+            }
+            switch change {
             case .none:
                 break
             case .notTheUser:
@@ -983,6 +991,7 @@ final class MediaSelectionLearner {
                 if characteristic == .audible {
                     print("[Playback] audio picked in the player's menu: \(language ?? "?")")
                     PlaybackLanguagePreferences.noteChosenAudio(languageOrName: language)
+                    NotificationCenter.default.post(name: MediaSelectionLearner.userPickedAudio, object: item)
                 } else {
                     print("[Playback] subtitles picked in the player's menu: \(language ?? "off")")
                     PlaybackLanguagePreferences.noteChosenSubtitle(languageOrName: language, isOff: current == nil)
