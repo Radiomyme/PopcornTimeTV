@@ -848,6 +848,8 @@
 "UpNext.StillWatching.Stop" = "إيقاف";
 "Settings.AutoPlayNext" = "تشغيل الحلقة التالية تلقائيًا";
 "Settings.AutoPlayNext.Footer" = "قرب نهاية الحلقة، تُعرض الحلقة التالية مع عد تنازلي، ثم تبدأ تلقائيًا، بنفس الإصدار عند الإمكان.";
+"Settings.SubtitleSync" = "مزامنة الترجمة تلقائيًا";
+"Settings.SubtitleSync.Footer" = "تضبط الترجمات المُنزَّلة على الحوار (ملفات MKV).";
 "Settings.UpNextCard" = "بطاقة الحلقة التالية";
 "Settings.UpNextCard.Value" = "%d ث قبل النهاية";
 "Settings.UpNextCard.Message" = "المدة قبل نهاية الحلقة التي تعرض فيها بطاقتها الحلقة التالية. عند تفعيل تشغيل الحلقة التالية تلقائيًا تبدأ الحلقة التالية عند النهاية، وإلا فعند اختيار تشغيل الآن فقط.";

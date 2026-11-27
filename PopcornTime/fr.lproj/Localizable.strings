@@ -547,6 +547,8 @@
 "UpNext.StillWatching.Stop" = "Arrêter";
 "Settings.AutoPlayNext" = "Enchaîner les épisodes";
 "Settings.AutoPlayNext.Footer" = "Vers la fin d'un épisode, le suivant est proposé avec un compte à rebours, puis démarre seul, dans la même version quand c'est possible.";
+"Settings.SubtitleSync" = "Synchro auto des sous-titres";
+"Settings.SubtitleSync.Footer" = "Recale les sous-titres téléchargés sur les dialogues (fichiers MKV).";
 "Settings.UpNextCard" = "Carte Épisode suivant";
 "Settings.UpNextCard.Value" = "%d s avant la fin";
 "Settings.UpNextCard.Message" = "Combien de temps avant la fin d'un épisode sa carte propose le suivant. Avec « Enchaîner les épisodes », le suivant démarre à la fin ; sinon seulement quand vous choisissez Lire maintenant.";

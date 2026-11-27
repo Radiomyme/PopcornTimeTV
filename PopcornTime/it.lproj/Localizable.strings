@@ -845,6 +845,8 @@
 "UpNext.StillWatching.Stop" = "Interrompi";
 "Settings.AutoPlayNext" = "Riproduci l'episodio successivo";
 "Settings.AutoPlayNext.Footer" = "Verso la fine di un episodio, il successivo viene proposto con un conto alla rovescia e parte da solo, nella stessa versione quando possibile.";
+"Settings.SubtitleSync" = "Sincronizzazione automatica dei sottotitoli";
+"Settings.SubtitleSync.Footer" = "Allinea i sottotitoli scaricati ai dialoghi (file MKV).";
 "Settings.UpNextCard" = "Scheda episodio successivo";
 "Settings.UpNextCard.Value" = "%d s prima della fine";
 "Settings.UpNextCard.Message" = "Quanto prima della fine di un episodio la sua scheda propone il successivo. Con Riproduci l'episodio successivo attivo, il successivo parte alla fine; altrimenti solo quando scegli Riproduci ora.";

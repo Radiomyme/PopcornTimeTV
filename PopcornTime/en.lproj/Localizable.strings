@@ -547,6 +547,8 @@
 "UpNext.StillWatching.Stop" = "Stop";
 "Settings.AutoPlayNext" = "Autoplay Next Episode";
 "Settings.AutoPlayNext.Footer" = "Near the end of an episode, the next one is offered with a countdown, then starts on its own, in the same version when possible.";
+"Settings.SubtitleSync" = "Automatic Subtitle Sync";
+"Settings.SubtitleSync.Footer" = "Lines up downloaded subtitles with the dialogue (MKV files).";
 "Settings.UpNextCard" = "Next Episode Card";
 "Settings.UpNextCard.Value" = "%d s before the end";
 "Settings.UpNextCard.Message" = "How long before the end of an episode its card offers the next one. With Autoplay Next Episode on, the next one starts at the end; otherwise only when you choose Play Now.";

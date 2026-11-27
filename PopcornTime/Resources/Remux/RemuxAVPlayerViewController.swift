@@ -314,6 +314,12 @@ final class RemuxAVPlayerViewController: AVPlayerViewController {
     /// master playlist — the item is rebuilt once for it
     /// (`rebuildForLateSubtitlesIfDue`).
     private var lateSubtitles = LateSubtitlesWatch()
+    /// Remux path: an OpenSubtitles file the automatic sync retimed — the
+    /// item is rebuilt when it is the subtitle on screen
+    /// (`rebuildForRetimedSubtitlesIfDue`).
+    private var retimeWatch = SubtitleRetimeWatch()
+    /// The retimed files' selection check is under way (asynchronous).
+    private var retimeCheckInFlight = false
     /// Bounded storage, direct path: AVPlayer waiting with the data on disk
     /// (sampled 1 Hz) → the item is rebuilt (`checkDirectStall`).
     private var directStall = BoundedDirectStallWatch()
@@ -496,6 +502,10 @@ final class RemuxAVPlayerViewController: AVPlayerViewController {
             // missing segments will never exist. VLC reads the torrent file
             // itself (no extra disk) — at once, at the current position.
             DispatchQueue.main.async { self?.remuxDidHalt(reason) }
+        }
+        // Main queue: an OpenSubtitles file the automatic sync retimed.
+        remux.onExternalSubtitleRetimed = { [weak self] key in
+            DispatchQueue.main.async { self?.retimeWatch.retimed(key: key) }
         }
         remux.onUnavailableSegmentRequested = { [weak self] playerSeconds in
             // Playback needs a pruned segment (deleted for good): at once for
@@ -2485,11 +2495,13 @@ final class RemuxAVPlayerViewController: AVPlayerViewController {
         checkBoundedReverseScan()
         rebuildLiveBornItemIfEnded()
         rebuildForLateSubtitlesIfDue()
+        rebuildForRetimedSubtitlesIfDue()
 #if os(tvOS)
         upNextTick()
 #endif
 #if DEBUG
         debugPickAudioIfDue()
+        debugSelectExternalSubtitleIfDue()
 #endif
     }
 
@@ -2668,8 +2680,10 @@ final class RemuxAVPlayerViewController: AVPlayerViewController {
         liveBornWatch.attached(ObjectIdentifier(item),
                                isEventSession: (remux?.session?.totalDurationSeconds ?? 1) <= 0,
                                remuxFinished: remux?.isFinished ?? true)
-        // Its master playlist has every OpenSubtitles list known so far.
+        // Its master playlist has every OpenSubtitles list known so far,
+        // and it loads the files as they are served now (retimed or not).
         lateSubtitles.attached()
+        retimeWatch.attached()
     }
 
     /// Remux path, 1 Hz: AVFoundation keeps the live bookkeeping of an item
@@ -2726,6 +2740,58 @@ final class RemuxAVPlayerViewController: AVPlayerViewController {
         starvation.rebuildNow(player: player, at: time, reason: LateSubtitlesWatch.reason,
                               resumesPlayback: playing, exactPosition: true, picksSubtitlesAnew: true)
     }
+
+    /// Remux path, 1 Hz: the automatic sync retimed an OpenSubtitles file
+    /// (`RemuxPlayback.onExternalSubtitleRetimed`). AVPlayer read that
+    /// WebVTT once for this item: when it is the subtitle on screen, the
+    /// item is rebuilt in place on the corrected file — position, play /
+    /// pause state and the user's audio and subtitle choice kept (not picked
+    /// anew), under 0.3 s without picture — also when the user switches to
+    /// it later on this item. Otherwise nothing: the next item loads the
+    /// corrected file. Waits for the next tick as
+    /// `rebuildForLateSubtitlesIfDue` does (recovery, resume question, start
+    /// seek, Picture in Picture, AirPlay, background).
+    private func rebuildForRetimedSubtitlesIfDue() {
+        guard let player = player, route == .remux, remux != nil, let item = player.currentItem else { return }
+        if retimeWatch.needsSelectionCheck, !retimeCheckInFlight {
+            retimeCheckInFlight = true
+            Task { @MainActor [weak self] in
+                let shown = await PlaybackLanguagePreferences.shownExternalSubtitleKey(of: item)
+                guard let self = self else { return }
+                self.retimeCheckInFlight = false
+                // The item was replaced meanwhile: it loaded the corrected file.
+                guard self.player?.currentItem === item else { return }
+                self.retimeWatch.selectionChecked(shownKey: shown)
+            }
+        }
+        let time = player.currentTime().seconds
+        guard retimeWatch.shouldRebuild(isEligible: didStartPlayback && canRebuildInPlace(player, at: time)) else { return }
+        let playing = playIntent.wantsPlayback
+        print("[Player] OpenSubtitles file retimed by the automatic sync: replacing the item at "
+              + "\(String(format: "%.3f", time)) s (\(playing ? "playing" : "paused")) with the corrected subtitles")
+        starvation.rebuildNow(player: player, at: time, reason: SubtitleRetimeWatch.reason,
+                              resumesPlayback: playing, exactPosition: true, announced: true)
+    }
+
+#if DEBUG
+    /// `-PTDebugExternalSubtitle "<file>@<language>"`: its OpenSubtitles
+    /// rendition is selected once, as soon as the item has it (the remux
+    /// flags it DEFAULT, but a DEFAULT subtitle is only shown when the
+    /// system's subtitle setting asks for it).
+    private func debugSelectExternalSubtitleIfDue() {
+        guard !debugSelectedExternalSubtitle, !debugSelectingExternalSubtitle, route == .remux,
+              let language = RemuxPlayback.debugExternalSubtitleLanguage,
+              let item = player?.currentItem, item.status == .readyToPlay else { return }
+        debugSelectingExternalSubtitle = true
+        Task { @MainActor [weak self] in
+            let done = await PlaybackLanguagePreferences.debugSelectExternalSubtitle(language: language, in: item)
+            self?.debugSelectingExternalSubtitle = false
+            if done { self?.debugSelectedExternalSubtitle = true }
+        }
+    }
+    private var debugSelectedExternalSubtitle = false
+    private var debugSelectingExternalSubtitle = false
+#endif
 
     /// Remux path: the user picked another audio track in AVKit's menu. The
     /// item is rebuilt in place on that track (position kept, playing on

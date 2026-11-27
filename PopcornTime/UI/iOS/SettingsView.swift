@@ -17,6 +17,8 @@ struct SettingsView: View {
     @AppStorage(CellularStreamingPolicy.defaultsKey) private var streamOnCellular = false
     /// « Dolby Vision 8.1 » (`DolbyVisionPlaybackMode`).
     @AppStorage(DolbyVisionPlaybackMode.defaultsKey) private var dolbyVisionMode = DolbyVisionPlaybackMode.automatic
+    /// « Automatic Subtitle Sync » (`SubtitleAutoSyncPreference`, on by default).
+    @AppStorage(SubtitleAutoSyncPreference.defaultsKey) private var autoSubtitleSync = true
     /// « Autoplay next episode » (episode chaining, on by default: D8).
     @AppStorage(UpNextPreferences.autoPlayNextKey) private var autoPlayNext = true
     /// « Next Episode Card » (seconds before the end; absent = 60).
@@ -127,6 +129,12 @@ struct SettingsView: View {
                     }
                 }
                 languagePicker("Subtitle Language", storage: $preferredSubtitleLanguage, subtitles: true)
+                // Downloaded (OpenSubtitles) subtitles only, on the MKV route.
+                Toggle(isOn: $autoSubtitleSync) {
+                    Text(LocalizedStringKey(SubtitleAutoSyncPreference.titleKey))
+                    Text(LocalizedStringKey(SubtitleAutoSyncPreference.footerKey))
+                }
+                .accessibilityIdentifier("Settings.SubtitleSync")
             } header: {
                 Text("Languages")
             } footer: {

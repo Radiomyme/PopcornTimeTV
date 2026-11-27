@@ -200,6 +200,8 @@ final class GlassSettingsModel: ObservableObject {
     @Published private(set) var maximumResolution: Int
     /// « Dolby Vision 8.1 » (`DolbyVisionPlaybackMode`, device-wide).
     @Published private(set) var dolbyVisionMode = DolbyVisionPlaybackMode.stored()
+    /// « Automatic Subtitle Sync » (`SubtitleAutoSyncPreference`, device-wide).
+    @Published private(set) var subtitleSync = SubtitleAutoSyncPreference.isEnabled()
     @Published private(set) var languageFirst: Bool
     @Published private(set) var isTraktSignedIn: Bool
     /// nil while it is being measured.
@@ -427,6 +429,11 @@ final class GlassSettingsModel: ObservableObject {
         mode.store()
     }
 
+    func toggleSubtitleSync() {
+        subtitleSync.toggle()
+        SubtitleAutoSyncPreference.store(subtitleSync)
+    }
+
     /// « No Limit », « 1080p »…
     var maximumResolutionText: String {
         actions.maximumResolutionChoices.first { $0.id == String(maximumResolution) }?.title
@@ -466,6 +473,7 @@ final class GlassSettingsModel: ObservableObject {
         if let stored = actions.readUpNextCardLead?(), stored != upNextCardLead { upNextCardLead = stored }
         if let stored = actions.readMaximumResolution?(), stored != maximumResolution { maximumResolution = stored }
         if DolbyVisionPlaybackMode.stored() != dolbyVisionMode { dolbyVisionMode = DolbyVisionPlaybackMode.stored() }
+        if SubtitleAutoSyncPreference.isEnabled() != subtitleSync { subtitleSync = SubtitleAutoSyncPreference.isEnabled() }
         if let stored = actions.readLanguageFirst?(), stored != languageFirst { languageFirst = stored }
         if let stored = actions.readHome?(), stored != home { home = stored }
         if let stored = actions.readProfile?(), stored != profile { profile = stored }
@@ -575,7 +583,7 @@ enum GlassSettingsRowID: Hashable {
     case homeLanguages, homeShelves, homeLookup
     case tmdbKey, streamingRegion, streamingServices
     case switchProfile, profilePreferences
-    case maximumResolution, languageFirst, dolbyVision
+    case maximumResolution, languageFirst, dolbyVision, subtitleSync
 }
 
 struct GlassSettingsView: View {
@@ -765,6 +773,14 @@ struct GlassSettingsView: View {
             GlassSettingsRow(symbol: "captions.bubble.fill", tint: .teal, title: "Subtitle Language",
                              value: model.languageName(model.subtitleLanguage, subtitles: true)) { picker = .subtitles }
                 .focused($focusedRow, equals: .subtitles)
+            GlassSettingsDivider()
+            // Downloaded (OpenSubtitles) subtitles only, on the MKV route.
+            GlassSettingsRow(symbol: "waveform", tint: .teal, title: SubtitleAutoSyncPreference.titleKey,
+                             detail: SubtitleAutoSyncPreference.footerKey, detailLines: 3,
+                             value: glassSettingsLocalized(model.subtitleSync ? "On" : "Off"),
+                             showsChevron: false) { model.toggleSubtitleSync() }
+                .focused($focusedRow, equals: .subtitleSync)
+                .accessibilityIdentifier("Settings.Row.subtitleSync")
         }
     }
 

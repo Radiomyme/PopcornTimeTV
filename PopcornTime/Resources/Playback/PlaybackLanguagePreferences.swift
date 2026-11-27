@@ -1014,3 +1014,39 @@ final class MediaSelectionLearner {
         return forced ? nil : option
     }
 }
+
+// MARK: - The automatic subtitle sync's retimed files (`SubtitleRetimeWatch`)
+
+extension PlaybackLanguagePreferences {
+
+    /// The remux key of the OpenSubtitles rendition `item` shows: what the
+    /// players compare with the files the automatic sync retimed. nil when
+    /// no subtitle is on screen, or one of the file's own tracks.
+    @MainActor
+    static func shownExternalSubtitleKey(of item: AVPlayerItem) async -> String? {
+        guard let group = try? await item.asset.loadMediaSelectionGroup(for: .legible),
+              let option = item.currentMediaSelection.selectedMediaOption(in: group) else { return nil }
+        let names = await loadNames(of: [option])
+        let tag = option.extendedLanguageTag ?? option.locale?.identifier.replacingOccurrences(of: "_", with: "-")
+        return SubtitleRetimeWatch.externalKey(languageTag: tag, name: names[option])
+            ?? SubtitleRetimeWatch.externalKey(languageTag: tag, name: option.displayName)
+    }
+
+    #if DEBUG
+    /// `-PTDebugExternalSubtitle`: selects its OpenSubtitles rendition in
+    /// `item` as the app's own choice (not learnt as the user's). False when
+    /// the item has none (yet).
+    @MainActor
+    static func debugSelectExternalSubtitle(language: String, in item: AVPlayerItem) async -> Bool {
+        guard let group = try? await item.asset.loadMediaSelectionGroup(for: .legible) else { return false }
+        let names = await loadNames(of: group.options)
+        let key = RemuxPlayback.externalKey(languageTag: language)
+        guard let option = group.options.first(where: {
+            SubtitleRetimeWatch.externalKey(languageTag: $0.extendedLanguageTag, name: names[$0] ?? $0.displayName) == key
+        }) else { return false }
+        select(option, in: group, of: item)
+        print("[SubSync] DEBUG: selected the subtitle '\(names[option] ?? option.displayName)'")
+        return true
+    }
+    #endif
+}

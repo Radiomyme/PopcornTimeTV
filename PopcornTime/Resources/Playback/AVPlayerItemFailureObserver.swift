@@ -507,6 +507,20 @@ struct MediaSelectionSnapshot {
 
     let entries: [Entry]
 
+    /// An option `apply` selected explicitly in `group` (nil: off).
+    struct Pick {
+        let characteristic: AVMediaCharacteristic
+        let group: AVMediaSelectionGroup
+        let option: AVMediaSelectionOption?
+    }
+
+    /// What `apply` did: its log lines, and its explicit picks
+    /// (`reassert`).
+    struct Applied {
+        var lines: [String] = []
+        var picks: [Pick] = []
+    }
+
     /// The audible + legible selection of `item`; nil when its asset has
     /// neither group (or they can't load).
     @MainActor
@@ -550,37 +564,84 @@ struct MediaSelectionSnapshot {
     /// subtitle language, as on a first start; none: automatic.
     @MainActor
     @discardableResult
-    func apply(to item: AVPlayerItem, picksSubtitlesAnew: Bool = false) async -> [String] {
+    func apply(to item: AVPlayerItem, picksSubtitlesAnew: Bool = false) async -> Applied {
         // The rebuilt item's own picks in AVKit's menus are learnt too.
         PlaybackLanguagePreferences.learnChoices(on: item)
-        var applied: [String] = []
+        var applied = Applied()
         for entry in entries {
             guard let group = try? await item.asset.loadMediaSelectionGroup(for: entry.characteristic) else { continue }
-            let kind = entry.characteristic == .audible ? "audio" : "sous-titres"
+            let kind = Self.kind(entry.characteristic)
+            func pick(_ option: AVMediaSelectionOption?, _ line: String) {
+                PlaybackLanguagePreferences.select(option, in: group, of: item)
+                applied.lines.append(line)
+                applied.picks.append(Pick(characteristic: entry.characteristic, group: group, option: option))
+            }
             if entry.isAutomatic {
                 if picksSubtitlesAnew, entry.characteristic == .legible,
                    let option = await Self.rankedLegibleOption(in: group, languageTag: nil, of: item) {
-                    PlaybackLanguagePreferences.select(option, in: group, of: item)
-                    applied.append("\(kind) \(option.displayName) (classement)")
+                    pick(option, "\(kind) \(option.displayName) (classement)")
                 } else {
                     item.selectMediaOptionAutomatically(in: group)
-                    applied.append("\(kind) auto")
+                    applied.lines.append("\(kind) auto")
                 }
             } else if entry.propertyList == nil && entry.displayName == nil {
-                PlaybackLanguagePreferences.select(nil, in: group, of: item)
-                applied.append("\(kind) off")
+                pick(nil, "\(kind) off")
             } else if let option = entry.matchingOption(in: group) {
-                PlaybackLanguagePreferences.select(option, in: group, of: item)
-                applied.append("\(kind) \(option.displayName)")
+                pick(option, "\(kind) \(option.displayName)")
             } else if entry.characteristic == .legible,
                       let option = await Self.rankedLegibleOption(in: group, languageTag: entry.languageTag, of: item) {
-                PlaybackLanguagePreferences.select(option, in: group, of: item)
-                applied.append("\(kind) \(option.displayName) (classement)")
+                pick(option, "\(kind) \(option.displayName) (classement)")
             } else {
-                applied.append("\(kind) introuvable")
+                applied.lines.append("\(kind) introuvable")
             }
         }
         return applied
+    }
+
+    private static func kind(_ characteristic: AVMediaCharacteristic) -> String {
+        characteristic == .audible ? "audio" : "sous-titres"
+    }
+
+    /// The subtitle picks of `picks` that `item` no longer shows, selected
+    /// again; returns the log text (nil: every pick held). tvOS measured:
+    /// a pick made while the rebuilt HLS item is loading is replaced by
+    /// AVPlayer's automatic selection once the item is ready (the forced
+    /// track of the audio language, else none) — the OpenSubtitles file
+    /// the user read was gone after the rebuild while the log said it was
+    /// restored. A pick made once the item is ready holds. Only subtitles
+    /// are re-selected: an audio switch inside the item is what the
+    /// rebuilds avoid (see the remux players' audio pick).
+    @MainActor
+    @discardableResult
+    static func reassert(_ picks: [Pick], on item: AVPlayerItem) -> String? {
+        let selection = item.currentMediaSelection
+        let shown = picks.map { selection.selectedMediaOption(in: $0.group) }
+        let lost = drifted(wanted: picks.map(\.option), shown: shown)
+            .filter { picks[$0].characteristic == .legible }
+        guard !lost.isEmpty else { return nil }
+        var lines: [String] = []
+        for index in lost {
+            let pick = picks[index]
+            PlaybackLanguagePreferences.select(pick.option, in: pick.group, of: item)
+            lines.append("\(kind(pick.characteristic)) \(pick.option?.displayName ?? "off") "
+                         + "(AVPlayer had put \(shown[index]?.displayName ?? "off"))")
+        }
+        return lines.joined(separator: ", ")
+    }
+
+    /// What `item` shows in the groups of `picks` (logs: what is on screen,
+    /// not what was asked).
+    @MainActor
+    static func shownSelection(_ picks: [Pick], of item: AVPlayerItem) -> String {
+        let selection = item.currentMediaSelection
+        return picks.map { "\(kind($0.characteristic)) \(selection.selectedMediaOption(in: $0.group)?.displayName ?? "off")" }
+            .joined(separator: ", ")
+    }
+
+    /// Indices of the picks (`wanted`) the item does not show (`shown`,
+    /// same order). Pure: the tests cover it.
+    static func drifted<Option: Equatable>(wanted: [Option?], shown: [Option?]) -> [Int] {
+        zip(wanted, shown).enumerated().compactMap { index, pair in pair.0 == pair.1 ? nil : index }
     }
 
     /// The app's subtitle pick in `group` of `item`
@@ -1022,6 +1083,16 @@ final class PlaybackStarvationRecovery {
     /// The rebuild in progress gives subtitles nobody chose the app's pick
     /// (`rebuildNow`'s `picksSubtitlesAnew`).
     private var rebuildPicksSubtitlesAnew = false
+    /// The owner logged why it rebuilds (`rebuildNow`'s `announced`): no
+    /// « native item stuck » line for a planned replacement.
+    private var rebuildIsAnnounced = false
+    /// The explicit picks the selection restore made on the rebuilt item:
+    /// checked again once it is ready, and after its resume
+    /// (`MediaSelectionSnapshot.reassert`).
+    private var selectionPicks: [MediaSelectionSnapshot.Pick] = []
+    /// How long after the resume the restored selection is checked once
+    /// more (and logged as shown).
+    static let selectionCheckDelay: TimeInterval = 1
     /// The position a recovery was recovering when it ended without
     /// resuming (`onGiveUp`, or `handle` returned false while recovering /
     /// after the budget): where the owner's VLC hand-off continues once
@@ -1166,6 +1237,8 @@ final class PlaybackStarvationRecovery {
         generation += 1
         snapshotGeneration += 1
         snapshotPending = false
+        selectionPicks = []
+        rebuildIsAnnounced = false
         statusObservation?.invalidate()
         statusObservation = nil
         rateObserver = nil
@@ -1215,13 +1288,16 @@ final class PlaybackStarvationRecovery {
     /// `picksSubtitlesAnew` gives subtitles nobody chose the app's pick on
     /// the new item, as on a first start (`MediaSelectionSnapshot.apply`) —
     /// a choice the user made, off included, is kept like any other.
+    /// `announced`: the owner logged why it replaces a healthy item (an
+    /// OpenSubtitles file retimed by the automatic sync), so no « native
+    /// item stuck » line, and « item rebuilt » at the end.
     @discardableResult
     func rebuildNow(player: AVPlayer, at time: Double, reason: String, resumesPlayback: Bool = true,
-                    exactPosition: Bool = false, picksSubtitlesAnew: Bool = false) -> Bool {
+                    exactPosition: Bool = false, picksSubtitlesAnew: Bool = false, announced: Bool = false) -> Bool {
         guard !isRecovering, player.currentItem != nil, time.isFinite, time >= 0 else { return false }
         begin(player: player, time: time, startFraction: nil, captureSelection: true,
               isDataReady: { _, _ in true }, reason: reason, stuckItem: true, resumesPlayback: resumesPlayback,
-              exactPosition: exactPosition, picksSubtitlesAnew: picksSubtitlesAnew)
+              exactPosition: exactPosition, picksSubtitlesAnew: picksSubtitlesAnew, announced: announced)
         return true
     }
 
@@ -1359,7 +1435,8 @@ final class PlaybackStarvationRecovery {
                        isDataReady: @escaping (Double, TimeInterval) -> Bool, reason: String,
                        stuckItem: Bool = false, userTarget: Bool = false, resumesPlayback: Bool = true,
                        exactPosition: Bool = false, picksSubtitlesAnew: Bool = false, waitsForPlay: Bool = false,
-                       pausedRebuild: Bool = false, keepsRate: Bool = false, jump: Bool = false) {
+                       pausedRebuild: Bool = false, keepsRate: Bool = false, jump: Bool = false,
+                       announced: Bool = false) {
         generation += 1
         let current = generation
         statusObservation?.invalidate()
@@ -1382,6 +1459,8 @@ final class PlaybackStarvationRecovery {
         navigationDuringRebuild = nil
         rebuildSeeksExactly = exactPosition
         rebuildPicksSubtitlesAnew = picksSubtitlesAnew
+        rebuildIsAnnounced = announced
+        selectionPicks = []
         resumeTime = time
         resumeTimeIsUserTarget = userTarget
         abandonedTime = nil
@@ -1422,7 +1501,9 @@ final class PlaybackStarvationRecovery {
             }
         }
         if stuckItem {
-            print("[Player] native item stuck at \(Self.seconds(time)) on complete data (\(reason)) — rebuilding it there")
+            if !announced {
+                print("[Player] native item stuck at \(Self.seconds(time)) on complete data (\(reason)) — rebuilding it there")
+            }
         } else {
             if jump {
                 print("[Player] jump to \(Self.seconds(time)): its media is not written yet — the item no longer waits on it, "
@@ -1754,7 +1835,8 @@ final class PlaybackStarvationRecovery {
             Task { @MainActor [weak self] in
                 let applied = await snapshot.apply(to: item, picksSubtitlesAnew: picksSubtitlesAnew)
                 guard let self = self, current == self.generation else { return }
-                print("[Player] starvation recovery: selection restored — \(applied.joined(separator: ", "))")
+                print("[Player] starvation recovery: selection restored — \(applied.lines.joined(separator: ", "))")
+                self.selectionPicks = applied.picks
                 self.selectionApplied = true
                 self.seekIfReady(current)
             }
@@ -1799,6 +1881,11 @@ final class PlaybackStarvationRecovery {
         statusObservation?.invalidate()
         statusObservation = nil
         print("[Player] starvation recovery: new item ready — seeking to \(Self.seconds(time))")
+        // The selection restored while the item was loading may not have
+        // survived its readiness (`MediaSelectionSnapshot.reassert`).
+        if let line = MediaSelectionSnapshot.reassert(selectionPicks, on: item) {
+            print("[Player] starvation recovery: selection lost when the item became ready — re-applied: \(line)")
+        }
         // Up to 2 s before (a keyframe), never after: nothing is skipped —
         // exactly there for a rebuild that asked for it (`exactPosition`).
         let box = WeakBox(self)
@@ -1834,7 +1921,12 @@ final class PlaybackStarvationRecovery {
         navigationDuringRebuild = nil
         rebuildSeeksExactly = false
         rebuildPicksSubtitlesAnew = false
-        print("[Player] \(stuckItem ? "stuck item rebuilt" : jump ? "jump" : "starvation recovery #\(recoveryCount)"): "
+        let announced = rebuildIsAnnounced
+        rebuildIsAnnounced = false
+        checkSelectionLater(selectionPicks)
+        selectionPicks = []
+        let what = stuckItem ? (announced ? "item rebuilt" : "stuck item rebuilt") : jump ? "jump" : "starvation recovery #\(recoveryCount)"
+        print("[Player] \(what): "
               + "native playback \(resumes ? "resumes" : "stays paused") at \(Self.seconds(time))"
               + (finished ? "" : " (seek interrupted)"))
         if jump {
@@ -1845,6 +1937,23 @@ final class PlaybackStarvationRecovery {
         onWaitingChanged?(false)
         if resumes { onResumed?(time) }
         if let navigation = navigation { onNavigatedDuringRebuild?(navigation) }
+    }
+
+    /// `selectionCheckDelay` after the resume: the restored subtitles still
+    /// on screen (else selected again), and what the item really shows,
+    /// logged — not what was applied. Skipped when another recovery started
+    /// or the item was replaced meanwhile.
+    private func checkSelectionLater(_ picks: [MediaSelectionSnapshot.Pick]) {
+        guard !picks.isEmpty, let item = player?.currentItem else { return }
+        let current = generation
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.selectionCheckDelay) { [weak self] in
+            guard let self = self, current == self.generation, !self.isRecovering,
+                  self.player?.currentItem === item else { return }
+            if let line = MediaSelectionSnapshot.reassert(picks, on: item) {
+                print("[Player] rebuilt item: selection lost after the resume — re-applied: \(line)")
+            }
+            print("[Player] rebuilt item: on screen — \(MediaSelectionSnapshot.shownSelection(picks, of: item))")
+        }
     }
 
     /// Ends the recovery without resuming (→ the owner's VLC fallback).

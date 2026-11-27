@@ -852,6 +852,8 @@
 "UpNext.StillWatching.Stop" = "Parar";
 "Settings.AutoPlayNext" = "Reproduzir o próximo episódio";
 "Settings.AutoPlayNext.Footer" = "Perto do fim de um episódio, o próximo é oferecido com uma contagem regressiva e começa sozinho, na mesma versão quando possível.";
+"Settings.SubtitleSync" = "Sincronização automática de legendas";
+"Settings.SubtitleSync.Footer" = "Ajusta as legendas baixadas aos diálogos (arquivos MKV).";
 "Settings.UpNextCard" = "Cartão do próximo episódio";
 "Settings.UpNextCard.Value" = "%d s antes do fim";
 "Settings.UpNextCard.Message" = "Quanto tempo antes do fim de um episódio o cartão oferece o próximo. Com Reproduzir o próximo episódio ativado, o próximo começa no fim; senão, só quando você escolhe Reproduzir agora.";

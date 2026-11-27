@@ -263,6 +263,9 @@ final class RemuxPlayback {
     var subtitles: [Subtitle] {
         get { stateLock.withLock { lockedSubtitles } }
         set {
+            #if DEBUG
+            let newValue = Self.withDebugExternalSubtitle(newValue)
+            #endif
             stateLock.withLock {
                 lockedSubtitles = newValue
                 lockedSubtitlesPending = false
@@ -281,6 +284,43 @@ final class RemuxPlayback {
     /// Called once on the main queue when native playback is impossible
     /// (unsupported tracks, unreadable file…) — fall back to VLC.
     var onFailure: ((String) -> Void)?
+
+    /// Called on the main queue when the automatic subtitle sync retimed the
+    /// OpenSubtitles file of `key` (`sub_{key}`): it is served retimed from
+    /// now on. AVPlayer reads a WebVTT once per item, so when that rendition
+    /// is the one on screen the owner rebuilds its item
+    /// (`SubtitleRetimeWatch`); otherwise the next item loads it.
+    var onExternalSubtitleRetimed: ((_ key: String) -> Void)? {
+        get { stateLock.withLock { lockedOnRetimed } }
+        set { stateLock.withLock { lockedOnRetimed = newValue } }
+    }
+
+    /// The automatic sync of the OpenSubtitles files (`SubtitleAutoSync`);
+    /// nil when « Automatic Subtitle Sync » is off (read when the object is
+    /// made: a change applies from the next playback).
+    let subtitleSync: SubtitleAutoSync?
+
+    /// Test hook (and `-PTDebugExternalSubtitle`): a subtitle whose link is a
+    /// file URL is read from disk instead of downloaded. Off in the app: an
+    /// OpenSubtitles answer never points at a local file.
+    static var readsLocalSubtitleFiles = false
+
+    /// Test hook (and `-PTDebugSubtitleSyncQuick`): the schedule of the
+    /// automatic sync instead of the standard one. Set before creating the object.
+    static var subtitleSyncScheduleOverride: SubtitleAutoSyncSchedule?
+
+    /// The remux key ("fr", "pt-br") of a subtitle language tag: what
+    /// `sub_{key}` and `onExternalSubtitleRetimed` use.
+    static func externalKey(languageTag: String) -> String {
+        let allowed = CharacterSet(charactersIn: "abcdefghijklmnopqrstuvwxyz0123456789-")
+        return String(languageTag.lowercased().unicodeScalars.filter { allowed.contains($0) }.map(Character.init))
+    }
+
+    /// Test hook: the WebVTT served for `sub_{key}.vtt` (downloaded and
+    /// converted when needed), nil when it can't be had.
+    func externalSubtitleData(forKey key: String, completion: @escaping (Data?) -> Void) {
+        externalVTT(forKey: key, isRequest: false, completion: completion)
+    }
 
     // SHARED API (fix round 4: A4 implements, B1 + harnesses consume) -------
 
@@ -1023,6 +1063,7 @@ final class RemuxPlayback {
     /// (logged once per such episode).
     private var lockedWantedPastRemux = false
     private var lockedOnHalted: ((String) -> Void)?
+    private var lockedOnRetimed: ((String) -> Void)?
     private var lockedOnUnavailable: ((Double) -> Void)?
     /// Uptime of the last `onUnavailableSegmentRequested` (coalescing).
     private var lockedLastUnavailable: TimeInterval?
@@ -1250,6 +1291,23 @@ final class RemuxPlayback {
         self.outputDir = (Self.outputParentOverride ?? FileManager.default.temporaryDirectory)
             .appendingPathComponent("remux-\(UUID().uuidString.prefix(8))")
         self.boundedSession = BoundedStorageSession.session(for: streamer)
+        var schedule = Self.subtitleSyncScheduleOverride ?? .standard
+        #if DEBUG
+        if Self.subtitleSyncScheduleOverride == nil, let quick = Self.debugSubtitleSyncSchedule {
+            schedule = quick
+            print("[SubSync] DEBUG: the 30 s test clip schedule (-PTDebugSubtitleSyncQuick)")
+        }
+        #endif
+        self.subtitleSync = SubtitleAutoSyncPreference.isEnabled() ? SubtitleAutoSync(schedule: schedule) : nil
+        subtitleSync?.onApply = { [weak self] key, cues in self?.applySubtitleSync(key: key, cues: cues) }
+        if subtitleSync == nil { print("[SubSync] off (Settings)") }
+        #if DEBUG
+        if let injected = Self.debugExternalSubtitle {
+            print("[SubSync] DEBUG: \(injected.link) served as the OpenSubtitles file in \(injected.ISO639)")
+            Self.readsLocalSubtitleFiles = true
+            lockedSubtitles = [injected]
+        }
+        #endif
     }
 
     /// The stream's bounded-storage session (set up where the stream
@@ -1857,8 +1915,14 @@ final class RemuxPlayback {
     private func externalRenditions(defaultAllowed: Bool) -> [HLSPlaylists.ExternalSubtitle] {
         var seen = Set<String>()
         var result: [HLSPlaylists.ExternalSubtitle] = []
-        let preferred = preferredSubtitleLanguages.first.flatMap { MKVToHLSRemuxSession.normalizedLanguage($0) }
-        var defaultTaken = !defaultAllowed
+        #if DEBUG
+        // `-PTDebugExternalSubtitle`: its file is the DEFAULT one.
+        let injected = Self.debugExternalSubtitleLanguage
+        #else
+        let injected: String? = nil
+        #endif
+        let preferred = (injected ?? preferredSubtitleLanguages.first).flatMap { MKVToHLSRemuxSession.normalizedLanguage($0) }
+        var defaultTaken = !defaultAllowed && injected == nil
         let failed = vttLock.withLock { Set(vttFailures.filter { $0.value.kind == .definitive }.keys) }
         let advertised = stateLock.withLock { lockedAdvertisedExternalKeys }
         for subtitle in subtitles {
@@ -1906,9 +1970,7 @@ final class RemuxPlayback {
 
     /// URL-safe key ("fr", "pt-br"): the language code, else the name.
     private static func externalKey(for subtitle: Subtitle) -> String {
-        let source = subtitle.ISO639.isEmpty ? subtitle.language : bcp47(for: subtitle)
-        let allowed = CharacterSet(charactersIn: "abcdefghijklmnopqrstuvwxyz0123456789-")
-        return String(source.lowercased().unicodeScalars.filter { allowed.contains($0) }.map(Character.init))
+        externalKey(languageTag: subtitle.ISO639.isEmpty ? subtitle.language : bcp47(for: subtitle))
     }
 
     private static func externalKey(fromPath path: String, suffix: String) -> String {
@@ -2204,7 +2266,15 @@ final class RemuxPlayback {
         // One file per language: two languages whose downloads suggest the
         // same file name must not overwrite each other.
         let directory = outputDir
-        PopcornKit.downloadSubtitleFile(subtitle.link, fileName: "sub_\(key)", downloadDirectory: directory) { [weak self] fileURL, error in
+        let download: (@escaping (URL?, NSError?) -> Void) -> Void = { done in
+            // A local file (`readsLocalSubtitleFiles`): read as if downloaded.
+            if Self.readsLocalSubtitleFiles, let url = URL(string: subtitle.link), url.isFileURL {
+                done(FileManager.default.fileExists(atPath: url.path) ? url : nil, nil)
+                return
+            }
+            PopcornKit.downloadSubtitleFile(subtitle.link, fileName: "sub_\(key)", downloadDirectory: directory, completion: done)
+        }
+        download { [weak self] fileURL, error in
             DispatchQueue.global(qos: .userInitiated).async {
                 // Stopped meanwhile (the player closed during the download):
                 // the download recreated the output directory `stop()`
@@ -2228,14 +2298,13 @@ final class RemuxPlayback {
                     return
                 }
                 // Encoding (SubEncoding / BOM / language code page), format
-                // (SRT, MicroDVD, SubViewer, ASS…) → WebVTT, without the
-                // converter's MPEGTS:0 map: the right one is added below.
-                guard let vtt = SubtitleConversion.webVTT(fromSubtitleData: raw,
-                                                          formatHint: subtitle.format,
-                                                          encodingHint: subtitle.encoding,
-                                                          languageHint: subtitle.ISO639,
-                                                          frameRate: videoFrameRate ?? subtitle.frameRate,
-                                                          timestampMap: false) else {
+                // (SRT, MicroDVD, SubViewer, ASS…) → cues → WebVTT, without the
+                // converter's MPEGTS:0 map: the right one is added below. The
+                // cues are kept for the automatic sync, which retimes them.
+                let cues = SubtitleConversion.decodeText(raw, encodingHint: subtitle.encoding, languageHint: subtitle.ISO639)
+                    .map { SubtitleConversion.parse($0, format: SubtitleConversion.format(fromHint: subtitle.format),
+                                                    frameRate: videoFrameRate ?? subtitle.frameRate ?? 23.976) } ?? []
+                guard !cues.isEmpty else {
                     self.finishExternalAttempt(key: key, data: nil,
                                                failure: (.definitive, "OpenSubtitles file not convertible (\(subtitle.ISO639), \(subtitle.format ?? "?"))"))
                     return
@@ -2244,7 +2313,10 @@ final class RemuxPlayback {
                 // asks for a .vtt after the master playlist, and the preferred
                 // file is fetched ahead of it only once segment 0 exists).
                 let start90k = self.session?.timelineStart90k ?? 0
+                let vtt = SubtitleConversion.makeWebVTT(cues)
                 self.finishExternalAttempt(key: key, data: Data(Self.withTimestampMap(vtt, mpegts: start90k).utf8), failure: nil)
+                // After the file is cached: a retimed version replaces it.
+                self.subtitleSync?.register(key: key, language: Self.bcp47(for: subtitle), cues: cues)
             }
         }
     }
@@ -2339,6 +2411,77 @@ final class RemuxPlayback {
     static func withTimestampMap(_ vtt: String, mpegts: Int64 = 0) -> String {
         HLSPlaylists.withTimestampMap(vtt, mpegts: mpegts)
     }
+
+    // MARK: - Automatic subtitle sync
+
+    /// The automatic sync retimed `key`'s file (`SubtitleAutoSync.onApply`,
+    /// its queue): from now on `sub_{key}.vtt` serves `cues` — same URI, so
+    /// an item rebuilt on it keeps the user's selection. The cues moved
+    /// themselves (a negative offset can't go through X-TIMESTAMP-MAP, which
+    /// is clamped at 0); the map stays the session's.
+    private func applySubtitleSync(key: String, cues: [SubtitleCue]) {
+        let start90k = session?.timelineStart90k ?? 0
+        let data = Data(Self.withTimestampMap(SubtitleConversion.makeWebVTT(cues), mpegts: start90k).utf8)
+        let replaced: Bool = vttLock.withLock {
+            guard !vttClosed, vttCache[key] != nil else { return false }
+            vttCache[key] = data
+            return true
+        }
+        guard replaced else { return }
+        print("[SubSync] sub_\(key).vtt: the retimed file is served from now on (\(cues.count) cues)")
+        DispatchQueue.main.async { [weak self] in
+            guard let self = self, !self.isStopped else { return }
+            self.onExternalSubtitleRetimed?(key)
+        }
+    }
+
+    /// Pump queue, before pumping: what the session copies for the sync.
+    private func prepareSubtitleSyncMaterial(_ session: MKVToHLSRemuxSession) {
+        guard let sync = subtitleSync else { return }
+        session.collectsSyncMaterial = sync.wantsMaterial
+        session.collectsSyncAudio = sync.wantsAudio
+    }
+
+    /// Pump queue, after pumping: hands what the session copied to the sync's queue.
+    private func feedSubtitleSync(_ session: MKVToHLSRemuxSession) {
+        guard let sync = subtitleSync else { return }
+        let material = session.takeSyncMaterial()
+        guard !material.isEmpty else { return }
+        sync.ingest(material, timelineStart: Double(session.timelineStart90k) / 90_000)
+    }
+
+    #if DEBUG
+    /// `-PTDebugExternalSubtitle "<path of a subtitle file>@<language code>"`:
+    /// the remux serves that file as the OpenSubtitles subtitle of that
+    /// language (as if the search had returned it, whatever it returned for
+    /// that language), flagged DEFAULT; the players select it once
+    /// (`PlaybackLanguagePreferences.debugSelectExternalSubtitle`). With `-PTDebugSubtitleSyncQuick YES`
+    /// the automatic sync runs on the 30 s test clip schedule
+    /// (`SubtitleAutoSyncSchedule.quick`). End-to-end checks of the sync.
+    static var debugExternalSubtitle: Subtitle? {
+        guard let spec = UserDefaults.standard.string(forKey: "PTDebugExternalSubtitle"),
+              let at = spec.lastIndex(of: "@") else { return nil }
+        let path = String(spec[..<at]), language = String(spec[spec.index(after: at)...])
+        guard !path.isEmpty, !language.isEmpty else { return nil }
+        let name = Locale(identifier: "en").localizedString(forLanguageCode: language) ?? language
+        return Subtitle(language: name, link: URL(fileURLWithPath: path).absoluteString, ISO639: language, rating: 0,
+                        format: (path as NSString).pathExtension)
+    }
+
+    /// The language of `debugExternalSubtitle`.
+    static var debugExternalSubtitleLanguage: String? { debugExternalSubtitle?.ISO639 }
+
+    /// `list` with `debugExternalSubtitle` in place of its language's entry.
+    private static func withDebugExternalSubtitle(_ list: [Subtitle]) -> [Subtitle] {
+        guard let injected = debugExternalSubtitle else { return list }
+        return [injected] + list.filter { externalKey(for: $0) != externalKey(for: injected) }
+    }
+
+    /// The schedule `-PTDebugSubtitleSyncQuick YES` asks for, nil without it.
+    private static var debugSubtitleSyncSchedule: SubtitleAutoSyncSchedule? {
+        UserDefaults.standard.bool(forKey: "PTDebugSubtitleSyncQuick") ? .quick : nil
+    }
+    #endif
 
     // MARK: - Pump
 
@@ -2517,11 +2660,17 @@ final class RemuxPlayback {
             session.setInputComplete(false)
         }
         noteInputComplete(session, inputComplete)
+        prepareSubtitleSyncMaterial(session)
 
         if !prepared {
             switch session.prepare() {
             case .ready:
                 prepared = true
+                subtitleSync?.configure(
+                    tracks: session.subtitleRenditions.map {
+                        .init(index: $0.index, name: $0.name, isForced: $0.isForced, isCommentary: $0.isCommentary)
+                    },
+                    audio: session.syncAudioSource)
             case .unsupported(let reason):
                 // P0: never leave AVPlayer spinning on something it can't
                 // play — the caller switches to VLC right away.
@@ -2631,6 +2780,7 @@ final class RemuxPlayback {
             if produced >= 6 && written >= anchor + 3 { break }
             if Date().timeIntervalSince(tickStart) > 0.8 { break }
         }
+        feedSubtitleSync(session)
         // The first two segments may just have been written: the torrent is
         // turned to a prepared resume in this tick's report.
         logJumpCapability(session)
@@ -2665,6 +2815,8 @@ final class RemuxPlayback {
             // session without its end).
             if inputComplete && idleTicks >= 3 && session.nextSegmentIndex == progress.segmentsWritten {
                 session.finish()
+                feedSubtitleSync(session)
+                subtitleSync?.inputFinished()
                 // A jump whose keyframe the input never had (an index that lies
                 // about the last one): failed, not a film that ends there.
                 if haltIfJumpFailed(session) { return }

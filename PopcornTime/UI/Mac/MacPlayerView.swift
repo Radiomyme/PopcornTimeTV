@@ -792,6 +792,12 @@ final class MacPlayerController: ObservableObject {
     /// master playlist — the item is rebuilt once for it
     /// (`rebuildForLateSubtitlesIfDue`).
     private var lateSubtitles = LateSubtitlesWatch()
+    /// Remux path: an OpenSubtitles file the automatic sync retimed — the
+    /// item is rebuilt when it is the subtitle on screen
+    /// (`rebuildForRetimedSubtitlesIfDue`).
+    private var retimeWatch = SubtitleRetimeWatch()
+    /// The retimed files' selection check is under way (asynchronous).
+    private var retimeCheckInFlight = false
     /// Picture in Picture is on: the stuck-playback safety net stays out of
     /// it.
     private var isPictureInPictureActive = false
@@ -1210,6 +1216,10 @@ final class MacPlayerController: ObservableObject {
             // Codecs the remuxer can't repackage (DTS / TrueHD only, VP9…) —
             // reported within seconds of the header.
             DispatchQueue.main.async { self?.fallBackToVLC(message) }
+        }
+        // Main queue: an OpenSubtitles file the automatic sync retimed.
+        remux.onExternalSubtitleRetimed = { [weak self] key in
+            MainActor.assumeIsolated { self?.retimeWatch.retimed(key: key) }
         }
         remux.onHalted = { [weak self] reason in
             // The remux stopped producing after `onReady` (disk full…): the
@@ -2278,6 +2288,10 @@ final class MacPlayerController: ObservableObject {
         checkBoundedReverseScan()
         rebuildLiveBornItemIfEnded()
         rebuildForLateSubtitlesIfDue()
+        rebuildForRetimedSubtitlesIfDue()
+        #if DEBUG
+        debugSelectExternalSubtitleIfDue()
+        #endif
         // The stats text only while it shows (it is hidden 10 s after the
         // start; "n" brings it back, up to date within a second): this used
         // to reload every track's format and rebuild the text once a second
@@ -2453,8 +2467,10 @@ final class MacPlayerController: ObservableObject {
         liveBornWatch.attached(ObjectIdentifier(item),
                                isEventSession: (remux?.session?.totalDurationSeconds ?? 1) <= 0,
                                remuxFinished: remux?.isFinished ?? true)
-        // Its master playlist has every OpenSubtitles list known so far.
+        // Its master playlist has every OpenSubtitles list known so far,
+        // and it loads the files as they are served now (retimed or not).
         lateSubtitles.attached()
+        retimeWatch.attached()
         loadCommandTracks(of: item)
     }
 
@@ -2503,6 +2519,57 @@ final class MacPlayerController: ObservableObject {
         starvation.rebuildNow(player: player, at: time, reason: LateSubtitlesWatch.reason,
                               resumesPlayback: playing, exactPosition: true, picksSubtitlesAnew: true)
     }
+
+    /// Remux path, 1 Hz: the automatic sync retimed an OpenSubtitles file
+    /// (`RemuxPlayback.onExternalSubtitleRetimed`). AVPlayer read that
+    /// WebVTT once for this item: when it is the subtitle on screen, the
+    /// item is rebuilt in place on the corrected file — position, play /
+    /// pause state and the user's audio and subtitle choice kept (not picked
+    /// anew) — also when the user switches to it later on this item.
+    /// Otherwise nothing: the next item loads the corrected file. Waits for
+    /// the next tick as `rebuildForLateSubtitlesIfDue` does.
+    private func rebuildForRetimedSubtitlesIfDue() {
+        guard let player = player, !isDirectPlayback, vlcURL == nil, remux != nil, let item = player.currentItem else { return }
+        if retimeWatch.needsSelectionCheck, !retimeCheckInFlight {
+            retimeCheckInFlight = true
+            Task { @MainActor [weak self] in
+                let shown = await PlaybackLanguagePreferences.shownExternalSubtitleKey(of: item)
+                guard let self = self else { return }
+                self.retimeCheckInFlight = false
+                // The item was replaced meanwhile: it loaded the corrected file.
+                guard self.player?.currentItem === item else { return }
+                self.retimeWatch.selectionChecked(shownKey: shown)
+            }
+        }
+        let time = player.currentTime().seconds
+        let eligible = !starvation.isRecovering && !stopped && time.isFinite && time >= 0
+            && item.status == .readyToPlay && !awaitingStartSeek && startSeekTarget == nil
+            && !isPictureInPictureActive && !player.isExternalPlaybackActive
+        guard retimeWatch.shouldRebuild(isEligible: eligible) else { return }
+        let playing = playIntent.wantsPlayback
+        print("[Player] OpenSubtitles file retimed by the automatic sync: replacing the item at "
+              + "\(String(format: "%.3f", time)) s (\(playing ? "playing" : "paused")) with the corrected subtitles")
+        starvation.rebuildNow(player: player, at: time, reason: SubtitleRetimeWatch.reason,
+                              resumesPlayback: playing, exactPosition: true, announced: true)
+    }
+
+    #if DEBUG
+    /// `-PTDebugExternalSubtitle "<file>@<language>"`: its OpenSubtitles
+    /// rendition is selected once, as soon as the item has it.
+    private func debugSelectExternalSubtitleIfDue() {
+        guard !debugSelectedExternalSubtitle, !debugSelectingExternalSubtitle, !isDirectPlayback, vlcURL == nil,
+              let language = RemuxPlayback.debugExternalSubtitleLanguage,
+              let item = player?.currentItem, item.status == .readyToPlay else { return }
+        debugSelectingExternalSubtitle = true
+        Task { @MainActor [weak self] in
+            let done = await PlaybackLanguagePreferences.debugSelectExternalSubtitle(language: language, in: item)
+            self?.debugSelectingExternalSubtitle = false
+            if done { self?.debugSelectedExternalSubtitle = true }
+        }
+    }
+    private var debugSelectedExternalSubtitle = false
+    private var debugSelectingExternalSubtitle = false
+    #endif
 
     /// The session's furthest native position (1 Hz, and at close).
     private func noteHighWater() {

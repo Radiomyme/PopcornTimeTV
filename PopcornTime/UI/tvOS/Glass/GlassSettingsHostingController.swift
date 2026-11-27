@@ -94,6 +94,7 @@ final class GlassSettingsHostingController: UIHostingController<GlassSettingsVie
         case "maximumResolution": row = .maximumResolution
         case "languageFirst": row = .languageFirst
         case "dolbyVision": row = .dolbyVision
+        case "subtitleSync": row = .subtitleSync
         case "tmdbKey": row = .tmdbKey
         case "streamingRegion": row = .streamingRegion
         case "streamingServices": row = .streamingServices

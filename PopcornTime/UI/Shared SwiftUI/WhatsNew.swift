@@ -75,6 +75,12 @@ struct WhatsNewRelease {
                      titleEN: "HDR10+ recognised",
                      bodyEN: "HDR10+ movies are announced as such to the player.",
                      platforms: [.iOS, .macOS]),
+        WhatsNewItem(id: "subtitle-sync", symbol: "captions.bubble",
+                     titleFR: "Sous-titres recalés",
+                     bodyFR: "Les sous-titres téléchargés se calent seuls sur les dialogues.",
+                     titleEN: "Subtitles in sync",
+                     bodyEN: "Downloaded subtitles line up with the dialogue on their own.",
+                     platforms: [.tvOS, .iOS, .macOS]),
     ])
 
     /// What is new since 5.4.0 (CHANGELOG.md's "5.4.1").

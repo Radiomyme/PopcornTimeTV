@@ -26,6 +26,8 @@ struct MacSettingsView: View {
     @AppStorage(SourcePreferences.languageFirstKey) private var languageFirst = true
     /// « Dolby Vision 8.1 » (`DolbyVisionPlaybackMode`).
     @AppStorage(DolbyVisionPlaybackMode.defaultsKey) private var dolbyVisionMode = DolbyVisionPlaybackMode.automatic
+    /// « Automatic Subtitle Sync » (`SubtitleAutoSyncPreference`, on by default).
+    @AppStorage(SubtitleAutoSyncPreference.defaultsKey) private var autoSubtitleSync = true
     /// « Autoplay next episode » (decision D8: on unless turned off).
     @AppStorage(UpNextPreferences.autoPlayNextKey) private var autoPlayNext = true
     /// « Next Episode Card » (seconds before the end; absent = 60).
@@ -211,6 +213,12 @@ struct MacSettingsView: View {
                 }
             }
             languagePicker("Subtitle Language", storage: $preferredSubtitleLanguage, subtitles: true)
+            // Downloaded (OpenSubtitles) subtitles only, on the MKV route.
+            Toggle(isOn: $autoSubtitleSync) {
+                Text(LocalizedStringKey(SubtitleAutoSyncPreference.titleKey))
+                Text(LocalizedStringKey(SubtitleAutoSyncPreference.footerKey))
+            }
+            .accessibilityIdentifier("Settings.SubtitleSync")
         } header: {
             Text("Languages")
         } footer: {

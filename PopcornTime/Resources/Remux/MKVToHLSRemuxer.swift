@@ -189,6 +189,9 @@ final class MKVToHLSRemuxSession {
         let autoselect: Bool
         /// Hearing-impaired / SDH track (→ CHARACTERISTICS transcribes-spoken-dialog…).
         var isSDH = false
+        /// A commentary transcript (`isCommentary`): never the automatic
+        /// subtitle sync's reference (its timing is not the film's dialogue).
+        var isCommentary = false
         /// Matroska TrackNumber of the source track (diagnostics).
         var trackNumber: UInt64 = 0
         var playlistName: String { "subs\(index).m3u8" }
@@ -2062,6 +2065,7 @@ final class MKVToHLSRemuxSession {
                                               isForced: forced,
                                               autoselect: true)
             rendition.isSDH = sdh
+            rendition.isCommentary = Self.isCommentary(track)
             rendition.trackNumber = track.number
             subtitleRenditions.append(rendition)
             subtitleOutputs.append(SubtitleOutput(index: index, track: track))
@@ -2081,6 +2085,9 @@ final class MKVToHLSRemuxSession {
         self.videoOutput = VideoOutput(track: videoTrack, plan: videoPlan, config: videoConfig)
         self.audioOutputs = audioOutputs
         self.subtitleOutputs = subtitleOutputs
+        syncAudioSource = audioOutputs.first { $0.index == defaultChoice }.flatMap {
+            Self.syncAudioSource(index: $0.index, track: $0.track, plan: $0.plan, transcoded: $0.transcoder != nil)
+        }
         routes = [videoTrack.number: .video]
         for output in audioOutputs { routes[output.track.number] = .audio(output.index) }
         for output in subtitleOutputs { routes[output.track.number] = .subtitle(output.index) }
@@ -2199,9 +2206,11 @@ final class MKVToHLSRemuxSession {
         video.pending.append(frame)
         video.pendingBytes += frame.data.count
         video.latestPTS = max(video.latestPTS, units(frame.timestamp, 90_000))
+        noteSyncObserved(frame.timestamp)
     }
 
     private func handleAudio(_ frame: MKVFrame, output: AudioOutput) {
+        noteSyncAudio(frame, output: output)
         if let transcoder = output.transcoder {
             handleTranscoded(frame, output: output, transcoder: transcoder)
             return
@@ -2405,6 +2414,114 @@ final class MKVToHLSRemuxSession {
             + "the rendition continues with silence")
     }
 
+    // MARK: - Automatic subtitle sync material
+
+    /// The audio track the automatic subtitle sync may decode for its speech
+    /// reference (`SubtitleAutoSync`): the DEFAULT rendition, when Apple's
+    /// decoders take its codec (AC-3, E-AC-3, AAC) and it is not transcoded.
+    struct SyncAudioSource: Equatable {
+        let renditionIndex: Int
+        let codec: RemuxAudioPlan.Codec
+        /// AAC: the AudioSpecificConfig (CodecPrivate, or the one made for a
+        /// legacy CodecID). nil otherwise.
+        let audioSpecificConfig: Data?
+        let sampleRate: Double
+        let channels: Int
+        /// Matroska CodecDelay, seconds.
+        let codecDelay: Double
+    }
+
+    /// One compressed access unit of `SyncAudioSource`, media timeline (s).
+    struct SyncAudioUnit {
+        let data: Data
+        let time: Double
+        let duration: Double?
+    }
+
+    /// What the automatic subtitle sync aligns on, copied while demuxing and
+    /// handed over with `takeSyncMaterial()`: the sync works on its own queue,
+    /// the pump only copies.
+    struct SyncMaterial {
+        /// Embedded text cues by subtitle rendition index, media timeline,
+        /// as `handleSubtitle` keeps them (before segmenting empties them).
+        var cues: [Int: [SubtitleCue]] = [:]
+        var audio: [SyncAudioUnit] = []
+        /// Media time ranges whose video was demuxed: only there does "no
+        /// cue" mean "nobody speaks" (runs, in reading order; they may overlap).
+        var observed: [ClosedRange<Double>] = []
+
+        var isEmpty: Bool { cues.isEmpty && audio.isEmpty && observed.isEmpty }
+    }
+
+    /// Collect `SyncMaterial` (set before `prepare`: the frames buffered by
+    /// `prepare` are routed once it is ready). Pump-queue only.
+    var collectsSyncMaterial = false {
+        didSet {
+            // A pause in the copying must not read as a stretch without
+            // cues: the next run starts afresh.
+            if !collectsSyncMaterial { syncRun = nil; syncMaterial = SyncMaterial(); syncAudioBytes = 0 }
+        }
+    }
+    /// Also copy the access units of `syncAudioSource` (only while a speech
+    /// reference is wanted: decoding is the expensive part). Pump-queue only.
+    var collectsSyncAudio = false
+    /// Decided with the renditions; nil when the DEFAULT audio has no
+    /// decoder here. Pump-queue only.
+    private(set) var syncAudioSource: SyncAudioSource?
+    private var syncMaterial = SyncMaterial()
+    /// The run of demuxed video times being extended (`noteSyncObserved`).
+    private var syncRun: ClosedRange<Double>?
+    private var syncAudioBytes = 0
+    /// Bound of the audio copied between two `takeSyncMaterial` calls (the
+    /// caller takes it every tick: a lookahead window is far below it).
+    static let maxSyncAudioBytes = 48 << 20
+
+    /// The material collected since the last call. Pump-queue only.
+    func takeSyncMaterial() -> SyncMaterial {
+        var taken = syncMaterial
+        // The run goes on: the sync merges what it is given.
+        if let run = syncRun { taken.observed.append(run) }
+        syncMaterial = SyncMaterial()
+        syncAudioBytes = 0
+        return taken
+    }
+
+    private func noteSyncObserved(_ ticks: Int64) {
+        guard collectsSyncMaterial else { return }
+        let time = Double(MatroskaDemuxer.saturatingAdd(ticks, shiftTicks)) * Double(demuxer.timestampScale) / 1e9
+        guard time.isFinite else { return }
+        // Decode order runs a few frames behind presentation order: a
+        // second either way still extends the run; a jump starts another.
+        if let run = syncRun, time >= run.lowerBound - 1, time <= run.upperBound + 1 {
+            syncRun = min(run.lowerBound, time)...max(run.upperBound, time)
+        } else {
+            if let run = syncRun { syncMaterial.observed.append(run) }
+            syncRun = time...time
+        }
+    }
+
+    private func noteSyncAudio(_ frame: MKVFrame, output: AudioOutput) {
+        guard collectsSyncMaterial, collectsSyncAudio, output.index == syncAudioSource?.renditionIndex,
+              syncAudioBytes + frame.data.count <= Self.maxSyncAudioBytes else { return }
+        let time = Double(MatroskaDemuxer.saturatingAdd(frame.timestamp, shiftTicks)) * Double(demuxer.timestampScale) / 1e9
+        let samples = output.plan.frameDuration(frame.data)
+        let duration = samples > 0 ? Double(samples) / Double(output.timescale) : nil
+        syncMaterial.audio.append(SyncAudioUnit(data: frame.data, time: time, duration: duration))
+        syncAudioBytes += frame.data.count
+    }
+
+    /// The DEFAULT audio rendition, when it can be decoded for the speech
+    /// reference (`SyncAudioSource`).
+    private static func syncAudioSource(index: Int, track: MKVTrack, plan: RemuxAudioPlan,
+                                        transcoded: Bool) -> SyncAudioSource? {
+        guard !transcoded, [.ac3, .eac3, .aac].contains(plan.codec) else { return nil }
+        let config = plan.codec == .aac ? RemuxCodecs.aacAudioSpecificConfig(track: track) : nil
+        if plan.codec == .aac, config == nil { return nil }
+        return SyncAudioSource(renditionIndex: index, codec: plan.codec, audioSpecificConfig: config,
+                               sampleRate: track.samplingFrequency, channels: track.channels,
+                               codecDelay: Double(track.codecDelayNs) / 1e9)
+    }
+
     private func handleSubtitle(_ frame: MKVFrame, output: SubtitleOutput) {
         let secondsPerTick = Double(demuxer.timestampScale) / 1e9
         let start = Double(frame.timestamp + shiftTicks) * secondsPerTick
@@ -2422,6 +2539,7 @@ final class MKVToHLSRemuxSession {
         cue.start = max(0, cue.start)
         guard cue.end > cue.start else { return }
         output.cues.append(cue)
+        if collectsSyncMaterial { syncMaterial.cues[output.index, default: []].append(cue) }
     }
 
     // MARK: - Private: segmenting

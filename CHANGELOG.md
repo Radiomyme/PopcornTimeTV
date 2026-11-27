@@ -21,6 +21,17 @@ independent decoder re-read all 719 frames of that file. Not yet seen on an HDR1
   No public algorithm exists for this conversion: it is the app's own, from the published
   formats (dovi_tool, FFmpeg, ST 2094-40).
 
+**Automatic subtitle sync (Apple TV, iPhone / iPad, Mac)**
+- Subtitles downloaded from OpenSubtitles are lined up with the film on their own, for MKV
+  files (the remux route). The reference is an embedded text subtitle track of the file when
+  there is one (any language, never a forced-only or commentary track), else the speech heard in
+  the audio's centre channel (AC-3, E-AC-3, AAC). A masked cross-correlation finds the offset,
+  and a 25 / 23.976 fps difference, after a few minutes of playback; it is applied only when the
+  match is clear and moves more than 0.15 s, then refined once. The corrected file is served and
+  the player reloads in place, keeping the position and the chosen tracks. Settings ›
+  Automatic Subtitle Sync turns it off. Checked with unit tests (synthetic films, real fixtures)
+  and on the Apple TV simulator, where a file shifted by −2.0 s was set right (+2.04 s found).
+
 **HDR10+ signalling (Apple TV, iPhone / iPad, Mac)**
 - A stream whose frames carry HDR10+, its own or converted, is announced as HDR10+ to the player
   (`SUPPLEMENTAL-CODECS` with the `cdm4` brand, as Apple asks since 2024).
