@@ -44,8 +44,10 @@ enum DolbyVisionPlaybackMode: String, CaseIterable, Identifiable {
     /// The HDR10 base layer only: RPUs and HDR10+ metadata dropped, the
     /// static mastering metadata kept.
     case hdr10
-    /// The base layer with its HDR10+ metadata when the file has some
-    /// (HDR10 otherwise).
+    /// The base layer with its HDR10+ metadata when the file has some. On
+    /// tvOS a file without it gets HDR10+ generated from the RPUs' L1 / L6
+    /// levels (`MKVToHLSRemuxSession.Options.hdr10PlusFromDolbyVision`);
+    /// elsewhere, and when the RPUs can't be read, HDR10.
     case hdr10Plus
 
     var id: String { rawValue }
@@ -63,8 +65,9 @@ enum DolbyVisionPlaybackMode: String, CaseIterable, Identifiable {
     }
 
     /// What the remux does: `automatic` becomes Dolby Vision when the
-    /// display takes it, else HDR10+ (kept only when the file has it; the
-    /// Apple TV sends HDR10 to a TV without HDR10+). Never `automatic`.
+    /// display takes it, else HDR10+ (the file's own, or on tvOS generated
+    /// from the RPUs; the Apple TV sends HDR10 to a TV without HDR10+).
+    /// Never `automatic`.
     func resolved(displaySupportsDolbyVision: Bool) -> DolbyVisionPlaybackMode {
         guard self == .automatic else { return self }
         return displaySupportsDolbyVision ? .dolbyVision : .hdr10Plus
@@ -127,8 +130,11 @@ struct RemuxVideoPlan {
     let sampleEntry: Data
     /// RFC 6381 token for the variant's `CODECS` (e.g. "hvc1.2.4.L153.B0").
     let codecsString: String
-    /// HLS `SUPPLEMENTAL-CODECS` (Dolby Vision profile 8 back-compatible
-    /// streams, e.g. "dvh1.08.06/db1p"); nil otherwise.
+    /// HLS `SUPPLEMENTAL-CODECS`: Dolby Vision profile 8 back-compatible
+    /// streams ("dvh1.08.06/db1p"), or HEVC whose samples carry HDR10+ —
+    /// the file's own or generated — as the `CODECS` string with the 'cdm4'
+    /// brand ("hvc1.2.4.L153.B0/cdm4": no CODECS format names HDR10+, What's
+    /// new in HLS 2024); nil otherwise.
     let supplementalCodecs: String?
     let videoRange: RemuxVideoRange
     /// Presentation size (tkhd / RESOLUTION), aspect ratio applied.
@@ -143,7 +149,17 @@ struct RemuxVideoPlan {
     let summary: String
     /// Optional per-sample payload rewrite (e.g. dropping Dolby Vision
     /// profile 7 enhancement-layer NAL units). nil = copy bytes untouched.
+    /// It may keep state (HDR10+ generated from Dolby Vision RPUs): call it
+    /// on one serial queue, in decode order.
     let transform: ((Data) -> Data)?
+    /// What a stateful `transform` did so far, for the session log (HDR10+
+    /// generated from Dolby Vision RPUs); nil otherwise. Same queue as it.
+    var transformReport: (() -> String)? = nil
+
+    /// The samples carry HDR10+ (signalled by the 'cdm4' brand).
+    var signalsHDR10Plus: Bool {
+        supplementalCodecs?.split(separator: ",").contains { $0.hasSuffix("/cdm4") } ?? false
+    }
 }
 
 /// Everything the session / HLS layer needs to mux and signal an audio track.
@@ -339,9 +355,11 @@ enum RemuxCodecs {
     /// when CodecPrivate is incomplete). `releaseTags` hints are NOT used for
     /// codec decisions, only as a last-resort VIDEO-RANGE hint.
     /// `dolbyVisionMode`: the « Dolby Vision 8.1 » setting (HEVC profile 8
-    /// with an HDR10 base only).
+    /// with an HDR10 base only). `hdr10PlusFromDolbyVision`: with the setting
+    /// on HDR10+ and a file without its own, generate HDR10+ from the RPUs.
     static func makeVideoPlan(track: MKVTrack, sampleFrames: [Data], releaseHintsHDR: Bool,
-                              dolbyVisionMode: DolbyVisionPlaybackMode = .dolbyVision) -> Result<RemuxVideoPlan, RemuxUnsupported> {
+                              dolbyVisionMode: DolbyVisionPlaybackMode = .dolbyVision,
+                              hdr10PlusFromDolbyVision: Bool = false) -> Result<RemuxVideoPlan, RemuxUnsupported> {
         if case .unsupported(let reason) = videoSupport(codecID: track.codecID) {
             return .failure(RemuxUnsupported(reason))
         }
@@ -350,7 +368,7 @@ enum RemuxCodecs {
             return makeAVCPlan(track: track, sampleFrames: sampleFrames, releaseHintsHDR: releaseHintsHDR)
         case "V_MPEGH/ISO/HEVC":
             return makeHEVCPlan(track: track, sampleFrames: sampleFrames, releaseHintsHDR: releaseHintsHDR,
-                                dolbyVisionMode: dolbyVisionMode)
+                                dolbyVisionMode: dolbyVisionMode, hdr10PlusFromDolbyVision: hdr10PlusFromDolbyVision)
         case "V_AV1":
             return makeAV1Plan(track: track, sampleFrames: sampleFrames, releaseHintsHDR: releaseHintsHDR)
         default:
@@ -1088,6 +1106,182 @@ extension RemuxCodecs {
         return out
     }
 
+    /// HDR10+ made from a Dolby Vision 8.1 stream, sample by sample: the
+    /// RPU (NAL 62) and EL (63) units go, and a prefix SEI holding the ST
+    /// 2094-40 metadata of the RPU's L1 / L6 levels (`RemuxHDR10Plus`) goes
+    /// in front of the first slice, after any AUD, parameter set or SEI.
+    ///
+    /// Each RPU maps on its own: it travels with its picture in decode
+    /// order, and a shot repeats the same L1, so the output is constant per
+    /// shot without any look-ahead or smoothing. A sample whose RPU gives
+    /// no L1 (compressed or absent DM, unreadable or missing RPU) reuses the
+    /// last L1 read; with none yet, it gets no HDR10+ (HDR10 for that
+    /// picture). L6 and source_max_pq are static: the last ones sent stay
+    /// in force (a compressed DM never sends them). A sample holding HDR10+
+    /// of its own keeps it and gets none.
+    ///
+    /// No hold either when L1 changes from one picture to the next
+    /// (mapping.md §2 suggests a causal hold for RPUs measured frame by
+    /// frame): every picture carries the mapping of its own RPU, which is
+    /// what the RPU says and is valid HDR10+. A hold here would run in
+    /// decode order, so pictures around B-frames would get the values of
+    /// pictures shown after them; done right it belongs where presentation
+    /// order is known (the segment cut), with the IRAP reset below. Not
+    /// done: Dolby-authored RPUs keep L1 constant per shot, and F12's RPUs
+    /// set scene_refresh_flag on every picture, where §2 itself sends the
+    /// new values (its L1 changes, at decode frames 97, 99, 100…, are a few
+    /// avg_pq codes).
+    ///
+    /// That memory starts over at every IRAP picture (IDR, CRA, BLA), as a
+    /// restarted session or a jump does (they start at a keyframe): a
+    /// segment then has the same bytes whether the pass reached it in order
+    /// or by a jump (RemuxJumpIdentityTests).
+    ///
+    /// Not thread-safe: the session calls it on its pump queue, in decode
+    /// order. One instance per plan, so per session.
+    final class HDR10PlusFromDolbyVision {
+        let lengthSize: Int
+        private let cache = RemuxHDR10Plus.Cache()
+        private var level1: DolbyVisionRPU.Level1?
+        private var level6: DolbyVisionRPU.Level6?
+        private var sourceMaxPQ: UInt16?
+        private var sequence: DolbyVisionRPU.SequenceInfo?
+        /// Samples given an SEI from their own RPU, from an earlier one,
+        /// none (no L1 yet), and left with the file's own HDR10+.
+        private(set) var fromOwnRPU = 0
+        private(set) var fromEarlierRPU = 0
+        private(set) var withoutHDR10Plus = 0
+        private(set) var withNativeHDR10Plus = 0
+
+        init(lengthSize: Int) {
+            self.lengthSize = lengthSize
+        }
+
+        /// The mapping's input for these levels. The peak is bounded by L6's
+        /// MaxCLL and mastering peak when the stream sends them (0 = unknown),
+        /// and by source_max_pq when L6 gives no mastering peak.
+        static func levels(level1: DolbyVisionRPU.Level1, level6: DolbyVisionRPU.Level6?,
+                           sourceMaxPQ: UInt16? = nil) -> RemuxHDR10Plus.Levels {
+            var levels = RemuxHDR10Plus.Levels(minPQ: Int(level1.minPQ), avgPQ: Int(level1.avgPQ), maxPQ: Int(level1.maxPQ))
+            if let level6 {
+                levels.maxContentLightLevel = Int(level6.maxContentLightLevel)
+                levels.masteringDisplayPeak = Int(level6.maxDisplayMasteringLuminance)
+            }
+            // Only read without an L6 mastering peak, and only kept when it is
+            // below L1 max (PQ codes order as cd/m² do): a bound that changes
+            // nothing stays out of the cache key.
+            if levels.masteringDisplayPeak == 0, let sourceMaxPQ, sourceMaxPQ > 0, sourceMaxPQ < level1.maxPQ {
+                levels.sourceMaxPQ = Int(sourceMaxPQ)
+            }
+            return levels
+        }
+
+        /// One line for the session log: what the samples got, so a file whose
+        /// later RPUs can't be read shows it (the summary only judges the first
+        /// frames).
+        var report: String {
+            "HDR10+ from Dolby Vision: \(fromOwnRPU) sample(s) from their own RPU, \(fromEarlierRPU) from an earlier one, "
+                + "\(withoutHDR10Plus) without (HDR10), \(withNativeHDR10Plus) with the file's own · "
+                + "\(cache.misses) SEI built, \(cache.hits) reused"
+        }
+
+        /// The sample without its Dolby Vision units, with its HDR10+ SEI.
+        /// A sample whose length prefixes don't tile it is returned as is.
+        func transform(_ frame: Data) -> Data {
+            let size = lengthSize
+            guard (1...4).contains(size), !frame.isEmpty else { return frame }
+            // One walk over the units in place (a 4K sample is large: only
+            // the RPU is read, and SEI units checked for HDR10+).
+            var units: [(range: Range<Int>, type: UInt8)] = []   // length prefix included
+            var firstVCL: Int?
+            var vclTemporalIDPlus1: UInt8 = 1
+            var irap = false
+            var rpu: Range<Int>?
+            var native = false
+            var dropsUnits = false
+            let parsed: Bool = frame.withUnsafeBytes { raw in
+                let n = raw.count
+                var pos = 0
+                while pos < n {
+                    guard pos + size <= n else { return false }
+                    var length = 0
+                    for k in 0..<size { length = length << 8 | Int(raw[pos + k]) }
+                    let start = pos + size
+                    guard length <= n - start else { return false }
+                    let type: UInt8 = length > 0 ? (raw[start] >> 1) & 0x3F : 0xFF
+                    if type < 32 {
+                        if firstVCL == nil {
+                            firstVCL = units.count
+                            if length > 1, raw[start + 1] & 0x07 != 0 { vclTemporalIDPlus1 = raw[start + 1] & 0x07 }
+                        }
+                        if (16...23).contains(type) { irap = true }
+                    } else if type == 62 || type == 63 {
+                        dropsUnits = true
+                        // The RPU: layer 0, TemporalId 0; the last one, as FFmpeg reads it.
+                        if type == 62, length > 2, raw[start] == 0x7C, raw[start + 1] == 0x01 { rpu = start..<(start + length) }
+                    } else if type == 39, !native, length > 2 {
+                        native = hevcNALHasHDR10Plus([UInt8](raw[start..<(start + length)]))
+                    }
+                    units.append((pos..<(start + length), type))
+                    pos = start + length
+                }
+                return true
+            }
+            guard parsed else { return frame }
+
+            if irap {
+                level1 = nil
+                level6 = nil
+                sourceMaxPQ = nil
+                sequence = nil
+            }
+            var ownLevel1 = false
+            if let rpu {
+                let metadata = frame.withUnsafeBytes {
+                    DolbyVisionRPU.parse(nal: UnsafeRawBufferPointer(rebasing: $0[rpu]), previousSequence: sequence)
+                }
+                if let metadata {
+                    sequence = metadata.sequenceInfo
+                    if let found = metadata.level1 { level1 = found; ownLevel1 = true }
+                    if let found = metadata.level6 { level6 = found }
+                    if let found = metadata.sourceMaxPQ { sourceMaxPQ = found }
+                }
+            }
+
+            var sei: [UInt8]?
+            if native {
+                withNativeHDR10Plus += 1
+            } else if firstVCL != nil, let level1 {
+                var unit = cache.seiNAL(for: Self.levels(level1: level1, level6: level6, sourceMaxPQ: sourceMaxPQ))
+                // An SEI's TemporalId is its picture's (H.265 §7.4.2.2).
+                if unit.count > 1 { unit[1] = vclTemporalIDPlus1 }
+                if unit.count < 1 << (8 * size) {
+                    sei = unit
+                    if ownLevel1 { fromOwnRPU += 1 } else { fromEarlierRPU += 1 }
+                }
+            }
+            if sei == nil, !native { withoutHDR10Plus += 1 }
+            guard sei != nil || dropsUnits else { return frame }
+
+            var out = Data(capacity: frame.count + (sei?.count ?? 0) + size)
+            frame.withUnsafeBytes { raw in
+                let base = raw.baseAddress!.assumingMemoryBound(to: UInt8.self)
+                for (index, unit) in units.enumerated() {
+                    if index == firstVCL, let sei {
+                        var length = sei.count
+                        var prefix = [UInt8](repeating: 0, count: size)
+                        for k in stride(from: size - 1, through: 0, by: -1) { prefix[k] = UInt8(length & 0xFF); length >>= 8 }
+                        out.append(contentsOf: prefix)
+                        out.append(contentsOf: sei)
+                    }
+                    if unit.type == 62 || unit.type == 63 { continue }
+                    out.append(base.advanced(by: unit.range.lowerBound), count: unit.range.count)
+                }
+            }
+            return out
+        }
+    }
+
     /// Mastering display (SEI 137) and content light level (SEI 144)
     /// payloads from SEI NAL units — byte-identical to `mdcv` / `clli`.
     fileprivate static func hdrSEIPayloads(_ nals: [[UInt8]], hevc: Bool) -> (mdcv: [UInt8]?, clli: [UInt8]?) {
@@ -1777,7 +1971,8 @@ extension RemuxCodecs {
     }
 
     fileprivate static func makeHEVCPlan(track: MKVTrack, sampleFrames: [Data], releaseHintsHDR: Bool,
-                                         dolbyVisionMode: DolbyVisionPlaybackMode) -> Result<RemuxVideoPlan, RemuxUnsupported> {
+                                         dolbyVisionMode: DolbyVisionPlaybackMode,
+                                         hdr10PlusFromDolbyVision: Bool) -> Result<RemuxVideoPlan, RemuxUnsupported> {
         let codecPrivate = [UInt8](track.codecPrivate)
         var record: HvcCRecord?
         var annexBConfig: [[UInt8]] = []
@@ -1905,6 +2100,17 @@ extension RemuxCodecs {
             note = "Dolby Vision sans configuration — lu en "
             noteNeedsRange = true
         }
+        // HDR10+ generated from the RPUs: asked for, no HDR10+ of the file's
+        // own, and an RPU of the first frames read to its L1 (decided here so
+        // the label and the playlist never promise it for a file without
+        // RPUs, or with RPUs this reader refuses).
+        let generateHDR10Plus = hdr10PlusFromDolbyVision && ignoredDolbyVision81 && dolbyVisionMode == .hdr10Plus
+            && sawRPU && !sawHDR10Plus
+            && sampleFrames.prefix(12).contains { frame in
+                let sample = annexBSamples ? annexBToLengthPrefixed(frame) : frame
+                guard let range = DolbyVisionRPU.rpuNALRange(in: sample, lengthSize: lengthSize) else { return false }
+                return DolbyVisionRPU.parse(nal: sample[range])?.level1 != nil
+            }
 
         // Colour, geometry, HDR metadata.
         let firstNALs = sampleFrames.first.map { nalUnits(of: $0, lengthSize: lengthSize, annexB: annexBSamples) } ?? []
@@ -1929,8 +2135,14 @@ extension RemuxCodecs {
         let hevcCodecs = hevcCodecString(profileTierLevel: Array(hvcC[1...12]), sampleEntry: "hvc1")
         let baseLabel = "HEVC " + hevcProfileName(sps)
         var transforms: [(Data) -> Data] = []
+        var generator: HDR10PlusFromDolbyVision?
         if annexBSamples { transforms.append { annexBToLengthPrefixed($0) } }
-        if stripDolbyVisionLayers {
+        if generateHDR10Plus {
+            // One pass: drops the RPU / EL units and inserts the HDR10+ SEI.
+            let made = HDR10PlusFromDolbyVision(lengthSize: lengthSize)
+            generator = made
+            transforms.append { made.transform($0) }
+        } else if stripDolbyVisionLayers {
             let size = lengthSize
             transforms.append { strippingHEVCNALUnits($0, lengthSize: size, types: [62, 63]) }
         }
@@ -1976,10 +2188,12 @@ extension RemuxCodecs {
         let summary: String
         if ignoredDolbyVision81 {
             // What plays: "HDR10 (Dolby Vision 8.1 ignoré)", "HDR10+ (…)", or
-            // HDR10 when HDR10+ was asked for a file without its metadata.
+            // HDR10 when HDR10+ was asked for a file without its metadata
+            // (and, on tvOS, without RPUs it could be made from).
             let label: String
             switch (dolbyVisionMode, sawHDR10Plus) {
             case (.hdr10Plus, true): label = "HDR10+ (Dolby Vision 8.1 ignoré)"
+            case (.hdr10Plus, false) where generateHDR10Plus: label = "HDR10+ (converti depuis Dolby Vision 8.1)"
             case (.hdr10Plus, false): label = "HDR10 (Dolby Vision 8.1 ignoré, pas de HDR10+)"
             default: label = "HDR10 (Dolby Vision 8.1 ignoré)"
             }
@@ -1987,11 +2201,17 @@ extension RemuxCodecs {
         } else {
             summary = videoSummary(baseLabel, rangeLabel: rangeName(range), geometry: geometry, fps: fps, note: note)
         }
-        return .success(RemuxVideoPlan(
-            codec: .hevc, sampleEntry: entry, codecsString: hevcCodecs, supplementalCodecs: nil, videoRange: range,
+        // HDR10+ in the samples (generated, or the file's own unless HDR10
+        // drops it) is signalled on PQ variants only, as Apple specifies it.
+        let carriesHDR10Plus = generateHDR10Plus || (sawHDR10Plus && !(ignoredDolbyVision81 && dolbyVisionMode == .hdr10))
+        let supplemental = carriesHDR10Plus && range == .pq ? "\(hevcCodecs)/cdm4" : nil
+        var plan = RemuxVideoPlan(
+            codec: .hevc, sampleEntry: entry, codecsString: hevcCodecs, supplementalCodecs: supplemental, videoRange: range,
             displayWidth: geometry.displayWidth, displayHeight: geometry.displayHeight,
             codedWidth: geometry.codedWidth, codedHeight: geometry.codedHeight, frameRate: fps,
-            summary: summary, transform: transform))
+            summary: summary, transform: transform)
+        if let generator { plan.transformReport = { generator.report } }
+        return .success(plan)
     }
 }
 

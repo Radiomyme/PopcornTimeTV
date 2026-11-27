@@ -2349,6 +2349,12 @@ final class RemuxPlayback {
         let storedMode = DolbyVisionPlaybackMode.stored()
         let displayDV = PlaybackCapabilities.current.dolbyVision
         options.dolbyVisionMode = storedMode.resolved(displaySupportsDolbyVision: displayDV)
+        #if os(tvOS)
+        // HDR10+ made from the Dolby Vision 8.1 RPUs: the Apple TV 4K (3rd
+        // generation and later) sends it to an HDR10+ TV. iOS and the Mac keep
+        // a file's own HDR10+ only.
+        options.hdr10PlusFromDolbyVision = true
+        #endif
         if storedMode == .automatic {
             print("[Remux] Dolby Vision 8.1: automatic → \(options.dolbyVisionMode.title) "
                   + "(display: \(PlaybackCapabilities.displayHDRFormats.joined(separator: ", ")))")

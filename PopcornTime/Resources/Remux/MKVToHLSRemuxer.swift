@@ -102,6 +102,11 @@ final class MKVToHLSRemuxSession {
         /// « Dolby Vision 8.1 » (Settings): Dolby Vision, or the HDR10 base
         /// layer with (HDR10+) or without its dynamic metadata.
         var dolbyVisionMode: DolbyVisionPlaybackMode = .dolbyVision
+        /// With `dolbyVisionMode` HDR10+ and a Dolby Vision 8.1 file without
+        /// HDR10+ of its own: generate it from the RPUs' L1 / L6 levels
+        /// (`RemuxCodecs.HDR10PlusFromDolbyVision`). Set on tvOS only, where
+        /// the Apple TV 4K sends HDR10+ to the TV; off, such a file plays HDR10.
+        var hdr10PlusFromDolbyVision = false
         /// Preferred audio languages, ISO 639-1 / BCP 47 ("fr"), priority order.
         var preferredAudioLanguages: [String] = []
         /// Preferred subtitle languages, ISO 639-1 / BCP 47, priority order.
@@ -208,6 +213,9 @@ final class MKVToHLSRemuxSession {
     }
 
     deinit {
+        // A session stopped before the end of the file (the viewer left, a
+        // rebuild) still says what its video transform did.
+        logTransformReport()
         try? fileHandle.close()
     }
 
@@ -494,7 +502,17 @@ final class MKVToHLSRemuxSession {
                         ? " · a\(a.index): \(a.resyncs) resync(s), \(a.dropped) dropped, \(a.fillerWindows) filled window(s)" : ""
                 }.joined())
         }
+        logTransformReport()
         lock.withLock { lockedProgress.finished = true }
+    }
+
+    /// Logs once what a stateful video transform did (HDR10+ generated from
+    /// Dolby Vision: samples converted, reusing an earlier RPU, left HDR10),
+    /// since the summary only judges the first frames.
+    private func logTransformReport() {
+        guard !transformReportLogged, let report = videoOutput?.plan.transformReport?() else { return }
+        transformReportLogged = true
+        log("video: \(report)")
     }
 
     /// Thread-safe snapshot.
@@ -1470,6 +1488,8 @@ final class MKVToHLSRemuxSession {
     private var outcome: PrepareResult?
     private var headerParsed = false
     private var isFinished = false
+    /// `logTransformReport` already ran.
+    private var transformReportLogged = false
     private var videoTrack: MKVTrack?
     private var audioCandidates: [MKVTrack] = []
     private var subtitleCandidates: [MKVTrack] = []
@@ -1926,7 +1946,8 @@ final class MKVToHLSRemuxSession {
         let sampleFrames = Array(buffer.frames.lazy.filter { $0.trackNumber == videoTrack.number }.prefix(10).map(\.data))
         let videoPlan: RemuxVideoPlan
         switch RemuxCodecs.makeVideoPlan(track: videoTrack, sampleFrames: sampleFrames, releaseHintsHDR: options.releaseHintsHDR,
-                                             dolbyVisionMode: options.dolbyVisionMode) {
+                                             dolbyVisionMode: options.dolbyVisionMode,
+                                             hdr10PlusFromDolbyVision: options.hdr10PlusFromDolbyVision) {
         case .success(let plan): videoPlan = plan
         case .failure(let error): return error.reason
         }
@@ -2083,6 +2104,8 @@ final class MKVToHLSRemuxSession {
         guard let video = videoOutput else { return "Vidéo non prise en charge" }
         var brands: [String] = []
         if case .dolbyVision = video.plan.codec { brands.append("dby1") }
+        // HDR10+ in the samples: the 'cdm4' brand (CTA-5001), as in SUPPLEMENTAL-CODECS.
+        if video.plan.signalsHDR10Plus { brands.append("cdm4") }
         do {
             try FMP4Muxer.initSegment(tracks: [video.config], extraBrands: brands)
                 .write(to: outputDirectory.appendingPathComponent("video_init.mp4"), options: .atomic)

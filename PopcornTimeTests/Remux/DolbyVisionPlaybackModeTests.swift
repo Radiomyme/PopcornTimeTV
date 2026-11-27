@@ -141,7 +141,7 @@ final class DolbyVisionPlaybackModeTests: CheckedTestCase {
     func testHDR10PlusKeepsItsMetadataWithoutDolbyVision() {
         guard let plan = plan(.hdr10Plus) else { return }
         eq(plan.codec, .hevc, "plain HEVC")
-        eq(plan.supplementalCodecs, nil, "no SUPPLEMENTAL-CODECS")
+        eq(plan.supplementalCodecs, plan.codecsString + "/cdm4", "SUPPLEMENTAL-CODECS: HDR10+ ('cdm4')")
         check(!hasBox(plan.sampleEntry, "dvvC"), "no dvvC")
         check(plan.summary.hasPrefix("HDR10+ (Dolby Vision 8.1 ignoré)"), "summary: \(plan.summary)")
         let input = frames(hdr10Plus: true)[0]
