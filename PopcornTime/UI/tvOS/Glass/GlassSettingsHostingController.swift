@@ -93,6 +93,7 @@ final class GlassSettingsHostingController: UIHostingController<GlassSettingsVie
         case "upNextCard": row = .upNextCard
         case "maximumResolution": row = .maximumResolution
         case "languageFirst": row = .languageFirst
+        case "dolbyVision": row = .dolbyVision
         case "tmdbKey": row = .tmdbKey
         case "streamingRegion": row = .streamingRegion
         case "streamingServices": row = .streamingServices

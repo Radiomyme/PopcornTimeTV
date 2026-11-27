@@ -99,6 +99,9 @@ final class MKVToHLSRemuxSession {
         var releaseTaggedAtmos = false
         /// Release name carried HDR/DV tags — last-resort VIDEO-RANGE hint.
         var releaseHintsHDR = false
+        /// « Dolby Vision 8.1 » (Settings): Dolby Vision, or the HDR10 base
+        /// layer with (HDR10+) or without its dynamic metadata.
+        var dolbyVisionMode: DolbyVisionPlaybackMode = .dolbyVision
         /// Preferred audio languages, ISO 639-1 / BCP 47 ("fr"), priority order.
         var preferredAudioLanguages: [String] = []
         /// Preferred subtitle languages, ISO 639-1 / BCP 47, priority order.
@@ -1922,7 +1925,8 @@ final class MKVToHLSRemuxSession {
         // Video -----------------------------------------------------------
         let sampleFrames = Array(buffer.frames.lazy.filter { $0.trackNumber == videoTrack.number }.prefix(10).map(\.data))
         let videoPlan: RemuxVideoPlan
-        switch RemuxCodecs.makeVideoPlan(track: videoTrack, sampleFrames: sampleFrames, releaseHintsHDR: options.releaseHintsHDR) {
+        switch RemuxCodecs.makeVideoPlan(track: videoTrack, sampleFrames: sampleFrames, releaseHintsHDR: options.releaseHintsHDR,
+                                             dolbyVisionMode: options.dolbyVisionMode) {
         case .success(let plan): videoPlan = plan
         case .failure(let error): return error.reason
         }

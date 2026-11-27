@@ -197,6 +197,8 @@ final class GlassSettingsModel: ObservableObject {
     @Published private(set) var upNextCardLead: Int
     /// In lines; 0: no limit.
     @Published private(set) var maximumResolution: Int
+    /// « Dolby Vision 8.1 » (`DolbyVisionPlaybackMode`, device-wide).
+    @Published private(set) var dolbyVisionMode = DolbyVisionPlaybackMode.stored()
     @Published private(set) var languageFirst: Bool
     @Published private(set) var isTraktSignedIn: Bool
     /// nil while it is being measured.
@@ -419,6 +421,11 @@ final class GlassSettingsModel: ObservableObject {
         actions.setMaximumResolution(lines)
     }
 
+    func select(dolbyVisionMode mode: DolbyVisionPlaybackMode) {
+        dolbyVisionMode = mode
+        mode.store()
+    }
+
     /// « No Limit », « 1080p »…
     var maximumResolutionText: String {
         actions.maximumResolutionChoices.first { $0.id == String(maximumResolution) }?.title
@@ -457,6 +464,7 @@ final class GlassSettingsModel: ObservableObject {
         if let stored = actions.readAutoPlayNext?(), stored != autoPlayNext { autoPlayNext = stored }
         if let stored = actions.readUpNextCardLead?(), stored != upNextCardLead { upNextCardLead = stored }
         if let stored = actions.readMaximumResolution?(), stored != maximumResolution { maximumResolution = stored }
+        if DolbyVisionPlaybackMode.stored() != dolbyVisionMode { dolbyVisionMode = DolbyVisionPlaybackMode.stored() }
         if let stored = actions.readLanguageFirst?(), stored != languageFirst { languageFirst = stored }
         if let stored = actions.readHome?(), stored != home { home = stored }
         if let stored = actions.readProfile?(), stored != profile { profile = stored }
@@ -556,7 +564,7 @@ enum GlassSettingsPalette {
 /// The rows that open a picker.
 enum GlassSettingsPicker: String, Identifiable {
     case quality, upNextCard, audio, subtitles, homeLanguages, homeShelves, streamingRegion, streamingServices, tmdbKey
-    case taste, maximumResolution
+    case taste, maximumResolution, dolbyVision
     var id: String { rawValue }
 }
 
@@ -566,7 +574,7 @@ enum GlassSettingsRowID: Hashable {
     case homeLanguages, homeShelves, homeLookup
     case tmdbKey, streamingRegion, streamingServices
     case switchProfile, profilePreferences
-    case maximumResolution, languageFirst
+    case maximumResolution, languageFirst, dolbyVision
 }
 
 struct GlassSettingsView: View {
@@ -720,6 +728,12 @@ struct GlassSettingsView: View {
                              value: model.maximumResolutionText) { picker = .maximumResolution }
                 .focused($focusedRow, equals: .maximumResolution)
                 .accessibilityIdentifier("Settings.Row.maximumResolution")
+            GlassSettingsDivider()
+            GlassSettingsRow(symbol: "sparkles.rectangle.stack", tint: .orange, title: DolbyVisionPlaybackMode.settingTitle,
+                             detail: DolbyVisionPlaybackMode.settingFooterKey,
+                             value: model.dolbyVisionMode.title) { picker = .dolbyVision }
+                .focused($focusedRow, equals: .dolbyVision)
+                .accessibilityIdentifier("Settings.Row.dolbyVision")
             GlassSettingsDivider()
             GlassSettingsRow(symbol: "play.square.stack.fill", tint: .green, title: "Settings.AutoPlayNext",
                              detail: "Settings.AutoPlayNext.Footer", detailLines: 3,
@@ -901,6 +915,17 @@ struct GlassSettingsView: View {
                 selectedID: String(model.maximumResolution),
                 onSelect: { id in
                     if let lines = Int(id) { model.select(maximumResolution: lines) }
+                    self.picker = nil
+                },
+                onCancel: { self.picker = nil })
+        case .dolbyVision:
+            GlassSettingsPickerSheet(
+                title: DolbyVisionPlaybackMode.settingTitle,
+                message: DolbyVisionPlaybackMode.settingFooterKey,
+                options: DolbyVisionPlaybackMode.allCases.map { .init(id: $0.rawValue, title: $0.title, detail: nil) },
+                selectedID: model.dolbyVisionMode.rawValue,
+                onSelect: { id in
+                    if let mode = DolbyVisionPlaybackMode(rawValue: id) { model.select(dolbyVisionMode: mode) }
                     self.picker = nil
                 },
                 onCancel: { self.picker = nil })

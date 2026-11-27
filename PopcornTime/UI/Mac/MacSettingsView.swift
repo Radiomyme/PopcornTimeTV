@@ -24,6 +24,8 @@ struct MacSettingsView: View {
     @AppStorage(SourcePreferences.maximumResolutionKey) private var maximumResolution = 0
     /// « Prefer Your Language » (on by default).
     @AppStorage(SourcePreferences.languageFirstKey) private var languageFirst = true
+    /// « Dolby Vision 8.1 » (`DolbyVisionPlaybackMode`).
+    @AppStorage(DolbyVisionPlaybackMode.defaultsKey) private var dolbyVisionMode = DolbyVisionPlaybackMode.dolbyVision
     /// « Autoplay next episode » (decision D8: on unless turned off).
     @AppStorage(UpNextPreferences.autoPlayNextKey) private var autoPlayNext = true
     /// « Next Episode Card » (seconds before the end; absent = 60).
@@ -169,6 +171,15 @@ struct MacSettingsView: View {
             } label: {
                 Text("Maximum Resolution")
                 Text("The automatic choice stays at or below it. Higher sources stay in the list.")
+            }
+            .pickerStyle(.menu)
+            Picker(selection: $dolbyVisionMode) {
+                ForEach(DolbyVisionPlaybackMode.allCases) { mode in
+                    Text(verbatim: mode.title).tag(mode)
+                }
+            } label: {
+                Text(verbatim: DolbyVisionPlaybackMode.settingTitle)
+                Text(LocalizedStringKey(DolbyVisionPlaybackMode.settingFooterKey))
             }
             .pickerStyle(.menu)
             // Off: the next episode's card stays without a countdown,

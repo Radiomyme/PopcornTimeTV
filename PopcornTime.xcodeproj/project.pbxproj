@@ -232,6 +232,7 @@
 		47F38E899AB0E538123969A7 /* DownloadsStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2464A46F5144EEC990D42E0 /* DownloadsStore.swift */; };
 		48B830EC7270C5FC30750018 /* JSONValue.swift in Sources */ = {isa = PBXBuildFile; fileRef = B9A5B2894233AEB853E7A1E1 /* JSONValue.swift */; };
 		48D1BD31031B5260E652CBA5 /* GlassSettingsHostingController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 75533C77215A85953E8365E9 /* GlassSettingsHostingController.swift */; };
+		4903B1470FE551F7A2A470BD /* DolbyVisionPlaybackModeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 228B6390A26857F0A9144FB7 /* DolbyVisionPlaybackModeTests.swift */; };
 		4947EFF0ACB302B9EED1A927 /* CellularStreamingPolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = C6CEE8B378B84F46EAD207EE /* CellularStreamingPolicy.swift */; };
 		49790C91C8A1210BB715AF53 /* UpNextDebugHooks.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0BC9ED4486ACB15182D82B39 /* UpNextDebugHooks.swift */; };
 		49A5508891E64D7ACCC48537 /* RemuxAudioTranscoder.swift in Sources */ = {isa = PBXBuildFile; fileRef = E07267B3D72BCBF52A5C33B0 /* RemuxAudioTranscoder.swift */; };
@@ -1059,6 +1060,7 @@
 		2187CEADB1AC0D29B6A61DFF /* HomeTabView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = HomeTabView.swift; path = PopcornTime/UI/iOS/HomeTabView.swift; sourceTree = SOURCE_ROOT; };
 		224BD88708A37BB12A9D1EBB /* WatchlistView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = WatchlistView.swift; path = PopcornTime/UI/iOS/WatchlistView.swift; sourceTree = SOURCE_ROOT; };
 		2274CD17180CD2CE85175EEA /* ObjCExceptionCatcher.m */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.c.objc; name = ObjCExceptionCatcher.m; path = PopcornTime/UI/tvOS/Views/ObjCExceptionCatcher.m; sourceTree = SOURCE_ROOT; };
+		228B6390A26857F0A9144FB7 /* DolbyVisionPlaybackModeTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = DolbyVisionPlaybackModeTests.swift; path = PopcornTimeTests/Remux/DolbyVisionPlaybackModeTests.swift; sourceTree = SOURCE_ROOT; };
 		22F85F2B92BDB15700534691 /* HomeCardMenu.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = HomeCardMenu.swift; path = "PopcornTime/UI/Shared SwiftUI/Home/HomeCardMenu.swift"; sourceTree = SOURCE_ROOT; };
 		2421B9AF4982E4364E732997 /* PlaybackStartTiming.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = PlaybackStartTiming.swift; path = PopcornTime/Resources/Playback/PlaybackStartTiming.swift; sourceTree = SOURCE_ROOT; };
 		287B85341C9873A200EEF5C8 /* PopcornTime.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = PopcornTime.app; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -1989,6 +1991,7 @@
 				0DF840FA832BFE06BD11B1D6 /* RemuxSteeringTests.swift */,
 				76B53B224FDAE1F5F30C3494 /* RemuxResumeEngineTests.swift */,
 				B1A8C3A6124637AD94DF7505 /* RemuxWaitNudgeTests.swift */,
+				228B6390A26857F0A9144FB7 /* DolbyVisionPlaybackModeTests.swift */,
 			);
 			name = Remux;
 			sourceTree = "<group>";
@@ -3493,6 +3496,7 @@
 				929CDEEEBC141DCD5AB2A720 /* ProfileTasteTests.swift in Sources */,
 				CF0BC5D6A22E2CBDF3C1165A /* DownloadsCatalog.swift in Sources */,
 				3D383972149342F1BF7FB10A /* DownloadsCatalogTests.swift in Sources */,
+				4903B1470FE551F7A2A470BD /* DolbyVisionPlaybackModeTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

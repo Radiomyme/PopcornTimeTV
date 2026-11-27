@@ -2346,6 +2346,7 @@ final class RemuxPlayback {
         var options = MKVToHLSRemuxSession.Options()
         options.releaseTaggedAtmos = isAtmos
         options.releaseHintsHDR = releaseHintsHDR
+        options.dolbyVisionMode = .stored()
         options.preferredAudioLanguages = preferredAudioLanguages
         options.preferredSubtitleLanguages = preferredSubtitleLanguages
         return options

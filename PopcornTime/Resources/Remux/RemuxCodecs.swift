@@ -30,6 +30,48 @@ struct RemuxUnsupported: Error, CustomStringConvertible, Equatable {
     var description: String { reason }
 }
 
+/// « Dolby Vision 8.1 » in the Settings of every app: how the remux plays a
+/// Dolby Vision profile 8 stream whose base layer is HDR10 (compatibility
+/// ID 1). Some TVs pump or flicker on its per-frame metadata; the HDR10
+/// base layer plays with a steady picture. Device-wide, like the quality.
+enum DolbyVisionPlaybackMode: String, CaseIterable, Identifiable {
+    /// The RPUs signalled and kept: the TV switches to Dolby Vision.
+    case dolbyVision
+    /// The HDR10 base layer only: RPUs and HDR10+ metadata dropped, the
+    /// static mastering metadata kept.
+    case hdr10
+    /// The base layer with its HDR10+ metadata when the file has some
+    /// (HDR10 otherwise).
+    case hdr10Plus
+
+    var id: String { rawValue }
+
+    static let defaultsKey = "dolbyVision81Playback"
+
+    /// The stored choice; absent or unknown = Dolby Vision.
+    static func stored(in defaults: UserDefaults = .standard) -> DolbyVisionPlaybackMode {
+        defaults.string(forKey: defaultsKey).flatMap(DolbyVisionPlaybackMode.init(rawValue:)) ?? .dolbyVision
+    }
+
+    /// The default removes the key.
+    func store(in defaults: UserDefaults = .standard) {
+        defaults.set(self == .dolbyVision ? nil : rawValue, forKey: Self.defaultsKey)
+    }
+
+    /// Format names, the same in every language.
+    var title: String {
+        switch self {
+        case .dolbyVision: return "Dolby Vision"
+        case .hdr10: return "HDR10"
+        case .hdr10Plus: return "HDR10+"
+        }
+    }
+
+    /// The setting's name and its one-line explanation (Localizable.strings keys).
+    static let settingTitle = "Dolby Vision 8.1"
+    static let settingFooterKey = "If the picture flickers, try HDR10."
+}
+
 /// HLS `VIDEO-RANGE`.
 enum RemuxVideoRange: String {
     case sdr = "SDR"
@@ -276,7 +318,10 @@ enum RemuxCodecs {
     /// the track (used e.g. to sniff Dolby Vision RPUs / AV1 sequence headers
     /// when CodecPrivate is incomplete). `releaseTags` hints are NOT used for
     /// codec decisions, only as a last-resort VIDEO-RANGE hint.
-    static func makeVideoPlan(track: MKVTrack, sampleFrames: [Data], releaseHintsHDR: Bool) -> Result<RemuxVideoPlan, RemuxUnsupported> {
+    /// `dolbyVisionMode`: the « Dolby Vision 8.1 » setting (HEVC profile 8
+    /// with an HDR10 base only).
+    static func makeVideoPlan(track: MKVTrack, sampleFrames: [Data], releaseHintsHDR: Bool,
+                              dolbyVisionMode: DolbyVisionPlaybackMode = .dolbyVision) -> Result<RemuxVideoPlan, RemuxUnsupported> {
         if case .unsupported(let reason) = videoSupport(codecID: track.codecID) {
             return .failure(RemuxUnsupported(reason))
         }
@@ -284,7 +329,8 @@ enum RemuxCodecs {
         case "V_MPEG4/ISO/AVC":
             return makeAVCPlan(track: track, sampleFrames: sampleFrames, releaseHintsHDR: releaseHintsHDR)
         case "V_MPEGH/ISO/HEVC":
-            return makeHEVCPlan(track: track, sampleFrames: sampleFrames, releaseHintsHDR: releaseHintsHDR)
+            return makeHEVCPlan(track: track, sampleFrames: sampleFrames, releaseHintsHDR: releaseHintsHDR,
+                                dolbyVisionMode: dolbyVisionMode)
         case "V_AV1":
             return makeAV1Plan(track: track, sampleFrames: sampleFrames, releaseHintsHDR: releaseHintsHDR)
         default:
@@ -890,6 +936,134 @@ extension RemuxCodecs {
             }
             out.append(byte)
             zeros = byte == 0 ? zeros + 1 : 0
+        }
+        return out
+    }
+
+    /// RBSP → NAL payload: inserts emulation_prevention_three_byte after
+    /// every 0x0000 followed by a byte ≤ 0x03 (H.265 §7.4.2).
+    static func escapeRBSP(_ rbsp: [UInt8]) -> [UInt8] {
+        var out: [UInt8] = []
+        out.reserveCapacity(rbsp.count + rbsp.count / 64 + 1)
+        var zeros = 0
+        for byte in rbsp {
+            if zeros >= 2, byte <= 0x03 {
+                out.append(0x03)
+                zeros = 0
+            }
+            out.append(byte)
+            zeros = byte == 0 ? zeros + 1 : 0
+        }
+        return out
+    }
+
+    /// One SEI message of an RBSP: payload type and its bytes (RBSP form).
+    struct SEIMessage: Equatable {
+        var type: Int
+        var payload: [UInt8]
+    }
+
+    /// The messages of an SEI RBSP (after the NAL header), nil when the
+    /// syntax doesn't parse to the trailing bits.
+    static func seiMessages(rbsp: [UInt8]) -> [SEIMessage]? {
+        var messages: [SEIMessage] = []
+        var pos = 0
+        while pos < rbsp.count {
+            if rbsp[pos] == 0x80, rbsp[(pos + 1)...].allSatisfy({ $0 == 0 }) { return messages }  // rbsp_trailing_bits
+            var type = 0
+            while pos < rbsp.count, rbsp[pos] == 0xFF { type += 255; pos += 1 }
+            guard pos < rbsp.count else { return nil }
+            type += Int(rbsp[pos]); pos += 1
+            var size = 0
+            while pos < rbsp.count, rbsp[pos] == 0xFF { size += 255; pos += 1 }
+            guard pos < rbsp.count else { return nil }
+            size += Int(rbsp[pos]); pos += 1
+            guard pos + size <= rbsp.count else { return nil }
+            messages.append(SEIMessage(type: type, payload: Array(rbsp[pos..<(pos + size)])))
+            pos += size
+        }
+        return nil
+    }
+
+    /// HDR10+ dynamic metadata (SMPTE ST 2094-40): a registered ITU-T T.35
+    /// message (type 4) of Samsung's provider code — country 0xB5,
+    /// provider 0x003C, provider-oriented code 0x0001, application 4.
+    static func isHDR10PlusMessage(_ message: SEIMessage) -> Bool {
+        message.type == 4 && message.payload.starts(with: [0xB5, 0x00, 0x3C, 0x00, 0x01, 0x04])
+    }
+
+    /// A prefix SEI NAL unit (type 39) holding HDR10+ metadata.
+    static func hevcNALHasHDR10Plus(_ nal: [UInt8]) -> Bool {
+        guard nal.count > 2, (nal[0] >> 1) & 0x3F == 39 else { return false }
+        return seiMessages(rbsp: unescapeRBSP(nal, from: 2))?.contains(where: isHDR10PlusMessage) ?? false
+    }
+
+    /// The SEI NAL unit without its HDR10+ messages: nil when nothing else
+    /// remains (the unit goes), the unit untouched when it has none or
+    /// doesn't parse.
+    static func hevcSEIWithoutHDR10Plus(_ nal: [UInt8]) -> [UInt8]? {
+        guard nal.count > 2, (nal[0] >> 1) & 0x3F == 39,
+              let messages = seiMessages(rbsp: unescapeRBSP(nal, from: 2)),
+              messages.contains(where: isHDR10PlusMessage) else { return nal }
+        let kept = messages.filter { !isHDR10PlusMessage($0) }
+        guard !kept.isEmpty else { return nil }
+        var rbsp: [UInt8] = []
+        func ffCoded(_ value: Int) {
+            var rest = value
+            while rest >= 255 { rbsp.append(0xFF); rest -= 255 }
+            rbsp.append(UInt8(rest))
+        }
+        for message in kept {
+            ffCoded(message.type)
+            ffCoded(message.payload.count)
+            rbsp += message.payload
+        }
+        rbsp.append(0x80)
+        return Array(nal[0..<2]) + escapeRBSP(rbsp)
+    }
+
+    /// A length-prefixed HEVC sample without its HDR10+ metadata (static
+    /// HDR10 brightness). Untouched when it has none or doesn't parse.
+    static func strippingHDR10Plus(_ frame: Data, lengthSize: Int) -> Data {
+        guard (1...4).contains(lengthSize) else { return frame }
+        // The NAL units' ranges, walked in place (a 4K sample is large:
+        // only its SEI units are copied).
+        var units: [Range<Int>] = []
+        var rewritten: [Int: [UInt8]?] = [:]
+        let parsed: Bool = frame.withUnsafeBytes { raw in
+            let n = raw.count
+            var pos = 0
+            while pos < n {
+                guard pos + lengthSize <= n else { return false }
+                var length = 0
+                for k in 0..<lengthSize { length = length << 8 | Int(raw[pos + k]) }
+                let start = pos + lengthSize
+                guard length <= n - start else { return false }
+                units.append(start..<(start + length))
+                if length > 2, (raw[start] >> 1) & 0x3F == 39 {
+                    let nal = [UInt8](raw[start..<(start + length)])
+                    // nil value: the unit goes (updateValue keeps a nil, a subscript would remove it).
+                    if hevcNALHasHDR10Plus(nal) { rewritten.updateValue(hevcSEIWithoutHDR10Plus(nal), forKey: units.count - 1) }
+                }
+                pos = start + length
+            }
+            return true
+        }
+        guard parsed, !rewritten.isEmpty else { return frame }
+        var out = Data(capacity: frame.count)
+        for (index, range) in units.enumerated() {
+            let kept: [UInt8]
+            if let replacement = rewritten[index] {
+                guard let replacement else { continue }
+                kept = replacement
+            } else {
+                kept = [UInt8](frame[(frame.startIndex + range.lowerBound)..<(frame.startIndex + range.upperBound)])
+            }
+            var length = kept.count
+            var prefix = [UInt8](repeating: 0, count: lengthSize)
+            for k in stride(from: lengthSize - 1, through: 0, by: -1) { prefix[k] = UInt8(length & 0xFF); length >>= 8 }
+            out.append(contentsOf: prefix)
+            out.append(contentsOf: kept)
         }
         return out
     }
@@ -1582,7 +1756,8 @@ extension RemuxCodecs {
         return h
     }
 
-    fileprivate static func makeHEVCPlan(track: MKVTrack, sampleFrames: [Data], releaseHintsHDR: Bool) -> Result<RemuxVideoPlan, RemuxUnsupported> {
+    fileprivate static func makeHEVCPlan(track: MKVTrack, sampleFrames: [Data], releaseHintsHDR: Bool,
+                                         dolbyVisionMode: DolbyVisionPlaybackMode) -> Result<RemuxVideoPlan, RemuxUnsupported> {
         let codecPrivate = [UInt8](track.codecPrivate)
         var record: HvcCRecord?
         var annexBConfig: [[UInt8]] = []
@@ -1667,21 +1842,27 @@ extension RemuxCodecs {
         }
 
         // Dolby Vision.
-        var sawRPU = false, sawEL = false
+        var sawRPU = false, sawEL = false, sawHDR10Plus = false
         for frame in sampleFrames.prefix(12) {
             for unit in nalUnits(of: frame, lengthSize: lengthSize, annexB: annexBSamples) {
                 let type = (unit[0] >> 1) & 0x3F
                 if type == 62 { sawRPU = true }
                 if type == 63 { sawEL = true }
+                if type == 39, !sawHDR10Plus, hevcNALHasHDR10Plus(unit) { sawHDR10Plus = true }
             }
         }
         let dv = dolbyVisionConfig(of: track)
         var dvMode: (profile: Int, level: Int, compat: Int)?
         var stripDolbyVisionLayers = false
+        /// « Dolby Vision 8.1 » set to HDR10 / HDR10+: the HDR10 base layer plays.
+        var ignoredDolbyVision81 = false
         var note: String?
         var noteNeedsRange = false
         if let dv = dv {
             switch dv.profile {
+            case _ where dv.profile == 8 && dv.compatibilityID == 1 && dolbyVisionMode != .dolbyVision:
+                stripDolbyVisionLayers = true
+                ignoredDolbyVision81 = true
             case _ where dv.profile == 5 || (dv.profile == 8 && [1, 2, 4].contains(dv.compatibilityID)):
                 if sawRPU {
                     dvMode = (dv.profile, dv.level, dv.compatibilityID)
@@ -1732,6 +1913,12 @@ extension RemuxCodecs {
             let size = lengthSize
             transforms.append { strippingHEVCNALUnits($0, lengthSize: size, types: [62, 63]) }
         }
+        // HDR10: a steady picture, so no HDR10+ dynamic metadata either
+        // (every sample: it may start after the first frames).
+        if ignoredDolbyVision81, dolbyVisionMode == .hdr10 {
+            let size = lengthSize
+            transforms.append { strippingHDR10Plus($0, lengthSize: size) }
+        }
         let transform: ((Data) -> Data)? = transforms.isEmpty ? nil : { data in transforms.reduce(data) { $1($0) } }
 
         if let mode = dvMode {
@@ -1765,12 +1952,25 @@ extension RemuxCodecs {
         let range = videoRange(transfer: color.transfer)
         if noteNeedsRange, let prefix = note { note = prefix + rangeName(range) }
         let entry = visualSampleEntry("hvc1", width: geometry.codedWidth, height: geometry.codedHeight, children: children)
+        let summary: String
+        if ignoredDolbyVision81 {
+            // What plays: "HDR10 (Dolby Vision 8.1 ignoré)", "HDR10+ (…)", or
+            // HDR10 when HDR10+ was asked for a file without its metadata.
+            let label: String
+            switch (dolbyVisionMode, sawHDR10Plus) {
+            case (.hdr10Plus, true): label = "HDR10+ (Dolby Vision 8.1 ignoré)"
+            case (.hdr10Plus, false): label = "HDR10 (Dolby Vision 8.1 ignoré, pas de HDR10+)"
+            default: label = "HDR10 (Dolby Vision 8.1 ignoré)"
+            }
+            summary = videoSummary(label, rangeLabel: nil, geometry: geometry, fps: fps, note: nil)
+        } else {
+            summary = videoSummary(baseLabel, rangeLabel: rangeName(range), geometry: geometry, fps: fps, note: note)
+        }
         return .success(RemuxVideoPlan(
             codec: .hevc, sampleEntry: entry, codecsString: hevcCodecs, supplementalCodecs: nil, videoRange: range,
             displayWidth: geometry.displayWidth, displayHeight: geometry.displayHeight,
             codedWidth: geometry.codedWidth, codedHeight: geometry.codedHeight, frameRate: fps,
-            summary: videoSummary(baseLabel, rangeLabel: rangeName(range), geometry: geometry, fps: fps, note: note),
-            transform: transform))
+            summary: summary, transform: transform))
     }
 }
 

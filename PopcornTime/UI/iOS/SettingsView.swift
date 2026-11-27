@@ -15,6 +15,8 @@ struct SettingsView: View {
     /// « Prefer Your Language » (on by default).
     @AppStorage(SourcePreferences.languageFirstKey) private var languageFirst = true
     @AppStorage(CellularStreamingPolicy.defaultsKey) private var streamOnCellular = false
+    /// « Dolby Vision 8.1 » (`DolbyVisionPlaybackMode`).
+    @AppStorage(DolbyVisionPlaybackMode.defaultsKey) private var dolbyVisionMode = DolbyVisionPlaybackMode.dolbyVision
     /// « Autoplay next episode » (episode chaining, on by default: D8).
     @AppStorage(UpNextPreferences.autoPlayNextKey) private var autoPlayNext = true
     /// « Next Episode Card » (seconds before the end; absent = 60).
@@ -78,6 +80,19 @@ struct SettingsView: View {
                 Text("Playback")
             } footer: {
                 Text(verbatim: "\(String(localized: String.LocalizationValue(automaticChoice.wrappedValue.detailKey))) \(String(localized: "The automatic choice stays at or below the maximum resolution."))")
+            }
+
+            Section {
+                Picker(selection: $dolbyVisionMode) {
+                    ForEach(DolbyVisionPlaybackMode.allCases) { mode in
+                        Text(verbatim: mode.title).tag(mode)
+                    }
+                } label: {
+                    Text(verbatim: DolbyVisionPlaybackMode.settingTitle)
+                }
+                .pickerStyle(.navigationLink)
+            } footer: {
+                Text(LocalizedStringKey(DolbyVisionPlaybackMode.settingFooterKey))
             }
 
             Section {
